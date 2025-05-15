@@ -1,0 +1,1 @@
+console.log('VisionWX Web UI loaded');
