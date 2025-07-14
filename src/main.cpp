@@ -24,6 +24,7 @@
 #include <AsyncTCP.h>
 #include <Update.h>
 #include "utils.h"
+#include "settings.h"
 
 // Buzzer
 #include "buzzer.h"
@@ -32,6 +33,9 @@
 
 extern IRrecv irrecv;
 extern decode_results results;
+extern unsigned long lastMenuActivity;
+
+bool menuActive = false;
 
 Preferences preferences;
 
@@ -119,11 +123,13 @@ const unsigned char icon_clear_day[] PROGMEM = {
 unsigned long lastBrightnessRead = 0;
 unsigned long lastDHTRead = 0;
 unsigned long lastIRCheck = 0;
+unsigned long lastButtonCheck = 0;
 // ...more for each timed task
 
 const unsigned long brightnessInterval = 60000; // ms
-const unsigned long dhtInterval = 2000;       // ms
-const unsigned long irInterval = 50;          // ms
+const unsigned long dhtInterval = 2000;         // ms
+const unsigned long irInterval = 50;            // ms
+const unsigned long buttonInterval = 100; // ms
 
 void connectToWiFi()
 {
@@ -167,7 +173,6 @@ void connectToWiFi()
     dma_display->setCursor(0, 17);
     dma_display->setTextColor(myWHITE);
     dma_display->print(WiFi.localIP().toString());
-
 
     delay(1000);
   }
@@ -404,6 +409,7 @@ void displayWeatherData()
 }
 
 void scrollWeatherDetails()
+
 {
   if (!start_Scroll_Text)
   {
@@ -444,6 +450,7 @@ void scrollWeatherDetails()
   }
 }
 
+/*
 bool isPressed(int pin)
 {
   if (digitalRead(pin) == LOW)
@@ -554,6 +561,8 @@ void checkForSetupMenu()
 
   dma_display->clearScreen();
 }
+
+*/ 
 // === PART 10: Web Interface and OTA ===
 
 void setupWebInterface()
@@ -599,8 +608,6 @@ void setupWebInterface()
 
 ///////////////////////// Setup function  ////////////////////////////////////
 
-
-
 void setup()
 {
 
@@ -616,7 +623,7 @@ void setup()
   setupIRSensor();
 
   // Initialize DHT Sensor
-  //setupDHTSensor();
+  // setupDHTSensor();
 
   Serial.println("\nESP32 Weather Display");
 
@@ -659,9 +666,11 @@ void setup()
   delay(2000);
 
   setupButtons();
- // setupBuzzer();
+  // setupBuzzer();
 
   setupWebInterface();
+
+ // drawMenu();
 }
 
 ///////////////////////////////// Loop Function //////////////////////////////////////
@@ -670,6 +679,44 @@ void loop()
 {
 
   unsigned long now = millis();
+    // IR SENSOR always runs
+    if (now - lastIRCheck >= irInterval)
+    {
+        lastIRCheck = now;
+        readIRSensor();
+    }
+
+
+    // BUTTONS always run
+    if (now - lastButtonCheck >= buttonInterval)  
+    {
+        lastButtonCheck = now;
+        getButton();
+    }
+
+
+    // MENU LOGIC
+    if (menuActive) {
+        updateMenu();
+        
+        // ---- AUTO-BACK-TO-MAIN MENU TIMER ----
+        if (millis() - lastMenuActivity > 30000)
+        {
+
+            if (currentMenuLevel != MENU_MAIN)
+            {
+                currentMenuLevel = MENU_MAIN;
+                currentMenuIndex = 0;
+                drawMenu();
+            }
+
+            // menuActive = false;
+        }
+
+        delay(100);
+        return;
+    }
+
 
   // Time update every second
   if (now - prevMillis_ShowTimeDate >= interval_ShowTimeDate)
@@ -697,36 +744,23 @@ void loop()
   // Process Tempest UDP if available
   fetchTempestData();
 
-
-
   if (now - lastBrightnessRead >= brightnessInterval)
   {
     lastBrightnessRead = now;
     readBrightnessSensor();
   }
 
-  if (now - lastIRCheck >= irInterval)
-  {
-    lastIRCheck = now;
-    // Check IR sensor, etc.
-    readIRSensor();
-  }
 
   // readDHTSensor();
 
-  // Button handling
-  getButton();
-
-
-
-
+  /*
   // Check for setup menu on boot
   if (!inSetupMenu && isPressed(BTN_SEL))
   {
     inSetupMenu = true;
     handleSetupMenu();
   }
-
+  */
 
   // Display update
   if (reset_Time_and_Date_Display)
@@ -737,8 +771,6 @@ void loop()
     displayWeatherData();
   }
 
-
- // updateMenu();
 
 
 }

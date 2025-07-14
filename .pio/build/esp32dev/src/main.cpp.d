@@ -288,4 +288,4 @@
  .pio/libdeps/esp32dev/ESPAsyncWebServer/src/WebHandlerImpl.h \
  .pio/libdeps/esp32dev/ESPAsyncWebServer/src/WebResponseImpl.h \
  C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/cores/esp32/StreamString.h \
- include/buzzer.h include/menu.h
+ include/settings.h include/buzzer.h include/menu.h
