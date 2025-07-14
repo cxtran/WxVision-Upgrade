@@ -1,8 +1,10 @@
 #include "display.h"
+#include "icons.h"
+
 
 MatrixPanel_I2S_DMA *dma_display = nullptr;
 
-uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK;
+uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
 
 void setupDisplay() {
   HUB75_I2S_CFG::i2s_pins _pins = {
@@ -28,4 +30,54 @@ void setupDisplay() {
   myBLUE   = dma_display->color565(0, 0, 255);
   myWHITE  = dma_display->color565(255, 255, 255);
   myBLACK  = dma_display->color565(0, 0, 0);
+  myYELLOW = dma_display->color565(255, 255, 0);
+  myCYAN = dma_display->color565(0, 255, 255);
 }
+
+int getTextWidth(const char* text) {
+  int16_t x1, y1;
+  uint16_t w, h;
+  dma_display->getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+  return w;
+}
+
+const uint8_t* getWeatherIconFromCode(String code) {
+  Serial.printf("Code: %s", code);
+  if (code.startsWith("01n")) return icon_clear_night;
+  if (code.startsWith("02n")) return icon_cloud_night;
+  if (code.startsWith("01d")) return icon_clear;
+  if (code.startsWith("02d")) return icon_cloudy;
+  if (code.startsWith("03") || code.startsWith("04")) return icon_cloudy;
+  if (code.startsWith("09") || code.startsWith("10")) return icon_rain;
+  if (code.startsWith("11")) return icon_thunder;
+  if (code.startsWith("13")) return icon_snow;
+  if (code.startsWith("50")) return icon_fog;
+  return icon_clear; // fallback
+}
+
+const uint8_t* getWeatherIconFromCondition(String condition) {
+  condition.toLowerCase();
+  if (condition.indexOf("clear") >= 0) return icon_clear;
+  if (condition.indexOf("cloud") >= 0) return icon_cloudy;
+  if (condition.indexOf("rain") >= 0) return icon_rain;
+  if (condition.indexOf("storm") >= 0) return icon_thunder;
+  if (condition.indexOf("snow") >= 0) return icon_snow;
+  if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0) return icon_fog;
+  return icon_clear;
+}
+
+const uint16_t getIconColorFromCondition(String condition){
+  if (condition.indexOf("clear") >= 0) return dma_display->color565(255, 255, 0); // (yellow)
+  if (condition.indexOf("cloud") >= 0) return dma_display->color565(180, 180, 180);
+  if (condition.indexOf("rain") >= 0) return dma_display->color565(0, 200, 255);
+  if (condition.indexOf("storm") >= 0) return dma_display->color565(255, 255, 0);
+  if (condition.indexOf("snow") >= 0) return dma_display->color565(220, 255, 255);
+  if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0) return dma_display->color565(180, 180, 180);
+  return dma_display->color565(255, 255, 0);
+}
+
+const uint16_t getDayNightColorFromCode( String code){
+  if (code.indexOf("d") >= 0) return dma_display->color565(255, 170, 51); // day color
+  else return myBLUE; // night color
+}
+
