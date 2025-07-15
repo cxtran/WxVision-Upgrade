@@ -3,9 +3,9 @@
 
 void handleButtonInput();
 void handleIR(uint32_t code);
-
-#pragma once
-#include <Arduino.h>
+void startEditField(const char* currentValue);
+void finishEditField();
+void drawEditField();
 
 // Menu identifiers
 enum MenuLevel {

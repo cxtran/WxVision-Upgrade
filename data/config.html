@@ -1,1 +1,201 @@
-<h2>Device Configuration</h2><form>...</form>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>WxVision Config</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 480px; margin: auto; background: #222; color: #eee; }
+    h2 { border-bottom: 1px solid #444; padding-bottom: 2px; margin-top: 1.5em; }
+    label { display: block; margin-top: 12px; font-weight: bold; }
+    input[type="text"], input[type="password"], input[type="number"], select {
+      width: 100%; font-size: 1em; padding: 6px; margin-top: 2px; border-radius: 4px;
+      border: 1px solid #444; background: #111; color: #eee;
+    }
+    input[type="range"] { width: 80%; }
+    button, input[type="submit"] {
+      background: #1a88ff; color: #fff; padding: 10px 24px; border: none; border-radius: 4px;
+      margin-top: 18px; font-size: 1em; cursor: pointer;
+    }
+    button.system { background: #3a3a3a; margin-right: 8px; }
+    .row { display: flex; gap: 10px; }
+    .row > div { flex: 1; }
+    .help { color: #aaa; font-size: 0.93em; }
+    .section { background: #2a2a2a; padding: 14px 10px 8px 10px; border-radius: 8px; margin-bottom: 16px;}
+  </style>
+</head>
+<body>
+  <h1>WxVision Settings</h1>
+  <form id="settingsForm" autocomplete="off">
+
+    <div class="section">
+      <h2>WiFi</h2>
+      <label>SSID <input type="text" name="wifiSSID" id="wifiSSID" maxlength="32"></label>
+      <label>Password <input type="password" name="wifiPass" id="wifiPass" maxlength="64"></label>
+    </div>
+
+    <div class="section">
+      <h2>Device Settings</h2>
+      <div class="row">
+        <div>
+          <label>Units
+            <select name="units" id="units">
+              <option value="0">F + mph</option>
+              <option value="1">C + m/s</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <label>Day Format
+            <select name="dayFormat" id="dayFormat">
+              <option value="0">MM/DD/YYYY</option>
+              <option value="1">DD/MM/YYYY</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <div class="row">
+        <div>
+          <label>Forecast Source
+            <select name="forecastSrc" id="forecastSrc">
+              <option value="0">OpenWeatherMap</option>
+              <option value="1">WeatherFlow</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <label>Auto Rotate
+            <select name="autoRotate" id="autoRotate">
+              <option value="1">On</option>
+              <option value="0">Off</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <label>Manual Screen <input type="checkbox" name="manualScreen" id="manualScreen"></label>
+    </div>
+
+    <div class="section">
+      <h2>Display Settings</h2>
+      <div class="row">
+        <div>
+          <label>Theme
+            <select name="theme" id="theme">
+              <option value="0">Color</option>
+              <option value="1">Mono</option>
+            </select>
+          </label>
+        </div>
+        <div>
+          <label>Brightness <input type="range" min="1" max="100" step="1" name="brightness" id="brightness"></label>
+        </div>
+      </div>
+      <label>Scroll Speed
+        <select name="scrollSpeed" id="scrollSpeed">
+          <option value="1">1 (Slow)</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="4">4</option>
+          <option value="5">5 (Fast)</option>
+        </select>
+      </label>
+      <label>Custom Message <input type="text" name="customMsg" id="customMsg" maxlength="32"></label>
+    </div>
+
+    <div class="section">
+      <h2>Weather Settings</h2>
+      <label>OWM City <input type="text" name="owmCity" id="owmCity" maxlength="32"></label>
+      <label>OWM API Key <input type="text" name="owmApiKey" id="owmApiKey" maxlength="64"></label>
+      <label>WF Token <input type="text" name="wfToken" id="wfToken" maxlength="64"></label>
+      <label>WF Station ID <input type="text" name="wfStationId" id="wfStationId" maxlength="32"></label>
+    </div>
+
+    <div class="section">
+      <h2>Calibration</h2>
+      <div class="row">
+        <div>
+          <label>Temp Offset <input type="number" min="-10" max="10" name="tempOffset" id="tempOffset"></label>
+        </div>
+        <div>
+          <label>Hum Offset <input type="number" min="-20" max="20" name="humOffset" id="humOffset"></label>
+        </div>
+        <div>
+          <label>Light Gain (%) <input type="number" min="50" max="150" name="lightGain" id="lightGain"></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>System Actions</h2>
+      <button type="button" class="system" onclick="systemAction('/ota')">OTA Update</button>
+      <button type="button" class="system" onclick="systemAction('/reboot')">Reboot</button>
+      <button type="button" class="system" onclick="systemAction('/quickrestore')">Quick Restore</button>
+      <button type="button" class="system" onclick="systemAction('/factoryreset')">Factory Reset</button>
+    </div>
+
+    <input type="submit" value="Save All Settings">
+  </form>
+
+  <p id="msg"></p>
+
+  <script>
+    // Load settings from ESP32
+    fetch('/settings.json')
+      .then(r => r.json())
+      .then(d => {
+        document.getElementById('wifiSSID').value = d.wifiSSID || '';
+        document.getElementById('wifiPass').value = d.wifiPass || '';
+        document.getElementById('units').value = d.units || 0;
+        document.getElementById('dayFormat').value = d.dayFormat || 0;
+        document.getElementById('forecastSrc').value = d.forecastSrc || 0;
+        document.getElementById('autoRotate').value = d.autoRotate || 1;
+        document.getElementById('manualScreen').checked = !!d.manualScreen;
+        document.getElementById('theme').value = d.theme || 0;
+        document.getElementById('brightness').value = d.brightness || 50;
+        document.getElementById('scrollSpeed').value = d.scrollSpeed || 2;
+        document.getElementById('customMsg').value = d.customMsg || '';
+        document.getElementById('owmCity').value = d.owmCity || '';
+        document.getElementById('owmApiKey').value = d.owmApiKey || '';
+        document.getElementById('wfToken').value = d.wfToken || '';
+        document.getElementById('wfStationId').value = d.wfStationId || '';
+        document.getElementById('tempOffset').value = d.tempOffset || 0;
+        document.getElementById('humOffset').value = d.humOffset || 0;
+        document.getElementById('lightGain').value = d.lightGain || 100;
+      });
+
+    // Save settings via POST
+    document.getElementById('settingsForm').onsubmit = async function(e) {
+      e.preventDefault();
+      const f = e.target;
+      const data = {
+        wifiSSID: f.wifiSSID.value,
+        wifiPass: f.wifiPass.value,
+        units: parseInt(f.units.value),
+        dayFormat: parseInt(f.dayFormat.value),
+        forecastSrc: parseInt(f.forecastSrc.value),
+        autoRotate: parseInt(f.autoRotate.value),
+        manualScreen: f.manualScreen.checked ? 1 : 0,
+        theme: parseInt(f.theme.value),
+        brightness: parseInt(f.brightness.value),
+        scrollSpeed: parseInt(f.scrollSpeed.value),
+        customMsg: f.customMsg.value,
+        owmCity: f.owmCity.value,
+        owmApiKey: f.owmApiKey.value,
+        wfToken: f.wfToken.value,
+        wfStationId: f.wfStationId.value,
+        tempOffset: parseInt(f.tempOffset.value),
+        humOffset: parseInt(f.humOffset.value),
+        lightGain: parseInt(f.lightGain.value),
+      };
+      const r = await fetch('/settings', { method: 'POST', body: JSON.stringify(data), headers: {'Content-Type': 'application/json'} });
+      document.getElementById('msg').innerText = (r.ok ? 'Settings Saved! Rebooting...' : 'Save Failed');
+      if (r.ok) setTimeout(() => location.reload(), 2000);
+    };
+
+    // System actions (OTA, Reboot, etc)
+    function systemAction(path) {
+      fetch(path).then(() => {});
+    }
+  </script>
+</body>
+</html>

@@ -164,4 +164,4 @@
  C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal-spi.h \
  include/Font5x7Uts.h include/pins.h \
  C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
- include/settings.h include/system.h
+ include/settings.h include/system.h include/utils.h

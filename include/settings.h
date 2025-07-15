@@ -1,17 +1,35 @@
 #pragma once
 #include <Arduino.h>
 
-extern int units;
-extern int dayFormat;
-extern int forecastSrc;
-extern int autoRotate;
+#include <Preferences.h>
 
-extern int theme;
-extern int brightness;
-extern int scrollSpeed;
 
-extern int tempOffset;
-extern int humOffset;
+
+extern int units;            // 0 = F+mph, 1 = C+m/s
+extern int dayFormat ;        // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
+extern int forecastSrc ;      // 0 = OpenWeather, 1 = WeatherFlow
+extern int autoRotate ;       // 1=on
+extern int manualScreen;     // 0=Main,1=Weather,2=Forecast,3=Calib
+
+extern String wifiSSID ;
+extern String wifiPass ;
+
+// --- Display ---
+extern int theme ;            // 0 = Color, 1 = Monochrome
+extern int brightness ;      // 1 - 100
+extern int scrollSpeed ;      // 1-5
+extern String customMsg ;
+
+// --- Weather ---
+extern String owmCity ;
+extern String owmApiKey ;
+extern String wfToken ;
+extern String wfStationId ;
+
+// --- Calibration ---
+extern int tempOffset ;   // degrees
+extern int tempOffset ;   // degrees
+extern int lightGain ;  // %
 extern int lightGain;
 
 // Functions

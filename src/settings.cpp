@@ -1,43 +1,78 @@
 #include <Preferences.h>
 #include "settings.h"
 
+// Preference storage object
 Preferences prefs;
 
-// Global settings
-int units = 0;        // 0 = F+mph, 1 = C+m/s
-int dayFormat = 0;    // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
-int forecastSrc = 0;  // 0 = OpenWeather, 1 = WeatherFlow
-int autoRotate = 1;   // 1=on
+// ==== Global settings ====
+// --- Device ---
+int units = 0;            // 0 = F+mph, 1 = C+m/s
+int dayFormat = 0;        // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
+int forecastSrc = 0;      // 0 = OpenWeather, 1 = WeatherFlow
+int autoRotate = 1;       // 1=on
+int manualScreen = 0;     // 0=Main,1=Weather,2=Forecast,3=Calib
 
-int theme = 0;        // 0 = Color, 1 = Monochrome
-int brightness = 50;  // 1 - 100
-int scrollSpeed = 2;  // 1-5
+String wifiSSID = "";
+String wifiPass = "";
 
+// --- Display ---
+int theme = 0;            // 0 = Color, 1 = Monochrome
+int brightness = 50;      // 1 - 100
+int scrollSpeed = 2;      // 1-5
+String customMsg = "";
+
+// --- Weather ---
+String owmCity = "";
+String owmApiKey = "";
+String wfToken = "";
+String wfStationId = "";
+
+// --- Calibration ---
 int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
 
 void loadSettings() {
     prefs.begin("visionwx", true); // read-only
+
+    // Device
+    wifiSSID = prefs.getString("wifiSSID", "");
+    wifiPass = prefs.getString("wifiPass", "");
     units = prefs.getInt("units", 0);
     dayFormat = prefs.getInt("dayFmt", 0);
     forecastSrc = prefs.getInt("forecast", 0);
     autoRotate = prefs.getInt("autoRotate", 1);
+    manualScreen = prefs.getInt("manualScreen", 0);
+
+    // Display
     theme = prefs.getInt("theme", 0);
     brightness = prefs.getInt("brightness", 50);
     scrollSpeed = prefs.getInt("scrollSpeed", 2);
+    customMsg = prefs.getString("customMsg", "");
+
+    // Weather
+    owmCity = prefs.getString("owmCity", "");
+    owmApiKey = prefs.getString("owmApiKey", "");
+    wfToken = prefs.getString("wfToken", "");
+    wfStationId = prefs.getString("wfStationId", "");
+
+    // Calibration
     tempOffset = prefs.getInt("tempOffset", 0);
     humOffset = prefs.getInt("humOffset", 0);
     lightGain = prefs.getInt("lightGain", 100);
+
     prefs.end();
 }
 
 void saveDeviceSettings() {
     prefs.begin("visionwx", false);
+    prefs.putString("wifiSSID", wifiSSID);
+    prefs.putString("wifiPass", wifiPass);
     prefs.putInt("units", units);
     prefs.putInt("dayFmt", dayFormat);
     prefs.putInt("forecast", forecastSrc);
     prefs.putInt("autoRotate", autoRotate);
+    prefs.putInt("manualScreen", manualScreen);
     prefs.end();
 }
 
@@ -46,6 +81,7 @@ void saveDisplaySettings() {
     prefs.putInt("theme", theme);
     prefs.putInt("brightness", brightness);
     prefs.putInt("scrollSpeed", scrollSpeed);
+    prefs.putString("customMsg", customMsg);
     prefs.end();
 }
 
@@ -57,9 +93,19 @@ void saveCalibrationSettings() {
     prefs.end();
 }
 
-void saveSystemSettings() {
-    // if you add more system-wide settings like OTA passwords
+void saveWeatherSettings() {
     prefs.begin("visionwx", false);
+    prefs.putInt("forecast", forecastSrc);
+    prefs.putString("owmCity", owmCity);
+    prefs.putString("owmApiKey", owmApiKey);
+    prefs.putString("wfToken", wfToken);
+    prefs.putString("wfStationId", wfStationId);
+    prefs.end();
+}
+
+void saveSystemSettings() {
+    prefs.begin("visionwx", false);
+    // add any future system-wide settings here
     prefs.end();
 }
 
@@ -67,8 +113,11 @@ void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
     saveCalibrationSettings();
+    saveWeatherSettings();
+    saveSystemSettings();
 }
 
+// --- Value toggles/adjusts (unchanged) ---
 void toggleUnits(int dir) {
     units += dir;
     if (units < 0) units = 1;
@@ -127,15 +176,4 @@ void adjustLightGain(int dir) {
     lightGain += dir * 5;
     if (lightGain < 50) lightGain = 50;
     if (lightGain > 150) lightGain = 150;
-}
-
-
-
-// You probably want to save API keys, tokens, city, station ID later.
-// For now we just save the forecast source.
-
-void saveWeatherSettings() {
-    prefs.begin("visionwx", false);
-    prefs.putInt("forecast", forecastSrc);  // already using your global
-    prefs.end();
 }

@@ -162,4 +162,6 @@
  C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Wire/src/Wire.h \
  C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/cores/esp32/esp32-hal.h \
  .pio/libdeps/esp32dev/Adafruit\ BusIO/Adafruit_SPIDevice.h \
- include/Font5x7Uts.h include/pins.h include/settings.h include/menu.h
+ include/Font5x7Uts.h include/pins.h include/settings.h \
+ C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Preferences/src/Preferences.h \
+ include/menu.h

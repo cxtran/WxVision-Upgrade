@@ -25,7 +25,7 @@
 #include <Update.h>
 #include "utils.h"
 #include "settings.h"
-
+#include "web.h"
 // Buzzer
 #include "buzzer.h"
 
@@ -34,6 +34,7 @@
 extern IRrecv irrecv;
 extern decode_results results;
 extern unsigned long lastMenuActivity;
+extern int menuScroll;
 
 bool menuActive = false;
 
@@ -42,15 +43,7 @@ Preferences preferences;
 int menuIndex = 0;
 bool inSetupMenu = false;
 
-const char *setupMenuItems[] = {
-    "Unit: °F/°C",
-    "Toggle Color",
-    "OTA Update",
-    "Reboot",
-    "Save & Exit"};
-const int setupMenuCount = sizeof(setupMenuItems) / sizeof(setupMenuItems[0]);
-
-AsyncWebServer server(80);
+// AsyncWebServer server(80);
 
 WiFiUDP udp;
 const int localPort = 50222;
@@ -108,17 +101,6 @@ bool start_Scroll_Text = false;
 unsigned long prevMillis_ShowTimeDate = 0;
 const long interval_ShowTimeDate = 1000;
 
-// === PART 2: Display Init, Colors, Bitmap Icons ===
-
-// Weather icon bitmaps (compressed for brevity; define full in real code)
-/*
-const unsigned char icon_clear_day[] PROGMEM = {
-    0x01, 0x80, 0x21, 0x84, 0x71, 0x8e, 0x38, 0x1c, 0x13, 0xc8, 0x07, 0xe0, 0x0f, 0xf0, 0xef, 0xf7,
-    0xef, 0xf7, 0x0f, 0xf0, 0x07, 0xe0, 0x13, 0xc8, 0x38, 0x1c, 0x71, 0x8e, 0x21, 0x84, 0x01, 0x80};
-*/
-// Define additional weather icons like icon_clouds_day[], icon_rain_day[], etc.
-// You can reuse icons you already defined, like weather_icon_code_02d, 03d, etc.
-// === PART 3: WiFi, NTP Sync, RTC Time ===
 
 unsigned long lastBrightnessRead = 0;
 unsigned long lastDHTRead = 0;
@@ -247,7 +229,6 @@ void getTimeFromRTC()
   sprintf(chr_d_month, "%02d", d_month);
   sprintf(chr_d_year, "%04d", d_year);
 }
-// === PART 4: OpenWeatherMap + WeatherFlow API Fetch ===
 
 String httpGETRequest(const char *url)
 {
@@ -345,7 +326,6 @@ void fetchTempestData()
     }
   }
 }
-// === PART 5: Display Time, Weather, and Scroll ===
 
 void drawWeatherIcon(String iconCode)
 {
@@ -409,7 +389,6 @@ void displayWeatherData()
 }
 
 void scrollWeatherDetails()
-
 {
   if (!start_Scroll_Text)
   {
@@ -451,120 +430,6 @@ void scrollWeatherDetails()
 }
 
 /*
-bool isPressed(int pin)
-{
-  if (digitalRead(pin) == LOW)
-  {
-    delay(150);
-    while (digitalRead(pin) == LOW)
-      delay(10);
-    return true;
-  }
-  return false;
-}
-// === PART 8: Menu Display and Logic ===
-
-void drawSetupMenu()
-{
-  dma_display->clearScreen();
-  for (int i = 0; i < setupMenuCount; i++)
-  {
-    dma_display->setCursor(0, i * 8);
-    dma_display->setTextColor(i == menuIndex ? myCYAN : myWHITE);
-    dma_display->print(setupMenuItems[i]);
-  }
-}
-
-void handleSetupMenu()
-{
-  drawSetupMenu();
-
-  while (inSetupMenu)
-  {
-    if (isPressed(BTN_UP))
-    {
-      menuIndex = (menuIndex - 1 + setupMenuCount) % setupMenuCount;
-      drawSetupMenu();
-    }
-    else if (isPressed(BTN_DN))
-    {
-      menuIndex = (menuIndex + 1) % setupMenuCount;
-      drawSetupMenu();
-    }
-    else if (isPressed(BTN_SEL))
-    {
-      String choice = setupMenuItems[menuIndex];
-
-      if (choice == "Unit: °F/°C")
-      {
-        useImperial = !useImperial;
-      }
-      else if (choice == "Toggle Color")
-      {
-        colorMode = (colorMode == "color") ? "mono" : "color";
-      }
-      else if (choice == "OTA Update")
-      {
-        WiFiClient client;
-        ArduinoOTA.begin();
-        dma_display->clearScreen();
-        dma_display->setCursor(0, 0);
-        dma_display->setTextColor(myYELLOW);
-        dma_display->print("OTA Ready");
-
-        delay(5000);
-      }
-      else if (choice == "Reboot")
-      {
-        ESP.restart();
-      }
-      else if (choice == "Save & Exit")
-      {
-        preferences.begin("weatherApp", false);
-        preferences.putBool("imperial", useImperial);
-        preferences.putString("mode", colorMode);
-        preferences.end();
-        inSetupMenu = false;
-        break;
-      }
-      drawSetupMenu();
-    }
-    delay(100);
-  }
-}
-// === PART 9: Detect Setup Menu on Boot (Hold SELECT) ===
-
-void checkForSetupMenu()
-{
-  dma_display->clearScreen();
-  dma_display->setCursor(0, 0);
-  dma_display->setTextColor(myCYAN);
-  dma_display->print("Hold SELECT");
-  dma_display->setCursor(0, 8);
-  dma_display->print("for Setup...");
-
-  unsigned long t0 = millis();
-  while (millis() - t0 < 3000)
-  {
-    if (digitalRead(BTN_SEL == LOW))
-    {
-      delay(800);
-      if (digitalRead(BTN_SEL == LOW))
-      {
-        inSetupMenu = true;
-        handleSetupMenu();
-        return;
-      }
-    }
-    delay(100);
-  }
-
-  dma_display->clearScreen();
-}
-
-*/ 
-// === PART 10: Web Interface and OTA ===
-
 void setupWebInterface()
 {
   SPIFFS.begin(true);
@@ -605,19 +470,24 @@ void setupWebInterface()
 
   server.begin();
 }
-
+*/
 ///////////////////////// Setup function  ////////////////////////////////////
 
 void setup()
 {
 
-  Serial.println("Display setup done.");
+  
+  Serial.begin(115200);
+  delay(100); // Allow time for Serial to initialize
 
+  loadSettings();
+
+ 
   // Initialize display
   delay(500);
   setupDisplay();
-
-  Serial.begin(115200);
+ 
+  Serial.println("Display setup done.");
 
   // IR Sensor
   setupIRSensor();
@@ -668,9 +538,20 @@ void setup()
   setupButtons();
   // setupBuzzer();
 
-  setupWebInterface();
 
- // drawMenu();
+ // setupWebServer(); // Initialize web server()
+
+//  setupWebInterface();
+
+    setupWebServer(); // Initialize web server
+    
+  // Initialize menu
+    currentMenuLevel = MENU_MAIN;
+    currentMenuIndex = 0;
+    menuActive = false;
+    menuScroll = 0;
+
+ 
 }
 
 ///////////////////////////////// Loop Function //////////////////////////////////////
@@ -753,14 +634,6 @@ void loop()
 
   // readDHTSensor();
 
-  /*
-  // Check for setup menu on boot
-  if (!inSetupMenu && isPressed(BTN_SEL))
-  {
-    inSetupMenu = true;
-    handleSetupMenu();
-  }
-  */
 
   // Display update
   if (reset_Time_and_Date_Display)
