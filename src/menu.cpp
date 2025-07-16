@@ -7,7 +7,6 @@
 #include "system.h"
 #include "utils.h"
 #include "WiFi.h"
-#include "bluetoothsettings.h"
 
 MenuLevel currentMenuLevel = MENU_MAIN;
 int currentMenuIndex = 0;
@@ -559,15 +558,7 @@ void handleSelect()
             startEditField(wifiPass.c_str());
             return;
         }
-        if (currentMenuIndex == 2) {
-            // ---- NEW: BLE SCAN ----
-            scanBLENetworks();      // <--- Implement this
-            currentMenuLevel = MENU_BLE_SELECT;
-            bleSelectIndex = 0;
-            bleMenuScroll = 0;
-            drawBLEMenu();          // <--- Implement this (same style as WiFi)
-            return;
-        }
+
         if (currentMenuIndex == deviceCount - 2) {
             saveDeviceSettings();
             currentMenuLevel = MENU_MAIN;
@@ -656,9 +647,7 @@ void handleSelect()
     // --- Draw correct menu depending on currentMenuLevel
     if (currentMenuLevel == MENU_WIFI_SELECT) {
         drawWiFiMenu();
-    } else if (currentMenuLevel == MENU_BLE_SELECT) {
-        drawBLEMenu();
-    } else {
+    }  else {
         drawMenu();
     }
 }
