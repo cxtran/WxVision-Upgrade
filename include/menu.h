@@ -1,11 +1,28 @@
 #pragma once
-#include    <Arduino.h>
+#include <Arduino.h>
+#include <vector>
 
 void handleButtonInput();
 void handleIR(uint32_t code);
 void startEditField(const char* currentValue);
 void finishEditField();
 void drawEditField();
+void connectToWiFi();
+extern void saveDeviceSettings(); // If not already declared
+extern void drawMenu(); // If not already declared
+void scanAndSelectWiFi();
+void showWifiSelection();
+extern bool wifiSelecting;
+void drawWiFiMenu();
+
+
+
+
+// Simple globals to support network selection
+extern std::vector<String> foundSSIDs;
+extern int selectedWifiIdx;
+extern bool wifiSelecting ;
+extern int wifiScanCount;
 
 // Menu identifiers
 enum MenuLevel {
@@ -16,6 +33,7 @@ enum MenuLevel {
   MENU_CALIBRATION,
   MENU_SYSTEM,
   MENU_MANUAL_SCREEN,
+  MENU_WIFI_SELECT = 99   // <---- Add this!
 };
 
 enum MenuItem {

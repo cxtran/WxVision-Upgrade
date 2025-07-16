@@ -1,23 +1,22 @@
 #include <Preferences.h>
 #include "settings.h"
 
-// Preference storage object
+// Preferences storage object
 Preferences prefs;
 
 // ==== Global settings ====
 // --- Device ---
 int units = 0;            // 0 = F+mph, 1 = C+m/s
-int dayFormat = 0;        // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
+int dayFormat = 0;        // 0 = MM/DD, 1 = DD/MM
 int forecastSrc = 0;      // 0 = OpenWeather, 1 = WeatherFlow
-int autoRotate = 1;       // 1=on
-int manualScreen = 0;     // 0=Main,1=Weather,2=Forecast,3=Calib
-
+int autoRotate = 1;       // 1 = on, 0 = off
+int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
 String wifiSSID = "";
 String wifiPass = "";
 
 // --- Display ---
-int theme = 0;            // 0 = Color, 1 = Monochrome
-int brightness = 50;      // 1 - 100
+int theme = 0;            // 0 = Color, 1 = Mono
+int brightness = 50;      // 1-100
 int scrollSpeed = 2;      // 1-5
 String customMsg = "";
 
@@ -36,30 +35,30 @@ void loadSettings() {
     prefs.begin("visionwx", true); // read-only
 
     // Device
-    wifiSSID = prefs.getString("wifiSSID", "");
-    wifiPass = prefs.getString("wifiPass", "");
-    units = prefs.getInt("units", 0);
-    dayFormat = prefs.getInt("dayFmt", 0);
-    forecastSrc = prefs.getInt("forecast", 0);
-    autoRotate = prefs.getInt("autoRotate", 1);
+    wifiSSID     = prefs.getString("wifiSSID", "");
+    wifiPass     = prefs.getString("wifiPass", "");
+    units        = prefs.getInt("units", 0);
+    dayFormat    = prefs.getInt("dayFmt", 0);
+    forecastSrc  = prefs.getInt("forecast", 0);
+    autoRotate   = prefs.getInt("autoRotate", 1);
     manualScreen = prefs.getInt("manualScreen", 0);
 
     // Display
-    theme = prefs.getInt("theme", 0);
-    brightness = prefs.getInt("brightness", 50);
-    scrollSpeed = prefs.getInt("scrollSpeed", 2);
-    customMsg = prefs.getString("customMsg", "");
+    theme        = prefs.getInt("theme", 0);
+    brightness   = prefs.getInt("brightness", 50);
+    scrollSpeed  = prefs.getInt("scrollSpeed", 2);
+    customMsg    = prefs.getString("customMsg", "");
 
     // Weather
-    owmCity = prefs.getString("owmCity", "");
-    owmApiKey = prefs.getString("owmApiKey", "");
-    wfToken = prefs.getString("wfToken", "");
-    wfStationId = prefs.getString("wfStationId", "");
+    owmCity      = prefs.getString("owmCity", "");
+    owmApiKey    = prefs.getString("owmApiKey", "");
+    wfToken      = prefs.getString("wfToken", "");
+    wfStationId  = prefs.getString("wfStationId", "");
 
     // Calibration
-    tempOffset = prefs.getInt("tempOffset", 0);
-    humOffset = prefs.getInt("humOffset", 0);
-    lightGain = prefs.getInt("lightGain", 100);
+    tempOffset   = prefs.getInt("tempOffset", 0);
+    humOffset    = prefs.getInt("humOffset", 0);
+    lightGain    = prefs.getInt("lightGain", 100);
 
     prefs.end();
 }
@@ -85,6 +84,16 @@ void saveDisplaySettings() {
     prefs.end();
 }
 
+void saveWeatherSettings() {
+    prefs.begin("visionwx", false);
+    prefs.putInt("forecast", forecastSrc); // Allow changing source here too
+    prefs.putString("owmCity", owmCity);
+    prefs.putString("owmApiKey", owmApiKey);
+    prefs.putString("wfToken", wfToken);
+    prefs.putString("wfStationId", wfStationId);
+    prefs.end();
+}
+
 void saveCalibrationSettings() {
     prefs.begin("visionwx", false);
     prefs.putInt("tempOffset", tempOffset);
@@ -93,27 +102,17 @@ void saveCalibrationSettings() {
     prefs.end();
 }
 
-void saveWeatherSettings() {
-    prefs.begin("visionwx", false);
-    prefs.putInt("forecast", forecastSrc);
-    prefs.putString("owmCity", owmCity);
-    prefs.putString("owmApiKey", owmApiKey);
-    prefs.putString("wfToken", wfToken);
-    prefs.putString("wfStationId", wfStationId);
-    prefs.end();
-}
-
 void saveSystemSettings() {
     prefs.begin("visionwx", false);
-    // add any future system-wide settings here
+    // Add any future system-wide settings here
     prefs.end();
 }
 
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
-    saveCalibrationSettings();
     saveWeatherSettings();
+    saveCalibrationSettings();
     saveSystemSettings();
 }
 
