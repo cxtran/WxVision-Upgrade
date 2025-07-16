@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <vector>
+#include "bluetoothsettings.h"
 
 void handleButtonInput();
 void handleIR(uint32_t code);
@@ -14,6 +15,7 @@ void scanAndSelectWiFi();
 void showWifiSelection();
 extern bool wifiSelecting;
 void drawWiFiMenu();
+extern void scanBLENetworks();
 
 
 
@@ -33,7 +35,8 @@ enum MenuLevel {
   MENU_CALIBRATION,
   MENU_SYSTEM,
   MENU_MANUAL_SCREEN,
-  MENU_WIFI_SELECT = 99   // <---- Add this!
+  MENU_WIFI_SELECT = 99,  
+  MENU_BLE_SELECT // <---- Add this!
 };
 
 enum MenuItem {
@@ -91,8 +94,12 @@ void handleDown();
 void handleSelect();
 void handleLeft();
 void handleRight();
+void ensureWiFiListFresh();
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern void fetchWeatherFromOWM();
+extern void scanBLENetworks();
+
+
 extern bool reset_Time_and_Date_Display;
