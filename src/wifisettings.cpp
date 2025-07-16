@@ -25,7 +25,6 @@ String wifiScanEncr[20];
 String wifiScanRSSI[20];
 extern int menuScroll;
 extern bool menuActive;
-extern bool wifiSelecting;
 extern int wifiSelectIndex;
 
 extern String wifiSSID;
@@ -132,6 +131,8 @@ void cancelWiFiSelection() {
 }
 // =========== WiFi Connection ===========
 void connectToWiFi() {
+    Serial.printf("SSID: %s\n", wifiSSID.c_str());  
+
     if (wifiSSID.isEmpty()) {
         scanAndSelectWiFi();
         wifiSelecting = true;
@@ -173,10 +174,15 @@ void connectToWiFi() {
             dma_display->setCursor(0, 0);
             dma_display->setTextColor(myGREEN);
             dma_display->print("WiFi OK");
-            dma_display->setCursor(0, 9);
+            dma_display->setCursor(0,8 );
+            dma_display->setTextColor(myBLUE);
+
+            dma_display->print(WiFi.SSID());  
+            dma_display->setCursor(0, 16);
             dma_display->setTextColor(myWHITE);
             dma_display->print(WiFi.localIP().toString());
-            delay(1500);
+    
+            delay(3000);
             dma_display->clearScreen();
         }
         // ---- Fix: Return to main operation after success ----

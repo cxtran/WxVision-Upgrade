@@ -246,6 +246,8 @@ void handleIR(uint32_t code)
         break;
     }
 }
+
+
 void drawMenu()
 {
     // 1. If editing a field, show the edit UI instead of the menu!
@@ -372,21 +374,20 @@ void drawMenu()
         }
     }
 }
+
+
 void handleUp()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
 
     if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiSelectIndex > 0) {
-            wifiSelectIndex--;
-            // If highlight moves above visible window, scroll window up
-            if (wifiSelectIndex < wifiMenuScroll) {
-                wifiMenuScroll = wifiSelectIndex;
-            }
+        if (wifiScanCount > 0) {
+            wifiSelectIndex = (wifiSelectIndex - 1 + wifiScanCount) % wifiScanCount;  // roll up
+
+            // For rolling menu: no need to adjust wifiMenuScroll, 
+            // drawWiFiMenu() will always center selection.
         }
-        // Clamp scroll
-        if (wifiMenuScroll < 0) wifiMenuScroll = 0;
         drawWiFiMenu();
         return;
     }
@@ -397,23 +398,18 @@ void handleUp()
     drawMenu();
 }
 
-
 void handleDown()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
 
     if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiSelectIndex < wifiScanCount - 1) {
-            wifiSelectIndex++;
-            // If highlight moves below visible window, scroll window down
-            if (wifiSelectIndex >= wifiMenuScroll + wifiVisibleLines) {
-                wifiMenuScroll = wifiSelectIndex - wifiVisibleLines + 1;
-            }
+        if (wifiScanCount > 0) {
+            wifiSelectIndex = (wifiSelectIndex + 1) % wifiScanCount;  // roll down
+
+            // For rolling menu: no need to adjust wifiMenuScroll,
+            // drawWiFiMenu() will always center selection.
         }
-        // Clamp scroll to prevent blank window
-        int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-        if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
         drawWiFiMenu();
         return;
     }
@@ -432,6 +428,7 @@ void handleDown()
     drawMenu();
 }
 
+
 void handleLeft()
 {
     lastMenuActivity = millis();
@@ -446,7 +443,12 @@ void handleLeft()
     }
     else if (currentMenuLevel == MENU_DISPLAY) {
         if (currentMenuIndex == 0) toggleTheme(-1);
-        if (currentMenuIndex == 1) adjustBrightness(-1);
+        if (currentMenuIndex == 1) {
+            // Decrease brightness, clamp to 0..255, update hardware
+            brightness--;
+            if (brightness < 0) brightness = 0;
+            dma_display->setBrightness8(brightness);
+        }
         if (currentMenuIndex == 2) adjustScrollSpeed(-1);
     }
     else if (currentMenuLevel == MENU_CALIBRATION) {
@@ -456,6 +458,7 @@ void handleLeft()
     }
     drawMenu();
 }
+
 
 void handleRight()
 {
@@ -481,6 +484,8 @@ void handleRight()
     }
     drawMenu();
 }
+
+
 void handleSelect()
 {
     lastMenuActivity = millis();
@@ -546,8 +551,8 @@ void handleSelect()
     else if (currentMenuLevel == MENU_DEVICE)
     {
         if (currentMenuIndex == 0) {
-            // Scan for WiFi every time you select this menu item
-            scanWiFiNetworks();
+            // Always scan for WiFi every time you enter this menu!
+            scanWiFiNetworks();                // <---- ALWAYS scan here
             currentMenuLevel = MENU_WIFI_SELECT;
             wifiSelectIndex = 0;
             wifiMenuScroll = 0;
@@ -661,6 +666,7 @@ void startEditField(const char* currentValue) {
     drawEditField();
 }
 
+
 void finishEditField() {
     editingField = false;
     if (currentMenuLevel == MENU_DEVICE && currentMenuIndex == 0) wifiSSID = String(editBuffer);
@@ -676,6 +682,7 @@ void finishEditField() {
 
     drawMenu();
 }
+
 
 void drawEditField() {
     const int VISIBLE_LEN = 16; // or however many chars fit your display
@@ -701,7 +708,10 @@ void drawEditField() {
     dma_display->print(shown);
 }
 
+
 void updateMenu() { drawMenu(); }
+
+
 void drawWiFiMenu() {
     ensureWiFiListFresh();
 
@@ -713,21 +723,36 @@ void drawWiFiMenu() {
     dma_display->setCursor(0, 0);
     dma_display->print("Select WiFi:");
 
-    // Show 3 lines starting from wifiMenuScroll
+    if (wifiScanCount == 0) {
+        dma_display->setTextColor(dma_display->color565(255, 80, 80));
+        dma_display->setCursor(0, 10);
+        dma_display->print("No WiFi found.");
+        return;
+    }
+
+    // Where the selected item should be on screen (e.g., center)
+    int centerLine = wifiVisibleLines / 2;
+
     const int labelHeight = 7;
     const int listStartY = labelHeight + 1;
     const int wifiLineHeight = 8;
+
+    // Draw visible lines with vertical rolling
     for (int i = 0; i < wifiVisibleLines; ++i) {
-        int idx = wifiMenuScroll + i;
-        if (idx >= wifiScanCount) break;
-        dma_display->setCursor(0, listStartY + wifiLineHeight * i);
-        if (idx == wifiSelectIndex)
+        // Calculate the index in the wifi list, rolling around
+        int idx = (wifiSelectIndex - centerLine + i + wifiScanCount) % wifiScanCount;
+
+        // Highlight selected line
+        if (i == centerLine) // middle line is always selection
             dma_display->setTextColor(dma_display->color565(255,255,0));
         else
             dma_display->setTextColor(dma_display->color565(255,255,255));
+
+        dma_display->setCursor(0, listStartY + wifiLineHeight * i);
         dma_display->print(scannedSSIDs[idx]);
     }
 }
+
 
 
 void ensureWiFiListFresh() {

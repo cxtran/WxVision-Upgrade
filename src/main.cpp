@@ -101,8 +101,7 @@ const unsigned long dhtInterval = 2000;
 const unsigned long irInterval = 50;
 const unsigned long buttonInterval = 100;
 
-// === BLE Settings ===
-extern const int bleVisibleLines;
+
 
 void syncTimeFromNTP() {
     Serial.println("Syncing time from NTP...");
@@ -310,7 +309,6 @@ void setup() {
     Serial.println("Display setup done.");
     setupIRSensor();
     Serial.println("\nESP32 Weather Display");
-    Serial.println("Setting up display...");
     Serial.println("Connecting WiFi...");
     connectToWiFi();
       if (wifiSelecting) return;
@@ -318,9 +316,7 @@ void setup() {
     Serial.println("WiFi done.");
     ArduinoOTA.setHostname("ESP32-Weather");
     ArduinoOTA.begin();
-    if (!SPIFFS.begin(true)) {
-        Serial.println("An error occurred while mounting SPIFFS");
-    }
+    setupWebServer();
     Serial.println("Displaying Time...");
     syncTimeFromNTP();
     Serial.println("Done.");
@@ -335,7 +331,7 @@ void setup() {
     displayDate();
     delay(2000);
     setupButtons();
-    setupWebServer();
+   
     currentMenuLevel = MENU_MAIN;
     currentMenuIndex = 0;
     menuActive = false;
