@@ -21,8 +21,9 @@ const char* keyboardGridSym[] = {
     "01234567",
     "89!@#$%^",
     "&*()-_=+",
-    "[]{};:,." // 8 chars, but you could make it shorter
+    "[]{};:,." // The '.' is included as an ordinary selectable symbol
 };
+
 
 const int gridRows = 4;
 const int gridCols = 8; // for navigation and drawing
@@ -93,8 +94,14 @@ void handleKeyboardIR(uint32_t code) {
             if (kbEditCursor > 0) kbEditCursor--;
         } else if (code == 0xFFFFE01F) { // RIGHT
             if (kbEditCursor < editLen) kbEditCursor++;
-        }
-        else if (code == 0xFFFF906F) { // DOWN
+        } else if (code == 0xFFFF48B7) { // OK deletes char at cursor
+            if (kbEditCursor < editLen) {
+                for (int i = kbEditCursor; i < editLen-1; ++i)
+                    keyboardBuffer[i] = keyboardBuffer[i+1];
+                editLen--;
+                keyboardBuffer[editLen] = '\0';
+            }
+        } else if (code == 0xFFFF906F) { // DOWN
             kbEditLineActive = false;
             kbCursorRow = kbRowScroll;
         } else if (code == 0xFFFF08F7) { // CANCEL
@@ -229,22 +236,33 @@ void drawKeyboard() {
     // --- Edit Buffer, line 1 ---
     int bufferY = 8;
     int charWidth = 8;
-    int visibleChars = 8;  // 64px / 8px per char
+    int visibleChars = 8;
     int start = (kbEditCursor > visibleChars-1) ? (kbEditCursor - (visibleChars-1)) : 0;
+
+    // Pick buffer color based on focus
+    uint16_t bufferColor = kbEditLineActive 
+        ? dma_display->color565(255,220,80)   // gold/orange for active
+        : dma_display->color565(64,128,255);  // blue for inactive
 
     for (int i = 0; i < visibleChars; ++i) {
         int idx = start + i;
         int x = i * charWidth;
         char c = (idx < editLen) ? keyboardBuffer[idx] : ' ';
         bool isCursor = (idx == kbEditCursor);
-        if (isCursor && blinkState) {
-            dma_display->fillRect(x, bufferY, charWidth, 8, dma_display->color565(255,255,255));
-            dma_display->setTextColor(dma_display->color565(0,0,180));
+
+        // Highlight char at cursor: bright yellow when blinking, buffer color otherwise
+        if (isCursor) {
+            dma_display->setTextColor(blinkState ? dma_display->color565(255,255,64) : bufferColor);
         } else {
-            dma_display->setTextColor(dma_display->color565(64,128,255));
+            dma_display->setTextColor(bufferColor);
         }
+
         dma_display->setCursor(x, bufferY);
-        dma_display->print(c);
+        if (isCursor && blinkState) {
+            dma_display->print('_'); // blink as underscore
+        } else {
+            dma_display->print(c);
+        }
     }
 
     // --- Draw Keyboard Row (line 2) ---
@@ -252,35 +270,61 @@ void drawKeyboard() {
     int row = kbRowScroll;
     int lastRowLen = strlen(keyboardGrid[gridRows-1]);
     int lastRowSPCol = lastRowLen;
-    for (int col = 0; col < ((row == gridRows-1) ? lastRowLen+1 : gridCols); ++col) {
+    int colsThisRow = (row == gridRows-1 && kbdMode != MODE_SYM) ? lastRowLen+1 : strlen(keyboardGrid[row]);
+
+    for (int col = 0; col < colsThisRow; ++col) {
         int x = col * charWidth;
         bool isSel = (!kbEditLineActive && row == kbCursorRow && col == kbCursorCol && kbCursorRow < gridRows);
-        if (isSel) {
-            dma_display->fillRect(x, gridY, charWidth, 8, dma_display->color565(0,128,255));
-            dma_display->setTextColor(dma_display->color565(255,255,255));
-        } else {
-            dma_display->setTextColor(dma_display->color565(180,180,180));
-        }
-        dma_display->setCursor(x, gridY);
-        if (row == gridRows-1 && col == lastRowSPCol) {
+
+        // Draw SP key only for upper/lower mode, not for symbol mode
+        if (row == gridRows-1 && col == lastRowSPCol && kbdMode != MODE_SYM) {
+            if (isSel) {
+                dma_display->fillRect(x-1, gridY-1, 13, 9, dma_display->color565(0,180,180)); // <-- width now 13
+                dma_display->setTextColor(dma_display->color565(255,255,255));
+            } else {
+                dma_display->drawRect(x-1, gridY-1, 13, 9, dma_display->color565(64,128,128)); // <-- width now 13
+                dma_display->setTextColor(dma_display->color565(64,128,128));
+            }
+            dma_display->setCursor(x, gridY);
             dma_display->print("SP");
-        } else {
+        }
+        else if (col < (int)strlen(keyboardGrid[row])) {
+            if (isSel) {
+                dma_display->fillRect(x-1, gridY-1, 7, 9, dma_display->color565(0,128,255));
+                dma_display->setTextColor(dma_display->color565(255,255,255));
+            } else {
+                dma_display->setTextColor(dma_display->color565(180,180,180));
+            }
+            dma_display->setCursor(x, gridY);
             dma_display->print(keyboardGrid[row][col]);
         }
     }
-
     // --- Draw BS, OK, MOD buttons (line 3) ---
     int btnY = 24;
-    const int btnW = 21, btnH = 8;
-    for (int i = 0; i < 3; ++i) {
-        int x = i * btnW;
+    int charWidthBtn = 8; // For your font
+    const char* btnLabels[3] = {"BS", "OK", getModeButtonLabel()};
+    for (int i = 0, xpos = 0; i < 3; ++i) {
+        int labelLen = strlen(btnLabels[i]);
+        int btnW = labelLen * charWidthBtn + 4;
         bool highlight = (!kbEditLineActive && kbCursorRow == gridRows && kbCursorCol == i);
-        uint16_t fill = highlight ? (i==2 ? dma_display->color565(180,255,0) : dma_display->color565(255,180,0)) : dma_display->color565(40,40,40);
-        dma_display->fillRect(x, btnY, btnW-1, btnH, fill);
-        dma_display->setTextColor(highlight ? dma_display->color565(0,0,0) : dma_display->color565(255,255,255));
-        dma_display->setCursor(x+2, btnY);
-        if (i==0) dma_display->print("BS");
-        else if (i==1) dma_display->print("OK");
-        else          dma_display->print(getModeButtonLabel());
+
+        // Use higher contrast for all
+        uint16_t fill = highlight
+            ? (i==2 ? dma_display->color565(180,255,0) : dma_display->color565(255,180,0))
+            : dma_display->color565(30,40,60);
+        uint16_t border = dma_display->color565(255,255,0); // bright yellow border for all
+        uint16_t textColor = highlight ? dma_display->color565(0,0,0) : dma_display->color565(255,255,255);
+
+        // Button background and border
+        dma_display->fillRect(xpos, btnY, btnW, 9, fill);
+        dma_display->drawRect(xpos, btnY, btnW, 9, border);
+
+        // Text
+        dma_display->setTextColor(textColor);
+        dma_display->setCursor(xpos + 2, btnY + 1);
+        dma_display->print(btnLabels[i]);
+
+        xpos += btnW + 2; // 2px gap between buttons
     }
+
 }

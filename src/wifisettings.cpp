@@ -35,6 +35,7 @@ extern String wfToken;
 extern String wfStationId;
 extern int humOffset;
 
+/*
 void scanAndSelectWiFi()
 {
     Serial.println("Scanning for WiFi networks...");
@@ -87,7 +88,6 @@ void scanAndSelectWiFi()
         dma_display->print("CH+/CH-:Move OK:Select");
     }
 }
-
 void selectWiFiNetwork(int delta)
 {
     wifiScanIndex += delta;
@@ -152,7 +152,11 @@ void cancelWiFiSelection()
     delay(1000);
     ESP.restart();
 }
+*/
+
 // =========== WiFi Connection ===========
+
+
 void connectToWiFi()
 {
     Serial.printf("SSID: %s\n", wifiSSID.c_str());

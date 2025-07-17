@@ -25,7 +25,7 @@
 #include "web.h"
 #include "buzzer.h"
 #include "menu.h"
-
+#include "keyboard.h" // <-- Include keyboard header
 
 
 extern int wifiSelectIndex;
@@ -329,7 +329,7 @@ void setup() {
         onWiFiConnectFailed();
         return;
     }
-    
+
 
     Serial.println("WiFi done.");
     ArduinoOTA.setHostname("ESP32-Weather");
@@ -358,6 +358,16 @@ void setup() {
 
 void loop() {
     unsigned long now = millis();
+
+    static unsigned long lastBlink = 0;
+    const unsigned long blinkInterval = 500; // ms
+
+    // --- Keyboard blinking cursor ---
+    if (inKeyboardMode && now - lastBlink >= blinkInterval) {
+        lastBlink = now;
+        keyboardBlinkTick();
+    }
+
 
     // --- Always check IR sensor ---
     if (now - lastIRCheck >= irInterval) {

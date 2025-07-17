@@ -12,3 +12,5 @@ void handleKeyboardIR(uint32_t code);
 
 // Draw/redraw
 void drawKeyboard();
+
+void keyboardBlinkTick() ;
