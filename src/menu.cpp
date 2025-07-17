@@ -7,6 +7,7 @@
 #include "system.h"
 #include "utils.h"
 #include "WiFi.h"
+#include "keyboard.h"   // <-- Required for keyboard mode
 
 MenuLevel currentMenuLevel = MENU_MAIN;
 int currentMenuIndex = 0;
@@ -18,19 +19,10 @@ extern int scrollOffset;
 int wifiMenuScroll = 0;
 const int wifiVisibleLines = 3;
 
-
 bool wifiSelecting = false;
-
-// For field editing:
-bool editingField = false;
-char editBuffer[64] = "";
-int editCharIdx = 0;
-void drawBLEMenu();
-
 
 std::vector<String> foundSSIDs;
 int selectedWifiIdx = 0;
-
 
 String scannedSSIDs[16]; // Up to 16 SSIDs
 int wifiScanCount = 0;
@@ -48,78 +40,99 @@ extern int humOffset;
 const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System Actions", "Save & Exit"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
-const char* deviceMenu[] = {
-    "WiFi SSID", "WiFi Pass", "Bluetooth", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "Exit & Save", "Back"
-};
-const int deviceCount = sizeof(deviceMenu)/sizeof(deviceMenu[0]);
+const char *deviceMenu[] = {
+    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "Exit & Save", "< Back"};
+const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 
-const char* displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "Exit & Save", "Back"};
-const int displayCount = sizeof(displayMenu)/sizeof(displayMenu[0]);
+const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "Exit & Save", "< Back"};
+const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
 
-const char* weatherMenu[] = {"OWM City", "OWM API Key", "WF Token", "WF Station ID", "Exit & Save", "Back"};
-const int weatherCount = sizeof(weatherMenu)/sizeof(weatherMenu[0]);
+const char *weatherMenu[] = {"OWM City", "OWM API Key", "WF Token", "WF Station ID", "Exit & Save", "< Back"};
+const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
 
-const char* calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "Exit & Save", "Back"};
-const int calibCount = sizeof(calibMenu)/sizeof(calibMenu[0]);
+const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "Exit & Save", "< Back"};
+const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 
-const char* systemMenu[] = {"OTA Update", "Reset Power", "Quick Restore", "Factory Reset", "Exit & Save", "Back"};
-const int systemCount = sizeof(systemMenu)/sizeof(systemMenu[0]);
-
-
+const char *systemMenu[] = {"OTA Update", "Reset Power", "Quick Restore", "Factory Reset", "Exit & Save", "< Back"};
+const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 void scanWiFiNetworks() {
     wifiScanCount = 0;
+    wifiSelecting = true;
+
+    WiFi.mode(WIFI_STA);      // Set WiFi to Station mode (required for scanning)
+    delay(100);
+
     int n = WiFi.scanNetworks();
-    if (n <= 0) {
-        scannedSSIDs[0] = "(No networks)";
-        wifiScanCount = 1;
-    } else {
-        int j = 0;
-        for (int i = 0; i < n && j < 16; ++i) {
-            String ssid = WiFi.SSID(i);
-            if (ssid.length() == 0) continue; // skip blank SSIDs!
-            scannedSSIDs[j++] = ssid;
-        }
-        wifiScanCount = j > 0 ? j : 1;
-        if (wifiScanCount == 1 && scannedSSIDs[0].length() == 0) {
-            scannedSSIDs[0] = "(No networks)";
-        }
+    int j = 0;
+    for (int i = 0; i < n && j < 15; ++i) {  // Leave room for "Back"
+        String ssid = WiFi.SSID(i);
+        ssid.trim();
+        if (ssid.length() == 0) continue;
+        scannedSSIDs[j++] = ssid;
     }
+    // Always add "< Back" as last menu entry
+    scannedSSIDs[j++] = "< Back";
+    wifiScanCount = j;
     wifiSelectIndex = 0;
     wifiMenuScroll = 0;
     wifiSelectNeedsScan = false;
+    Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount-1);
 }
-
 
 void handleIR(uint32_t code)
 {
+    // --- Keyboard mode always has top priority ---
+    if (inKeyboardMode) {
+        handleKeyboardIR(code);
+        return;
+    }
+
     Serial.printf("IR Code: 0x%X\n", code);
 
     // -------- 1. WiFi Select Mode --------
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        const uint32_t IR_UP    = 0xFFFF30CF;  // CH+
-        const uint32_t IR_DOWN  = 0xFFFF906F;  // CH-
-        const uint32_t IR_OK    = 0xFFFF48B7;  // OK
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        const uint32_t IR_UP = 0xFFFF30CF;     // CH+
+        const uint32_t IR_DOWN = 0xFFFF906F;   // CH-
+        const uint32_t IR_OK = 0xFFFF48B7;     // OK
         const uint32_t IR_CANCEL = 0xFFFF08F7; // Power/Menu
 
-        if (wifiScanCount == 0) {
+        if (wifiScanCount == 0)
+        {
             // No networks scanned, just return to device menu
             currentMenuLevel = MENU_DEVICE;
             drawMenu();
             return;
         }
 
-        if (code == IR_UP && wifiSelectIndex > 0) {
-            wifiSelectIndex--;
-            Serial.printf("WiFi Select: %d/%d %s\n", wifiSelectIndex, wifiScanCount, scannedSSIDs[wifiSelectIndex].c_str());
-            drawWiFiMenu();
+        if (code == IR_UP)
+        {
+            handleUp();
             playBuzzerTone(1000, 60);
-        } else if (code == IR_DOWN && wifiSelectIndex < wifiScanCount - 1) {
-            wifiSelectIndex++;
-            Serial.printf("WiFi Select: %d/%d %s\n", wifiSelectIndex, wifiScanCount, scannedSSIDs[wifiSelectIndex].c_str());
-            drawWiFiMenu();
+        }
+        else if (code == IR_DOWN)
+        {
+            handleDown();
             playBuzzerTone(1300, 60);
-        } else if (code == IR_OK) {
+        }
+        else if (code == IR_OK)
+        {
+            // --- Handle Back option ---
+            if (wifiSelectIndex == wifiScanCount - 1) // Last entry is "< Back"
+            {
+                wifiSelecting = false;
+                currentMenuLevel = MENU_DEVICE;
+                drawMenu();
+                playBuzzerTone(900, 80);
+                return;
+            }
+            // Block selecting "(No networks)"!
+            if (scannedSSIDs[wifiSelectIndex] == "(No networks)")
+            {
+                playBuzzerTone(500, 100); // error tone
+                return;                   // Do nothing if fake SSID is selected
+            }
             // Picked a network: set SSID, prompt for password (or reuse old pass)
             wifiSSID = scannedSSIDs[wifiSelectIndex];
             Serial.printf("Selected SSID: %s\n", wifiSSID.c_str());
@@ -127,69 +140,26 @@ void handleIR(uint32_t code)
             currentMenuIndex = 1; // WiFi Pass
             menuScroll = 0;
             drawMenu();
-            startEditField(wifiPass.c_str());
+            // --- Use keyboard for password entry ---
+            startKeyboardEntry(wifiPass.c_str(), [](const char* result){
+                if(result) {
+                    wifiPass = String(result);
+                    saveDeviceSettings();
+                    connectToWiFi();
+                }
+                drawMenu();
+            });
             playBuzzerTone(2200, 120);
             return;
-        } else if (code == IR_CANCEL) {
+        }
+        else if (code == IR_CANCEL)
+        {
+            wifiSelecting = false;
             currentMenuLevel = MENU_DEVICE;
             drawMenu();
             playBuzzerTone(700, 80);
         }
         return; // No further menu processing
-    }
-
-    // -------- 2. Edit Mode --------
-    if (editingField) {
-        const uint32_t IR_UP    = 0xFFFF30CF;
-        const uint32_t IR_DOWN  = 0xFFFF906F;
-        const uint32_t IR_LEFT  = 0xFFFF50AF;
-        const uint32_t IR_RIGHT = 0xFFFFE01F;
-        const uint32_t IR_OK    = 0xFFFF48B7;
-        const uint32_t IR_CANCEL = 0xFFFF08F7;
-
-        const char* charSet = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-_=+[]{};:,.<>?/|";
-        int charSetLen = strlen(charSet);
-
-        char current = editBuffer[editCharIdx];
-        int idx = strchr(charSet, current) ? (strchr(charSet, current) - charSet) : 0;
-
-        switch (code) {
-            case IR_UP:
-                idx = (idx + 1) % charSetLen;
-                editBuffer[editCharIdx] = charSet[idx];
-                playBuzzerTone(1000, 40);
-                break;
-            case IR_DOWN:
-                idx = (idx - 1 + charSetLen) % charSetLen;
-                editBuffer[editCharIdx] = charSet[idx];
-                playBuzzerTone(1000, 40);
-                break;
-            case IR_RIGHT:
-                if (editCharIdx < (int)sizeof(editBuffer) - 2) {
-                    editCharIdx++;
-                    if (editBuffer[editCharIdx] == 0) editBuffer[editCharIdx] = ' ';
-                }
-                playBuzzerTone(1500, 40);
-                break;
-            case IR_LEFT:
-                if (editCharIdx > 0) editCharIdx--;
-                playBuzzerTone(800, 40);
-                break;
-            case IR_OK:
-                finishEditField();
-                playBuzzerTone(2200, 100);
-                return;
-            case IR_CANCEL:
-                editingField = false;
-                drawMenu();
-                playBuzzerTone(700, 80);
-                return;
-            default:
-                playBuzzerTone(500, 100);
-                break;
-        }
-        drawEditField();
-        return;
     }
 
     // -------- 3. Menu NOT Active --------
@@ -247,36 +217,38 @@ void handleIR(uint32_t code)
     }
 }
 
-
 void drawMenu()
 {
-    // 1. If editing a field, show the edit UI instead of the menu!
-    if (editingField) {
-        drawEditField();
+    // If keyboard mode, let keyboard handle drawing!
+    if (inKeyboardMode) {
+        drawKeyboard();
         return;
     }
 
     // 2. If WiFi Select Mode, always call drawWiFiMenu() and return
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
         drawWiFiMenu();
         return;
     }
 
-    // 3. Normal menu rendering
+    // 3. Normal menu rendering (unchanged)
     dma_display->fillScreen(dma_display->color565(0, 0, 0));
     dma_display->setCursor(0, 0);
     dma_display->setFont(&Font5x7Uts);
 
-    int count = (currentMenuLevel == MENU_MAIN) ? mainCount
-        : (currentMenuLevel == MENU_DEVICE) ? deviceCount
-        : (currentMenuLevel == MENU_DISPLAY) ? displayCount
-        : (currentMenuLevel == MENU_WEATHER) ? weatherCount
-        : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
-        : systemCount;
+    int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
+                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
+                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
+                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
+                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
+                                                         : systemCount;
 
-    for (int i = 0; i < visibleLines; i++) {
+    for (int i = 0; i < visibleLines; i++)
+    {
         int itemIdx = menuScroll + i;
-        if (itemIdx >= count) break;
+        if (itemIdx >= count)
+            break;
 
         bool isSelected = (itemIdx == currentMenuIndex);
         uint16_t color = isSelected ? dma_display->color565(255, 0, 0) : dma_display->color565(255, 255, 255);
@@ -284,10 +256,12 @@ void drawMenu()
         char line[64];
         line[0] = 0;
 
-        if (currentMenuLevel == MENU_MAIN && itemIdx < mainCount) {
+        if (currentMenuLevel == MENU_MAIN && itemIdx < mainCount)
+        {
             sprintf(line, "%s", mainMenu[itemIdx]);
         }
-        else if (currentMenuLevel == MENU_DEVICE && itemIdx < deviceCount) {
+        else if (currentMenuLevel == MENU_DEVICE && itemIdx < deviceCount)
+        {
             if (itemIdx == 0)
                 sprintf(line, "WiFi SSID: %s", wifiSSID.c_str());
             else if (itemIdx == 1)
@@ -305,9 +279,10 @@ void drawMenu()
             else if (itemIdx == deviceCount - 2)
                 sprintf(line, "Exit & Save");
             else if (itemIdx == deviceCount - 1)
-                sprintf(line, "Back");
+                sprintf(line, "< Back");
         }
-        else if (currentMenuLevel == MENU_DISPLAY && itemIdx < displayCount) {
+        else if (currentMenuLevel == MENU_DISPLAY && itemIdx < displayCount)
+        {
             if (itemIdx == 0)
                 sprintf(line, "Theme: %s", (theme == 0) ? "Color" : "Mono");
             else if (itemIdx == 1)
@@ -319,9 +294,10 @@ void drawMenu()
             else if (itemIdx == displayCount - 2)
                 sprintf(line, "Exit & Save");
             else if (itemIdx == displayCount - 1)
-                sprintf(line, "Back");
+                sprintf(line, "< Back");
         }
-        else if (currentMenuLevel == MENU_WEATHER && itemIdx < weatherCount) {
+        else if (currentMenuLevel == MENU_WEATHER && itemIdx < weatherCount)
+        {
             if (itemIdx == 0)
                 sprintf(line, "OWM City: %s", owmCity.c_str());
             else if (itemIdx == 1)
@@ -333,9 +309,10 @@ void drawMenu()
             else if (itemIdx == weatherCount - 2)
                 sprintf(line, "Exit & Save");
             else if (itemIdx == weatherCount - 1)
-                sprintf(line, "Back");
+                sprintf(line, "< Back");
         }
-        else if (currentMenuLevel == MENU_CALIBRATION && itemIdx < calibCount) {
+        else if (currentMenuLevel == MENU_CALIBRATION && itemIdx < calibCount)
+        {
             if (itemIdx == 0)
                 sprintf(line, "TempOff: %+d", tempOffset);
             else if (itemIdx == 1)
@@ -345,9 +322,10 @@ void drawMenu()
             else if (itemIdx == calibCount - 2)
                 sprintf(line, "Exit & Save");
             else if (itemIdx == calibCount - 1)
-                sprintf(line, "Back");
+                sprintf(line, "< Back");
         }
-        else if (currentMenuLevel == MENU_SYSTEM && itemIdx < systemCount) {
+        else if (currentMenuLevel == MENU_SYSTEM && itemIdx < systemCount)
+        {
             if (itemIdx == 0)
                 sprintf(line, "OTA Update");
             else if (itemIdx == 1)
@@ -359,15 +337,19 @@ void drawMenu()
             else if (itemIdx == systemCount - 2)
                 sprintf(line, "Exit & Save");
             else if (itemIdx == systemCount - 1)
-                sprintf(line, "Back");
+                sprintf(line, "< Back");
         }
-        else {
+        else
+        {
             strcpy(line, "");
         }
 
-        if (isSelected && needsScroll(line)) {
+        if (isSelected && needsScroll(line))
+        {
             drawScrollingText(line, i * 8, color, itemIdx);
-        } else {
+        }
+        else
+        {
             dma_display->setTextColor(color);
             dma_display->setCursor(0, i * 8);
             dma_display->print(line);
@@ -375,26 +357,42 @@ void drawMenu()
     }
 }
 
-
-void handleUp()
-{
+void handleUp() {
     lastMenuActivity = millis();
     scrollOffset = 0;
 
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiScanCount > 0) {
-            wifiSelectIndex = (wifiSelectIndex - 1 + wifiScanCount) % wifiScanCount;  // roll up
-
-            // For rolling menu: no need to adjust wifiMenuScroll, 
-            // drawWiFiMenu() will always center selection.
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        if (wifiScanCount > 0)
+        {
+            if (wifiSelectIndex > 0)
+            {
+                wifiSelectIndex--;
+                // Scroll window up if selection goes above the visible window
+                if (wifiSelectIndex < wifiMenuScroll)
+                {
+                    wifiMenuScroll = wifiSelectIndex;
+                }
+            }
+            // Clamp scroll (for when list shrinks)
+            if (wifiMenuScroll < 0)
+                wifiMenuScroll = 0;
+            int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
+            if (wifiMenuScroll > maxScroll)
+                wifiMenuScroll = maxScroll;
         }
         drawWiFiMenu();
         return;
     }
 
+    // Other menu navigation unchanged
     currentMenuIndex--;
-    if (currentMenuIndex < 0) currentMenuIndex = 0;
-    if (currentMenuIndex < menuScroll) menuScroll = currentMenuIndex;
+    if (currentMenuIndex < 0)
+        currentMenuIndex = 0;
+    if (currentMenuIndex < menuScroll)
+        menuScroll = currentMenuIndex;
+    Serial.printf("[UP] Index: %d, Scroll: %d, Visible: %d, Count: %d\n", wifiSelectIndex, wifiMenuScroll, wifiVisibleLines, wifiScanCount);
+
     drawMenu();
 }
 
@@ -403,110 +401,162 @@ void handleDown()
     lastMenuActivity = millis();
     scrollOffset = 0;
 
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiScanCount > 0) {
-            wifiSelectIndex = (wifiSelectIndex + 1) % wifiScanCount;  // roll down
-
-            // For rolling menu: no need to adjust wifiMenuScroll,
-            // drawWiFiMenu() will always center selection.
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        if (wifiScanCount > 0)
+        {
+            if (wifiSelectIndex < wifiScanCount - 1)
+            {
+                wifiSelectIndex++;
+                // Scroll window down if selection goes below the visible window
+                if (wifiSelectIndex >= wifiMenuScroll + wifiVisibleLines)
+                {
+                    wifiMenuScroll = wifiSelectIndex - wifiVisibleLines + 1;
+                }
+            }
+            // Clamp scroll so we never show blank window
+            int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
+            if (wifiMenuScroll > maxScroll)
+                wifiMenuScroll = maxScroll;
+            if (wifiMenuScroll < 0)
+                wifiMenuScroll = 0;
         }
         drawWiFiMenu();
         return;
     }
 
-    int count = (currentMenuLevel == MENU_MAIN) ? mainCount
-        : (currentMenuLevel == MENU_DEVICE) ? deviceCount
-        : (currentMenuLevel == MENU_DISPLAY) ? displayCount
-        : (currentMenuLevel == MENU_WEATHER) ? weatherCount
-        : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
-        : systemCount;
+    // Other menu navigation unchanged
+    int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
+                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
+                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
+                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
+                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
+                                                         : systemCount;
 
     currentMenuIndex++;
-    if (currentMenuIndex >= count) currentMenuIndex = count - 1;
+    if (currentMenuIndex >= count)
+        currentMenuIndex = count - 1;
     if (currentMenuIndex >= menuScroll + visibleLines)
         menuScroll = currentMenuIndex - visibleLines + 1;
+
+    Serial.printf("[DOWN] Index: %d, Scroll: %d, Visible: %d, Count: %d\n", wifiSelectIndex, wifiMenuScroll, wifiVisibleLines, wifiScanCount);
+
     drawMenu();
 }
-
 
 void handleLeft()
 {
     lastMenuActivity = millis();
 
-    if (currentMenuLevel == MENU_WIFI_SELECT) return; // no left/right in wifi select
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+        return; // no left/right in wifi select
 
-    if (currentMenuLevel == MENU_DEVICE) {
-        if (currentMenuIndex == 2) toggleUnits(-1);
-        if (currentMenuIndex == 3) toggleDayFormat(-1);
-        if (currentMenuIndex == 4) toggleForecastSrc(-1);
-        if (currentMenuIndex == 5) toggleAutoRotate(-1);
+    if (currentMenuLevel == MENU_DEVICE)
+    {
+        if (currentMenuIndex == 2)
+            toggleUnits(-1);
+        if (currentMenuIndex == 3)
+            toggleDayFormat(-1);
+        if (currentMenuIndex == 4)
+            toggleForecastSrc(-1);
+        if (currentMenuIndex == 5)
+            toggleAutoRotate(-1);
     }
-    else if (currentMenuLevel == MENU_DISPLAY) {
-        if (currentMenuIndex == 0) toggleTheme(-1);
-        if (currentMenuIndex == 1) {
+    else if (currentMenuLevel == MENU_DISPLAY)
+    {
+        if (currentMenuIndex == 0)
+            toggleTheme(-1);
+        if (currentMenuIndex == 1)
+        {
             // Decrease brightness, clamp to 0..255, update hardware
             brightness--;
-            if (brightness < 0) brightness = 0;
+            if (brightness < 4)
+                brightness = 3;
             dma_display->setBrightness8(brightness);
         }
-        if (currentMenuIndex == 2) adjustScrollSpeed(-1);
+        if (currentMenuIndex == 2)
+            adjustScrollSpeed(-1);
     }
-    else if (currentMenuLevel == MENU_CALIBRATION) {
-        if (currentMenuIndex == 0) adjustTempOffset(-1);
-        if (currentMenuIndex == 1) adjustHumOffset(-1);
-        if (currentMenuIndex == 2) adjustLightGain(-1);
+    else if (currentMenuLevel == MENU_CALIBRATION)
+    {
+        if (currentMenuIndex == 0)
+            adjustTempOffset(-1);
+        if (currentMenuIndex == 1)
+            adjustHumOffset(-1);
+        if (currentMenuIndex == 2)
+            adjustLightGain(-1);
     }
     drawMenu();
 }
-
 
 void handleRight()
 {
     lastMenuActivity = millis();
 
-    if (currentMenuLevel == MENU_WIFI_SELECT) return; // no left/right in wifi select
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+        return; // no left/right in wifi select
 
-    if (currentMenuLevel == MENU_DEVICE) {
-        if (currentMenuIndex == 2) toggleUnits(1);
-        if (currentMenuIndex == 3) toggleDayFormat(1);
-        if (currentMenuIndex == 4) toggleForecastSrc(1);
-        if (currentMenuIndex == 5) toggleAutoRotate(1);
+    if (currentMenuLevel == MENU_DEVICE)
+    {
+        if (currentMenuIndex == 2)
+            toggleUnits(1);
+        if (currentMenuIndex == 3)
+            toggleDayFormat(1);
+        if (currentMenuIndex == 4)
+            toggleForecastSrc(1);
+        if (currentMenuIndex == 5)
+            toggleAutoRotate(1);
     }
-    else if (currentMenuLevel == MENU_DISPLAY) {
-        if (currentMenuIndex == 0) toggleTheme(1);
-        if (currentMenuIndex == 1) adjustBrightness(1);
-        if (currentMenuIndex == 2) adjustScrollSpeed(1);
+    else if (currentMenuLevel == MENU_DISPLAY)
+    {
+        if (currentMenuIndex == 0)
+            toggleTheme(1);
+        if (currentMenuIndex == 1)
+        {
+            // Increase brightness, clamp to 0..255, update hardware
+            brightness++;
+            if (brightness < 0)
+                brightness = 0;
+            dma_display->setBrightness8(brightness);
+        }
+        if (currentMenuIndex == 2)
+            adjustScrollSpeed(1);
     }
-    else if (currentMenuLevel == MENU_CALIBRATION) {
-        if (currentMenuIndex == 0) adjustTempOffset(1);
-        if (currentMenuIndex == 1) adjustHumOffset(1);
-        if (currentMenuIndex == 2) adjustLightGain(1);
+    else if (currentMenuLevel == MENU_CALIBRATION)
+    {
+        if (currentMenuIndex == 0)
+            adjustTempOffset(1);
+        if (currentMenuIndex == 1)
+            adjustHumOffset(1);
+        if (currentMenuIndex == 2)
+            adjustLightGain(1);
     }
     drawMenu();
 }
-
 
 void handleSelect()
 {
     lastMenuActivity = millis();
 
     // Defensive: clamp index
-    int count = (currentMenuLevel == MENU_MAIN) ? mainCount
-        : (currentMenuLevel == MENU_DEVICE) ? deviceCount
-        : (currentMenuLevel == MENU_DISPLAY) ? displayCount
-        : (currentMenuLevel == MENU_WEATHER) ? weatherCount
-        : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
-        : systemCount;
-    if (currentMenuIndex < 0) currentMenuIndex = 0;
-    if (currentMenuIndex >= count) currentMenuIndex = count - 1;
+    int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
+                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
+                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
+                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
+                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
+                                                         : systemCount;
+    if (currentMenuIndex < 0)
+        currentMenuIndex = 0;
+    if (currentMenuIndex >= count)
+        currentMenuIndex = count - 1;
 
-    if (editingField) {
-        finishEditField();
-        return;
-    }
+    if (inKeyboardMode)
+        return; // If keyboard is active, do nothing
 
-    if (currentMenuLevel == MENU_MAIN) {
-        switch (currentMenuIndex) {
+    if (currentMenuLevel == MENU_MAIN)
+    {
+        switch (currentMenuIndex)
+        {
         case 0:
             currentMenuLevel = MENU_DEVICE;
             currentMenuIndex = 0;
@@ -550,217 +600,233 @@ void handleSelect()
     }
     else if (currentMenuLevel == MENU_DEVICE)
     {
-        if (currentMenuIndex == 0) {
+        if (currentMenuIndex == 0)
+        {
             // Always scan for WiFi every time you enter this menu!
-            scanWiFiNetworks();                // <---- ALWAYS scan here
+            scanWiFiNetworks(); // <---- ALWAYS scan here
             currentMenuLevel = MENU_WIFI_SELECT;
             wifiSelectIndex = 0;
             wifiMenuScroll = 0;
             drawWiFiMenu();
             return;
         }
-        if (currentMenuIndex == 1) {
-            startEditField(wifiPass.c_str());
+        if (currentMenuIndex == 1)
+        {
+            // ---- Use keyboard for password entry ----
+            startKeyboardEntry(wifiPass.c_str(), [](const char* result){
+                if(result) {
+                    wifiPass = String(result);
+                    saveDeviceSettings();
+                    connectToWiFi();
+                }
+                drawMenu();
+            });
             return;
         }
 
-        if (currentMenuIndex == deviceCount - 2) {
+        if (currentMenuIndex == deviceCount - 2)
+        {
             saveDeviceSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == deviceCount - 1) {
+        else if (currentMenuIndex == deviceCount - 1)
+        {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
-    else if (currentMenuLevel == MENU_DISPLAY) {
-        if (currentMenuIndex == displayCount - 2) {
+    else if (currentMenuLevel == MENU_DISPLAY)
+    {
+        if (currentMenuIndex == displayCount - 2)
+        {
             saveDisplaySettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == displayCount - 1) {
+        else if (currentMenuIndex == displayCount - 1)
+        {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
+        // Optionally add keyboard entry for custom message:
+        else if (currentMenuIndex == 3) {
+            // Keyboard entry for Custom Msg
+            startKeyboardEntry(customMsg.c_str(), [](const char* result){
+                if(result) customMsg = String(result);
+                drawMenu();
+            });
+            return;
+        }
     }
-    else if (currentMenuLevel == MENU_WEATHER) {
-        if (currentMenuIndex == 0) {
-            startEditField(owmCity.c_str());
+    else if (currentMenuLevel == MENU_WEATHER)
+    {
+        if (currentMenuIndex == 0)
+        {
+            startKeyboardEntry(owmCity.c_str(), [](const char* result){
+                if(result) owmCity = String(result);
+                drawMenu();
+            });
             return;
         }
-        if (currentMenuIndex == 1) {
-            startEditField(owmApiKey.c_str());
+        if (currentMenuIndex == 1)
+        {
+            startKeyboardEntry(owmApiKey.c_str(), [](const char* result){
+                if(result) owmApiKey = String(result);
+                drawMenu();
+            });
             return;
         }
-        if (currentMenuIndex == 2) {
-            startEditField(wfToken.c_str());
+        if (currentMenuIndex == 2)
+        {
+            startKeyboardEntry(wfToken.c_str(), [](const char* result){
+                if(result) wfToken = String(result);
+                drawMenu();
+            });
             return;
         }
-        if (currentMenuIndex == 3) {
-            startEditField(wfStationId.c_str());
+        if (currentMenuIndex == 3)
+        {
+            startKeyboardEntry(wfStationId.c_str(), [](const char* result){
+                if(result) wfStationId = String(result);
+                drawMenu();
+            });
             return;
         }
-        if (currentMenuIndex == weatherCount - 2) {
+        if (currentMenuIndex == weatherCount - 2)
+        {
             saveWeatherSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == weatherCount - 1) {
+        else if (currentMenuIndex == weatherCount - 1)
+        {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
-    else if (currentMenuLevel == MENU_CALIBRATION) {
-        if (currentMenuIndex == calibCount - 2) {
+    else if (currentMenuLevel == MENU_CALIBRATION)
+    {
+        if (currentMenuIndex == calibCount - 2)
+        {
             saveCalibrationSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == calibCount - 1) {
+        else if (currentMenuIndex == calibCount - 1)
+        {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
-    else if (currentMenuLevel == MENU_SYSTEM) {
-        if (currentMenuIndex == systemCount - 2) {
+    else if (currentMenuLevel == MENU_SYSTEM)
+    {
+        if (currentMenuIndex == systemCount - 2)
+        {
             saveSystemSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == systemCount - 1) {
+        else if (currentMenuIndex == systemCount - 1)
+        {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == 0) startOTA();
-        else if (currentMenuIndex == 1) resetPowerUsage();
-        else if (currentMenuIndex == 2) quickRestore();
-        else if (currentMenuIndex == 3) factoryReset();
+        else if (currentMenuIndex == 0)
+            startOTA();
+        else if (currentMenuIndex == 1)
+            resetPowerUsage();
+        else if (currentMenuIndex == 2)
+            quickRestore();
+        else if (currentMenuIndex == 3)
+            factoryReset();
     }
 
     // --- Draw correct menu depending on currentMenuLevel
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
         drawWiFiMenu();
-    }  else {
+    }
+    else
+    {
         drawMenu();
     }
 }
 
-// ------- Text Field Editing Logic --------
-void startEditField(const char* currentValue) {
-    editingField = true;
-    strncpy(editBuffer, currentValue, sizeof(editBuffer)-1);
-    editBuffer[sizeof(editBuffer)-1] = '\0';
-    editCharIdx = strlen(editBuffer);
-    drawEditField();
-}
-
-
-void finishEditField() {
-    editingField = false;
-    if (currentMenuLevel == MENU_DEVICE && currentMenuIndex == 0) wifiSSID = String(editBuffer);
-    if (currentMenuLevel == MENU_DEVICE && currentMenuIndex == 1) {
-        wifiPass = String(editBuffer);
-        saveDeviceSettings(); // Save SSID/pass to Preferences!
-        connectToWiFi();      // Optionally auto-connect here!
-    }
-    if (currentMenuLevel == MENU_WEATHER && currentMenuIndex == 0) owmCity = String(editBuffer);
-    if (currentMenuLevel == MENU_WEATHER && currentMenuIndex == 1) owmApiKey = String(editBuffer);
-    if (currentMenuLevel == MENU_WEATHER && currentMenuIndex == 2) wfToken = String(editBuffer);
-    if (currentMenuLevel == MENU_WEATHER && currentMenuIndex == 3) wfStationId = String(editBuffer);
-
-    drawMenu();
-}
-
-
-void drawEditField() {
-    const int VISIBLE_LEN = 16; // or however many chars fit your display
-    int bufLen = strlen(editBuffer);
-    int startIdx = 0;
-
-    if (editCharIdx >= VISIBLE_LEN)
-        startIdx = editCharIdx - VISIBLE_LEN + 1;
-
-    char shown[VISIBLE_LEN + 1];
-    memset(shown, 0, sizeof(shown));
-    strncpy(shown, editBuffer + startIdx, VISIBLE_LEN);
-
-    if (millis()/500%2 && editCharIdx >= startIdx && editCharIdx < startIdx + VISIBLE_LEN)
-        shown[editCharIdx - startIdx] = '_';
-
-    dma_display->fillScreen(dma_display->color565(0, 0, 0));
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextColor(dma_display->color565(255,255,0));
-    dma_display->setCursor(0, 0);
-    dma_display->print("Edit:");
-    dma_display->setCursor(0, 12);
-    dma_display->print(shown);
-}
-
-
 void updateMenu() { drawMenu(); }
 
+bool wifiScanInProgress = false;
 
-void drawWiFiMenu() {
-    ensureWiFiListFresh();
-
-    dma_display->fillScreen(dma_display->color565(0, 0, 0));
+void drawWiFiMenu()
+{
+    dma_display->fillScreen(dma_display->color565(0, 0, 0)); // Clear screen
     dma_display->setFont(&Font5x7Uts);
 
-    // Label
-    dma_display->setTextColor(dma_display->color565(0,255,255));
+    // Draw label
+    dma_display->setTextColor(dma_display->color565(0, 255, 255));
     dma_display->setCursor(0, 0);
     dma_display->print("Select WiFi:");
 
-    if (wifiScanCount == 0) {
+    // Show "Scanning..." if scan is in progress
+    if (wifiScanInProgress)
+    {
+        dma_display->setTextColor(dma_display->color565(255, 255, 80));
+        dma_display->setCursor(0, 10);
+        dma_display->print("Scanning...");
+        return;
+    }
+
+    // Show "No WiFi found" if scan is complete but none are found
+    if (wifiScanCount == 0)
+    {
         dma_display->setTextColor(dma_display->color565(255, 80, 80));
         dma_display->setCursor(0, 10);
         dma_display->print("No WiFi found.");
         return;
     }
 
-    // Where the selected item should be on screen (e.g., center)
-    int centerLine = wifiVisibleLines / 2;
+    // Clamp scroll to avoid blanks
+    int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
+    if (wifiMenuScroll > maxScroll)
+        wifiMenuScroll = maxScroll;
+    if (wifiMenuScroll < 0)
+        wifiMenuScroll = 0;
 
     const int labelHeight = 7;
     const int listStartY = labelHeight + 1;
     const int wifiLineHeight = 8;
 
-    // Draw visible lines with vertical rolling
-    for (int i = 0; i < wifiVisibleLines; ++i) {
-        // Calculate the index in the wifi list, rolling around
-        int idx = (wifiSelectIndex - centerLine + i + wifiScanCount) % wifiScanCount;
-
-        // Highlight selected line
-        if (i == centerLine) // middle line is always selection
-            dma_display->setTextColor(dma_display->color565(255,255,0));
+    for (int i = 0; i < wifiVisibleLines; ++i)
+    {
+        int idx = wifiMenuScroll + i;
+        if (idx >= wifiScanCount)
+            break;
+        if (idx == wifiSelectIndex)
+            dma_display->setTextColor(dma_display->color565(255, 255, 0));
         else
-            dma_display->setTextColor(dma_display->color565(255,255,255));
-
+            dma_display->setTextColor(dma_display->color565(255, 255, 255));
         dma_display->setCursor(0, listStartY + wifiLineHeight * i);
         dma_display->print(scannedSSIDs[idx]);
     }
 }
 
-
-
-void ensureWiFiListFresh() {
-    if (wifiScanCount == 1 && scannedSSIDs[0] == "(No networks)") {
-        scanWiFiNetworks();
-    }
+void onWiFiConnectFailed()
+{
+    // Do a scan and update scannedSSIDs[] like your menu code
+    scanWiFiNetworks(); // <-- Your safe menu-managed scanner
+    wifiSelectIndex = 0;
+    wifiMenuScroll = 0;
+    currentMenuLevel = MENU_WIFI_SELECT;
+    menuActive = true;
+    drawMenu(); // Will call drawWiFiMenu() as needed
 }
-
-
-
-

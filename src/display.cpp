@@ -1,5 +1,6 @@
 #include "display.h"
 #include "icons.h"
+#include "settings.h"
 
 
 MatrixPanel_I2S_DMA *dma_display = nullptr;
@@ -20,7 +21,7 @@ void setupDisplay() {
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(3);
+  dma_display->setBrightness8(brightness);
   dma_display->setTextSize(1);
   dma_display->setTextWrap(false);
   dma_display->setFont(&Font5x7Uts);

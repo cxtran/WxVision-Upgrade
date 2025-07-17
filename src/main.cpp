@@ -309,9 +309,27 @@ void setup() {
     Serial.println("Display setup done.");
     setupIRSensor();
     Serial.println("\nESP32 Weather Display");
+
+    // ---- WiFi credential check ----
+    if (wifiSSID.isEmpty() || wifiPass.isEmpty()) {
+        Serial.println("[WiFi] No credentials, showing WiFi menu...");
+        onWiFiConnectFailed();  // Show WiFi select menu immediately
+        return;                 // Pause setup until WiFi is configured
+    }
+
     Serial.println("Connecting WiFi...");
     connectToWiFi();
-      if (wifiSelecting) return;
+
+    // If WiFi menu is open, pause rest of setup (user needs to pick network)
+    if (wifiSelecting) return;
+
+    // Extra connection check (in case connectToWiFi fails to connect)
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[WiFi] Connection failed, showing WiFi menu...");
+        onWiFiConnectFailed();
+        return;
+    }
+    
 
     Serial.println("WiFi done.");
     ArduinoOTA.setHostname("ESP32-Weather");
@@ -331,7 +349,7 @@ void setup() {
     displayDate();
     delay(2000);
     setupButtons();
-   
+
     currentMenuLevel = MENU_MAIN;
     currentMenuIndex = 0;
     menuActive = false;
@@ -363,21 +381,27 @@ void loop() {
     }
 
     // --- Standard Menu Navigation ---
-    if (menuActive) {
-        updateMenu();
-        // Auto-back-to-main after 30 seconds of inactivity
-        if (millis() - lastMenuActivity > 30000) {
-            if (currentMenuLevel != MENU_MAIN || currentMenuIndex != 0 || menuScroll != 0) {
-                currentMenuLevel = MENU_MAIN;
-                currentMenuIndex = 0;
-                menuScroll = 0;
-                drawMenu();
-            }
+if (menuActive) {
+    updateMenu();
+
+    static unsigned long lastAutoReturnCheck = 0; // Remembers last checked activity
+
+    // Only auto-back-to-main if NO navigation activity happened since last check
+    if (millis() - lastMenuActivity > 30000 && lastMenuActivity == lastAutoReturnCheck) {
+        if (currentMenuLevel != MENU_MAIN || currentMenuIndex != 0 || menuScroll != 0) {
+            currentMenuLevel = MENU_MAIN;
+            currentMenuIndex = 0;
+            menuScroll = 0;
+            drawMenu();
         }
-        delay(100);
-        return;
+    } else {
+        // If the user did something, update the marker so the 30s timer resets
+        lastAutoReturnCheck = lastMenuActivity;
     }
 
+    delay(100);
+    return;
+}
     // --- Main background tasks (run only if not in menu or wifi selection) ---
 
     // Update time/date display every second

@@ -1,7 +1,6 @@
 #pragma once
 #include <Arduino.h>
 #include <vector>
-#include "bluetoothsettings.h"
 
 void handleButtonInput();
 void handleIR(uint32_t code);
@@ -13,11 +12,8 @@ extern void saveDeviceSettings(); // If not already declared
 extern void drawMenu(); // If not already declared
 void scanAndSelectWiFi();
 void showWifiSelection();
-extern bool wifiSelecting;
 void drawWiFiMenu();
-extern void scanBLENetworks();
-
-
+void onWiFiConnectFailed() ;
 
 
 // Simple globals to support network selection
