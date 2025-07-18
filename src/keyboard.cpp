@@ -4,12 +4,11 @@
 enum KbdMode { MODE_UPPER, MODE_LOWER, MODE_SYM };
 KbdMode kbdMode = MODE_UPPER;
 
-// Last row has only the "real" characters; "SP" is added in code after last character!
 const char* keyboardGridUpper[] = {
-    "ABCDEFGH", // 8
-    "IJKLMNOP", // 8
-    "QRSTUVWX", // 8
-    "YZ"        // Only two letters, SP appears after 'Z'
+    "ABCDEFGH",
+    "IJKLMNOP",
+    "QRSTUVWX",
+    "YZ"
 };
 const char* keyboardGridLower[] = {
     "abcdefgh",
@@ -21,26 +20,25 @@ const char* keyboardGridSym[] = {
     "01234567",
     "89!@#$%^",
     "&*()-_=+",
-    "[]{};:,." // The '.' is included as an ordinary selectable symbol
+    "[]{};:,."
 };
 
-
 const int gridRows = 4;
-const int gridCols = 8; // for navigation and drawing
+const int gridCols = 8;
 const int keyboardVisibleRows = 1;
 
 char keyboardBuffer[64] = ""; // Max 63 chars + null
 bool inKeyboardMode = false;
 bool kbEditLineActive = false;
-int kbCursorRow = 0, kbCursorCol = 0;  // kbCursorRow == gridRows means button row
+int kbCursorRow = 0, kbCursorCol = 0;
 int kbRowScroll = 0;
 int editLen = 0;
 int kbEditCursor = 0;
-volatile bool blinkState = true;  // Toggle in your loop/timer for cursor blink
+volatile bool blinkState = true;
 
 static void (*keyboardDoneCallback)(const char*) = nullptr;
+static const char* keyboardTitle = nullptr; // For customizable title
 
-// --- Helpers ---
 const char** getActiveGrid() {
     switch (kbdMode) {
         case MODE_LOWER: return keyboardGridLower;
@@ -66,7 +64,7 @@ void switchKeyboardMode() {
     drawKeyboard();
 }
 
-void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const char* result)) {
+void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const char* result), const char* title) {
     inKeyboardMode = true;
     kbEditLineActive = false;
     kbdMode = MODE_UPPER;
@@ -78,6 +76,7 @@ void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const c
     kbRowScroll = 0;
     kbEditCursor = editLen;
     keyboardDoneCallback = onDoneCallback;
+    keyboardTitle = title ? title : "Enter Text:";
     drawKeyboard();
 }
 
@@ -87,7 +86,7 @@ void handleKeyboardIR(uint32_t code) {
     if (!inKeyboardMode) return;
 
     int lastRowLen = strlen(keyboardGrid[gridRows-1]);
-    int lastRowSPCol = lastRowLen; // SP is at col = lastRowLen, only on last row
+    int lastRowSPCol = lastRowLen;
 
     if (kbEditLineActive) {
         if (code == 0xFFFF50AF) { // LEFT
@@ -115,35 +114,29 @@ void handleKeyboardIR(uint32_t code) {
                 kbEditLineActive = true;
             } else if (kbCursorRow > 0) {
                 kbCursorRow--;
-                // Adjust col for last row SP case
                 if (kbCursorRow == gridRows-1) {
                     if (kbCursorCol > lastRowSPCol) kbCursorCol = lastRowSPCol;
                 } else if (kbCursorCol >= gridCols) {
                     kbCursorCol = gridCols-1;
                 }
-                // Scroll if needed
                 if (kbCursorRow < kbRowScroll) kbRowScroll = kbCursorRow;
             }
         } else if (code == 0xFFFF906F) { // DOWN
             if (kbCursorRow < gridRows) {
                 kbCursorRow++;
-                // If entering button row, limit to three columns
-                if (kbCursorRow == gridRows && kbCursorCol > 2) kbCursorCol = 2;
-                // If wrapping, reset to first row
+                if (kbCursorRow == gridRows && kbCursorCol > 3) kbCursorCol = 3;
                 if (kbCursorRow > gridRows) {
                     kbCursorRow = 0;
                     kbRowScroll = 0;
                 }
-                // Scroll if needed
                 if (kbCursorRow >= kbRowScroll + keyboardVisibleRows && kbCursorRow < gridRows) {
                     kbRowScroll = kbCursorRow - (keyboardVisibleRows-1);
                 }
             }
         } else if (code == 0xFFFF50AF) { // LEFT
             if (kbCursorRow == gridRows) {
-                kbCursorCol = (kbCursorCol == 0) ? 2 : kbCursorCol-1;
+                kbCursorCol = (kbCursorCol == 0) ? 3 : kbCursorCol-1;
             } else if (kbCursorRow == gridRows-1) {
-                // Special: wrap between last char and SP key
                 if (kbCursorCol == 0)
                     kbCursorCol = lastRowSPCol;
                 else
@@ -153,21 +146,19 @@ void handleKeyboardIR(uint32_t code) {
             }
         } else if (code == 0xFFFFE01F) { // RIGHT
             if (kbCursorRow == gridRows) {
-                kbCursorCol = (kbCursorCol == 2) ? 0 : kbCursorCol+1;
+                kbCursorCol = (kbCursorCol == 3) ? 0 : kbCursorCol+1;
             } else if (kbCursorRow == gridRows-1) {
-                // Only allow to move to SP after last char
                 if (kbCursorCol == lastRowSPCol)
                     kbCursorCol = 0;
                 else
                     kbCursorCol++;
-                if (kbCursorCol > lastRowSPCol) kbCursorCol = 0; // prevent OOB
+                if (kbCursorCol > lastRowSPCol) kbCursorCol = 0;
             } else {
                 kbCursorCol = (kbCursorCol+1) % gridCols;
             }
         } else if (code == 0xFFFF48B7) { // OK
             if (kbCursorRow < gridRows) {
                 if (kbCursorRow == gridRows-1 && kbCursorCol == lastRowSPCol) {
-                    // Insert space (SP key)
                     if (editLen < (int)sizeof(keyboardBuffer)-1) {
                         for (int i = editLen; i > kbEditCursor; --i)
                             keyboardBuffer[i] = keyboardBuffer[i-1];
@@ -190,7 +181,7 @@ void handleKeyboardIR(uint32_t code) {
                     }
                 }
             } else if (kbCursorRow == gridRows) {
-                // 0=BS, 1=OK, 2=MOD
+                // 0=BS, 1=OK, 2=MOD, 3=X
                 if (kbCursorCol == 0) { // BS
                     if (kbEditCursor > 0 && editLen > 0) {
                         for (int i = kbEditCursor-1; i < editLen-1; ++i)
@@ -205,6 +196,10 @@ void handleKeyboardIR(uint32_t code) {
                     return;
                 } else if (kbCursorCol == 2) { // MOD
                     switchKeyboardMode();
+                    return;
+                } else if (kbCursorCol == 3) { // CANCEL "X"
+                    inKeyboardMode = false;
+                    if (keyboardDoneCallback) keyboardDoneCallback(nullptr);
                     return;
                 }
             }
@@ -228,10 +223,10 @@ void drawKeyboard() {
     const char** keyboardGrid = getActiveGrid();
     dma_display->fillScreen(0);
 
-    // --- Title (yellow) ---
+    // --- Title (yellow, or customizable) ---
     dma_display->setTextColor(dma_display->color565(255,255,0));
     dma_display->setCursor(0, 0);
-    dma_display->print("Enter Text:");
+    dma_display->print(keyboardTitle ? keyboardTitle : "Enter Text:");
 
     // --- Edit Buffer, line 1 ---
     int bufferY = 8;
@@ -239,7 +234,6 @@ void drawKeyboard() {
     int visibleChars = 8;
     int start = (kbEditCursor > visibleChars-1) ? (kbEditCursor - (visibleChars-1)) : 0;
 
-    // Pick buffer color based on focus
     uint16_t bufferColor = kbEditLineActive 
         ? dma_display->color565(255,220,80)   // gold/orange for active
         : dma_display->color565(64,128,255);  // blue for inactive
@@ -250,7 +244,6 @@ void drawKeyboard() {
         char c = (idx < editLen) ? keyboardBuffer[idx] : ' ';
         bool isCursor = (idx == kbEditCursor);
 
-        // Highlight char at cursor: bright yellow when blinking, buffer color otherwise
         if (isCursor) {
             dma_display->setTextColor(blinkState ? dma_display->color565(255,255,64) : bufferColor);
         } else {
@@ -259,7 +252,7 @@ void drawKeyboard() {
 
         dma_display->setCursor(x, bufferY);
         if (isCursor && blinkState) {
-            dma_display->print('_'); // blink as underscore
+            dma_display->print('_');
         } else {
             dma_display->print(c);
         }
@@ -279,10 +272,10 @@ void drawKeyboard() {
         // Draw SP key only for upper/lower mode, not for symbol mode
         if (row == gridRows-1 && col == lastRowSPCol && kbdMode != MODE_SYM) {
             if (isSel) {
-                dma_display->fillRect(x-1, gridY-1, 13, 9, dma_display->color565(0,180,180)); // <-- width now 13
+                dma_display->fillRect(x-1, gridY-1, 13, 9, dma_display->color565(0,180,180));
                 dma_display->setTextColor(dma_display->color565(255,255,255));
             } else {
-                dma_display->drawRect(x-1, gridY-1, 13, 9, dma_display->color565(64,128,128)); // <-- width now 13
+                dma_display->drawRect(x-1, gridY-1, 13, 9, dma_display->color565(64,128,128));
                 dma_display->setTextColor(dma_display->color565(64,128,128));
             }
             dma_display->setCursor(x, gridY);
@@ -299,32 +292,45 @@ void drawKeyboard() {
             dma_display->print(keyboardGrid[row][col]);
         }
     }
-    // --- Draw BS, OK, MOD buttons (line 3) ---
+
+    // --- Draw BS, OK, MOD, X buttons (line 3) ---
     int btnY = 24;
-    int charWidthBtn = 8; // For your font
-    const char* btnLabels[3] = {"BS", "OK", getModeButtonLabel()};
-    for (int i = 0, xpos = 0; i < 3; ++i) {
-        int labelLen = strlen(btnLabels[i]);
-        int btnW = labelLen * charWidthBtn + 4;
+    int screenW = 64; // Change to your display width if needed
+    int btnCount = 4;
+    int totalSpacing = (btnCount - 1) * 2; // 2px between each button
+    int baseBtnW = (screenW - totalSpacing) / 4;
+    // MOD ("abc") button: +5px wider, X button: base-3px wide (was base-5, then +2 more)
+    int btnWidths[4] = {baseBtnW, baseBtnW, baseBtnW + 5, baseBtnW - 3};
+    const char* btnLabels[4] = {"BS", "OK", getModeButtonLabel(), "X"};
+
+    int xpos = 0;
+    for (int i = 0; i < 4; ++i) {
         bool highlight = (!kbEditLineActive && kbCursorRow == gridRows && kbCursorCol == i);
 
-        // Use higher contrast for all
-        uint16_t fill = highlight
-            ? (i==2 ? dma_display->color565(180,255,0) : dma_display->color565(255,180,0))
-            : dma_display->color565(30,40,60);
-        uint16_t border = dma_display->color565(255,255,0); // bright yellow border for all
-        uint16_t textColor = highlight ? dma_display->color565(0,0,0) : dma_display->color565(255,255,255);
+        uint16_t fill, border, textColor;
+        if (i == 3) { // X (Cancel)
+            fill = highlight ? dma_display->color565(220,40,40) : dma_display->color565(120,0,0);
+            border = dma_display->color565(255,64,64);
+            textColor = dma_display->color565(255,255,255);
+        } else {
+            fill = highlight
+                ? (i==2 ? dma_display->color565(180,255,0) : dma_display->color565(255,180,0))
+                : dma_display->color565(30,40,60);
+            border = dma_display->color565(255,255,0);
+            textColor = highlight ? dma_display->color565(0,0,0) : dma_display->color565(255,255,255);
+        }
 
-        // Button background and border
-        dma_display->fillRect(xpos, btnY, btnW, 9, fill);
-        dma_display->drawRect(xpos, btnY, btnW, 9, border);
+        dma_display->fillRect(xpos, btnY, btnWidths[i], 9, fill);
+        dma_display->drawRect(xpos, btnY, btnWidths[i], 9, border);
 
-        // Text
+        // Center label, and move "X" 2px to the right
+        int labelLen = strlen(btnLabels[i]);
+        int tx = xpos + (btnWidths[i] - 8*labelLen) / 2;
+        if (i == 3) tx += 2;
         dma_display->setTextColor(textColor);
-        dma_display->setCursor(xpos + 2, btnY + 1);
+        dma_display->setCursor(tx > xpos ? tx : xpos + 1, btnY + 1);
         dma_display->print(btnLabels[i]);
 
-        xpos += btnW + 2; // 2px gap between buttons
+        xpos += btnWidths[i] + 2; // move right, keep 2px space
     }
-
 }

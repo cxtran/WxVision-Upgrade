@@ -7,7 +7,49 @@
 #include "system.h"
 #include "utils.h"
 #include "WiFi.h"
-#include "keyboard.h"   // <-- Required for keyboard mode
+#include "keyboard.h" // <-- Required for keyboard mode
+#include "InfoModal.h"
+
+// --- System Info Colors ---
+#define SYSINFO_HEADER dma_display->color565(0,255,80)
+#define SYSINFO_HEADERBG dma_display->color565(0,20,60)
+#define SYSINFO_UNSELXBG dma_display->color565(40,40,180)
+#define SYSINFO_SELXBG   dma_display->color565(255,0,0)
+#define SYSINFO_XCOLOR   dma_display->color565(255,255,255)
+#define SYSINFO_ULINE    dma_display->color565(180,180,255)
+#define SYSINFO_SEL      dma_display->color565(255,255,64)
+#define SYSINFO_UNSEL    dma_display->color565(0,255,255)
+
+InfoModal sysInfoModal("Sys Info");
+
+
+// -- System Info modal state --
+bool systemInfoActive = false;
+int sysInfoSelIndex = 0;
+int sysInfoScrollY = 0;
+int sysInfoHorizScroll = 0;
+bool sysInfoAtClose = false;
+unsigned long sysInfoLastScrollTime = 0;
+String sysInfoLines[8];
+int sysInfoLineCount = 0;
+
+// Add these at top of file (not inside function)
+bool atScrollEnd = false;
+unsigned long scrollPauseStart = 0;
+
+
+// Number of display columns and rows for info screen
+const int SYSINFO_MAXCOLS = 12;
+const int SYSINFO_CHARH = 8;
+const int SYSINFO_MAXROWS = 4;
+const int SYSINFO_INFOROWS = SYSINFO_MAXROWS - 1;
+const int SYSINFO_SCROLLSPEED = 50;
+const int SYSINFO_ENDPAUSE = 300;
+const int SYSINFO_SCREEN_WIDTH = 64;  // Your display width in pixels
+static int sysInfoScrollOffset = 0;   // Pixel offset for scrolling
+static int lastSysInfoSelIndex = -1;
+static unsigned long sysInfoScrollTime = 0;
+static bool sysInfoFirstScroll = true;
 
 MenuLevel currentMenuLevel = MENU_MAIN;
 int currentMenuIndex = 0;
@@ -37,38 +79,69 @@ extern String wfToken;
 extern String wfStationId;
 extern int humOffset;
 
-const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System Actions", "Save & Exit"};
+const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
 const char *deviceMenu[] = {
-    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "Exit & Save", "< Back"};
+    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 
-const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "Exit & Save", "< Back"};
+const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
 
-const char *weatherMenu[] = {"OWM City", "OWM API Key", "WF Token", "WF Station ID", "Exit & Save", "< Back"};
+const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key",  "WF Token", "WF Station ID", "< Back"};
 const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
 
-const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "Exit & Save", "< Back"};
+const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 
-const char *systemMenu[] = {"OTA Update", "Reset Power", "Quick Restore", "Factory Reset", "Exit & Save", "< Back"};
+const char *systemMenu[] = {
+    "OTA Update",
+    "Reset Power",
+    "Quick Restore",
+    "Factory Reset",
+    "Reboot",
+    "Show System Info",
+    "Set Time Zone",
+    "Set Date & Time",
+    "WiFi Signal Test",
+    "< Back"
+};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
-void scanWiFiNetworks() {
+
+CountryEntry countries[] = {
+    {"", "US"},
+    {"", "GB"},
+    {"", "VN"},
+    {"", "CA"},
+    {"", "DE"},
+    {"", "FR"},
+    {"", "AU"},
+    {"", "IN"},
+    // ... add more as you like ...
+    {"Custom...", ""} // Last item triggers keyboard
+};
+const int numCountries = sizeof(countries) / sizeof(countries[0]);
+int countryIndex = 0;          // Should be persisted with your settings!
+String customCountryCode = ""; // Stores user's custom entry
+
+void scanWiFiNetworks()
+{
     wifiScanCount = 0;
     wifiSelecting = true;
 
-    WiFi.mode(WIFI_STA);      // Set WiFi to Station mode (required for scanning)
+    WiFi.mode(WIFI_STA); // Set WiFi to Station mode (required for scanning)
     delay(100);
 
     int n = WiFi.scanNetworks();
     int j = 0;
-    for (int i = 0; i < n && j < 15; ++i) {  // Leave room for "Back"
+    for (int i = 0; i < n && j < 15; ++i)
+    { // Leave room for "Back"
         String ssid = WiFi.SSID(i);
         ssid.trim();
-        if (ssid.length() == 0) continue;
+        if (ssid.length() == 0)
+            continue;
         scannedSSIDs[j++] = ssid;
     }
     // Always add "< Back" as last menu entry
@@ -77,13 +150,25 @@ void scanWiFiNetworks() {
     wifiSelectIndex = 0;
     wifiMenuScroll = 0;
     wifiSelectNeedsScan = false;
-    Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount-1);
+    Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount - 1);
 }
 
 void handleIR(uint32_t code)
-{
+{   /* 
+    // -- System Info Modal Handling --
+    if (systemInfoActive) {
+        handleSystemInfoIR(code);
+        return;
+    }
+    */
+    if (sysInfoModal.isActive()) {
+        sysInfoModal.handleIR(code);
+        return;
+    }
+    
     // --- Keyboard mode always has top priority ---
-    if (inKeyboardMode) {
+    if (inKeyboardMode)
+    {
         handleKeyboardIR(code);
         return;
     }
@@ -141,14 +226,14 @@ void handleIR(uint32_t code)
             menuScroll = 0;
             drawMenu();
             // --- Use keyboard for password entry ---
-            startKeyboardEntry(wifiPass.c_str(), [](const char* result){
+            startKeyboardEntry(wifiPass.c_str(), [](const char *result)
+                               {
                 if(result) {
                     wifiPass = String(result);
                     saveDeviceSettings();
                     connectToWiFi();
                 }
-                drawMenu();
-            });
+                drawMenu(); });
             playBuzzerTone(2200, 120);
             return;
         }
@@ -178,6 +263,9 @@ void handleIR(uint32_t code)
     switch (code)
     {
     case 0xFFFF08F7: // Power/Menu (exit menu)
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
         menuActive = false;
         dma_display->clearScreen();
         delay(50);
@@ -220,7 +308,8 @@ void handleIR(uint32_t code)
 void drawMenu()
 {
     // If keyboard mode, let keyboard handle drawing!
-    if (inKeyboardMode) {
+    if (inKeyboardMode)
+    {
         drawKeyboard();
         return;
     }
@@ -276,8 +365,6 @@ void drawMenu()
                 sprintf(line, "AutoRot: %s", (autoRotate == 0) ? "Off" : "On");
             else if (itemIdx == 6)
                 sprintf(line, "ManualScr");
-            else if (itemIdx == deviceCount - 2)
-                sprintf(line, "Exit & Save");
             else if (itemIdx == deviceCount - 1)
                 sprintf(line, "< Back");
         }
@@ -291,8 +378,6 @@ void drawMenu()
                 sprintf(line, "Scroll: %d", scrollSpeed);
             else if (itemIdx == 3)
                 sprintf(line, "Custom Msg");
-            else if (itemIdx == displayCount - 2)
-                sprintf(line, "Exit & Save");
             else if (itemIdx == displayCount - 1)
                 sprintf(line, "< Back");
         }
@@ -300,14 +385,20 @@ void drawMenu()
         {
             if (itemIdx == 0)
                 sprintf(line, "OWM City: %s", owmCity.c_str());
-            else if (itemIdx == 1)
-                snprintf(line, sizeof(line), "OWM Key: %.30s", owmApiKey.c_str());
+            else if (itemIdx == 1) {
+                if (owmCountryIndex < numCountries - 1) {
+                    sprintf(line, "Country: %s (%s)", countries[owmCountryIndex].name, countries[owmCountryIndex].code);
+                } else {
+                    sprintf(line, "Country: Custom (%s)", 
+                        owmCountryCustom.length() ? owmCountryCustom.c_str() : "--");
+                }
+            }
             else if (itemIdx == 2)
-                sprintf(line, "WF Token: %s", wfToken.c_str());
+                snprintf(line, sizeof(line), "OWM Key: %.30s", owmApiKey.c_str());
             else if (itemIdx == 3)
+                sprintf(line, "WF Token: %s", wfToken.c_str());
+            else if (itemIdx == 4)
                 sprintf(line, "WF ID: %s", wfStationId.c_str());
-            else if (itemIdx == weatherCount - 2)
-                sprintf(line, "Exit & Save");
             else if (itemIdx == weatherCount - 1)
                 sprintf(line, "< Back");
         }
@@ -319,8 +410,6 @@ void drawMenu()
                 sprintf(line, "HumOff: %+d", humOffset);
             else if (itemIdx == 2)
                 sprintf(line, "LightG: %d%%", lightGain);
-            else if (itemIdx == calibCount - 2)
-                sprintf(line, "Exit & Save");
             else if (itemIdx == calibCount - 1)
                 sprintf(line, "< Back");
         }
@@ -334,11 +423,20 @@ void drawMenu()
                 sprintf(line, "Quick Restore");
             else if (itemIdx == 3)
                 sprintf(line, "Factory Reset");
-            else if (itemIdx == systemCount - 2)
-                sprintf(line, "Exit & Save");
+            else if (itemIdx == 4)
+                sprintf(line, "Reboot");
+            else if (itemIdx == 5)
+                sprintf(line, "Show System Info");
+            else if (itemIdx == 6)
+                sprintf(line, "Set Time Zone");
+            else if (itemIdx == 7)
+                sprintf(line, "Set Date & Time");
+            else if (itemIdx == 8)
+                sprintf(line, "WiFi Signal Test");
             else if (itemIdx == systemCount - 1)
                 sprintf(line, "< Back");
         }
+
         else
         {
             strcpy(line, "");
@@ -357,7 +455,8 @@ void drawMenu()
     }
 }
 
-void handleUp() {
+void handleUp()
+{
     lastMenuActivity = millis();
     scrollOffset = 0;
 
@@ -486,6 +585,19 @@ void handleLeft()
         if (currentMenuIndex == 2)
             adjustLightGain(-1);
     }
+    else if (currentMenuLevel == MENU_WEATHER)
+    {
+        if (currentMenuIndex == 1)
+        { // OWM Country Code
+            if (owmCountryIndex  > 0)
+                owmCountryIndex --;
+            else
+                owmCountryIndex  = numCountries - 1;
+            drawMenu();
+            return;
+        }
+    }
+
     drawMenu();
 }
 
@@ -531,6 +643,20 @@ void handleRight()
         if (currentMenuIndex == 2)
             adjustLightGain(1);
     }
+
+    else if (currentMenuLevel == MENU_WEATHER)
+    {
+        if (currentMenuIndex == 1)
+        { // OWM Country Code
+            if (owmCountryIndex  < numCountries - 1)
+                owmCountryIndex ++;
+            else
+                owmCountryIndex  = 0;
+            drawMenu();
+            return;
+        }
+    }
+
     drawMenu();
 }
 
@@ -583,18 +709,19 @@ void handleSelect()
             menuScroll = 0;
             break;
         case 5:
-            saveAllSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
             menuActive = false;
             dma_display->clearScreen();
             delay(50);
+            playBuzzerTone(3000, 100);
             fetchWeatherFromOWM();
             displayClock();
             displayDate();
             displayWeatherData();
             reset_Time_and_Date_Display = true;
+
             break;
         }
     }
@@ -613,25 +740,18 @@ void handleSelect()
         if (currentMenuIndex == 1)
         {
             // ---- Use keyboard for password entry ----
-            startKeyboardEntry(wifiPass.c_str(), [](const char* result){
+            startKeyboardEntry(wifiPass.c_str(), [](const char *result)
+                               {
                 if(result) {
                     wifiPass = String(result);
                     saveDeviceSettings();
                     connectToWiFi();
                 }
-                drawMenu();
-            });
+                drawMenu(); });
             return;
         }
 
-        if (currentMenuIndex == deviceCount - 2)
-        {
-            saveDeviceSettings();
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
-        else if (currentMenuIndex == deviceCount - 1)
+        if (currentMenuIndex == deviceCount - 1)
         {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
@@ -654,12 +774,13 @@ void handleSelect()
             menuScroll = 0;
         }
         // Optionally add keyboard entry for custom message:
-        else if (currentMenuIndex == 3) {
+        else if (currentMenuIndex == 3)
+        {
             // Keyboard entry for Custom Msg
-            startKeyboardEntry(customMsg.c_str(), [](const char* result){
+            startKeyboardEntry(customMsg.c_str(), [](const char *result)
+                               {
                 if(result) customMsg = String(result);
-                drawMenu();
-            });
+                drawMenu(); });
             return;
         }
     }
@@ -667,90 +788,116 @@ void handleSelect()
     {
         if (currentMenuIndex == 0)
         {
-            startKeyboardEntry(owmCity.c_str(), [](const char* result){
-                if(result) owmCity = String(result);
-                drawMenu();
-            });
+            startKeyboardEntry(owmCity.c_str(), [](const char *result)
+                               {
+            if(result) owmCity = String(result);
+            drawMenu(); });
             return;
         }
         if (currentMenuIndex == 1)
         {
-            startKeyboardEntry(owmApiKey.c_str(), [](const char* result){
-                if(result) owmApiKey = String(result);
-                drawMenu();
-            });
+            if (countryIndex == numCountries - 1)
+            {
+                // Custom...
+                startKeyboardEntry(owmCountryCustom.c_str(), [](const char *result)
+                                   {
+                if(result) owmCountryCustom = String(result);
+                drawMenu(); });
+            }
+            // Otherwise, selecting does nothing (left/right changes)
             return;
         }
         if (currentMenuIndex == 2)
         {
-            startKeyboardEntry(wfToken.c_str(), [](const char* result){
-                if(result) wfToken = String(result);
-                drawMenu();
-            });
+            startKeyboardEntry(owmApiKey.c_str(), [](const char *result)
+                               {
+            if(result) owmApiKey = String(result);
+            drawMenu(); });
             return;
         }
         if (currentMenuIndex == 3)
         {
-            startKeyboardEntry(wfStationId.c_str(), [](const char* result){
-                if(result) wfStationId = String(result);
-                drawMenu();
-            });
+            startKeyboardEntry(wfToken.c_str(), [](const char *result)
+                               {
+            if(result) wfToken = String(result);
+            drawMenu(); });
             return;
         }
-        if (currentMenuIndex == weatherCount - 2)
+        if (currentMenuIndex == 4)
         {
-            saveWeatherSettings();
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
+            startKeyboardEntry(wfStationId.c_str(), [](const char *result)
+                               {
+            if(result) wfStationId = String(result);
+            drawMenu(); });
+            return;
         }
-        else if (currentMenuIndex == weatherCount - 1)
+        if (currentMenuIndex == weatherCount - 1)
         {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
+
     else if (currentMenuLevel == MENU_CALIBRATION)
     {
-        if (currentMenuIndex == calibCount - 2)
-        {
-            saveCalibrationSettings();
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
-        else if (currentMenuIndex == calibCount - 1)
+        if (currentMenuIndex == calibCount - 1)
         {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
-    else if (currentMenuLevel == MENU_SYSTEM)
+else if (currentMenuLevel == MENU_SYSTEM)
+{
+    if (currentMenuIndex == 0)
+        startOTA();
+    else if (currentMenuIndex == 1)
+        resetPowerUsage();
+    else if (currentMenuIndex == 2)
+        quickRestore();
+    else if (currentMenuIndex == 3)
+        factoryReset();
+    else if (currentMenuIndex == 4) // Reboot
     {
-        if (currentMenuIndex == systemCount - 2)
-        {
-            saveSystemSettings();
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
-        else if (currentMenuIndex == systemCount - 1)
-        {
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
-        else if (currentMenuIndex == 0)
-            startOTA();
-        else if (currentMenuIndex == 1)
-            resetPowerUsage();
-        else if (currentMenuIndex == 2)
-            quickRestore();
-        else if (currentMenuIndex == 3)
-            factoryReset();
+        dma_display->fillScreen(0);
+        dma_display->setCursor(0, 0);
+        dma_display->setTextColor(dma_display->color565(255,255,0));
+        dma_display->print("Rebooting...");
+        delay(300);
+        ESP.restart();
     }
+    else if (currentMenuIndex == 5) // Show System Info
+    {
+        showSystemInfoScreen();
+        return;
+    }
+    else if (currentMenuIndex == 6) // Set Time Zone
+    {
+        showTimeZoneMenu();
+        return;
+    }
+    else if (currentMenuIndex == 7) // Set Date & Time
+    {
+        showSetDateTimeMenu();
+        return;
+    }
+    else if (currentMenuIndex == 8) // WiFi Signal Test
+    {
+        showWiFiSignalTest();
+        return;
+    }
+    else if (currentMenuIndex == systemCount - 1)
+    {
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    }
+}
+
+
+    if (!menuActive)
+        return; // Do NOT redraw menu if you just exited!
 
     // --- Draw correct menu depending on currentMenuLevel
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -829,4 +976,69 @@ void onWiFiConnectFailed()
     currentMenuLevel = MENU_WIFI_SELECT;
     menuActive = true;
     drawMenu(); // Will call drawWiFiMenu() as needed
+}
+
+
+// System info text lines
+String getSystemInfoLines() {
+    String lines =
+        "System Info:\n"
+        "FW: 1.0.0\n"
+        "IP: " + WiFi.localIP().toString() + "\n"
+        "MAC: " + WiFi.macAddress() + "\n"
+        "RSSI: " + String(WiFi.RSSI()) + " dBm\n"
+        "Heap: " + String(ESP.getFreeHeap()) + " B\n";
+    return lines;
+}
+
+
+void showTimeZoneMenu() {
+    // Replace with your own logic or a keyboard for now:
+    dma_display->fillScreen(0);
+    dma_display->setCursor(0, 0);
+    dma_display->setTextColor(dma_display->color565(255,255,0));
+    dma_display->print("Set Time Zone:");
+    dma_display->setCursor(0, 10);
+    dma_display->print("Edit in Settings");
+    delay(1500);
+    drawMenu();
+}
+
+void showSetDateTimeMenu() {
+    dma_display->fillScreen(0);
+    dma_display->setCursor(0, 0);
+    dma_display->setTextColor(dma_display->color565(255,255,0));
+    dma_display->print("Set Date & Time:");
+    dma_display->setCursor(0, 10);
+    dma_display->print("Edit in Settings");
+    delay(1500);
+    drawMenu();
+}
+
+void showWiFiSignalTest() {
+    dma_display->fillScreen(0);
+    dma_display->setCursor(0, 0);
+    dma_display->setTextColor(dma_display->color565(0,255,0));
+    dma_display->print("WiFi Signal:");
+    for (int i = 0; i < 20; ++i) { // show for 2s
+        dma_display->setCursor(0, 12);
+        dma_display->print("RSSI: ");
+        dma_display->print(WiFi.RSSI());
+        dma_display->print(" dBm   ");
+        delay(100);
+    }
+    drawMenu();
+}
+
+void showSystemInfoScreen()
+{
+    String lines[] = {
+        "FW: 1.0.0",
+        "IP: " + WiFi.localIP().toString(),
+        "MAC: " + WiFi.macAddress(),
+        "RSSI: " + String(WiFi.RSSI()) + " dBm",
+        "Heap: " + String(ESP.getFreeHeap()) + " B"
+    };
+    sysInfoModal.setLines(lines, 5);
+    sysInfoModal.show();
 }

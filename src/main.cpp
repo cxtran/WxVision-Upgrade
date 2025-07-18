@@ -16,7 +16,7 @@
 #include "utils.h"
 #include "icons.h"
 #include "sensors.h"
-#include <IRrecv.h>
+
 #include <IRremoteESP8266.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
@@ -27,11 +27,10 @@
 #include "menu.h"
 #include "keyboard.h" // <-- Include keyboard header
 
+extern InfoModal sysInfoModal; // Declare the InfoModal instance
 
 extern int wifiSelectIndex;
 
-extern IRrecv irrecv;
-extern decode_results results;
 extern unsigned long lastMenuActivity;
 extern int menuScroll;
 bool menuActive = false;
@@ -362,10 +361,26 @@ void loop() {
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500; // ms
 
-    // --- Keyboard blinking cursor ---
-    if (inKeyboardMode && now - lastBlink >= blinkInterval) {
-        lastBlink = now;
-        keyboardBlinkTick();
+    // --- Physical Reset Button (5 sec long press) ---
+    bool buttonDown = (digitalRead(BTN_SEL) == LOW);
+    if (buttonDown && !buttonWasDown) {
+        // Button just pressed
+        buttonDownMillis = millis();
+        resetLongPressHandled = false;
+        buttonWasDown = true;
+    }
+    if (buttonDown && !resetLongPressHandled) {
+        if (millis() - buttonDownMillis > resetHoldTime) {
+            // Long press detected, trigger reset
+            resetLongPressHandled = true;
+            triggerPhysicalReset();
+        }
+    }
+    if (!buttonDown && buttonWasDown) {
+        // Button released
+        buttonWasDown = false;
+        resetLongPressHandled = false;
+        // (If you want, you can add your short-press "select" handling here)
     }
 
 
@@ -375,11 +390,31 @@ void loop() {
         readIRSensor();  // This will handle navigation, editing, WiFi select, etc.
     }
 
+   // --- System Info Modal ---
+    if ( sysInfoModal.isActive() ) {
+        sysInfoModal.tick();
+        delay(40);   // Make UI smooth, avoid redraw flood
+        return;      // Stay in System Info until user exits
+    }   
+
+
+    // --- Keyboard blinking cursor ---
+    if (inKeyboardMode && now - lastBlink >= blinkInterval) {
+        lastBlink = now;
+        keyboardBlinkTick();
+    }
+
+
+
     // --- Always check buttons ---
     if (now - lastButtonCheck >= buttonInterval) {
         lastButtonCheck = now;
         getButton();
     }
+
+
+
+
 
     // --- WiFi Selection UI (acts like a menu page) ---
     if (wifiSelecting) {

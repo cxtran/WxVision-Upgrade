@@ -1,88 +1,19 @@
 #pragma once
 #include <Arduino.h>
 #include <vector>
+#include "InfoModal.h"
 
+// --- Menu Core Functions ---
 void handleButtonInput();
 void handleIR(uint32_t code);
 void startEditField(const char* currentValue);
 void finishEditField();
 void drawEditField();
 void connectToWiFi();
-extern void saveDeviceSettings(); // If not already declared
-extern void drawMenu(); // If not already declared
 void scanAndSelectWiFi();
 void showWifiSelection();
 void drawWiFiMenu();
-void onWiFiConnectFailed() ;
-
-
-// Simple globals to support network selection
-extern std::vector<String> foundSSIDs;
-extern int selectedWifiIdx;
-extern bool wifiSelecting ;
-extern int wifiScanCount;
-
-// Menu identifiers
-enum MenuLevel {
-  MENU_MAIN,
-  MENU_DEVICE,
-  MENU_DISPLAY,
-  MENU_WEATHER,
-  MENU_CALIBRATION,
-  MENU_SYSTEM,
-  MENU_MANUAL_SCREEN,
-  MENU_WIFI_SELECT = 99,  
-  MENU_BLE_SELECT // <---- Add this!
-};
-
-enum MenuItem {
-  // Main
-  MAIN_DEVICE_SETTINGS,
-  MAIN_DISPLAY_SETTINGS,
-  MAIN_WEATHER_SETTINGS,
-  MAIN_CALIBRATION,
-  MAIN_SYSTEM_ACTIONS,
-  MAIN_SAVE_EXIT,
-
-  // Device
-  DEVICE_UNITS,
-  DEVICE_DAY_FORMAT,
-  DEVICE_FORECAST_SOURCE,
-  DEVICE_AUTO_ROTATE,
-  DEVICE_MANUAL_SCREEN,
-  DEVICE_EXIT,
-
-  // Display
-  DISPLAY_THEME,
-  DISPLAY_BRIGHTNESS,
-  DISPLAY_SCROLL_SPEED,
-  DISPLAY_CUSTOM_MSG,
-  DISPLAY_EXIT,
-
-  // Weather
-  WEATHER_OWM_CITY,
-  WEATHER_OWM_KEY,
-  WEATHER_WF_TOKEN,
-  WEATHER_WF_STATION,
-  WEATHER_EXIT,
-
-  // Calibration
-  CALIB_TEMP_OFFSET,
-  CALIB_HUM_OFFSET,
-  CALIB_LIGHT_GAIN,
-  CALIB_EXIT,
-
-  // System
-  SYS_OTA,
-  SYS_RESET_POWER,
-  SYS_QUICK_RESTORE,
-  SYS_FACTORY_RESET,
-  SYS_EXIT
-};
-
-extern MenuLevel currentMenuLevel;
-extern int currentMenuIndex;
-
+void onWiFiConnectFailed();
 void updateMenu();
 void drawMenu();
 void handleUp();
@@ -91,11 +22,81 @@ void handleSelect();
 void handleLeft();
 void handleRight();
 void ensureWiFiListFresh();
+void handleSystemInfoIR(uint32_t code);
+void drawSystemInfoScreen();
+// --- Feature handlers for new System Menu items ---
+void showSystemInfoScreen();
+void showTimeZoneMenu();
+void showSetDateTimeMenu();
+void showWiFiSignalTest();
+
+
+// Systenm Info Modal
+extern bool systemInfoActive ;
+
+// --- WiFi/Network Globals ---
+extern std::vector<String> foundSSIDs;
+extern int selectedWifiIdx;
+extern bool wifiSelecting;
+extern int wifiScanCount;
+
+// --- Menu Identifiers ---
+enum MenuLevel {
+    MENU_MAIN,
+    MENU_DEVICE,
+    MENU_DISPLAY,
+    MENU_WEATHER,
+    MENU_CALIBRATION,
+    MENU_SYSTEM,
+    MENU_MANUAL_SCREEN,
+    MENU_WIFI_SELECT = 99,
+    MENU_BLE_SELECT
+};
+
+// --- Menu State ---
+extern MenuLevel currentMenuLevel;
+extern int currentMenuIndex;
+
+// --- External references to core app logic ---
+extern void saveDeviceSettings();
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern void fetchWeatherFromOWM();
 extern void scanBLENetworks();
-
-
 extern bool reset_Time_and_Date_Display;
+
+// --- Country Code (OWM) support (for weather menu) ---
+struct CountryEntry {
+    const char *name;
+    const char *code;
+};
+extern CountryEntry countries[];
+extern const int numCountries;
+extern int owmCountryIndex;
+extern String owmCountryCustom;
+
+// --- Settings for Weather/Device/Display/Calibration (extern if needed) ---
+extern String wifiSSID;
+extern String wifiPass;
+extern String owmCity;
+extern String owmApiKey;
+extern String wfToken;
+extern String wfStationId;
+extern int units;
+extern int dayFormat;
+extern int forecastSrc;
+extern int autoRotate;
+extern int manualScreen;
+extern int theme;
+extern int brightness;
+extern int scrollSpeed;
+extern String customMsg;
+extern int tempOffset;
+extern int humOffset;
+extern int lightGain;
+
+// --- Any additional new globals or helpers as needed (add here) ---
+
+
+void showSystemInfoScreen();

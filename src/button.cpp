@@ -47,3 +47,14 @@ void getButton(){
   lastDn = dn;
   lastCtr = ctr;
 }
+
+void triggerPhysicalReset() {
+    // Optional: Show a message first
+    dma_display->fillScreen(0);
+    dma_display->setTextColor(dma_display->color565(255,0,0));
+    dma_display->setCursor(0, 8);
+    dma_display->print("Resetting...");
+    delay(250);
+
+    ESP.restart(); // Built-in ESP32 software reset
+}

@@ -23,6 +23,9 @@ extern String customMsg ;
 // --- Weather ---
 extern String owmCity ;
 extern String owmApiKey ;
+extern int owmCountryIndex;
+extern String owmCountryCustom;
+
 extern String wfToken ;
 extern String wfStationId ;
 

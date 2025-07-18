@@ -25,6 +25,8 @@ String owmCity = "";
 String owmApiKey = "";
 String wfToken = "";
 String wfStationId = "";
+int owmCountryIndex = 0;
+String owmCountryCustom = "";
 
 // --- Calibration ---
 int tempOffset = 0;   // degrees
@@ -52,6 +54,8 @@ void loadSettings() {
     // Weather
     owmCity      = prefs.getString("owmCity", "");
     owmApiKey    = prefs.getString("owmApiKey", "");
+    owmCountryIndex = prefs.getInt("owmCountryIndex", 0);
+    owmCountryCustom = prefs.getString("owmCountryCustom", "");
     wfToken      = prefs.getString("wfToken", "");
     wfStationId  = prefs.getString("wfStationId", "");
 
@@ -89,6 +93,8 @@ void saveWeatherSettings() {
     prefs.putInt("forecast", forecastSrc); // Allow changing source here too
     prefs.putString("owmCity", owmCity);
     prefs.putString("owmApiKey", owmApiKey);
+    prefs.putInt("owmCountryIndex", owmCountryIndex);
+    prefs.putString("owmCountryCustom", owmCountryCustom);
     prefs.putString("wfToken", wfToken);
     prefs.putString("wfStationId", wfStationId);
     prefs.end();
