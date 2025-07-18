@@ -154,13 +154,21 @@ void scanWiFiNetworks()
 }
 
 void handleIR(uint32_t code)
-{   /* 
-    // -- System Info Modal Handling --
-    if (systemInfoActive) {
-        handleSystemInfoIR(code);
-        return;
+{   
+    Serial.printf("IR Code: 0x%X\n", code);
+
+
+    // --- Handle Screen On/Off IR code ---
+    const uint32_t IR_SCREEN =  0xFFFFF00F;   // Power/Menu (toggle screen on/off)   
+    if (code == IR_SCREEN) {
+        if (isScreenOff()) {
+            setScreenOff(false); // Turn ON (restore brightness)
+        } else {
+            setScreenOff(true);  // Turn OFF (set brightness to 0)
+        }
+        return; // Do not process further menu actions for this code
     }
-    */
+
     if (sysInfoModal.isActive()) {
         sysInfoModal.handleIR(code);
         return;
@@ -173,7 +181,7 @@ void handleIR(uint32_t code)
         return;
     }
 
-    Serial.printf("IR Code: 0x%X\n", code);
+ 
 
     // -------- 1. WiFi Select Mode --------
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -182,6 +190,7 @@ void handleIR(uint32_t code)
         const uint32_t IR_DOWN = 0xFFFF906F;   // CH-
         const uint32_t IR_OK = 0xFFFF48B7;     // OK
         const uint32_t IR_CANCEL = 0xFFFF08F7; // Power/Menu
+
 
         if (wifiScanCount == 0)
         {

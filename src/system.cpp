@@ -4,6 +4,7 @@
 #include "display.h"
 
 extern Preferences prefs;
+extern int brightness;
 
 void startOTA() {
     Serial.println("[SYSTEM] Starting OTA...");
@@ -55,3 +56,22 @@ void factoryReset() {
     delay(1000);
     ESP.restart();
 }
+
+// --- RAM-only screen off state ---
+static bool screenOff = false;
+static uint8_t lastBrightness = 32; // Default or load from settings
+
+void setScreenOff(bool off) {
+    if (off && !screenOff) {
+        lastBrightness = brightness;
+        dma_display->setBrightness8(0);
+        screenOff = true;
+    } else if (!off && screenOff) {
+        dma_display->setBrightness8(lastBrightness);
+        screenOff = false;
+    }
+}
+bool isScreenOff() {
+    return screenOff;
+}
+
