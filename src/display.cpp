@@ -21,7 +21,7 @@ void setupDisplay() {
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(brightness);
+  dma_display->setBrightness8(map(brightness, 1, 100, 3, 255));
   dma_display->setTextSize(1);
   dma_display->setTextWrap(false);
   dma_display->setFont(&Font5x7Uts);

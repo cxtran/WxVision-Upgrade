@@ -67,7 +67,7 @@ void setScreenOff(bool off) {
         dma_display->setBrightness8(0);
         screenOff = true;
     } else if (!off && screenOff) {
-        dma_display->setBrightness8(lastBrightness);
+        dma_display->setBrightness8(map(lastBrightness, 1, 100, 3, 255));
         screenOff = false;
     }
 }

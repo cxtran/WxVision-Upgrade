@@ -4,14 +4,8 @@
 #include "InfoModal.h"
 
 // --- Menu Core Functions ---
-void handleButtonInput();
 void handleIR(uint32_t code);
-void startEditField(const char* currentValue);
-void finishEditField();
-void drawEditField();
 void connectToWiFi();
-void scanAndSelectWiFi();
-void showWifiSelection();
 void drawWiFiMenu();
 void onWiFiConnectFailed();
 void updateMenu();
@@ -21,18 +15,15 @@ void handleDown();
 void handleSelect();
 void handleLeft();
 void handleRight();
-void ensureWiFiListFresh();
-void handleSystemInfoIR(uint32_t code);
-void drawSystemInfoScreen();
+
 // --- Feature handlers for new System Menu items ---
 void showSystemInfoScreen();
-void showTimeZoneMenu();
-void showSetDateTimeMenu();
+void showDateTimeModal();
 void showWiFiSignalTest();
 
 
-// Systenm Info Modal
-extern bool systemInfoActive ;
+
+// WiFi Signal Test
 
 // --- WiFi/Network Globals ---
 extern std::vector<String> foundSSIDs;
@@ -63,7 +54,6 @@ extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern void fetchWeatherFromOWM();
-extern void scanBLENetworks();
 extern bool reset_Time_and_Date_Display;
 
 // --- Country Code (OWM) support (for weather menu) ---
@@ -97,6 +87,3 @@ extern int humOffset;
 extern int lightGain;
 
 // --- Any additional new globals or helpers as needed (add here) ---
-
-
-void showSystemInfoScreen();

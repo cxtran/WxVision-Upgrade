@@ -28,6 +28,8 @@
 #include "keyboard.h" // <-- Include keyboard header
 
 extern InfoModal sysInfoModal; // Declare the InfoModal instance
+extern InfoModal wifiInfoModal;
+extern InfoModal dateModal;
 
 extern int wifiSelectIndex;
 
@@ -56,7 +58,7 @@ String countryCode = "US";
 bool useImperial = true;
 
 // === NTP/RTC ===
-const char *ntpServer = "pool.ntp.org";
+const char *ntpServer1 = "pool.ntp.org";
 const long gmtOffset_sec = -8 * 3600;
 const int daylightOffset_sec = 3600;
 RTC_DS3231 rtc;
@@ -102,9 +104,9 @@ const unsigned long buttonInterval = 100;
 
 
 
-void syncTimeFromNTP() {
+void syncTimeFromNTP1() {
     Serial.println("Syncing time from NTP...");
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1);
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo)) {
         Serial.println("❌ getLocalTime() failed");
@@ -331,17 +333,26 @@ void setup() {
 
 
     Serial.println("WiFi done.");
+
+    // OTA setup
     ArduinoOTA.setHostname("ESP32-Weather");
     ArduinoOTA.begin();
+
+
     setupWebServer();
     Serial.println("Displaying Time...");
-    syncTimeFromNTP();
+    syncTimeFromNTP1();
     Serial.println("Done.");
+
+    // UDP setup for Tempest integration
     udp.begin(localPort);
     Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
+
+    // OpenWeatherMap API setup
     fetchWeatherFromOWM();
     delay(500);
     getTimeFromRTC();
+
     reset_Time_and_Date_Display = true;
     displayWeatherData();
     displayClock();
@@ -377,7 +388,7 @@ void loop() {
         }
     }
     if (!buttonDown && buttonWasDown) {
-        // Button released
+        // Button release
         buttonWasDown = false;
         resetLongPressHandled = false;
         // (If you want, you can add your short-press "select" handling here)
@@ -397,6 +408,19 @@ void loop() {
         return;      // Stay in System Info until user exits
     }   
 
+    // --- Handle WiFi Info Modal ---
+    if (wifiInfoModal.isActive()) {
+        wifiInfoModal.tick();
+        delay(40);   // Make UI smooth, avoid redraw flood
+        return;      // Stay in WiFi Info until user exits
+    }
+
+    // --- Handle Date/Time Modal ---
+    if (dateModal.isActive()) {
+        dateModal.tick();
+        delay(40);   // Make UI smooth, avoid redraw flood
+        return;      // Stay in WiFi Info until user exits
+    }
 
     // --- Keyboard blinking cursor ---
     if (inKeyboardMode && now - lastBlink >= blinkInterval) {

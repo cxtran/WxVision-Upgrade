@@ -1,201 +1,284 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <title>WxVision Config</title>
+  <meta charset="UTF-8">
+  <title>ESP32 Weather Display Admin</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
-    body { font-family: Arial, sans-serif; max-width: 480px; margin: auto; background: #222; color: #eee; }
-    h2 { border-bottom: 1px solid #444; padding-bottom: 2px; margin-top: 1.5em; }
-    label { display: block; margin-top: 12px; font-weight: bold; }
-    input[type="text"], input[type="password"], input[type="number"], select {
-      width: 100%; font-size: 1em; padding: 6px; margin-top: 2px; border-radius: 4px;
-      border: 1px solid #444; background: #111; color: #eee;
+    body {
+      background: #f4f6fa;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      color: #213046;
     }
-    input[type="range"] { width: 80%; }
-    button, input[type="submit"] {
-      background: #1a88ff; color: #fff; padding: 10px 24px; border: none; border-radius: 4px;
-      margin-top: 18px; font-size: 1em; cursor: pointer;
+    header {
+      background: #23408e;
+      color: #fff;
+      padding: 1rem;
+      text-align: center;
+      letter-spacing: 1px;
+      box-shadow: 0 2px 6px #b7c8f6a8;
     }
-    button.system { background: #3a3a3a; margin-right: 8px; }
-    .row { display: flex; gap: 10px; }
-    .row > div { flex: 1; }
-    .help { color: #aaa; font-size: 0.93em; }
-    .section { background: #2a2a2a; padding: 14px 10px 8px 10px; border-radius: 8px; margin-bottom: 16px;}
+    nav {
+      display: flex;
+      justify-content: center;
+      background: #e3eaf6;
+      box-shadow: 0 1px 4px #b7c8f688;
+    }
+    nav a {
+      display: inline-block;
+      padding: 1rem 2rem;
+      text-decoration: none;
+      color: #23408e;
+      font-weight: 500;
+      transition: background 0.2s;
+      border-bottom: 2px solid transparent;
+    }
+    nav a.active, nav a:hover {
+      background: #d4defa;
+      border-bottom: 2px solid #377dfc;
+    }
+    .container { max-width: 600px; margin: 2rem auto; }
+    .card {
+      background: #fff;
+      padding: 2rem 2.5rem;
+      border-radius: 18px;
+      box-shadow: 0 2px 12px #b6b6e76c;
+      margin-bottom: 2rem;
+      animation: fadein 0.4s;
+    }
+    @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+    h2 { margin-top: 0; font-weight: 600; }
+    label { display: block; margin: 1.2em 0 0.2em; font-weight: 500; }
+    input, select {
+      width: 100%; padding: 0.6em;
+      border: 1px solid #b5c1dc; border-radius: 7px;
+      background: #f6f8fc; color: #213046;
+      font-size: 1em; box-sizing: border-box;
+      margin-bottom: 0.8em;
+    }
+    input[type="file"] { background: none; }
+    button {
+      background: #23408e;
+      color: #fff;
+      padding: 0.9em 2em;
+      border: none;
+      border-radius: 7px;
+      font-weight: 600;
+      margin-top: 1.2em;
+      font-size: 1.1em;
+      cursor: pointer;
+      transition: background 0.15s;
+      box-shadow: 0 1px 5px #b7c8f699;
+    }
+    button:hover { background: #377dfc; }
+    .success, .error {
+      margin-top: 1.2em;
+      padding: 0.8em 1em;
+      border-radius: 6px;
+      font-size: 1em;
+      text-align: center;
+    }
+    .success { background: #e7fbef; color: #12723d; border: 1px solid #3fc06e; }
+    .error   { background: #fde6e6; color: #aa1a1a; border: 1px solid #e59e9e; }
+    .ota-progress { margin-top: 1em; }
+    progress { width: 100%; height: 20px; }
+    fieldset {
+      border: none;
+      margin: 0; padding: 0;
+      margin-bottom: 2em;
+      padding-bottom: 0.8em;
+      border-left: 4px solid #e3eaf6;
+    }
+    legend {
+      font-size: 1.07em;
+      color: #23408e;
+      font-weight: 600;
+      margin-bottom: 0.7em;
+      padding-left: 0.5em;
+    }
+    .chips { margin: 1em 0 0 0; }
+    .chip {
+      display: inline-block;
+      font-size: 0.95em;
+      padding: 0.2em 0.8em;
+      border-radius: 999px;
+      background: #e7f7ef;
+      color: #12803b;
+      margin: 0 0.5em 0.5em 0;
+    }
+    .chip.red { background: #fde6e6; color: #a11; }
+    .chip.gray { background: #e5e7eb; color: #667; }
+    @media (max-width: 650px) {
+      .container { padding: 0.6em; }
+      .card { padding: 1.1em; }
+      nav a { padding: 1em 0.5em; font-size: 1em; }
+    }
   </style>
 </head>
 <body>
-  <h1>WxVision Settings</h1>
-  <form id="settingsForm" autocomplete="off">
-
-    <div class="section">
-      <h2>WiFi</h2>
-      <label>SSID <input type="text" name="wifiSSID" id="wifiSSID" maxlength="32"></label>
-      <label>Password <input type="password" name="wifiPass" id="wifiPass" maxlength="64"></label>
+  <header>
+    <h1>ESP32 Weather Display</h1>
+    <div style="font-size: 0.9em; opacity:0.7;">Admin Panel</div>
+  </header>
+  <nav>
+    <a href="#" class="active" id="tab-status">Status</a>
+    <a href="#" id="tab-settings">Settings</a>
+    <a href="#" id="tab-ota">OTA Update</a>
+  </nav>
+  <div class="container">
+    <!-- STATUS CARD -->
+    <div class="card" id="status-card">
+      <h2>Status</h2>
+      <div id="status-content">Loading...</div>
+      <div class="chips" id="chip-bar"></div>
     </div>
-
-    <div class="section">
+    <!-- SETTINGS CARD -->
+    <div class="card" id="settings-card" style="display:none">
       <h2>Device Settings</h2>
-      <div class="row">
-        <div>
-          <label>Units
-            <select name="units" id="units">
-              <option value="0">F + mph</option>
-              <option value="1">C + m/s</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>Day Format
-            <select name="dayFormat" id="dayFormat">
-              <option value="0">MM/DD/YYYY</option>
-              <option value="1">DD/MM/YYYY</option>
-            </select>
-          </label>
-        </div>
-      </div>
-      <div class="row">
-        <div>
-          <label>Forecast Source
-            <select name="forecastSrc" id="forecastSrc">
-              <option value="0">OpenWeatherMap</option>
-              <option value="1">WeatherFlow</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>Auto Rotate
-            <select name="autoRotate" id="autoRotate">
-              <option value="1">On</option>
-              <option value="0">Off</option>
-            </select>
-          </label>
-        </div>
-      </div>
-      <label>Manual Screen <input type="checkbox" name="manualScreen" id="manualScreen"></label>
+      <form id="settings-form">
+        <fieldset>
+          <legend>WiFi</legend>
+          <label>WiFi SSID</label>
+          <input name="wifiSSID" required>
+          <label>WiFi Password</label>
+          <input name="wifiPass" type="password" autocomplete="new-password">
+        </fieldset>
+        <fieldset>
+          <legend>Display</legend>
+          <label>Units</label>
+          <select name="units">
+            <option value="0">Fahrenheit / mph</option>
+            <option value="1">Celsius / m/s</option>
+          </select>
+          <label>Theme</label>
+          <select name="theme">
+            <option value="0">Color</option>
+            <option value="1">Mono</option>
+          </select>
+          <label>Brightness</label>
+          <input name="brightness" type="number" min="1" max="100">
+          <label>Scroll Speed</label>
+          <input name="scrollSpeed" type="number" min="1" max="5">
+          <label>Custom Message</label>
+          <input name="customMsg">
+        </fieldset>
+        <fieldset>
+          <legend>Weather</legend>
+          <label>OpenWeatherMap City</label>
+          <input name="owmCity" placeholder="City name">
+          <label>OpenWeatherMap API Key</label>
+          <input name="owmApiKey" placeholder="API Key">
+          <label>WeatherFlow Token</label>
+          <input name="wfToken" placeholder="Token">
+          <label>WeatherFlow Station ID</label>
+          <input name="wfStationId" placeholder="Station ID">
+        </fieldset>
+        <fieldset>
+          <legend>Calibration</legend>
+          <label>Temp Offset (°C)</label>
+          <input name="tempOffset" type="number" min="-10" max="10">
+          <label>Humidity Offset (%)</label>
+          <input name="humOffset" type="number" min="-20" max="20">
+          <label>Light Gain (%)</label>
+          <input name="lightGain" type="number" min="50" max="150">
+        </fieldset>
+        <button type="submit">Save Settings</button>
+      </form>
+      <div id="settings-msg"></div>
     </div>
-
-    <div class="section">
-      <h2>Display Settings</h2>
-      <div class="row">
-        <div>
-          <label>Theme
-            <select name="theme" id="theme">
-              <option value="0">Color</option>
-              <option value="1">Mono</option>
-            </select>
-          </label>
-        </div>
-        <div>
-          <label>Brightness <input type="range" min="1" max="100" step="1" name="brightness" id="brightness"></label>
-        </div>
-      </div>
-      <label>Scroll Speed
-        <select name="scrollSpeed" id="scrollSpeed">
-          <option value="1">1 (Slow)</option>
-          <option value="2">2</option>
-          <option value="3">3</option>
-          <option value="4">4</option>
-          <option value="5">5 (Fast)</option>
-        </select>
-      </label>
-      <label>Custom Message <input type="text" name="customMsg" id="customMsg" maxlength="32"></label>
+    <!-- OTA UPDATE CARD -->
+    <div class="card" id="ota-card" style="display:none">
+      <h2>OTA Firmware Update</h2>
+      <form id="ota-form" method="POST" enctype="multipart/form-data" action="/update">
+        <input type="file" name="firmware" required>
+        <button type="submit">Upload & Update</button>
+      </form>
+      <div id="ota-progress"></div>
+      <div id="ota-msg"></div>
     </div>
-
-    <div class="section">
-      <h2>Weather Settings</h2>
-      <label>OWM City <input type="text" name="owmCity" id="owmCity" maxlength="32"></label>
-      <label>OWM API Key <input type="text" name="owmApiKey" id="owmApiKey" maxlength="64"></label>
-      <label>WF Token <input type="text" name="wfToken" id="wfToken" maxlength="64"></label>
-      <label>WF Station ID <input type="text" name="wfStationId" id="wfStationId" maxlength="32"></label>
-    </div>
-
-    <div class="section">
-      <h2>Calibration</h2>
-      <div class="row">
-        <div>
-          <label>Temp Offset <input type="number" min="-10" max="10" name="tempOffset" id="tempOffset"></label>
-        </div>
-        <div>
-          <label>Hum Offset <input type="number" min="-20" max="20" name="humOffset" id="humOffset"></label>
-        </div>
-        <div>
-          <label>Light Gain (%) <input type="number" min="50" max="150" name="lightGain" id="lightGain"></label>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>System Actions</h2>
-      <button type="button" class="system" onclick="systemAction('/ota')">OTA Update</button>
-      <button type="button" class="system" onclick="systemAction('/reboot')">Reboot</button>
-      <button type="button" class="system" onclick="systemAction('/quickrestore')">Quick Restore</button>
-      <button type="button" class="system" onclick="systemAction('/factoryreset')">Factory Reset</button>
-    </div>
-
-    <input type="submit" value="Save All Settings">
-  </form>
-
-  <p id="msg"></p>
-
+  </div>
   <script>
-    // Load settings from ESP32
-    fetch('/settings.json')
-      .then(r => r.json())
-      .then(d => {
-        document.getElementById('wifiSSID').value = d.wifiSSID || '';
-        document.getElementById('wifiPass').value = d.wifiPass || '';
-        document.getElementById('units').value = d.units || 0;
-        document.getElementById('dayFormat').value = d.dayFormat || 0;
-        document.getElementById('forecastSrc').value = d.forecastSrc || 0;
-        document.getElementById('autoRotate').value = d.autoRotate || 1;
-        document.getElementById('manualScreen').checked = !!d.manualScreen;
-        document.getElementById('theme').value = d.theme || 0;
-        document.getElementById('brightness').value = d.brightness || 50;
-        document.getElementById('scrollSpeed').value = d.scrollSpeed || 2;
-        document.getElementById('customMsg').value = d.customMsg || '';
-        document.getElementById('owmCity').value = d.owmCity || '';
-        document.getElementById('owmApiKey').value = d.owmApiKey || '';
-        document.getElementById('wfToken').value = d.wfToken || '';
-        document.getElementById('wfStationId').value = d.wfStationId || '';
-        document.getElementById('tempOffset').value = d.tempOffset || 0;
-        document.getElementById('humOffset').value = d.humOffset || 0;
-        document.getElementById('lightGain').value = d.lightGain || 100;
-      });
+    // Tab navigation
+    const tabStatus = document.getElementById('tab-status');
+    const tabSettings = document.getElementById('tab-settings');
+    const tabOta = document.getElementById('tab-ota');
+    const statusCard = document.getElementById('status-card');
+    const settingsCard = document.getElementById('settings-card');
+    const otaCard = document.getElementById('ota-card');
+    [tabStatus, tabSettings, tabOta].forEach(tab =>
+      tab.onclick = function(e) {
+        e.preventDefault();
+        [tabStatus, tabSettings, tabOta].forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        statusCard.style.display = tab===tabStatus?'':'none';
+        settingsCard.style.display = tab===tabSettings?'':'none';
+        otaCard.style.display = tab===tabOta?'':'none';
+      }
+    );
 
-    // Save settings via POST
-    document.getElementById('settingsForm').onsubmit = async function(e) {
+    // STATUS
+    function fetchStatus() {
+      fetch('/status').then(res=>res.text()).then(html=>{
+        document.getElementById('status-content').innerHTML = html;
+        // Example of status chips (optional: parse html to get statuses and show chips)
+        let chips = '';
+        if(html.includes("WiFi:")) chips += '<span class="chip">WiFi OK</span>';
+        if(html.includes("Weather:")) chips += '<span class="chip gray">Weather</span>';
+        document.getElementById('chip-bar').innerHTML = chips;
+      });
+    }
+    fetchStatus();
+    setInterval(fetchStatus, 10000); // update every 10s
+
+    // SETTINGS
+    fetch('/settings.json').then(r=>r.json()).then(data=>{
+      for(const k in data) {
+        const f = document.forms['settings-form'][k];
+        if (f) f.value = data[k];
+      }
+    });
+    document.getElementById('settings-form').onsubmit = function(e){
       e.preventDefault();
-      const f = e.target;
-      const data = {
-        wifiSSID: f.wifiSSID.value,
-        wifiPass: f.wifiPass.value,
-        units: parseInt(f.units.value),
-        dayFormat: parseInt(f.dayFormat.value),
-        forecastSrc: parseInt(f.forecastSrc.value),
-        autoRotate: parseInt(f.autoRotate.value),
-        manualScreen: f.manualScreen.checked ? 1 : 0,
-        theme: parseInt(f.theme.value),
-        brightness: parseInt(f.brightness.value),
-        scrollSpeed: parseInt(f.scrollSpeed.value),
-        customMsg: f.customMsg.value,
-        owmCity: f.owmCity.value,
-        owmApiKey: f.owmApiKey.value,
-        wfToken: f.wfToken.value,
-        wfStationId: f.wfStationId.value,
-        tempOffset: parseInt(f.tempOffset.value),
-        humOffset: parseInt(f.humOffset.value),
-        lightGain: parseInt(f.lightGain.value),
-      };
-      const r = await fetch('/settings', { method: 'POST', body: JSON.stringify(data), headers: {'Content-Type': 'application/json'} });
-      document.getElementById('msg').innerText = (r.ok ? 'Settings Saved! Rebooting...' : 'Save Failed');
-      if (r.ok) setTimeout(() => location.reload(), 2000);
+      const data = {};
+      const fd = new FormData(this);
+      for(const [k,v] of fd.entries()) data[k] = v;
+      fetch('/settings', {
+        method:'POST', body:JSON.stringify(data),
+        headers:{'Content-Type':'application/json'}
+      }).then(r=>r.json()).then(res=>{
+        let msg = document.getElementById('settings-msg');
+        msg.innerHTML = res.ok ? "<div class='success'>Saved! Rebooting may be required.</div>"
+                               : "<div class='error'>Save failed.</div>";
+        setTimeout(()=>msg.innerHTML="", 3000);
+      });
     };
 
-    // System actions (OTA, Reboot, etc)
-    function systemAction(path) {
-      fetch(path).then(() => {});
-    }
+    // OTA
+    document.getElementById('ota-form').onsubmit = function(e) {
+      e.preventDefault();
+      const file = this.firmware.files[0];
+      if(!file) return;
+      let form = new FormData();
+      form.append('firmware', file);
+      let prog = document.getElementById('ota-progress');
+      let msg = document.getElementById('ota-msg');
+      msg.innerHTML = "";
+      prog.innerHTML = `<progress value="0" max="100"></progress>`;
+      let xhr = new XMLHttpRequest();
+      xhr.open('POST','/update');
+      xhr.upload.onprogress = function(e){
+        if(e.lengthComputable)
+          prog.firstChild.value = (e.loaded/e.total*100)|0;
+      };
+      xhr.onload = function() {
+        msg.innerHTML = xhr.responseText.includes("OK") ?
+          "<div class='success'>OTA Update Success! Rebooting...</div>"
+        : "<div class='error'>OTA Update Failed.</div>";
+        setTimeout(()=>{prog.innerHTML=""; msg.innerHTML=""; if(xhr.responseText.includes("OK")) location.reload();}, 2000);
+      };
+      xhr.send(form);
+    };
   </script>
 </body>
 </html>

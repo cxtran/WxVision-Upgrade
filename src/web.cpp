@@ -137,16 +137,31 @@ void setupWebServer()
     // OTA POST handler
     server.on("/update", HTTP_POST,
         [](AsyncWebServerRequest *req) {
-            req->send(200, "text/plain", Update.hasError() ? "FAIL" : "OK");
+            bool ok = !Update.hasError();
+            req->send(200, "text/html", ok ?
+                "<h2>Update Successful!</h2><a href='/'>Return to Settings</a><script>setTimeout(()=>location.href='/',2000);</script>"
+                : "<h2>Update FAILED!</h2><a href='/ota'>Try Again</a>");
             delay(1000);
-            ESP.restart();
+            if (ok) ESP.restart();
         },
         [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-            if (!index) Update.begin(UPDATE_SIZE_UNKNOWN);
-            Update.write(data, len);
-            if (final) Update.end(true);
+            if (!index) {
+                Serial.printf("OTA Update Start: %s\n", filename.c_str());
+                Update.begin(UPDATE_SIZE_UNKNOWN);
+            }
+            if (Update.write(data, len) != len) {
+                Serial.println("OTA Write Fail!");
+            }
+            if (final) {
+                if (Update.end(true)) {
+                    Serial.println("OTA Update Success.");
+                } else {
+                    Serial.println("OTA Update Error!");
+                }
+            }
         }
     );
+
 
     // SYSTEM ACTIONS (quick restore, factory reset)
     server.on("/quickrestore", HTTP_GET, [](AsyncWebServerRequest *req) {

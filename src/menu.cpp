@@ -9,34 +9,25 @@
 #include "WiFi.h"
 #include "keyboard.h" // <-- Required for keyboard mode
 #include "InfoModal.h"
+#include "datetimesettings.h"
 
 // --- System Info Colors ---
-#define SYSINFO_HEADER dma_display->color565(0,255,80)
-#define SYSINFO_HEADERBG dma_display->color565(0,20,60)
-#define SYSINFO_UNSELXBG dma_display->color565(40,40,180)
-#define SYSINFO_SELXBG   dma_display->color565(255,0,0)
-#define SYSINFO_XCOLOR   dma_display->color565(255,255,255)
-#define SYSINFO_ULINE    dma_display->color565(180,180,255)
-#define SYSINFO_SEL      dma_display->color565(255,255,64)
-#define SYSINFO_UNSEL    dma_display->color565(0,255,255)
+#define SYSINFO_HEADER dma_display->color565(0, 255, 80)
+#define SYSINFO_HEADERBG dma_display->color565(0, 20, 60)
+#define SYSINFO_UNSELXBG dma_display->color565(40, 40, 180)
+#define SYSINFO_SELXBG dma_display->color565(255, 0, 0)
+#define SYSINFO_XCOLOR dma_display->color565(255, 255, 255)
+#define SYSINFO_ULINE dma_display->color565(180, 180, 255)
+#define SYSINFO_SEL dma_display->color565(255, 255, 64)
+#define SYSINFO_UNSEL dma_display->color565(0, 255, 255)
 
 InfoModal sysInfoModal("Sys Info");
-
-
-// -- System Info modal state --
-bool systemInfoActive = false;
-int sysInfoSelIndex = 0;
-int sysInfoScrollY = 0;
-int sysInfoHorizScroll = 0;
-bool sysInfoAtClose = false;
-unsigned long sysInfoLastScrollTime = 0;
-String sysInfoLines[8];
-int sysInfoLineCount = 0;
+InfoModal wifiInfoModal("WiFi Info");
+InfoModal dateModal("Set Date/Time");
 
 // Add these at top of file (not inside function)
 bool atScrollEnd = false;
 unsigned long scrollPauseStart = 0;
-
 
 // Number of display columns and rows for info screen
 const int SYSINFO_MAXCOLS = 12;
@@ -45,8 +36,8 @@ const int SYSINFO_MAXROWS = 4;
 const int SYSINFO_INFOROWS = SYSINFO_MAXROWS - 1;
 const int SYSINFO_SCROLLSPEED = 50;
 const int SYSINFO_ENDPAUSE = 300;
-const int SYSINFO_SCREEN_WIDTH = 64;  // Your display width in pixels
-static int sysInfoScrollOffset = 0;   // Pixel offset for scrolling
+const int SYSINFO_SCREEN_WIDTH = 64; // Your display width in pixels
+static int sysInfoScrollOffset = 0;  // Pixel offset for scrolling
 static int lastSysInfoSelIndex = -1;
 static unsigned long sysInfoScrollTime = 0;
 static bool sysInfoFirstScroll = true;
@@ -89,26 +80,15 @@ const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
 
-const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key",  "WF Token", "WF Station ID", "< Back"};
+const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "WF Station ID", "< Back"};
 const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
 
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 
-const char *systemMenu[] = {
-    "OTA Update",
-    "Reset Power",
-    "Quick Restore",
-    "Factory Reset",
-    "Reboot",
-    "Show System Info",
-    "Set Time Zone",
-    "Set Date & Time",
-    "WiFi Signal Test",
-    "< Back"
-};
+const char *systemMenu[] = { "Show System Info","Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power","Factory Reset", "Reboot","< Back"};
+    
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
-
 
 CountryEntry countries[] = {
     {"", "US"},
@@ -125,6 +105,16 @@ CountryEntry countries[] = {
 const int numCountries = sizeof(countries) / sizeof(countries[0]);
 int countryIndex = 0;          // Should be persisted with your settings!
 String customCountryCode = ""; // Stores user's custom entry
+
+// Define actual settings as global/static variables
+
+int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
+int dtTimezone; // in minutes, e.g., -480 for UTC-8
+int dtFmt24;
+int dtDateFmt;
+
+const char *const fmt24Opts[] = {"12h", "24h"};
+const char *const dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
 
 void scanWiFiNetworks()
 {
@@ -154,26 +144,28 @@ void scanWiFiNetworks()
 }
 
 void handleIR(uint32_t code)
-{   
+{
     Serial.printf("IR Code: 0x%X\n", code);
 
-
     // --- Handle Screen On/Off IR code ---
-    const uint32_t IR_SCREEN =  0xFFFFF00F;   // Power/Menu (toggle screen on/off)   
-    if (code == IR_SCREEN) {
-        if (isScreenOff()) {
+    const uint32_t IR_SCREEN = 0xFFFFF00F; // Power/Menu (toggle screen on/off)
+    if (code == IR_SCREEN)
+    {
+        if (isScreenOff())
+        {
             setScreenOff(false); // Turn ON (restore brightness)
-        } else {
-            setScreenOff(true);  // Turn OFF (set brightness to 0)
+        }
+        else
+        {
+            setScreenOff(true); // Turn OFF (set brightness to 0)
         }
         return; // Do not process further menu actions for this code
     }
 
-    if (sysInfoModal.isActive()) {
-        sysInfoModal.handleIR(code);
-        return;
+    if (isScreenOff())
+    {
+        return; // Ignore all IR codes when screen is off
     }
-    
     // --- Keyboard mode always has top priority ---
     if (inKeyboardMode)
     {
@@ -181,7 +173,24 @@ void handleIR(uint32_t code)
         return;
     }
 
- 
+    if (sysInfoModal.isActive())
+    {
+        sysInfoModal.handleIR(code);
+        return;
+    }
+
+    // --- Handle WiFi Info Modal ---
+    if (wifiInfoModal.isActive())
+    {
+        wifiInfoModal.handleIR(code);
+        return;
+    }
+
+    if (dateModal.isActive())
+    {
+        dateModal.handleIR(code);
+        return;
+    }
 
     // -------- 1. WiFi Select Mode --------
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -190,7 +199,6 @@ void handleIR(uint32_t code)
         const uint32_t IR_DOWN = 0xFFFF906F;   // CH-
         const uint32_t IR_OK = 0xFFFF48B7;     // OK
         const uint32_t IR_CANCEL = 0xFFFF08F7; // Power/Menu
-
 
         if (wifiScanCount == 0)
         {
@@ -394,12 +402,16 @@ void drawMenu()
         {
             if (itemIdx == 0)
                 sprintf(line, "OWM City: %s", owmCity.c_str());
-            else if (itemIdx == 1) {
-                if (owmCountryIndex < numCountries - 1) {
+            else if (itemIdx == 1)
+            {
+                if (owmCountryIndex < numCountries - 1)
+                {
                     sprintf(line, "Country: %s (%s)", countries[owmCountryIndex].name, countries[owmCountryIndex].code);
-                } else {
-                    sprintf(line, "Country: Custom (%s)", 
-                        owmCountryCustom.length() ? owmCountryCustom.c_str() : "--");
+                }
+                else
+                {
+                    sprintf(line, "Country: Custom (%s)",
+                            owmCountryCustom.length() ? owmCountryCustom.c_str() : "--");
                 }
             }
             else if (itemIdx == 2)
@@ -425,23 +437,19 @@ void drawMenu()
         else if (currentMenuLevel == MENU_SYSTEM && itemIdx < systemCount)
         {
             if (itemIdx == 0)
-                sprintf(line, "OTA Update");
+                sprintf(line, "System Info");
             else if (itemIdx == 1)
-                sprintf(line, "Reset Power");
-            else if (itemIdx == 2)
-                sprintf(line, "Quick Restore");
-            else if (itemIdx == 3)
-                sprintf(line, "Factory Reset");
-            else if (itemIdx == 4)
-                sprintf(line, "Reboot");
-            else if (itemIdx == 5)
-                sprintf(line, "Show System Info");
-            else if (itemIdx == 6)
-                sprintf(line, "Set Time Zone");
-            else if (itemIdx == 7)
                 sprintf(line, "Set Date & Time");
-            else if (itemIdx == 8)
+            else if (itemIdx == 2)
                 sprintf(line, "WiFi Signal Test");
+            else if (itemIdx == 3)
+                sprintf(line, "Quick Restore");
+            else if (itemIdx == 4)
+                sprintf(line, "Reset Power");
+            else if (itemIdx == 5)
+                sprintf(line, "Factory Reset");
+            else if (itemIdx == 6)
+                sprintf(line, "Reboot");
             else if (itemIdx == systemCount - 1)
                 sprintf(line, "< Back");
         }
@@ -576,11 +584,14 @@ void handleLeft()
             toggleTheme(-1);
         if (currentMenuIndex == 1)
         {
+
             // Decrease brightness, clamp to 0..255, update hardware
             brightness--;
             if (brightness < 4)
                 brightness = 3;
-            dma_display->setBrightness8(brightness);
+
+            int hardwareBrightness = map(brightness, 1, 100, 3, 255);    
+            dma_display->setBrightness8(hardwareBrightness);
         }
         if (currentMenuIndex == 2)
             adjustScrollSpeed(-1);
@@ -598,10 +609,10 @@ void handleLeft()
     {
         if (currentMenuIndex == 1)
         { // OWM Country Code
-            if (owmCountryIndex  > 0)
-                owmCountryIndex --;
+            if (owmCountryIndex > 0)
+                owmCountryIndex--;
             else
-                owmCountryIndex  = numCountries - 1;
+                owmCountryIndex = numCountries - 1;
             drawMenu();
             return;
         }
@@ -638,7 +649,8 @@ void handleRight()
             brightness++;
             if (brightness < 0)
                 brightness = 0;
-            dma_display->setBrightness8(brightness);
+            int hardwareBrightness = map(brightness, 1, 100, 3, 255);
+            dma_display->setBrightness8(hardwareBrightness);
         }
         if (currentMenuIndex == 2)
             adjustScrollSpeed(1);
@@ -657,10 +669,10 @@ void handleRight()
     {
         if (currentMenuIndex == 1)
         { // OWM Country Code
-            if (owmCountryIndex  < numCountries - 1)
-                owmCountryIndex ++;
+            if (owmCountryIndex < numCountries - 1)
+                owmCountryIndex++;
             else
-                owmCountryIndex  = 0;
+                owmCountryIndex = 0;
             drawMenu();
             return;
         }
@@ -769,15 +781,16 @@ void handleSelect()
     }
     else if (currentMenuLevel == MENU_DISPLAY)
     {
-        if (currentMenuIndex == displayCount - 2)
+        if (currentMenuIndex == displayCount - 2) //
         {
-            saveDisplaySettings();
+
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
-        else if (currentMenuIndex == displayCount - 1)
+        else if (currentMenuIndex == displayCount - 1)  //  "< Back" 
         {
+            saveDisplaySettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
@@ -852,58 +865,52 @@ void handleSelect()
     {
         if (currentMenuIndex == calibCount - 1)
         {
+            saveCalibrationSettings(); // Save calibration settings    
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
         }
     }
-else if (currentMenuLevel == MENU_SYSTEM)
-{
-    if (currentMenuIndex == 0)
-        startOTA();
-    else if (currentMenuIndex == 1)
-        resetPowerUsage();
-    else if (currentMenuIndex == 2)
-        quickRestore();
-    else if (currentMenuIndex == 3)
-        factoryReset();
-    else if (currentMenuIndex == 4) // Reboot
+    else if (currentMenuLevel == MENU_SYSTEM)
     {
-        dma_display->fillScreen(0);
-        dma_display->setCursor(0, 0);
-        dma_display->setTextColor(dma_display->color565(255,255,0));
-        dma_display->print("Rebooting...");
-        delay(300);
-        ESP.restart();
-    }
-    else if (currentMenuIndex == 5) // Show System Info
-    {
-        showSystemInfoScreen();
-        return;
-    }
-    else if (currentMenuIndex == 6) // Set Time Zone
-    {
-        showTimeZoneMenu();
-        return;
-    }
-    else if (currentMenuIndex == 7) // Set Date & Time
-    {
-        showSetDateTimeMenu();
-        return;
-    }
-    else if (currentMenuIndex == 8) // WiFi Signal Test
-    {
-        showWiFiSignalTest();
-        return;
-    }
-    else if (currentMenuIndex == systemCount - 1)
-    {
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-    }
-}
+        if (currentMenuIndex == 0)
+            showSystemInfoScreen(); // Show system info screen
+        else if (currentMenuIndex == 1)
+            showDateTimeModal(); // Show date & time modal
+        else if (currentMenuIndex == 2)
+            showWiFiSignalTest(); // Show WiFi signal test
+        else if (currentMenuIndex == 3) // Reboot
+        {
+            quickRestore(); // Perform quick restore
+        }
+        else if (currentMenuIndex == 4) // Show System Info
+        {
+            resetPowerUsage(); // Reset power usage stats
+            return;
+        }
+        else if (currentMenuIndex == 5) // Set Date & Time
+        {
+            factoryReset(); // Perform factory reset
+            return;
+        }
+        else if (currentMenuIndex == 6) // Reboot
+        {
 
+            dma_display->fillScreen(0);
+            dma_display->setCursor(0, 0);
+            dma_display->setTextColor(dma_display->color565(255, 255, 0));
+            dma_display->print("Rebooting...");
+            delay(300);
+            ESP.restart();
+            return;
+        }
+        else if (currentMenuIndex == systemCount - 1) // Back
+        {
+            currentMenuLevel = MENU_MAIN;
+            currentMenuIndex = 0;
+            menuScroll = 0;
+        }
+    }
 
     if (!menuActive)
         return; // Do NOT redraw menu if you just exited!
@@ -988,55 +995,41 @@ void onWiFiConnectFailed()
 }
 
 
-// System info text lines
-String getSystemInfoLines() {
-    String lines =
-        "System Info:\n"
-        "FW: 1.0.0\n"
-        "IP: " + WiFi.localIP().toString() + "\n"
-        "MAC: " + WiFi.macAddress() + "\n"
-        "RSSI: " + String(WiFi.RSSI()) + " dBm\n"
-        "Heap: " + String(ESP.getFreeHeap()) + " B\n";
-    return lines;
-}
+void showWiFiSignalTest()
+{
+    scanWiFiNetworks();
 
+    const int maxLines = 32;
+    String lines[maxLines];
+    InfoFieldType types[maxLines];
+    int lineIndex = 0;
 
-void showTimeZoneMenu() {
-    // Replace with your own logic or a keyboard for now:
-    dma_display->fillScreen(0);
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,255,0));
-    dma_display->print("Set Time Zone:");
-    dma_display->setCursor(0, 10);
-    dma_display->print("Edit in Settings");
-    delay(1500);
-    drawMenu();
-}
+    lines[lineIndex] = "RSSI: " + String(WiFi.RSSI()) + " dBm";
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "MAC: " + WiFi.macAddress();
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "SSID: " + wifiSSID;
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "IP: " + WiFi.localIP().toString();
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "Subnet: " + WiFi.subnetMask().toString();
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "Gateway: " + WiFi.gatewayIP().toString();
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "DNS1: " + WiFi.dnsIP(0).toString();
+    types[lineIndex++] = InfoLabel;
+    lines[lineIndex] = "Channel: " + String(WiFi.channel());
+    types[lineIndex++] = InfoLabel;
 
-void showSetDateTimeMenu() {
-    dma_display->fillScreen(0);
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,255,0));
-    dma_display->print("Set Date & Time:");
-    dma_display->setCursor(0, 10);
-    dma_display->print("Edit in Settings");
-    delay(1500);
-    drawMenu();
-}
-
-void showWiFiSignalTest() {
-    dma_display->fillScreen(0);
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(0,255,0));
-    dma_display->print("WiFi Signal:");
-    for (int i = 0; i < 20; ++i) { // show for 2s
-        dma_display->setCursor(0, 12);
-        dma_display->print("RSSI: ");
-        dma_display->print(WiFi.RSSI());
-        dma_display->print(" dBm   ");
-        delay(100);
+    // Add networks (skip <Back> entry)
+    for (int i = 0; i < wifiScanCount - 1 && lineIndex < maxLines; i++)
+    {
+        lines[lineIndex] = "Net[" + String(i + 1) + "]: " + scannedSSIDs[i];
+        types[lineIndex++] = InfoLabel;
     }
-    drawMenu();
+
+    wifiInfoModal.setLines(lines, types, lineIndex);
+    wifiInfoModal.show();
 }
 
 void showSystemInfoScreen()
@@ -1046,8 +1039,104 @@ void showSystemInfoScreen()
         "IP: " + WiFi.localIP().toString(),
         "MAC: " + WiFi.macAddress(),
         "RSSI: " + String(WiFi.RSSI()) + " dBm",
-        "Heap: " + String(ESP.getFreeHeap()) + " B"
-    };
-    sysInfoModal.setLines(lines, 5);
+        "Heap: " + String(ESP.getFreeHeap()) + " B"};
+    InfoFieldType types[] = {
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    sysInfoModal.setLines(lines, types, 5);
     sysInfoModal.show();
+}
+
+void showDateTimeModal()
+{
+    // Read RTC and current config into working vars:
+    DateTime now = rtc.now();
+    dtYear = now.year();
+    dtMonth = now.month();
+    dtDay = now.day();
+    dtHour = now.hour();
+    dtMinute = now.minute();
+    dtSecond = now.second();
+    dtTimezone = tzOffset; // from settings
+
+    // Clamp chooser values BEFORE modal to ensure valid mapping!
+    dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
+    dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
+
+    // --- Modal fields: NO BUTTONS HERE ---
+    String lines[] = {
+        "Year", "Month", "Day", "Hour", "Minute", "Second",
+        "TimeZone", "TimeFmt", "DateFmt"
+    };
+    InfoFieldType types[] = {
+        InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
+        InfoNumber, InfoChooser, InfoChooser
+    };
+
+    int *intRefs[] = {
+        &dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond,
+        &dtTimezone};
+    int *chooserRefs[] = {&dtFmt24, &dtDateFmt};
+    static const char *fmt24Opts[] = {"12h", "24h"};
+    static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
+    static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts};
+    int chooserOptCounts[] = {2, 3};
+
+    dateModal.setLines(lines, types, 9);
+    dateModal.setValueRefs(
+        intRefs, 7,
+        chooserRefs, 2,
+        chooserOptPtrs, chooserOptCounts);
+
+    // --- Horizontal icon button bar ---
+    const String btns[] = { "OK", "x", "NTP" }; // Save, Cancel, SyncNTP
+    dateModal.setButtons(btns, 3);
+
+    dateModal.setCallback([](bool accepted, int btnIdx)
+    {
+        Serial.printf("Calback: Accept %d %d", accepted, btnIdx);
+        // btnIdx: 0=Save(✓), 1=Cancel(✗), 2=SyncNTP(N)
+        if (btnIdx == 2) // Sync NTP
+        {
+            syncTimeFromNTP();
+            // Reload modal working vars with the newly synced RTC time
+            DateTime now = rtc.now();
+            dtYear = now.year();
+            dtMonth = now.month();
+            dtDay = now.day();
+            dtHour = now.hour();
+            dtMinute = now.minute();
+            dtSecond = now.second();
+            showDateTimeModal(); // Re-show modal with new values
+            return;
+        }
+        if (btnIdx == 0 && accepted) // Save (✓)
+        {
+            // Clamp and validate values before saving
+            if (dtMonth < 1) dtMonth = 1;
+            if (dtMonth > 12) dtMonth = 12;
+            if (dtDay < 1) dtDay = 1;
+            if (dtDay > 31) dtDay = 31;
+            if (dtHour < 0) dtHour = 0;
+            if (dtHour > 23) dtHour = 23;
+            if (dtMinute < 0) dtMinute = 0;
+            if (dtMinute > 59) dtMinute = 59;
+            if (dtSecond < 0) dtSecond = 0;
+            if (dtSecond > 59) dtSecond = 59;
+            if (dtYear < 2000) dtYear = 2000;
+            if (dtYear > 2099) dtYear = 2099;
+            if (dtTimezone < -720) dtTimezone = -720;
+            if (dtTimezone > 840) dtTimezone = 840;
+
+            rtc.adjust(DateTime(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond));
+            tzOffset = dtTimezone;
+            fmt24 = dtFmt24;
+            dateFmt = dtDateFmt;
+            saveDateTimeSettings();
+        }
+        // btnIdx==1 or !accepted => Cancel: do nothing
+            dateModal.hide();
+            drawMenu();
+    });
+
+    dateModal.show();
 }

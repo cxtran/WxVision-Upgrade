@@ -16,7 +16,7 @@ String wifiPass = "";
 
 // --- Display ---
 int theme = 0;            // 0 = Color, 1 = Mono
-int brightness = 50;      // 1-100
+int brightness = 20;      // 1-100
 int scrollSpeed = 2;      // 1-5
 String customMsg = "";
 
@@ -32,6 +32,12 @@ String owmCountryCustom = "";
 int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
+
+// --- Date/Time/Timezone Settings ---
+int dstAuto = 0;              // 0 = off, 1 = auto
+int timeZoneOffsetMinutes = 0;  // UTC default
+int dateFormat = 0;             // 0 = YYYY-MM-DD
+int timeFormat24h = 1;          // 1 = 24h, 0 = 12h
 
 void loadSettings() {
     prefs.begin("visionwx", true); // read-only
@@ -63,6 +69,9 @@ void loadSettings() {
     tempOffset   = prefs.getInt("tempOffset", 0);
     humOffset    = prefs.getInt("humOffset", 0);
     lightGain    = prefs.getInt("lightGain", 100);
+
+    // Date/Time/Timezone (use new function for separation)
+    loadDateTimeSettings();
 
     prefs.end();
 }
@@ -108,21 +117,17 @@ void saveCalibrationSettings() {
     prefs.end();
 }
 
-void saveSystemSettings() {
-    prefs.begin("visionwx", false);
-    // Add any future system-wide settings here
-    prefs.end();
-}
+
 
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
     saveWeatherSettings();
     saveCalibrationSettings();
-    saveSystemSettings();
+    saveDateTimeSettings();
 }
 
-// --- Value toggles/adjusts (unchanged) ---
+// --- Value toggles/adjusts ---
 void toggleUnits(int dir) {
     units += dir;
     if (units < 0) units = 1;
