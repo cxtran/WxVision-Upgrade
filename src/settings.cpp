@@ -1,5 +1,6 @@
 #include <Preferences.h>
 #include "settings.h"
+#include "sensors.h"
 
 // Preferences storage object
 Preferences prefs;
@@ -32,12 +33,15 @@ String owmCountryCustom = "";
 int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
+bool autoBrightness = true;  // default: auto-brightness ON
 
 // --- Date/Time/Timezone Settings ---
 int dstAuto = 0;              // 0 = off, 1 = auto
 int timeZoneOffsetMinutes = 0;  // UTC default
 int dateFormat = 0;             // 0 = YYYY-MM-DD
 int timeFormat24h = 1;          // 1 = 24h, 0 = 12h
+
+
 
 void loadSettings() {
     prefs.begin("visionwx", true); // read-only
@@ -69,6 +73,7 @@ void loadSettings() {
     tempOffset   = prefs.getInt("tempOffset", 0);
     humOffset    = prefs.getInt("humOffset", 0);
     lightGain    = prefs.getInt("lightGain", 100);
+    autoBrightness = prefs.getBool("autoBrightness");
 
     // Date/Time/Timezone (use new function for separation)
     loadDateTimeSettings();
@@ -94,6 +99,7 @@ void saveDisplaySettings() {
     prefs.putInt("brightness", brightness);
     prefs.putInt("scrollSpeed", scrollSpeed);
     prefs.putString("customMsg", customMsg);
+    prefs.putBool("autoBrightness", autoBrightness);
     prefs.end();
 }
 
@@ -184,6 +190,9 @@ void adjustHumOffset(int dir) {
 
 void adjustLightGain(int dir) {
     lightGain += dir * 5;
-    if (lightGain < 50) lightGain = 50;
+    if (lightGain < 1) lightGain = 1;
     if (lightGain > 150) lightGain = 150;
+    // Update Brighness
+    float lux = readBrightnessSensor();            // <-- use your modified sensor function
+    setDisplayBrightnessFromLux(lux);          // <-- use the logarithmic auto-brightness
 }

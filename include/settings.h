@@ -39,6 +39,10 @@ extern String wfStationId;
 extern int tempOffset;   // degrees
 extern int humOffset;    // %
 extern int lightGain;    // %
+extern bool autoBrightness;
+
+
+
 
 void loadSettings();
 void saveDeviceSettings();

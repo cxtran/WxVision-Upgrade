@@ -10,6 +10,7 @@
 #include "keyboard.h" // <-- Required for keyboard mode
 #include "InfoModal.h"
 #include "datetimesettings.h"
+#include "ir_codes.h"
 
 // --- System Info Colors ---
 #define SYSINFO_HEADER dma_display->color565(0, 255, 80)
@@ -20,6 +21,10 @@
 #define SYSINFO_ULINE dma_display->color565(180, 180, 255)
 #define SYSINFO_SEL dma_display->color565(255, 255, 64)
 #define SYSINFO_UNSEL dma_display->color565(0, 255, 255)
+
+extern ScreenMode currentScreen;
+extern const int SCREEN_COUNT;
+void handleScreenSwitch(int dir);
 
 InfoModal sysInfoModal("Sys Info");
 InfoModal wifiInfoModal("WiFi Info");
@@ -86,8 +91,8 @@ const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 
-const char *systemMenu[] = { "Show System Info","Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power","Factory Reset", "Reboot","< Back"};
-    
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
+
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 CountryEntry countries[] = {
@@ -148,7 +153,7 @@ void handleIR(uint32_t code)
     Serial.printf("IR Code: 0x%X\n", code);
 
     // --- Handle Screen On/Off IR code ---
-    const uint32_t IR_SCREEN = 0xFFFFF00F; // Power/Menu (toggle screen on/off)
+    //   const uint32_t IR_SCREEN = 0xFFFFF00F; // Power/Menu (toggle screen on/off)
     if (code == IR_SCREEN)
     {
         if (isScreenOff())
@@ -195,10 +200,6 @@ void handleIR(uint32_t code)
     // -------- 1. WiFi Select Mode --------
     if (currentMenuLevel == MENU_WIFI_SELECT)
     {
-        const uint32_t IR_UP = 0xFFFF30CF;     // CH+
-        const uint32_t IR_DOWN = 0xFFFF906F;   // CH-
-        const uint32_t IR_OK = 0xFFFF48B7;     // OK
-        const uint32_t IR_CANCEL = 0xFFFF08F7; // Power/Menu
 
         if (wifiScanCount == 0)
         {
@@ -265,13 +266,31 @@ void handleIR(uint32_t code)
     }
 
     // -------- 3. Menu NOT Active --------
+    // -------- 3. Menu NOT Active --------
+    unsigned long lastMenuToggle = 0;
+
+    // In handleIR()
     if (!menuActive)
     {
-        if (code == 0xFFFF08F7) // Power/Menu
+        if (code == IR_LEFT)
         {
+            handleScreenSwitch(-1);
+            return;
+        }
+        else if (code == IR_RIGHT)
+        {
+            handleScreenSwitch(+1);
+            return;
+        }
+        else if (code == IR_CANCEL)
+        {
+            if (millis() - lastMenuToggle < 500)
+                return; // Prevent toggle flood
             menuActive = true;
             drawMenu();
             playBuzzerTone(3000, 100);
+            lastMenuToggle = millis();
+            return;
         }
         return;
     }
@@ -279,7 +298,7 @@ void handleIR(uint32_t code)
     // -------- 4. Normal Menu Navigation --------
     switch (code)
     {
-    case 0xFFFF08F7: // Power/Menu (exit menu)
+    case IR_CANCEL:
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
         menuScroll = 0;
@@ -292,24 +311,25 @@ void handleIR(uint32_t code)
         displayDate();
         displayWeatherData();
         reset_Time_and_Date_Display = true;
+        lastMenuToggle = millis(); // << Add this!
         break;
-    case 0xFFFF30CF:
+    case IR_UP:
         handleUp();
         playBuzzerTone(1500, 100);
         break;
-    case 0xFFFF906F:
+    case IR_DOWN:
         handleDown();
         playBuzzerTone(1200, 100);
         break;
-    case 0xFFFFE01F:
+    case IR_RIGHT:
         handleRight();
         playBuzzerTone(1800, 100);
         break;
-    case 0xFFFF50AF:
+    case IR_LEFT:
         handleLeft();
         playBuzzerTone(900, 100);
         break;
-    case 0xFFFF48B7:
+    case IR_OK:
         handleSelect();
         playBuzzerTone(2200, 100);
         break;
@@ -390,7 +410,11 @@ void drawMenu()
             if (itemIdx == 0)
                 sprintf(line, "Theme: %s", (theme == 0) ? "Color" : "Mono");
             else if (itemIdx == 1)
-                sprintf(line, "Bright: %d%%", brightness);
+                if (autoBrightness)
+                    sprintf(line, "Bright: auto");
+                else
+                    sprintf(line, "Bright: %d%%", brightness);
+
             else if (itemIdx == 2)
                 sprintf(line, "Scroll: %d", scrollSpeed);
             else if (itemIdx == 3)
@@ -582,17 +606,27 @@ void handleLeft()
     {
         if (currentMenuIndex == 0)
             toggleTheme(-1);
+
         if (currentMenuIndex == 1)
         {
-
-            // Decrease brightness, clamp to 0..255, update hardware
-            brightness--;
-            if (brightness < 4)
-                brightness = 3;
-
-            int hardwareBrightness = map(brightness, 1, 100, 3, 255);    
-            dma_display->setBrightness8(hardwareBrightness);
+            // If auto mode, turn OFF auto and allow manual brightness
+            if (autoBrightness)
+            {
+                autoBrightness = false;
+                playBuzzerTone(1200, 80);
+            }
+            else
+            {
+                // Manual decrease brightness, clamp 3-100
+                brightness--;
+                if (brightness < 3)
+                    brightness = 3;
+                int hardwareBrightness = map(brightness, 1, 100, 3, 255);
+                dma_display->setBrightness8(hardwareBrightness);
+                playBuzzerTone(900, 80);
+            }
         }
+
         if (currentMenuIndex == 2)
             adjustScrollSpeed(-1);
     }
@@ -643,15 +677,29 @@ void handleRight()
     {
         if (currentMenuIndex == 0)
             toggleTheme(1);
-        if (currentMenuIndex == 1)
+
+        else if (currentMenuIndex == 1)
         {
-            // Increase brightness, clamp to 0..255, update hardware
-            brightness++;
-            if (brightness < 0)
-                brightness = 0;
-            int hardwareBrightness = map(brightness, 1, 100, 3, 255);
-            dma_display->setBrightness8(hardwareBrightness);
+            // -- NEW: If in auto, toggle to manual (and vice versa elsewhere)
+            if (autoBrightness)
+            {
+                autoBrightness = false;
+                playBuzzerTone(1900, 80);
+            }
+            else
+            {
+                // manual: increment brightness %
+                brightness++;
+                if (brightness > 100)
+                    brightness = 100;
+                if (brightness < 1)
+                    brightness = 1;
+                int hardwareBrightness = map(brightness, 1, 100, 3, 255);
+                dma_display->setBrightness8(hardwareBrightness);
+                playBuzzerTone(2200, 60);
+            }
         }
+
         if (currentMenuIndex == 2)
             adjustScrollSpeed(1);
     }
@@ -664,7 +712,6 @@ void handleRight()
         if (currentMenuIndex == 2)
             adjustLightGain(1);
     }
-
     else if (currentMenuLevel == MENU_WEATHER)
     {
         if (currentMenuIndex == 1)
@@ -742,7 +789,6 @@ void handleSelect()
             displayDate();
             displayWeatherData();
             reset_Time_and_Date_Display = true;
-
             break;
         }
     }
@@ -751,7 +797,7 @@ void handleSelect()
         if (currentMenuIndex == 0)
         {
             // Always scan for WiFi every time you enter this menu!
-            scanWiFiNetworks(); // <---- ALWAYS scan here
+            scanWiFiNetworks();
             currentMenuLevel = MENU_WIFI_SELECT;
             wifiSelectIndex = 0;
             wifiMenuScroll = 0;
@@ -771,7 +817,6 @@ void handleSelect()
                 drawMenu(); });
             return;
         }
-
         if (currentMenuIndex == deviceCount - 1)
         {
             currentMenuLevel = MENU_MAIN;
@@ -781,14 +826,16 @@ void handleSelect()
     }
     else if (currentMenuLevel == MENU_DISPLAY)
     {
-        if (currentMenuIndex == displayCount - 2) //
+        // --- Toggle Auto/Manual Brightness with Select ---
+        if (currentMenuIndex == 1) // Brightness row
         {
-
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
+            autoBrightness = !autoBrightness;
+            playBuzzerTone(2000, 100);
+            drawMenu();
+            return;
         }
-        else if (currentMenuIndex == displayCount - 1)  //  "< Back" 
+        // If "< Back"
+        if (currentMenuIndex == displayCount - 1)
         {
             saveDisplaySettings();
             currentMenuLevel = MENU_MAIN;
@@ -805,6 +852,7 @@ void handleSelect()
                 drawMenu(); });
             return;
         }
+        // "Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"
     }
     else if (currentMenuLevel == MENU_WEATHER)
     {
@@ -860,12 +908,11 @@ void handleSelect()
             menuScroll = 0;
         }
     }
-
     else if (currentMenuLevel == MENU_CALIBRATION)
     {
         if (currentMenuIndex == calibCount - 1)
         {
-            saveCalibrationSettings(); // Save calibration settings    
+            saveCalibrationSettings();
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
             menuScroll = 0;
@@ -874,28 +921,27 @@ void handleSelect()
     else if (currentMenuLevel == MENU_SYSTEM)
     {
         if (currentMenuIndex == 0)
-            showSystemInfoScreen(); // Show system info screen
+            showSystemInfoScreen();
         else if (currentMenuIndex == 1)
-            showDateTimeModal(); // Show date & time modal
+            showDateTimeModal();
         else if (currentMenuIndex == 2)
-            showWiFiSignalTest(); // Show WiFi signal test
-        else if (currentMenuIndex == 3) // Reboot
+            showWiFiSignalTest();
+        else if (currentMenuIndex == 3)
         {
-            quickRestore(); // Perform quick restore
+            quickRestore();
         }
-        else if (currentMenuIndex == 4) // Show System Info
+        else if (currentMenuIndex == 4)
         {
-            resetPowerUsage(); // Reset power usage stats
+            resetPowerUsage();
             return;
         }
-        else if (currentMenuIndex == 5) // Set Date & Time
+        else if (currentMenuIndex == 5)
         {
-            factoryReset(); // Perform factory reset
+            factoryReset();
             return;
         }
-        else if (currentMenuIndex == 6) // Reboot
+        else if (currentMenuIndex == 6)
         {
-
             dma_display->fillScreen(0);
             dma_display->setCursor(0, 0);
             dma_display->setTextColor(dma_display->color565(255, 255, 0));
@@ -904,7 +950,7 @@ void handleSelect()
             ESP.restart();
             return;
         }
-        else if (currentMenuIndex == systemCount - 1) // Back
+        else if (currentMenuIndex == systemCount - 1)
         {
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
@@ -994,7 +1040,6 @@ void onWiFiConnectFailed()
     drawMenu(); // Will call drawWiFiMenu() as needed
 }
 
-
 void showWiFiSignalTest()
 {
     scanWiFiNetworks();
@@ -1065,12 +1110,10 @@ void showDateTimeModal()
     // --- Modal fields: NO BUTTONS HERE ---
     String lines[] = {
         "Year", "Month", "Day", "Hour", "Minute", "Second",
-        "TimeZone", "TimeFmt", "DateFmt"
-    };
+        "TimeZone", "TimeFmt", "DateFmt"};
     InfoFieldType types[] = {
         InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
-        InfoNumber, InfoChooser, InfoChooser
-    };
+        InfoNumber, InfoChooser, InfoChooser};
 
     int *intRefs[] = {
         &dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond,
@@ -1088,11 +1131,11 @@ void showDateTimeModal()
         chooserOptPtrs, chooserOptCounts);
 
     // --- Horizontal icon button bar ---
-    const String btns[] = { "OK", "x", "NTP" }; // Save, Cancel, SyncNTP
+    const String btns[] = {"OK", "x", "NTP"}; // Save, Cancel, SyncNTP
     dateModal.setButtons(btns, 3);
 
     dateModal.setCallback([](bool accepted, int btnIdx)
-    {
+                          {
         Serial.printf("Calback: Accept %d %d", accepted, btnIdx);
         // btnIdx: 0=Save(✓), 1=Cancel(✗), 2=SyncNTP(N)
         if (btnIdx == 2) // Sync NTP
@@ -1135,8 +1178,25 @@ void showDateTimeModal()
         }
         // btnIdx==1 or !accepted => Cancel: do nothing
             dateModal.hide();
-            drawMenu();
-    });
+            drawMenu(); });
 
     dateModal.show();
+}
+
+void handleScreenSwitch(int dir)
+{
+    // dir: +1 for right, -1 for left
+
+    int next = (int)currentScreen + dir;
+    if (next < 0)
+        next = SCREEN_COUNT - 1;
+    if (next >= SCREEN_COUNT)
+        next = 0;
+    currentScreen = (ScreenMode)next;
+    if (currentScreen == ScreenMode::SCREEN_OWM)
+    {
+        dma_display->clearScreen();
+        delay(50);
+    }
+    playBuzzerTone(2000 + dir * 200, 80);
 }

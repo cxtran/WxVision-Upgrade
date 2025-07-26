@@ -1,4 +1,6 @@
 #pragma once
+#include "display.h"
+#include "ir_codes.h"
 
 void setupDHTSensor();
 
@@ -10,5 +12,9 @@ void readIRSensor();
 
 void setupBrightnessSensor();
 
-void readBrightnessSensor();
+//void readBrightnessSensor();
+
+float readBrightnessSensor();
+
+void setDisplayBrightnessFromLux(float lux);
 
