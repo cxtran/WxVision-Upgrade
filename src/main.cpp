@@ -30,6 +30,9 @@ const int SCREEN_COUNT = 5; // Update if you add/remove screens
 extern InfoModal sysInfoModal;
 extern InfoModal wifiInfoModal;
 extern InfoModal dateModal;
+extern InfoModal mainMenuModal;
+extern InfoModal deviceModal;
+extern InfoModal displayModal;
 
 extern int wifiSelectIndex;
 
@@ -211,6 +214,22 @@ void loop() {
         return;
     }
 
+    if (mainMenuModal.isActive()) {
+        mainMenuModal.tick();
+        delay(40);
+        return;
+    }
+
+    if (deviceModal.isActive()) {
+        deviceModal.tick();
+        delay(40);
+        return;
+    }
+    if (displayModal.isActive()) {
+        displayModal.tick();
+        delay(40);
+        return;
+    }
     if (inKeyboardMode && now - lastBlink >= blinkInterval) {
         lastBlink = now;
         keyboardBlinkTick();
@@ -250,6 +269,8 @@ void loop() {
     scrollWeatherDetails();
     fetchTempestData();
 
+
+    // Auto Brightness
     if (now - lastBrightnessRead >= brightnessInterval) {
         lastBrightnessRead = now;
         float lux = readBrightnessSensor();

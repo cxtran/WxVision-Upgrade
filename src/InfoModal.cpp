@@ -4,17 +4,7 @@
 #include "keyboard.h"
 #include <cstring>
 
-// --- Info Modal Colors ---
-#define INFOMODAL_GREEN    dma_display->color565(0,255,80)
-#define INFOMODAL_HEADERBG dma_display->color565(0,20,60)
-#define INFOMODAL_UNSELXBG dma_display->color565(110,80,133)
-#define INFOMODAL_SELXBG   dma_display->color565(255,0,0)
-#define INFOMODAL_XCOLOR   dma_display->color565(255,255,255)
-#define INFOMODAL_ULINE    dma_display->color565(180,180,255)
-#define INFOMODAL_SEL      dma_display->color565(255,255,64)
-#define INFOMODAL_UNSEL    dma_display->color565(0,255,255)
-#define INFOMODAL_BTN_BG   dma_display->color565(20,60,120)
-#define INFOMODAL_BTN_SELBG dma_display->color565(255,130,0)
+extern bool autoBrightness;
 
 // --- Static trampoline for keyboard -> InfoModal::setTextValue ---
 static InfoModal* s_modalForText = nullptr;
@@ -47,57 +37,110 @@ InfoModal::InfoModal(const String& title)
 
 void InfoModal::setLines(const String _lines[], const InfoFieldType _types[], int count) {
     lineCount = (count > MAX_LINES) ? MAX_LINES : count;
+
+    int chooserPos = 0;
+    int numberPos = 0;
+    int textPos = 0;
+
     for (int i = 0; i < lineCount; ++i) {
         lines[i] = _lines[i];
         fieldTypes[i] = _types[i];
+
+        // Reset
         intRefs[i] = nullptr;
         chooserRefs[i] = nullptr;
         chooserOptions[i] = nullptr;
         chooserOptionCounts[i] = 0;
         textRefs[i] = nullptr;
         textSizes[i] = 0;
-    }
-    int chooserPos = 0, numberPos = 0, textPos = 0;
-    for (int i = 0; i < lineCount; ++i) {
-        if (fieldTypes[i] == InfoChooser) chooserFieldIndices[i] = chooserPos++;
-        else chooserFieldIndices[i] = -1;
-        if (fieldTypes[i] == InfoNumber) numberFieldIndices[i] = numberPos++;
-        else numberFieldIndices[i] = -1;
-        if (fieldTypes[i] == InfoText) textFieldIndices[i] = textPos++;
-        else textFieldIndices[i] = -1;
+
+        // Field index mapping (fixes crash!)
+        if (fieldTypes[i] == InfoChooser) {
+            chooserFieldIndices[i] = chooserPos++;
+            numberFieldIndices[i] = -1;
+            textFieldIndices[i] = -1;
+        } else if (fieldTypes[i] == InfoNumber) {
+            numberFieldIndices[i] = numberPos++;
+            chooserFieldIndices[i] = -1;
+            textFieldIndices[i] = -1;
+        } else if (fieldTypes[i] == InfoText) {
+            textFieldIndices[i] = textPos++;
+            chooserFieldIndices[i] = -1;
+            numberFieldIndices[i] = -1;
+        } else {
+            // Label or Button
+            chooserFieldIndices[i] = -1;
+            numberFieldIndices[i] = -1;
+            textFieldIndices[i] = -1;
+        }
     }
 }
-
 void InfoModal::setValueRefs(
     int* intRefs[], int refCount,
     int* chooserRefs[], int chooserCount,
     const char* const* chooserOptions[], const int chooserOptionCounts[],
     char* textRefs[], int textRefCount, int textSizes[]
 ) {
-    for (int i = 0; i < refCount; ++i)
-        this->intRefs[i] = intRefs[i];
-    for (int i = refCount; i < MAX_LINES; ++i)
-        this->intRefs[i] = nullptr;
+    Serial.println("[InfoModal] setValueRefs()");
 
-    for (int i = 0; i < chooserCount; ++i) {
-        this->chooserRefs[i] = chooserRefs[i];
-        this->chooserOptions[i] = chooserOptions[i];
-        this->chooserOptionCounts[i] = chooserOptionCounts[i];
+    // --- Number references ---
+    int numIndex = 0;
+    for (int i = 0; i < lineCount && numIndex < refCount; ++i) {
+        if (fieldTypes[i] == InfoNumber) {
+            this->intRefs[numIndex] = intRefs[numIndex];
+            numberFieldIndices[i] = numIndex;
+            Serial.printf("  [Number] Line %d -> intRefs[%d] = %p (val = %d)\n", i, numIndex, intRefs[numIndex], *intRefs[numIndex]);
+            ++numIndex;
+        } else {
+            numberFieldIndices[i] = -1;
+        }
     }
-    for (int i = chooserCount; i < MAX_LINES; ++i) {
+    for (int i = numIndex; i < MAX_LINES; ++i) {
+        this->intRefs[i] = nullptr;
+    }
+
+    // --- Chooser references and options ---
+    int chooserIndex = 0;
+    for (int i = 0; i < lineCount && chooserIndex < chooserCount; ++i) {
+        if (fieldTypes[i] == InfoChooser) {
+            this->chooserRefs[chooserIndex] = chooserRefs[chooserIndex];
+            this->chooserOptions[chooserIndex] = chooserOptions[chooserIndex];
+            this->chooserOptionCounts[chooserIndex] = chooserOptionCounts[chooserIndex];
+            chooserFieldIndices[i] = chooserIndex;
+            Serial.printf("  [Chooser] Line %d -> chooserRefs[%d] = %p (val = %d)\n", i, chooserIndex, chooserRefs[chooserIndex], *chooserRefs[chooserIndex]);
+            ++chooserIndex;
+        } else {
+            chooserFieldIndices[i] = -1;
+        }
+    }
+    for (int i = chooserIndex; i < MAX_LINES; ++i) {
         this->chooserRefs[i] = nullptr;
         this->chooserOptions[i] = nullptr;
         this->chooserOptionCounts[i] = 0;
     }
-    for (int i = 0; i < textRefCount && textRefs; ++i) {
-        this->textRefs[i] = textRefs[i];
-        this->textSizes[i] = textSizes ? textSizes[i] : 32;
+
+    // --- Text references ---
+    int textIndex = 0;
+    for (int i = 0; i < lineCount && textIndex < textRefCount; ++i) {
+        if (fieldTypes[i] == InfoText) {
+            this->textRefs[textIndex] = textRefs[textIndex];
+            this->textSizes[textIndex] = (textSizes && textSizes[textIndex] > 0) ? textSizes[textIndex] : 64;
+            textFieldIndices[i] = textIndex;
+            Serial.printf("  [Text] Line %d -> textRefs[%d] = \"%s\"\n", i, textIndex, textRefs[textIndex]);
+            ++textIndex;
+        } else {
+            textFieldIndices[i] = -1;
+        }
     }
-    for (int i = textRefCount; i < MAX_LINES; ++i) {
+    for (int i = textIndex; i < MAX_LINES; ++i) {
         this->textRefs[i] = nullptr;
         this->textSizes[i] = 0;
     }
+
+    textFieldCount = textIndex;
+    Serial.printf("[InfoModal] Setup complete: %d number, %d chooser, %d text fields\n", numIndex, chooserIndex, textFieldCount);
 }
+
 
 void InfoModal::setButtons(const String btns[], int count) {
     btnCount = count > 0 ? ((count > MAXROWS) ? MAXROWS : count) : 0;
@@ -124,7 +167,9 @@ void InfoModal::show() {
     active = true;
     draw();
 }
+
 void InfoModal::hide() { active = false; }
+
 bool InfoModal::isActive() const { return active; }
 
 void InfoModal::drawHeader() {
@@ -152,12 +197,12 @@ void InfoModal::drawHeader() {
 
 String InfoModal::getChooserLabel(int idx) {
     int cidx = chooserFieldIndices[idx];
-    if (cidx >= 0 && chooserRefs[cidx] && chooserOptions[cidx] && chooserOptionCounts[cidx] > 0) {
-        int v = *(chooserRefs[cidx]);
-        if (v >= 0 && v < chooserOptionCounts[cidx])
-            return chooserOptions[cidx][v];
-    }
-    return "?";
+    if (cidx < 0 || !chooserRefs[cidx] || !chooserOptions[cidx]) return "?";
+
+    int v = *(chooserRefs[cidx]);
+    if (v < 0 || v >= chooserOptionCounts[cidx]) return "?";
+
+    return chooserOptions[cidx][v];
 }
 
 void InfoModal::draw() {
@@ -165,12 +210,10 @@ void InfoModal::draw() {
     dma_display->fillScreen(0);
     drawHeader();
 
-    // --- Data lines ---
     int visibleRows = (btnCount > 0) ? DATA_ROWS : DATA_ROWS_FULL;
     int dataCount = lineCount;
     int scrollLimit = (dataCount > visibleRows) ? (dataCount - visibleRows) : 0;
 
-    // Clamp scrollY
     if (selIndex < scrollY) scrollY = selIndex;
     if (selIndex >= scrollY + visibleRows) scrollY = selIndex - visibleRows + 1;
     if (scrollY > scrollLimit) scrollY = scrollLimit;
@@ -180,21 +223,48 @@ void InfoModal::draw() {
         if (idx >= dataCount) break;
 
         bool isSelected = (selIndex == idx) && !atClose && (!inButtonBar);
+        bool isEditing = isSelected;
+        dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
         String s = lines[idx];
 
-        // For choosers, numbers, and text, show live value
-        if (fieldTypes[idx] == InfoNumber && intRefs[idx]) {
-            s += ": " + String(*(intRefs[idx]));
-        }
-        else if (fieldTypes[idx] == InfoChooser && chooserFieldIndices[idx] >= 0 && chooserRefs[chooserFieldIndices[idx]]) {
-            s += ": " + getChooserLabel(idx);
-        }
-        else if (fieldTypes[idx] == InfoText && textFieldIndices[idx] >= 0 && textRefs[textFieldIndices[idx]]) {
-            s += ": ";
-            s += textRefs[textFieldIndices[idx]];
+        Serial.printf("[draw] Line %d: type=%d | ", idx, fieldTypes[idx]);
+
+        if (fieldTypes[idx] == InfoNumber) {
+            int nidx = numberFieldIndices[idx];
+            if (nidx >= 0 && nidx < MAX_LINES && intRefs[nidx]) {
+                int val = *(intRefs[nidx]);
+                s += ": " + String(val);
+                Serial.printf("intRefs[%d] = %d\n", nidx, val);
+            } else {
+                s += ": ?";
+                Serial.printf("Invalid numberRef (nidx=%d)\n", nidx);
+            }
+        } else if (fieldTypes[idx] == InfoChooser) {
+            int cidx = chooserFieldIndices[idx];
+            if (cidx >= 0 && cidx < MAX_LINES &&
+                chooserRefs[cidx] && chooserOptions[cidx] &&
+                chooserOptionCounts[cidx] > 0) {
+                s += ": " + getChooserLabel(idx);
+                Serial.printf("chooserRefs[%d] = %d -> \"%s\"\n", cidx, *chooserRefs[cidx], getChooserLabel(idx).c_str());
+            } else {
+                s += ": ?";
+                Serial.printf("Invalid chooserRef (cidx=%d)\n", cidx);
+            }
+        } else if (fieldTypes[idx] == InfoText) {
+            int tidx = textFieldIndices[idx];
+            if (tidx >= 0 && tidx < MAX_LINES && textRefs[tidx]) {
+                s += ": ";
+                s += textRefs[tidx];
+                Serial.printf("textRefs[%d] = \"%s\"\n", tidx, textRefs[tidx]);
+            } else {
+                s += ": ?";
+                Serial.printf("Invalid textRef (tidx=%d)\n", tidx);
+            }
+        } else {
+            Serial.println("Unsupported field type");
         }
 
-        // --- Selected row: HORIZONTAL SCROLL for any field type ---
+        // Scroll logic
         if (isSelected) {
             if (selIndex != lastSelIndex) {
                 scrollOffset = 0;
@@ -203,7 +273,7 @@ void InfoModal::draw() {
             }
             int textW = getTextWidth(s.c_str());
             if (textW > SCREEN_WIDTH) {
-                if (millis() - lastScrollTime > SCROLLSPEED) {
+                if (millis() - lastScrollTime > scrollSpeed) {
                     lastScrollTime = millis();
                     scrollOffset++;
                     if (scrollOffset > (textW - SCREEN_WIDTH)) firstScroll = false;
@@ -214,13 +284,10 @@ void InfoModal::draw() {
                 firstScroll = true;
             }
 
-            dma_display->setTextColor(INFOMODAL_SEL);
+            dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
             int cursorX = -scrollOffset;
             dma_display->setCursor(cursorX, (i + 1) * CHARH);
-            if ((fieldTypes[idx] == InfoNumber || fieldTypes[idx] == InfoChooser || fieldTypes[idx] == InfoText) && inEdit && editIndex == idx)
-                dma_display->print(s + " <");
-            else
-                dma_display->print(s);
+            dma_display->print(s + (isEditing ? " <" : ""));
         } else {
             String sub = s.substring(0, MAXCOLS);
             dma_display->setTextColor(INFOMODAL_UNSEL);
@@ -229,7 +296,7 @@ void InfoModal::draw() {
         }
     }
 
-    // --- Button bar (always last row) ---
+    // --- Button bar ---
     if (btnCount > 0) {
         int btnY = (MAXROWS - 1) * CHARH;
         int totalBtnW = 0;
@@ -240,6 +307,7 @@ void InfoModal::draw() {
             btnWidths[i] = btnLabels[i].length() * 6 + 2 * pad;
             totalBtnW += btnWidths[i] + pad;
         }
+
         int btnX = (SCREEN_WIDTH - totalBtnW + pad) / 2;
         for (int i = 0; i < btnCount; ++i) {
             bool selected = (inButtonBar && btnSel == i);
@@ -254,174 +322,6 @@ void InfoModal::draw() {
     }
 }
 
-void InfoModal::handleIR(uint32_t code) {
-    if (!active) return;
-
-    Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
-
-    // --- If in edit mode for number, chooser, or text ---
-    if (inEdit && editIndex >= 0 && editIndex < lineCount) {
-        if (fieldTypes[editIndex] == InfoNumber) {
-            int nidx = numberFieldIndices[editIndex];
-            if (nidx >= 0 && intRefs[nidx]) {
-                int* ptr = intRefs[nidx];
-
-                if (code == 0xFFFF30CF) { // UP
-                    (*ptr)++;
-                } else if (code == 0xFFFF906F) { // DOWN
-                    (*ptr)--;
-                } else if (code == 0xFFFF48B7) { // OK
-                    inEdit = false;
-                    editIndex = -1;
-                    draw();
-                    return;
-                }
-
-                switch (editIndex) {
-                    case 0: if (*ptr < 2000) *ptr = 2000; if (*ptr > 2099) *ptr = 2099; break; // Year
-                    case 1: if (*ptr < 1) *ptr = 1; if (*ptr > 12) *ptr = 12; break;           // Month
-                    case 2: if (*ptr < 1) *ptr = 1; if (*ptr > 31) *ptr = 31; break;           // Day
-                    case 3: if (*ptr < 0) *ptr = 0; if (*ptr > 23) *ptr = 23; break;           // Hour
-                    case 4: if (*ptr < 0) *ptr = 0; if (*ptr > 59) *ptr = 59; break;           // Minute
-                    case 5: if (*ptr < 0) *ptr = 0; if (*ptr > 59) *ptr = 59; break;           // Second
-                    case 6: if (*ptr < -720) *ptr = -720; if (*ptr > 840) *ptr = 840; break;   // TimeZone
-                }
-                draw();
-                return;
-            }
-        } else if (fieldTypes[editIndex] == InfoChooser) {
-            int cidx = chooserFieldIndices[editIndex];
-            if (cidx >= 0 && chooserRefs[cidx] && chooserOptionCounts[cidx]) {
-                int& idx = *(chooserRefs[cidx]);
-                int count = chooserOptionCounts[cidx];
-                if (code == 0xFFFF30CF) { // UP
-                    idx = (idx + count - 1) % count;
-                    draw();
-                    return;
-                } else if (code == 0xFFFF906F) { // DOWN
-                    idx = (idx + 1) % count;
-                    draw();
-                    return;
-                } else if (code == 0xFFFF48B7) { // OK
-                    inEdit = false;
-                    editIndex = -1;
-                    draw();
-                    return;
-                }
-            }
-        } else if (fieldTypes[editIndex] == InfoText) {
-            // Only allow OK to exit edit mode (edit done by keyboard modal)
-            if (code == 0xFFFF48B7) {
-                inEdit = false;
-                editIndex = -1;
-                draw();
-            }
-            return;
-        }
-        return;
-    }
-
-    // --- Modal navigation ---
-    if (atClose) {
-        if (code == 0xFFFF48B7) { // OK
-            if (callback) callback(false, -1);
-            hide();
-            drawMenu();
-            return;
-        } else if (code == 0xFFFF906F) { // DOWN -> go to first data line
-            atClose = false;
-            selIndex = 0;
-            scrollY = 0;
-        } else if (code == 0xFFFF30CF) { // UP on X -> wrap to last data line or button bar
-            atClose = false;
-            if (btnCount > 0 && inButtonBar) {
-                inButtonBar = false;
-                selIndex = lineCount - 1;
-            } else if (btnCount > 0) {
-                selIndex = lineCount - 1;
-            } else {
-                selIndex = (lineCount > 0) ? (lineCount - 1) : 0;
-            }
-            scrollY = (lineCount > 0) ? (lineCount - 1) : 0;
-        }
-    } else if (btnCount > 0 && inButtonBar) {
-        // In button bar mode
-        if (code == 0xFFFF30CF) { // UP
-            inButtonBar = false;
-            selIndex = lineCount - 1;
-            draw();
-            return;
-        } else if (code == 0xFFFF906F) { // DOWN (optional: stay)
-            // stay in button bar
-        } else if (code == 0xFFFF48B7) { // OK
-            if (callback) {
-                bool accepted = (btnSel == 0); // Convention: 0 = Save, 1 = Cancel, etc
-                callback(accepted, btnSel);
-            }
-            if (btnSel == 1) { // Cancel
-                hide();
-                drawMenu();
-            }
-            // Other buttons: stay open unless callback closes modal.
-            return;
-        } else if (code == 0xFFFF50AF) { // LEFT
-    Serial.printf("LEFT: inButtonBar=%d btnSel(before)=%d btnCount=%d\n", inButtonBar, btnSel, btnCount);
-    if (btnCount > 0) {
-        btnSel = (btnSel - 1 + btnCount) % btnCount;
-        Serial.printf("LEFT: btnSel(after)=%d\n", btnSel);
-        draw();
-        return;
-    }
-} else if (code == 0xFFFFE01F) { // RIGHT
-    Serial.printf("RIGHT: inButtonBar=%d btnSel(before)=%d btnCount=%d\n", inButtonBar, btnSel, btnCount);
-    if (btnCount > 0) {
-        btnSel = (btnSel + 1) % btnCount;
-        Serial.printf("RIGHT: btnSel(after)=%d\n", btnSel);
-        draw();
-        return;
-    }
-}
-
-    } else {
-        // Not in button bar
-        if (code == 0xFFFF30CF) { // UP
-            if (selIndex == 0) {
-                atClose = true;
-            } else {
-                selIndex--;
-            }
-        } else if (code == 0xFFFF906F) { // DOWN
-            if (selIndex < lineCount - 1) {
-                selIndex++;
-            } else if (btnCount > 0 && !inButtonBar) {
-                inButtonBar = true;
-                btnSel = 0;
-            }
-        } else if (code == 0xFFFF48B7) { // OK
-            if (fieldTypes[selIndex] == InfoNumber || fieldTypes[selIndex] == InfoChooser) {
-                inEdit = true;
-                editIndex = selIndex;
-                draw();
-                return;
-            } else if (fieldTypes[selIndex] == InfoText) {
-                int textIdx = textFieldIndices[selIndex];
-                if (textIdx >= 0 && textRefs[textIdx]) {
-                    inEdit = true;
-                    editIndex = selIndex;
-                    s_modalForText = this;
-                    s_textIdxForText = textIdx;
-                    startKeyboardEntry(
-                        textRefs[textIdx],
-                        keyboardTextDoneShim,
-                        lines[selIndex].c_str()
-                    );
-                }
-                return;
-            }
-        }
-    }
-    draw();
-}
 
 int InfoModal::getSelIndex() const {
     return selIndex;
@@ -452,3 +352,192 @@ void InfoModal::handleTextDone(int idx, const char* result) {
     editIndex = -1;
     draw();
 }
+
+void InfoModal::setTextRefs(char* textRefsIn[], int count) {
+    textFieldCount = 0;
+    for (int i = 0; i < lineCount && textFieldCount < count && i < MAX_LINES; i++) {
+        if (fieldTypes[i] == InfoText) {
+            textRefs[textFieldCount] = textRefsIn[textFieldCount];
+            textFieldIndices[i] = textFieldCount;
+            textSizes[textFieldCount] = 64;  // Default size
+            textFieldCount++;
+        }
+    }
+}
+
+void InfoModal::handleIR(uint32_t code) {
+    if (!active) return;
+
+    extern bool autoBrightness;  // <-- Sync with global from main.cpp
+
+    Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
+
+    // --- During text edit only ---
+    if (inEdit && fieldTypes[editIndex] == InfoText) {
+        if (code == IR_CANCEL) {
+            inEdit = false;
+            editIndex = -1;
+            draw();
+        }
+        return;
+    }
+
+    // --- At Close ---
+    if (atClose) {
+        if (code == IR_OK || code == IR_CANCEL) {
+            if (callback) callback(false, -1);
+            hide();
+            drawMenu();
+            return;
+        }
+        if (code == IR_DOWN || code == IR_UP) {
+            atClose = false;
+            selIndex = (code == IR_DOWN) ? 0 : (lineCount > 0 ? lineCount - 1 : 0);
+            scrollY = selIndex;
+            draw();
+        }
+        return;
+    }
+
+    // --- Button Bar ---
+    if (btnCount > 0 && inButtonBar) {
+        if (code == IR_UP) {
+            inButtonBar = false;
+            selIndex = lineCount - 1;
+        } else if (code == IR_LEFT) {
+            btnSel = (btnSel - 1 + btnCount) % btnCount;
+        } else if (code == IR_RIGHT) {
+            btnSel = (btnSel + 1) % btnCount;
+        } else if (code == IR_OK) {
+            if (callback) callback(btnSel == 0, btnSel);
+            if (btnSel == 1) {
+                hide();
+                drawMenu();
+            }
+        }
+        draw();
+        return;
+    }
+
+    // --- UP/DOWN navigation ---
+    if (code == IR_UP) {
+        if (selIndex == 0) {
+            atClose = true;
+        } else {
+            selIndex--;
+        }
+        draw();
+        return;
+    } else if (code == IR_DOWN) {
+        if (selIndex < lineCount - 1) {
+            selIndex++;
+        } else if (btnCount > 0) {
+            inButtonBar = true;
+            btnSel = 0;
+        }
+        draw();
+        return;
+    }
+
+    // --- LEFT/RIGHT edits number or chooser ---
+    if (code == IR_LEFT || code == IR_RIGHT) {
+        InfoFieldType type = fieldTypes[selIndex];
+
+        if (type == InfoNumber) {
+            int nidx = numberFieldIndices[selIndex];
+            if (nidx >= 0 && intRefs[nidx]) {
+                int* ptr = intRefs[nidx];
+                if (code == IR_LEFT) (*ptr)--;
+                else if (code == IR_RIGHT) (*ptr)++;
+
+                // --- Live Brightness Update (line 2) ---
+                if (selIndex == 2) {
+                    *ptr = constrain(*ptr, 1, 100);
+
+                    if (!autoBrightness) {
+                        int hw = map(*ptr, 1, 100, 3, 255);
+                        dma_display->setBrightness8(hw);
+                        Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
+                    } else {
+                        Serial.println("[Live] Brightness change ignored (Auto ON)");
+                    }
+                }
+
+                // --- Live Scroll Speed Update (line 3) ---
+                if (selIndex == 3) {
+                    *ptr = constrain(*ptr, 10, 500);
+                    scrollSpeed = *ptr;
+                    Serial.printf("[Live] ScrollSpeed set to %d\n", scrollSpeed);
+                }
+
+                draw();
+            }
+        } else if (type == InfoChooser) {
+            int cidx = chooserFieldIndices[selIndex];
+            if (cidx >= 0 && chooserRefs[cidx]) {
+                int& val = *(chooserRefs[cidx]);
+                int count = chooserOptionCounts[cidx];
+                if (count > 0) {
+                    val = (val + (code == IR_LEFT ? count - 1 : 1)) % count;
+
+                    // --- Auto Brightness toggle sync (line 1) ---
+                    if (selIndex == 1) {
+                        autoBrightness = (val > 0);  // Sync global
+                        Serial.printf("[Live] AutoBrightness toggled: %s\n", autoBrightness ? "ON" : "OFF");
+
+                        if (autoBrightness) {
+                            float lux = readBrightnessSensor();           // ⬅️ Get current light level
+                            setDisplayBrightnessFromLux(lux);             // ⬅️ Apply auto brightness immediately
+                            Serial.printf("[Live] Auto ON → Lux: %.1f\n", lux);
+                        } else {
+                            int bIdx = numberFieldIndices[2];
+                            if (bIdx >= 0 && intRefs[bIdx]) {
+                                int b = constrain(*intRefs[bIdx], 1, 100);
+                                int hw = map(b, 1, 100, 3, 255);
+                                dma_display->setBrightness8(hw);
+                                Serial.printf("[Live] Auto OFF → Brightness: %d => HW %d\n", b, hw);
+                            }
+                        }
+                    }
+
+
+                    draw();
+                }
+            }
+        }
+        return;
+    }
+
+    // --- OK only triggers for text ---
+    if (code == IR_OK) {
+        if (fieldTypes[selIndex] == InfoText) {
+            int textIdx = textFieldIndices[selIndex];
+            if (textIdx >= 0 && textRefs[textIdx]) {
+                inEdit = true;
+                editIndex = selIndex;
+                s_modalForText = this;
+                s_textIdxForText = textIdx;
+                startKeyboardEntry(
+                    textRefs[textIdx],
+                    keyboardTextDoneShim,
+                    lines[selIndex].c_str()
+                );
+            }
+        } else if (btnCount == 0 && callback) {
+            callback(true, selIndex);
+            hide();
+            drawMenu();
+        }
+        return;
+    }
+
+    // --- Cancel globally ---
+    if (code == IR_CANCEL) {
+        if (callback) callback(false, -1);
+        hide();
+        drawMenu();
+    }
+}
+
+
+

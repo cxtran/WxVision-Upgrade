@@ -50,7 +50,7 @@ int getTextWidth(const char* text) {
 }
 
 const uint8_t* getWeatherIconFromCode(String code) {
-  Serial.printf("Code: %s", code);
+ // Serial.printf("Code: %s", code);
   if (code.startsWith("01n")) return icon_clear_night;
   if (code.startsWith("02n")) return icon_cloud_night;
   if (code.startsWith("01d")) return icon_clear;

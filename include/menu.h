@@ -20,8 +20,9 @@ void handleRight();
 void showSystemInfoScreen();
 void showDateTimeModal();
 void showWiFiSignalTest();
-
-
+void showMainMenuModal();
+void showDeviceSettingsModal();
+void showDisplaySettingsModal();
 
 // WiFi Signal Test
 
@@ -33,6 +34,7 @@ extern int wifiScanCount;
 
 // --- Menu Identifiers ---
 enum MenuLevel {
+    MENU_NONE = -1, // 🟢 Add this line to indicate "no menu level (modal mode)"
     MENU_MAIN,
     MENU_DEVICE,
     MENU_DISPLAY,
