@@ -127,13 +127,14 @@
     <a href="#" id="tab-ota">OTA Update</a>
   </nav>
   <div class="container">
-    <!-- STATUS CARD -->
+    <!-- STATUS -->
     <div class="card" id="status-card">
       <h2>Status</h2>
       <div id="status-content">Loading...</div>
       <div class="chips" id="chip-bar"></div>
     </div>
-    <!-- SETTINGS CARD -->
+
+    <!-- SETTINGS -->
     <div class="card" id="settings-card" style="display:none">
       <h2>Device Settings</h2>
       <form id="settings-form">
@@ -144,12 +145,13 @@
           <label>WiFi Password</label>
           <input name="wifiPass" type="password" autocomplete="new-password">
         </fieldset>
+
         <fieldset>
           <legend>Display</legend>
           <label>Units</label>
           <select name="units">
-            <option value="0">Fahrenheit / mph</option>
-            <option value="1">Celsius / m/s</option>
+            <option value="0">Fahrenheit-mph</option>
+            <option value="1">Celsius-m/s</option>
           </select>
           <label>Theme</label>
           <select name="theme">
@@ -158,15 +160,42 @@
           </select>
           <label>Brightness</label>
           <input name="brightness" type="number" min="1" max="100">
-          <label>Scroll Speed</label>
-          <input name="scrollSpeed" type="number" min="1" max="5">
+          <label>Scroll Speed (Level 1–10)</label>
+          <select name="scrollLevel">
+            <option value="1">1 - Very Slow</option>
+            <option value="2">2 - Slow</option>
+            <option value="3">3 - Med-Slow</option>
+            <option value="4">4 - Medium</option>
+            <option value="5">5 - Med-Fast</option>
+            <option value="6">6 - Fast</option>
+            <option value="7">7 - Very Fast</option>
+            <option value="8">8 - Ultra</option>
+            <option value="9">9 - Blazing</option>
+            <option value="10">10 - Max</option>
+          </select>
           <label>Custom Message</label>
           <input name="customMsg">
         </fieldset>
+
         <fieldset>
           <legend>Weather</legend>
           <label>OpenWeatherMap City</label>
           <input name="owmCity" placeholder="City name">
+          <label>Country</label>
+          <select name="owmCountryCustom">
+            <option value="">Select Country</option>
+            <option value="US">United States (US)</option>
+            <option value="CA">Canada (CA)</option>
+            <option value="GB">United Kingdom (GB)</option>
+            <option value="VN">Vietnam (VN)</option>
+            <option value="DE">Germany (DE)</option>
+            <option value="FR">France (FR)</option>
+            <option value="JP">Japan (JP)</option>
+            <option value="IN">India (IN)</option>
+            <option value="AU">Australia (AU)</option>
+            <option value="BR">Brazil (BR)</option>
+            <option value="MX">Mexico (MX)</option>
+          </select>
           <label>OpenWeatherMap API Key</label>
           <input name="owmApiKey" placeholder="API Key">
           <label>WeatherFlow Token</label>
@@ -174,6 +203,7 @@
           <label>WeatherFlow Station ID</label>
           <input name="wfStationId" placeholder="Station ID">
         </fieldset>
+
         <fieldset>
           <legend>Calibration</legend>
           <label>Temp Offset (°C)</label>
@@ -181,13 +211,15 @@
           <label>Humidity Offset (%)</label>
           <input name="humOffset" type="number" min="-20" max="20">
           <label>Light Gain (%)</label>
-          <input name="lightGain" type="number" min="50" max="150">
+          <input name="lightGain" type="number" min="1" max="150">
         </fieldset>
+
         <button type="submit">Save Settings</button>
       </form>
       <div id="settings-msg"></div>
     </div>
-    <!-- OTA UPDATE CARD -->
+
+    <!-- OTA UPDATE -->
     <div class="card" id="ota-card" style="display:none">
       <h2>OTA Firmware Update</h2>
       <form id="ota-form" method="POST" enctype="multipart/form-data" action="/update">
@@ -198,14 +230,15 @@
       <div id="ota-msg"></div>
     </div>
   </div>
+
   <script>
-    // Tab navigation
     const tabStatus = document.getElementById('tab-status');
     const tabSettings = document.getElementById('tab-settings');
     const tabOta = document.getElementById('tab-ota');
     const statusCard = document.getElementById('status-card');
     const settingsCard = document.getElementById('settings-card');
     const otaCard = document.getElementById('ota-card');
+
     [tabStatus, tabSettings, tabOta].forEach(tab =>
       tab.onclick = function(e) {
         e.preventDefault();
@@ -217,11 +250,9 @@
       }
     );
 
-    // STATUS
     function fetchStatus() {
       fetch('/status').then(res=>res.text()).then(html=>{
         document.getElementById('status-content').innerHTML = html;
-        // Example of status chips (optional: parse html to get statuses and show chips)
         let chips = '';
         if(html.includes("WiFi:")) chips += '<span class="chip">WiFi OK</span>';
         if(html.includes("Weather:")) chips += '<span class="chip gray">Weather</span>';
@@ -229,15 +260,15 @@
       });
     }
     fetchStatus();
-    setInterval(fetchStatus, 10000); // update every 10s
+    setInterval(fetchStatus, 10000);
 
-    // SETTINGS
     fetch('/settings.json').then(r=>r.json()).then(data=>{
       for(const k in data) {
         const f = document.forms['settings-form'][k];
         if (f) f.value = data[k];
       }
     });
+
     document.getElementById('settings-form').onsubmit = function(e){
       e.preventDefault();
       const data = {};
@@ -254,7 +285,6 @@
       });
     };
 
-    // OTA
     document.getElementById('ota-form').onsubmit = function(e) {
       e.preventDefault();
       const file = this.firmware.files[0];

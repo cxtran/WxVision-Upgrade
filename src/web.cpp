@@ -6,28 +6,14 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 
-// Declare globals somewhere (or extern if in other file)
-extern int units, dayFormat, theme, brightness, scrollSpeed;
-extern int manualScreen;
-extern String customMsg; // or your default value
-extern String owmCity; // Default city for OpenWeatherMap
-extern String owmApiKey ; // Your OpenWeatherMap API key
-extern String wfToken ; // Your WeatherFlow token
-extern String wfStationId ; // Your WeatherFlow station ID
-extern void saveAllSettings();
-extern String str_Weather_Conditions, str_Temp, str_Humd;
-extern bool useImperial;
-extern char chr_t_hour[3], chr_t_minute[3], chr_t_second[3];
-extern int humOffset; // Humidity offset for calibration
-
-
-
 // Declare your global variables as extern
 extern int units, dayFormat, forecastSrc, autoRotate, manualScreen;
-extern int theme, brightness, scrollSpeed;
+extern int theme, brightness, scrollSpeed, scrollLevel;
 extern String customMsg;
 extern String wifiSSID, wifiPass;
 extern String owmCity, owmApiKey, wfToken, wfStationId;
+extern int owmCountryIndex;
+extern String owmCountryCustom;
 extern int tempOffset, humOffset, lightGain;
 extern void saveAllSettings();
 extern void loadSettings();
@@ -50,24 +36,27 @@ void setupWebServer()
     // GET all settings as JSON for config.html
     server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest *req) {
         StaticJsonDocument<1024> doc;
-        doc["wifiSSID"]     = wifiSSID;
-        doc["wifiPass"]     = wifiPass;
-        doc["units"]        = units;
-        doc["dayFormat"]    = dayFormat;
-        doc["forecastSrc"]  = forecastSrc;
-        doc["autoRotate"]   = autoRotate;
-        doc["manualScreen"] = manualScreen;
-        doc["theme"]        = theme;
-        doc["brightness"]   = brightness;
-        doc["scrollSpeed"]  = scrollSpeed;
-        doc["customMsg"]    = customMsg;
-        doc["owmCity"]      = owmCity;
-        doc["owmApiKey"]    = owmApiKey;
-        doc["wfToken"]      = wfToken;
-        doc["wfStationId"]  = wfStationId;
-        doc["tempOffset"]   = tempOffset;
-        doc["humOffset"]    = humOffset;
-        doc["lightGain"]    = lightGain;
+        doc["wifiSSID"]         = wifiSSID;
+        doc["wifiPass"]         = wifiPass;
+        doc["units"]            = units;
+        doc["dayFormat"]        = dayFormat;
+        doc["forecastSrc"]      = forecastSrc;
+        doc["autoRotate"]       = autoRotate;
+        doc["manualScreen"]     = manualScreen;
+        doc["theme"]            = theme;
+        doc["brightness"]       = brightness;
+        doc["scrollSpeed"]      = scrollSpeed;
+        doc["scrollLevel"]      = scrollLevel;
+        doc["customMsg"]        = customMsg;
+        doc["owmCity"]          = owmCity;
+        doc["owmCountryIndex"]  = owmCountryIndex;
+        doc["owmCountryCustom"] = owmCountryCustom;
+        doc["owmApiKey"]        = owmApiKey;
+        doc["wfToken"]          = wfToken;
+        doc["wfStationId"]      = wfStationId;
+        doc["tempOffset"]       = tempOffset;
+        doc["humOffset"]        = humOffset;
+        doc["lightGain"]        = lightGain;
 
         String json;
         serializeJson(doc, json);
@@ -83,29 +72,32 @@ void setupWebServer()
                 req->send(400, "text/plain", "Invalid JSON");
                 return;
             }
-            wifiSSID      = doc["wifiSSID"]     | "";
-            wifiPass      = doc["wifiPass"]     | "";
-            units         = doc["units"]        | 0;
-            dayFormat     = doc["dayFormat"]    | 0;
-            forecastSrc   = doc["forecastSrc"]  | 0;
-            autoRotate    = doc["autoRotate"]   | 1;
-            manualScreen  = doc["manualScreen"] | 0;
-            theme         = doc["theme"]        | 0;
-            brightness    = doc["brightness"]   | 50;
-            scrollSpeed   = doc["scrollSpeed"]  | 2;
-            customMsg     = doc["customMsg"]    | "";
-            owmCity       = doc["owmCity"]      | "";
-            owmApiKey     = doc["owmApiKey"]    | "";
-            wfToken       = doc["wfToken"]      | "";
-            wfStationId   = doc["wfStationId"]  | "";
-            tempOffset    = doc["tempOffset"]   | 0;
-            humOffset     = doc["humOffset"]    | 0;
-            lightGain     = doc["lightGain"]    | 100;
+            wifiSSID        = doc["wifiSSID"]         | "";
+            wifiPass        = doc["wifiPass"]         | "";
+            units           = doc["units"]            | 0;
+            dayFormat       = doc["dayFormat"]        | 0;
+            forecastSrc     = doc["forecastSrc"]      | 0;
+            autoRotate      = doc["autoRotate"]       | 1;
+            manualScreen    = doc["manualScreen"]     | 0;
+            theme           = doc["theme"]            | 0;
+            brightness      = doc["brightness"]       | 50;
+            scrollSpeed     = doc["scrollSpeed"]      | 2;
+            scrollLevel     = doc["scrollLevel"]      | 5;
+            customMsg       = doc["customMsg"]        | "";
+            owmCity         = doc["owmCity"]          | "";
+            owmCountryIndex = doc["owmCountryIndex"]  | 0;
+            owmCountryCustom= doc["owmCountryCustom"] | "";
+            owmApiKey       = doc["owmApiKey"]        | "";
+            wfToken         = doc["wfToken"]          | "";
+            wfStationId     = doc["wfStationId"]      | "";
+            tempOffset      = doc["tempOffset"]       | 0;
+            humOffset       = doc["humOffset"]        | 0;
+            lightGain       = doc["lightGain"]        | 100;
 
             saveAllSettings();
             req->send(200, "application/json", "{\"ok\":true}");
-            delay(1200); // Optionally restart WiFi if SSID/pass changed
-            //ESP.restart(); // Uncomment if you want auto-reboot after settings
+            delay(1200); // Optional: reboot if network changed
+            //ESP.restart();
         }
     );
 
@@ -162,7 +154,6 @@ void setupWebServer()
         }
     );
 
-
     // SYSTEM ACTIONS (quick restore, factory reset)
     server.on("/quickrestore", HTTP_GET, [](AsyncWebServerRequest *req) {
         // implement quick restore logic
@@ -173,7 +164,7 @@ void setupWebServer()
         req->send(200, "text/plain", "Factory reset done (not implemented)");
     });
 
-    // 404
+    // 404 fallback
     server.onNotFound([](AsyncWebServerRequest *request) {
         request->send(404, "text/plain", "Not found");
     });

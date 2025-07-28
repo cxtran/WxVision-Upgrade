@@ -33,6 +33,11 @@ extern InfoModal mainMenuModal;
 extern InfoModal deviceModal;
 extern InfoModal displayModal;
 extern InfoModal weatherModal;
+extern InfoModal calibrationModal;
+extern InfoModal systemModal;
+
+extern void (*pendingModalFn)();
+extern unsigned long pendingModalTime;
 
 extern int wifiSelectIndex;
 
@@ -202,6 +207,8 @@ void loop() {
     if (deviceModal.isActive())   { deviceModal.tick(); delay(40); return; }
     if (displayModal.isActive())  { displayModal.tick(); delay(40); return; }
     if (weatherModal.isActive())  { weatherModal.tick(); delay(40); return; }
+    if (calibrationModal.isActive()) { calibrationModal.tick(); delay(40); return; }
+    if (systemModal.isActive()) { systemModal.tick(); delay(40); return; }
 
     if (now - lastButtonCheck >= buttonInterval) {
         lastButtonCheck = now;
@@ -213,6 +220,16 @@ void loop() {
         delay(60);
         return;
     }
+
+
+if (pendingModalFn && millis() >= pendingModalTime) {
+    void (*fn)() = pendingModalFn; // copy before clearing
+    pendingModalFn = nullptr;
+    pendingModalTime = 0;
+    fn(); // call modal function
+}
+
+
 
     if (menuActive) {
         updateMenu();

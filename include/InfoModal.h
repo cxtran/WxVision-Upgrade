@@ -5,12 +5,17 @@
 #include "sensors.h"
 #include "settings.h"
 // --- Info Modal Colors ---
-#define INFOMODAL_GREEN    dma_display->color565(0,255,80)
-#define INFOMODAL_HEADERBG dma_display->color565(0,20,60)
+#define INFOMODAL_GREEN    dma_display->color565(255,255,255)
+#define INFOMODAL_HEADERBG dma_display->color565(0,0,120)
+
+
+//#define INFOMODAL_GREEN    dma_display->color565(0,255,80)
+//#define INFOMODAL_HEADERBG dma_display->color565(0,20,60)
 #define INFOMODAL_UNSELXBG dma_display->color565(110,80,133)
 #define INFOMODAL_SELXBG   dma_display->color565(255,0,0)
 #define INFOMODAL_XCOLOR   dma_display->color565(255,255,255)
-#define INFOMODAL_ULINE    dma_display->color565(180,180,255)
+//#define INFOMODAL_ULINE    dma_display->color565(180,180,255)
+#define INFOMODAL_ULINE    dma_display->color565(255,255,255)
 #define INFOMODAL_SEL      dma_display->color565(255,255,64)
 #define INFOMODAL_UNSEL    dma_display->color565(0,255,255)
 #define INFOMODAL_BTN_BG   dma_display->color565(20,60,120)
@@ -110,4 +115,10 @@ private:
     bool firstScroll = true;
 
     std::function<void(bool, int)> callback;
+
+
+        // --- PATCH: Scrolling pause state ---
+    unsigned long scrollPauseTime = 0;   // --- PATCH
+    bool scrollPaused = false;           // --- PATCH
+
 };

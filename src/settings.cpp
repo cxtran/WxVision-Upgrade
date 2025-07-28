@@ -17,11 +17,13 @@ String wifiPass = "";
 
 // --- Display ---
 int theme = 0;            // 0 = Color, 1 = Mono
-int brightness = 20;      // 1–100
+int brightness = 10;      // 1–100
 int scrollSpeed = 150;    // derived from scrollLevel
-int scrollLevel = 3;      // 0 (fast) to 9 (slow)
+int scrollLevel = 7;      // 0 (slow) to 9 (fast)
 String customMsg = "";
 const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
+bool autoBrightness = true;
+
 
 // --- Weather ---
 String owmCity = "";
@@ -35,7 +37,7 @@ String owmCountryCustom = "";
 int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
-bool autoBrightness = true;
+
 
 // --- Date/Time/Timezone ---
 int dstAuto = 0;
@@ -57,8 +59,8 @@ void loadSettings() {
 
     // Display
     theme        = prefs.getInt("theme", 0);
-    brightness   = prefs.getInt("brightness", 50);
-    scrollLevel  = prefs.getInt("scrollLevel", 3); // default to 3 (medium)
+    brightness   = prefs.getInt("brightness", 10);
+    scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
 
     // Scroll speed mapping
@@ -79,7 +81,7 @@ void loadSettings() {
     tempOffset   = prefs.getInt("tempOffset", 0);
     humOffset    = prefs.getInt("humOffset", 0);
     lightGain    = prefs.getInt("lightGain", 100);
-    autoBrightness = prefs.getBool("autoBrightness");
+    autoBrightness = prefs.getBool("autoBrightness", true);
 
     loadDateTimeSettings();
 
@@ -100,9 +102,9 @@ void saveDeviceSettings() {
 
 void saveDisplaySettings() {
     Preferences prefs;
-    if (prefs.begin("display", false)) {
+    if (prefs.begin("visionwx", false)) {
         prefs.putInt("theme", theme);
-        prefs.putBool("autoBright", autoBrightness);
+        prefs.putBool("autoBrightness", autoBrightness);
         prefs.putInt("brightness", brightness);
         prefs.putInt("scrollLevel", scrollLevel);  // ✅ Persist level only
         prefs.putString("customMsg", customMsg);

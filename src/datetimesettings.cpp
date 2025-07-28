@@ -103,26 +103,12 @@ void syncTimeFromNTP() {
 
     if (!gotTime) {
         Serial.println("❌ NTP sync failed (timeout)");
-        #ifdef dma_display
-        dma_display->fillScreen(0);
-        dma_display->setCursor(0, 0);
-        dma_display->setTextColor(dma_display->color565(255, 0, 0));
-        dma_display->print("NTP Sync Failed!");
-        delay(1500);
-        #endif
         return;
     }
 
     int year = timeinfo.tm_year + 1900;
     if (year < 2000 || year > 2099) {
         Serial.printf("⚠️ NTP gave invalid year: %d\n", year);
-        #ifdef dma_display
-        dma_display->fillScreen(0);
-        dma_display->setCursor(0, 0);
-        dma_display->setTextColor(dma_display->color565(255, 0, 0));
-        dma_display->print("NTP Invalid Year");
-        delay(1500);
-        #endif
         return;
     }
 
@@ -142,11 +128,4 @@ void syncTimeFromNTP() {
                   newTime.year(), newTime.month(), newTime.day(),
                   newTime.hour(), newTime.minute(), newTime.second());
 
-   #ifdef dma_display
-    dma_display->fillScreen(0);
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(0, 255, 0));
-    dma_display->print("NTP Sync OK");
-    delay(1000);
-    #endif
 }

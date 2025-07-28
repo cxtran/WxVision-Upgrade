@@ -27,6 +27,8 @@ extern int theme;            // 0 = Color, 1 = Monochrome
 extern int brightness;       // 1 - 100
 extern int scrollSpeed;      // 1-5
 extern String customMsg;
+extern int scrollingLevel;
+extern bool autoBrightness;
 
 // --- Weather ---
 extern String owmCity;
@@ -40,7 +42,7 @@ extern String wfStationId;
 extern int tempOffset;   // degrees
 extern int humOffset;    // %
 extern int lightGain;    // %
-extern bool autoBrightness;
+
 
 
 

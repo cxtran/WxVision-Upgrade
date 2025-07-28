@@ -22,6 +22,9 @@
 #define SYSINFO_SEL dma_display->color565(255, 255, 64)
 #define SYSINFO_UNSEL dma_display->color565(0, 255, 255)
 
+void (*pendingModalFn)() = nullptr;
+unsigned long pendingModalTime = 0;
+
 extern ScreenMode currentScreen;
 extern const int SCREEN_COUNT;
 void handleScreenSwitch(int dir);
@@ -30,10 +33,10 @@ InfoModal sysInfoModal("Sys Info");
 InfoModal wifiInfoModal("WiFi Info");
 InfoModal dateModal("Set Date/Time");
 InfoModal mainMenuModal("Main Menu");
-InfoModal deviceModal("Device Settings");
-InfoModal displayModal("Display Settings");
-InfoModal weatherModal("Weather Settings");
-InfoModal calibrationModal("Calibration" );
+InfoModal deviceModal("Device ");
+InfoModal displayModal("Display");
+InfoModal weatherModal("Weather");
+InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 
 // Add these at top of file (not inside function)
@@ -128,6 +131,12 @@ int dtDateFmt;
 const char *const fmt24Opts[] = {"12h", "24h"};
 const char *const dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
 
+void reopenModalAfterDelay(void (*modalFn)(), unsigned long delayMs = 50)
+{
+    pendingModalFn = modalFn;
+    pendingModalTime = millis() + delayMs;
+}
+
 void scanWiFiNetworks()
 {
     wifiScanCount = 0;
@@ -215,7 +224,7 @@ void handleIR(uint32_t code)
         deviceModal.handleIR(code);
         return;
     }
-    
+
     if (displayModal.isActive())
     {
         displayModal.handleIR(code);
@@ -228,6 +237,17 @@ void handleIR(uint32_t code)
         return;
     }
 
+    if (calibrationModal.isActive())
+    {
+        calibrationModal.handleIR(code);
+        return;
+    }
+
+    if (systemModal.isActive())
+    {
+        systemModal.handleIR(code);
+        return;
+    }
 
     // -------- 1. WiFi Select Mode --------
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -790,50 +810,13 @@ void handleSelect()
     }
     else if (currentMenuLevel == MENU_CALIBRATION)
     {
-        if (currentMenuIndex == calibCount - 1)
-        {
-            saveCalibrationSettings();
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
+        showCalibrationModal();
+        return;
     }
     else if (currentMenuLevel == MENU_SYSTEM)
     {
-        switch (currentMenuIndex)
-        {
-        case 0:
-            showSystemInfoScreen();
-            break;
-        case 1:
-            showDateTimeModal();
-            break;
-        case 2:
-            showWiFiSignalTest();
-            break;
-        case 3:
-            quickRestore();
-            break;
-        case 4:
-            resetPowerUsage();
-            break;
-        case 5:
-            factoryReset();
-            break;
-        case 6:
-            dma_display->fillScreen(0);
-            dma_display->setCursor(0, 0);
-            dma_display->setTextColor(dma_display->color565(255, 255, 0));
-            dma_display->print("Rebooting...");
-            delay(300);
-            ESP.restart();
-            break;
-        case 7:
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-            break;
-        }
+        showSystemModal();
+        return;
     }
 
     if (!menuActive)
@@ -970,6 +953,7 @@ void showSystemInfoScreen()
 
 void showDateTimeModal()
 {
+    Serial.println("[Modal] showDateTimeModal opened");
     // Read RTC and current config into working vars:
     DateTime now = rtc.now();
     dtYear = now.year();
@@ -978,19 +962,22 @@ void showDateTimeModal()
     dtHour = now.hour();
     dtMinute = now.minute();
     dtSecond = now.second();
-    dtTimezone = tzOffset; // from settings
+    dtTimezone = tzOffset;
 
-    // Clamp chooser values BEFORE modal to ensure valid mapping!
+    // Clamp chooser values BEFORE modal
     dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
     dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
 
-    // --- Modal fields: NO BUTTONS HERE ---
+    static char ntpServer[64] = "pool.ntp.org";
+
     String lines[] = {
         "Year", "Month", "Day", "Hour", "Minute", "Second",
-        "TimeZone", "TimeFmt", "DateFmt"};
+        "TimeZone", "TimeFmt", "DateFmt",
+        "NTP Server", "Sync NTP"};
     InfoFieldType types[] = {
         InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
-        InfoNumber, InfoChooser, InfoChooser};
+        InfoNumber, InfoChooser, InfoChooser,
+        InfoText, InfoButton};
 
     int *intRefs[] = {
         &dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond,
@@ -1001,61 +988,62 @@ void showDateTimeModal()
     static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts};
     int chooserOptCounts[] = {2, 3};
 
-    dateModal.setLines(lines, types, 9);
+    char *textRefs[] = {ntpServer};
+    int textSizes[] = {64};
+
+    dateModal.setLines(lines, types, 11);
     dateModal.setValueRefs(
         intRefs, 7,
         chooserRefs, 2,
-        chooserOptPtrs, chooserOptCounts);
+        chooserOptPtrs, chooserOptCounts,
+        textRefs, 1, textSizes);
 
-    // --- Horizontal icon button bar ---
-    const String btns[] = {"OK", "x", "NTP"}; // Save, Cancel, SyncNTP
-    dateModal.setButtons(btns, 3);
-
+    // 🚫 No buttons — use auto-save and Sync button inline
     dateModal.setCallback([](bool accepted, int btnIdx)
                           {
-        Serial.printf("Calback: Accept %d %d", accepted, btnIdx);
-        // btnIdx: 0=Save(✓), 1=Cancel(✗), 2=SyncNTP(N)
-        if (btnIdx == 2) // Sync NTP
-        {
-            syncTimeFromNTP();
-            // Reload modal working vars with the newly synced RTC time
-            DateTime now = rtc.now();
-            dtYear = now.year();
-            dtMonth = now.month();
-            dtDay = now.day();
-            dtHour = now.hour();
-            dtMinute = now.minute();
-            dtSecond = now.second();
-            showDateTimeModal(); // Re-show modal with new values
-            return;
-        }
-        if (btnIdx == 0 && accepted) // Save (✓)
-        {
-            // Clamp and validate values before saving
-            if (dtMonth < 1) dtMonth = 1;
-            if (dtMonth > 12) dtMonth = 12;
-            if (dtDay < 1) dtDay = 1;
-            if (dtDay > 31) dtDay = 31;
-            if (dtHour < 0) dtHour = 0;
-            if (dtHour > 23) dtHour = 23;
-            if (dtMinute < 0) dtMinute = 0;
-            if (dtMinute > 59) dtMinute = 59;
-            if (dtSecond < 0) dtSecond = 0;
-            if (dtSecond > 59) dtSecond = 59;
-            if (dtYear < 2000) dtYear = 2000;
-            if (dtYear > 2099) dtYear = 2099;
-            if (dtTimezone < -720) dtTimezone = -720;
-            if (dtTimezone > 840) dtTimezone = 840;
+        int sel = dateModal.getSelIndex();
 
-            rtc.adjust(DateTime(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond));
-            tzOffset = dtTimezone;
-            fmt24 = dtFmt24;
-            dateFmt = dtDateFmt;
-            saveDateTimeSettings();
-        }
-        // btnIdx==1 or !accepted => Cancel: do nothing
-            dateModal.hide();
-            drawMenu(); });
+if (sel == 10) {
+    dateModal.hide();
+//    dateModal.resetState();
+
+    dma_display->fillScreen(0);
+    dma_display->setCursor(8, 12);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print("Syncing NTP...");
+
+    syncTimeFromNTP();
+
+    reopenModalAfterDelay(showDateTimeModal);  // ✅ reusable now
+    return;
+}
+
+
+
+
+
+
+
+        // Auto-save on close
+        // Clamp and validate values
+        dtMonth = constrain(dtMonth, 1, 12);
+        dtDay = constrain(dtDay, 1, 31);
+        dtHour = constrain(dtHour, 0, 23);
+        dtMinute = constrain(dtMinute, 0, 59);
+        dtSecond = constrain(dtSecond, 0, 59);
+        dtYear = constrain(dtYear, 2000, 2099);
+        dtTimezone = constrain(dtTimezone, -720, 840);
+
+        rtc.adjust(DateTime(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond));
+        tzOffset = dtTimezone;
+        fmt24 = dtFmt24;
+        dateFmt = dtDateFmt;
+
+        // TODO: optionally save ntpServer if you want it persisted
+        saveDateTimeSettings();
+
+        dateModal.hide();
+        drawMenu(); });
 
     dateModal.show();
 }
@@ -1120,13 +1108,13 @@ void showMainMenuModal()
             return;
         case 2:
             showWeatherSettingsModal();
-            break;
+            return;
         case 3:
-            currentMenuLevel = MENU_CALIBRATION;
-            break;
+            showCalibrationModal();
+            return;
         case 4:
-            currentMenuLevel = MENU_SYSTEM;
-            break;
+            showSystemModal();
+            return;
         case 5: // Exit Menu
             menuActive = false;
             dma_display->clearScreen();
@@ -1184,69 +1172,65 @@ void showDeviceSettingsModal()
 
     // Auto-save on modal close
     deviceModal.setCallback([](bool accepted, int btnIdx)
-    {
+                            {
         saveDeviceSettings(); // Always save on close
         deviceModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
         menuScroll = 0;
-        drawMenu();
-    });
+        drawMenu(); });
 
     deviceModal.show();
 }
 
-void showDisplaySettingsModal() {
+void showDisplaySettingsModal()
+{
     Serial.println("[DisplayModal] Opening Display Settings Modal");
 
     menuActive = true;
     currentMenuLevel = MENU_NONE;
 
-    static int autoBrightnessInt = autoBrightness ? 1 : 0;
+    // --- Sync working variables with global state ---
+    static int autoBrightnessInt;
+    autoBrightnessInt = autoBrightness ? 1 : 0;
 
-    // Match scrollSpeed to level 0–9 based on delay values
- //   static const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
-    static int scrollLevel = 3; // Default to Medium
+    static int brightnessTemp;
+    brightnessTemp = brightness;
+
+    // Convert scrollSpeed → scrollLevelTemp (0–9)
+    static int scrollLevelTemp = 3;
     for (int i = 0; i < 10; ++i) {
         if (scrollSpeed >= scrollDelays[i]) {
-            scrollLevel = i;
+            scrollLevelTemp = i;
             break;
         }
     }
 
     // --- Labels and Types ---
     String labels[] = {
-        "Theme",            // 0 - chooser
-        "Auto Brightness",  // 1 - chooser
-        "Brightness",       // 2 - number
-        "Scroll Speed",     // 3 - chooser (Level 1–10)
-        "Custom Msg"        // 4 - text
-    };
+        "Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Custom Msg"};
 
     InfoFieldType types[] = {
-        InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText
-    };
+        InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText};
 
     // --- Choosers ---
-    int* chooserRefs[] = { &theme, &autoBrightnessInt, &scrollLevel };
-    static const char* themeOpts[] = { "Color", "Mono" };
-    static const char* autoOpts[] = { "Off", "On" };
-    static const char* speedOpts[] = {
-        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"
-    };
-    static const char* const* chooserOpts[] = { themeOpts, autoOpts, speedOpts };
-    int chooserCounts[] = { 2, 2, 10 };
+    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp};
+    static const char *themeOpts[] = {"Color", "Mono"};
+    static const char *autoOpts[] = {"Off", "On"};
+    static const char *speedOpts[] = {
+        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
+    static const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts};
+    int chooserCounts[] = {2, 2, 10};
 
     // --- Number fields ---
-    static int brightnessTemp = brightness;
-    int* numberRefs[] = { &brightnessTemp };
+    int *numberRefs[] = {&brightnessTemp};
 
     // --- Text fields ---
     static char customMsgBuf[64];
     strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
     customMsgBuf[sizeof(customMsgBuf) - 1] = 0;
-    char* textRefs[] = { customMsgBuf };
-    int textSizes[] = { sizeof(customMsgBuf) };
+    char *textRefs[] = {customMsgBuf};
+    int textSizes[] = {sizeof(customMsgBuf)};
 
     // --- Apply to modal ---
     displayModal.setLines(labels, types, 5);
@@ -1254,20 +1238,20 @@ void showDisplaySettingsModal() {
         numberRefs, 1,
         chooserRefs, 3,
         chooserOpts, chooserCounts,
-        textRefs, 1, textSizes
-    );
+        textRefs, 1, textSizes);
 
+    // --- Callback ---
     displayModal.setCallback([](bool accepted, int btnIdx) {
         if (accepted) {
             brightness = constrain(brightnessTemp, 1, 100);
             autoBrightness = (autoBrightnessInt > 0);
-            scrollLevel = constrain(scrollLevel, 0, 9);
-            //static const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
+            scrollLevel = constrain(scrollLevelTemp, 0, 9);
             scrollSpeed = scrollDelays[scrollLevel];
             customMsg = String(customMsgBuf);
+
             saveDisplaySettings();
-            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d\n",
-                          brightness, scrollLevel + 1, scrollSpeed);
+            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d autoBrightness=%d\n",
+                          brightness, scrollLevel + 1, scrollSpeed, autoBrightness);
         }
 
         displayModal.hide();
@@ -1280,7 +1264,8 @@ void showDisplaySettingsModal() {
     displayModal.show();
 }
 
-void showWeatherSettingsModal() {
+void showWeatherSettingsModal()
+{
     Serial.println("[WeatherModal] Opening Weather Settings Modal");
 
     menuActive = true;
@@ -1299,44 +1284,39 @@ void showWeatherSettingsModal() {
     strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
     strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
 
-    static const char* countryLabels[] = {
+    static const char *countryLabels[] = {
         "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
-        "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"
-    };
-    static const char* countryCodes[] = {
-        "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""  // Custom code is manual
+        "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"};
+    static const char *countryCodes[] = {
+        "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", "" // Custom code is manual
     };
     const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
 
     // Labels and field types
     String labels[] = {
-        "Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"
-    };
+        "Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"};
     InfoFieldType types[] = {
-        InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText
-    };
+        InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText};
 
     // Set up references
-    int* chooserRefs[] = { &owmCountryIndexTemp };
-    const char* const* chooserOpts[] = { countryLabels };
-    int chooserCounts[] = { countryCount };
+    int *chooserRefs[] = {&owmCountryIndexTemp};
+    const char *const *chooserOpts[] = {countryLabels};
+    int chooserCounts[] = {countryCount};
 
-    char* textRefs[] = {
-        owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf
-    };
+    char *textRefs[] = {
+        owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf};
     int textSizes[] = {
         sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf),
-        sizeof(wfTokenBuf), sizeof(wfStationBuf)
-    };
+        sizeof(wfTokenBuf), sizeof(wfStationBuf)};
 
     weatherModal.setLines(labels, types, 6);
     weatherModal.setValueRefs(
         nullptr, 0,
         chooserRefs, 1, chooserOpts, chooserCounts,
-        textRefs, 5, textSizes
-    );
+        textRefs, 5, textSizes);
 
-    weatherModal.setCallback([](bool ok, int btnIdx) {
+    weatherModal.setCallback([](bool ok, int btnIdx)
+                             {
         // No Save/Cancel buttons — always save
         owmCountryIndex = owmCountryIndexTemp;
         owmCountryCustom = String(owmCountryCustomBuf);
@@ -1360,8 +1340,97 @@ void showWeatherSettingsModal() {
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
         menuScroll = 0;
-        drawMenu();
-    });
+        drawMenu(); });
 
     weatherModal.show();
+}
+
+void showCalibrationModal()
+{
+    Serial.println("[CalibrationModal] Opening Calibration Settings Modal");
+
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+
+    // Working copies
+    static int tempOffsetTemp = tempOffset;
+    static int humOffsetTemp = humOffset;
+    static int lightGainTemp = lightGain;
+
+    String labels[] = {
+        "Temp Offset", // -10 to +10
+        "Hum Offset",  // -20 to +20
+        "Light Gain"   // 1–150
+    };
+    InfoFieldType types[] = {
+        InfoNumber, InfoNumber, InfoNumber};
+
+    int *numberRefs[] = {&tempOffsetTemp, &humOffsetTemp, &lightGainTemp};
+
+    calibrationModal.setLines(labels, types, 3);
+    calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
+
+    // 🚫 No button bar
+
+    calibrationModal.setCallback([](bool accepted, int btnIdx)
+                                 {
+        tempOffset = constrain(tempOffsetTemp, -10, 10);
+        humOffset = constrain(humOffsetTemp, -20, 20);
+        lightGain = constrain(lightGainTemp, 1, 150);
+        saveCalibrationSettings();
+        float lux = readBrightnessSensor();
+        setDisplayBrightnessFromLux(lux);
+        Serial.printf("[Saved] tempOffset=%d, humOffset=%d, lightGain=%d\n",
+                      tempOffset, humOffset, lightGain);
+
+        calibrationModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+        drawMenu(); });
+
+    calibrationModal.show();
+}
+
+void showSystemModal()
+{
+    Serial.println("[SystemModal] Opening System Menu Modal");
+
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+
+    String labels[] = {
+        "Show System Info",
+        "Set Date & Time",
+        "WiFi Signal Test",
+        "Quick Restore",
+        "Reset Power",
+        "Factory Reset",
+        "Reboot"};
+    InfoFieldType types[] = {
+        InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton, InfoButton};
+
+    systemModal.setLines(labels, types, 7);
+    systemModal.setCallback([](bool accepted, int btnIdx)
+                            {
+        int sel = systemModal.getSelIndex();
+        systemModal.hide();
+
+        switch (sel) {
+            case 0: showSystemInfoScreen(); break;
+            case 1: showDateTimeModal(); break;
+            case 2: showWiFiSignalTest(); break;
+            case 3: quickRestore(); break;
+            case 4: resetPowerUsage(); break;
+            case 5: factoryReset(); break;
+            case 6: ESP.restart(); break;
+        }
+
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+        drawMenu(); });
+
+    systemModal.show();
 }

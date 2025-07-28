@@ -2,6 +2,9 @@
 #include <Arduino.h>
 #include <vector>
 #include "InfoModal.h"
+#include "sensors.h"
+#include "settings.h"
+
 
 // --- Menu Core Functions ---
 void handleIR(uint32_t code);
@@ -24,6 +27,8 @@ void showMainMenuModal();
 void showDeviceSettingsModal();
 void showDisplaySettingsModal();
 void showWeatherSettingsModal();
+void showCalibrationModal();
+void showSystemModal();
 
 // WiFi Signal Test
 
@@ -84,6 +89,7 @@ extern int manualScreen;
 extern int theme;
 extern int brightness;
 extern int scrollSpeed;
+extern int scrollLevel;
 extern String customMsg;
 extern int tempOffset;
 extern int humOffset;
