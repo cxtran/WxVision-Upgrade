@@ -5,6 +5,7 @@
 #include "datetimesettings.h"
 extern RTC_DS3231 rtc;
 
+extern const int scrollDelays[10];
 // --- Date/Time/Timezone Settings ---
 extern int dstAuto; // 0 = off, 1 = auto
 extern int timeZoneOffsetMinutes; // Time Zone offset in minutes, e.g. 420 for UTC+7

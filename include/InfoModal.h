@@ -3,7 +3,7 @@
 #include <functional>
 #include "ir_codes.h"
 #include "sensors.h"
-
+#include "settings.h"
 // --- Info Modal Colors ---
 #define INFOMODAL_GREEN    dma_display->color565(0,255,80)
 #define INFOMODAL_HEADERBG dma_display->color565(0,20,60)
@@ -30,7 +30,7 @@ public:
     static const int DATA_ROWS_FULL = 3; // 3 data rows if NO button bar
     static const int SCREEN_WIDTH = 64;
 
-    int scrollSpeed = 50;  // Default scroll speed, now writable
+   // int scrollSpeed = 50;  // Default scroll speed, now writable
 
 
 
@@ -63,6 +63,7 @@ public:
     bool inButtonBar;
     int btnSel;
 
+    void resetState();
 private:
     void draw();
     void drawHeader();

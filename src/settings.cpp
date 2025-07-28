@@ -17,9 +17,11 @@ String wifiPass = "";
 
 // --- Display ---
 int theme = 0;            // 0 = Color, 1 = Mono
-int brightness = 20;      // 1-100
-int scrollSpeed = 2;      // 1-5
+int brightness = 20;      // 1–100
+int scrollSpeed = 150;    // derived from scrollLevel
+int scrollLevel = 3;      // 0 (fast) to 9 (slow)
 String customMsg = "";
+const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 
 // --- Weather ---
 String owmCity = "";
@@ -33,18 +35,16 @@ String owmCountryCustom = "";
 int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
-bool autoBrightness = true;  // default: auto-brightness ON
+bool autoBrightness = true;
 
-// --- Date/Time/Timezone Settings ---
-int dstAuto = 0;              // 0 = off, 1 = auto
-int timeZoneOffsetMinutes = 0;  // UTC default
-int dateFormat = 0;             // 0 = YYYY-MM-DD
-int timeFormat24h = 1;          // 1 = 24h, 0 = 12h
-
-
+// --- Date/Time/Timezone ---
+int dstAuto = 0;
+int timeZoneOffsetMinutes = 0;
+int dateFormat = 0;
+int timeFormat24h = 1;
 
 void loadSettings() {
-    prefs.begin("visionwx", true); // read-only
+    prefs.begin("visionwx", true);
 
     // Device
     wifiSSID     = prefs.getString("wifiSSID", "");
@@ -58,7 +58,13 @@ void loadSettings() {
     // Display
     theme        = prefs.getInt("theme", 0);
     brightness   = prefs.getInt("brightness", 50);
-    scrollSpeed  = prefs.getInt("scrollSpeed", 2);
+    scrollLevel  = prefs.getInt("scrollLevel", 3); // default to 3 (medium)
+    scrollLevel  = constrain(scrollLevel, 0, 9);
+
+    // Scroll speed mapping
+
+    scrollSpeed = scrollDelays[scrollLevel];
+
     customMsg    = prefs.getString("customMsg", "");
 
     // Weather
@@ -75,7 +81,6 @@ void loadSettings() {
     lightGain    = prefs.getInt("lightGain", 100);
     autoBrightness = prefs.getBool("autoBrightness");
 
-    // Date/Time/Timezone (use new function for separation)
     loadDateTimeSettings();
 
     prefs.end();
@@ -94,18 +99,24 @@ void saveDeviceSettings() {
 }
 
 void saveDisplaySettings() {
-    prefs.begin("visionwx", false);
-    prefs.putInt("theme", theme);
-    prefs.putInt("brightness", brightness);
-    prefs.putInt("scrollSpeed", scrollSpeed);
-    prefs.putString("customMsg", customMsg);
-    prefs.putBool("autoBrightness", autoBrightness);
-    prefs.end();
+    Preferences prefs;
+    if (prefs.begin("display", false)) {
+        prefs.putInt("theme", theme);
+        prefs.putBool("autoBright", autoBrightness);
+        prefs.putInt("brightness", brightness);
+        prefs.putInt("scrollLevel", scrollLevel);  // ✅ Persist level only
+        prefs.putString("customMsg", customMsg);
+        prefs.end();
+        Serial.printf("[Prefs] Saved: theme=%d, auto=%d, bright=%d, scrollLevel=%d\n",
+            theme, autoBrightness, brightness, scrollLevel);
+    } else {
+        Serial.println("[Prefs] Failed to open namespace 'display'");
+    }
 }
 
 void saveWeatherSettings() {
     prefs.begin("visionwx", false);
-    prefs.putInt("forecast", forecastSrc); // Allow changing source here too
+    prefs.putInt("forecast", forecastSrc);
     prefs.putString("owmCity", owmCity);
     prefs.putString("owmApiKey", owmApiKey);
     prefs.putInt("owmCountryIndex", owmCountryIndex);
@@ -123,8 +134,6 @@ void saveCalibrationSettings() {
     prefs.end();
 }
 
-
-
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
@@ -133,66 +142,51 @@ void saveAllSettings() {
     saveDateTimeSettings();
 }
 
-// --- Value toggles/adjusts ---
+// --- Toggles ---
 void toggleUnits(int dir) {
-    units += dir;
-    if (units < 0) units = 1;
-    if (units > 1) units = 0;
+    units = (units + dir + 2) % 2;
 }
 
 void toggleDayFormat(int dir) {
-    dayFormat += dir;
-    if (dayFormat < 0) dayFormat = 1;
-    if (dayFormat > 1) dayFormat = 0;
+    dayFormat = (dayFormat + dir + 2) % 2;
 }
 
 void toggleForecastSrc(int dir) {
-    forecastSrc += dir;
-    if (forecastSrc < 0) forecastSrc = 1;
-    if (forecastSrc > 1) forecastSrc = 0;
+    forecastSrc = (forecastSrc + dir + 2) % 2;
 }
 
 void toggleAutoRotate(int dir) {
-    autoRotate += dir;
-    if (autoRotate < 0) autoRotate = 1;
-    if (autoRotate > 1) autoRotate = 0;
+    autoRotate = (autoRotate + dir + 2) % 2;
 }
 
 void toggleTheme(int dir) {
-    theme += dir;
-    if (theme < 0) theme = 1;
-    if (theme > 1) theme = 0;
+    theme = (theme + dir + 2) % 2;
 }
 
 void adjustBrightness(int dir) {
     brightness += dir * 5;
-    if (brightness < 1) brightness = 1;
-    if (brightness > 100) brightness = 100;
-}
-
-void adjustScrollSpeed(int dir) {
-    scrollSpeed += dir;
-    if (scrollSpeed < 1) scrollSpeed = 1;
-    if (scrollSpeed > 5) scrollSpeed = 5;
+    brightness = constrain(brightness, 1, 100);
 }
 
 void adjustTempOffset(int dir) {
-    tempOffset += dir;
-    if (tempOffset < -10) tempOffset = -10;
-    if (tempOffset > 10) tempOffset = 10;
+    tempOffset = constrain(tempOffset + dir, -10, 10);
 }
 
 void adjustHumOffset(int dir) {
-    humOffset += dir;
-    if (humOffset < -20) humOffset = -20;
-    if (humOffset > 20) humOffset = 20;
+    humOffset = constrain(humOffset + dir, -20, 20);
 }
 
 void adjustLightGain(int dir) {
     lightGain += dir * 5;
-    if (lightGain < 1) lightGain = 1;
-    if (lightGain > 150) lightGain = 150;
-    // Update Brighness
-    float lux = readBrightnessSensor();            // <-- use your modified sensor function
-    setDisplayBrightnessFromLux(lux);          // <-- use the logarithmic auto-brightness
+    lightGain = constrain(lightGain, 1, 150);
+    float lux = readBrightnessSensor();
+    setDisplayBrightnessFromLux(lux);
+}
+void adjustScrollSpeed(int dir) {
+    scrollLevel += dir;
+    if (scrollLevel < 0) scrollLevel = 0;
+    if (scrollLevel > 9) scrollLevel = 9;
+
+//    static const int scrollDelays[] = {10, 20, 30, 50, 75, 100, 150, 200, 300, 500};
+    scrollSpeed = scrollDelays[scrollLevel];
 }

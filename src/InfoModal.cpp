@@ -5,6 +5,8 @@
 #include <cstring>
 
 extern bool autoBrightness;
+extern int scrollLevel;
+extern void saveDisplaySettings();
 
 // --- Static trampoline for keyboard -> InfoModal::setTextValue ---
 static InfoModal* s_modalForText = nullptr;
@@ -227,7 +229,7 @@ void InfoModal::draw() {
         dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
         String s = lines[idx];
 
-        Serial.printf("[draw] Line %d: type=%d | ", idx, fieldTypes[idx]);
+  //      Serial.printf("[draw] Line %d: type=%d | ", idx, fieldTypes[idx]);
 
         if (fieldTypes[idx] == InfoNumber) {
             int nidx = numberFieldIndices[idx];
@@ -365,14 +367,26 @@ void InfoModal::setTextRefs(char* textRefsIn[], int count) {
     }
 }
 
+
+void InfoModal::resetState() {
+      selIndex = 0;
+      scrollY = 0;
+      inButtonBar = false;
+      atClose = false;
+      inEdit = false;
+      editIndex = -1;
+  }
+
 void InfoModal::handleIR(uint32_t code) {
     if (!active) return;
 
-    extern bool autoBrightness;  // <-- Sync with global from main.cpp
+    extern bool autoBrightness;
+    extern float readBrightnessSensor();
+    extern void setDisplayBrightnessFromLux(float lux);
+    extern void saveDisplaySettings();
 
     Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
 
-    // --- During text edit only ---
     if (inEdit && fieldTypes[editIndex] == InfoText) {
         if (code == IR_CANCEL) {
             inEdit = false;
@@ -382,7 +396,6 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- At Close ---
     if (atClose) {
         if (code == IR_OK || code == IR_CANCEL) {
             if (callback) callback(false, -1);
@@ -399,7 +412,6 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- Button Bar ---
     if (btnCount > 0 && inButtonBar) {
         if (code == IR_UP) {
             inButtonBar = false;
@@ -419,7 +431,6 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- UP/DOWN navigation ---
     if (code == IR_UP) {
         if (selIndex == 0) {
             atClose = true;
@@ -439,7 +450,6 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- LEFT/RIGHT edits number or chooser ---
     if (code == IR_LEFT || code == IR_RIGHT) {
         InfoFieldType type = fieldTypes[selIndex];
 
@@ -447,27 +457,18 @@ void InfoModal::handleIR(uint32_t code) {
             int nidx = numberFieldIndices[selIndex];
             if (nidx >= 0 && intRefs[nidx]) {
                 int* ptr = intRefs[nidx];
-                if (code == IR_LEFT) (*ptr)--;
-                else if (code == IR_RIGHT) (*ptr)++;
+                if (code == IR_LEFT) (*ptr)--; else (*ptr)++;
 
-                // --- Live Brightness Update (line 2) ---
-                if (selIndex == 2) {
+                if (selIndex == 2) {  // Brightness
                     *ptr = constrain(*ptr, 1, 100);
-
                     if (!autoBrightness) {
                         int hw = map(*ptr, 1, 100, 3, 255);
                         dma_display->setBrightness8(hw);
                         Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
                     } else {
-                        Serial.println("[Live] Brightness change ignored (Auto ON)");
+                        Serial.println("[Live] Brightness ignored (Auto ON)");
                     }
-                }
-
-                // --- Live Scroll Speed Update (line 3) ---
-                if (selIndex == 3) {
-                    *ptr = constrain(*ptr, 10, 500);
-                    scrollSpeed = *ptr;
-                    Serial.printf("[Live] ScrollSpeed set to %d\n", scrollSpeed);
+                    saveDisplaySettings();
                 }
 
                 draw();
@@ -480,15 +481,14 @@ void InfoModal::handleIR(uint32_t code) {
                 if (count > 0) {
                     val = (val + (code == IR_LEFT ? count - 1 : 1)) % count;
 
-                    // --- Auto Brightness toggle sync (line 1) ---
-                    if (selIndex == 1) {
-                        autoBrightness = (val > 0);  // Sync global
-                        Serial.printf("[Live] AutoBrightness toggled: %s\n", autoBrightness ? "ON" : "OFF");
+                    if (selIndex == 1) {  // Auto Brightness toggle
+                        autoBrightness = (val > 0);
+                        Serial.printf("[Live] AutoBrightness: %s\n", autoBrightness ? "ON" : "OFF");
 
                         if (autoBrightness) {
-                            float lux = readBrightnessSensor();           // ⬅️ Get current light level
-                            setDisplayBrightnessFromLux(lux);             // ⬅️ Apply auto brightness immediately
-                            Serial.printf("[Live] Auto ON → Lux: %.1f\n", lux);
+                            float lux = readBrightnessSensor();
+                            setDisplayBrightnessFromLux(lux);
+                            Serial.printf("[Live] Auto ON → Brightness from Lux: %.1f\n", lux);
                         } else {
                             int bIdx = numberFieldIndices[2];
                             if (bIdx >= 0 && intRefs[bIdx]) {
@@ -498,8 +498,16 @@ void InfoModal::handleIR(uint32_t code) {
                                 Serial.printf("[Live] Auto OFF → Brightness: %d => HW %d\n", b, hw);
                             }
                         }
+                        saveDisplaySettings();
                     }
 
+                    if (selIndex == 3) {  // Scroll Speed chooser
+                        scrollLevel = constrain(val, 0, 9);
+                //        static const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
+                        scrollSpeed = scrollDelays[scrollLevel];
+                        Serial.printf("[Live] ScrollSpeed set to %d ms (Level %d)\n", scrollSpeed, scrollLevel);
+                        saveDisplaySettings();
+                    }
 
                     draw();
                 }
@@ -508,7 +516,6 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- OK only triggers for text ---
     if (code == IR_OK) {
         if (fieldTypes[selIndex] == InfoText) {
             int textIdx = textFieldIndices[selIndex];
@@ -531,13 +538,15 @@ void InfoModal::handleIR(uint32_t code) {
         return;
     }
 
-    // --- Cancel globally ---
     if (code == IR_CANCEL) {
-        if (callback) callback(false, -1);
-        hide();
-        drawMenu();
+        if (inEdit) {
+            inEdit = false;
+            editIndex = -1;
+            draw();
+        } else if (callback) {
+            callback(false, -1);
+            hide();
+            drawMenu();
+        }
     }
 }
-
-
-

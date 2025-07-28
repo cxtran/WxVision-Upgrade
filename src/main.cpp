@@ -22,10 +22,9 @@
 #include "menu.h"
 #include "keyboard.h"
 
-
 // Make these global
 ScreenMode currentScreen = ScreenMode::SCREEN_OWM;
-const int SCREEN_COUNT = 5; // Update if you add/remove screens
+const int SCREEN_COUNT = 5;
 
 extern InfoModal sysInfoModal;
 extern InfoModal wifiInfoModal;
@@ -33,6 +32,7 @@ extern InfoModal dateModal;
 extern InfoModal mainMenuModal;
 extern InfoModal deviceModal;
 extern InfoModal displayModal;
+extern InfoModal weatherModal;
 
 extern int wifiSelectIndex;
 
@@ -64,8 +64,6 @@ const unsigned long irInterval = 50;
 const unsigned long buttonInterval = 100;
 const unsigned long screenInterval = 10000;
 
-
-// --- Functions ---
 void fetchTempestData() {
     int packetSize = udp.parsePacket();
     if (packetSize > 0) {
@@ -105,21 +103,18 @@ void setup() {
 
     Serial.println("\nESP32 Weather Display");
 
-    // ---- WiFi credential check ----
     if (wifiSSID.isEmpty() || wifiPass.isEmpty()) {
         Serial.println("[WiFi] No credentials, showing WiFi menu...");
-        onWiFiConnectFailed(); // Show WiFi select menu immediately
-        return;                // Pause setup until WiFi is configured
+        onWiFiConnectFailed();
+        return;
     }
 
     Serial.println("Connecting WiFi...");
     connectToWiFi();
 
-    // If WiFi menu is open, pause rest of setup (user needs to pick network)
     if (wifiSelecting)
         return;
 
-    // Extra connection check (in case connectToWiFi fails to connect)
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[WiFi] Connection failed, showing WiFi menu...");
         onWiFiConnectFailed();
@@ -127,8 +122,6 @@ void setup() {
     }
 
     Serial.println("WiFi done.");
-
-    // OTA setup
     ArduinoOTA.setHostname("ESP32-Weather");
     ArduinoOTA.begin();
 
@@ -137,11 +130,9 @@ void setup() {
     syncTimeFromNTP1();
     Serial.println("Done.");
 
-    // UDP setup for Tempest integration
     udp.begin(localPort);
     Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
 
-    // OpenWeatherMap API setup
     fetchWeatherFromOWM();
     delay(500);
     getTimeFromRTC();
@@ -159,81 +150,58 @@ void setup() {
     currentMenuIndex = 0;
     menuActive = false;
     menuScroll = 0;
-
 }
 
 void loop() {
     unsigned long now = millis();
-
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500; // ms
 
-    // --- Physical Reset Button (5 sec long press) ---
+    // Handle reset button (physical long-press)
     bool buttonDown = (digitalRead(BTN_SEL) == LOW);
     if (buttonDown && !buttonWasDown) {
-        // Button just pressed
         buttonDownMillis = millis();
         resetLongPressHandled = false;
         buttonWasDown = true;
     }
     if (buttonDown && !resetLongPressHandled) {
         if (millis() - buttonDownMillis > resetHoldTime) {
-            // Long press detected, trigger reset
             resetLongPressHandled = true;
             triggerPhysicalReset();
         }
     }
     if (!buttonDown && buttonWasDown) {
-        // Button release
         buttonWasDown = false;
         resetLongPressHandled = false;
     }
 
-    // --- Always check IR sensor ---
+    // IR input
     if (now - lastIRCheck >= irInterval) {
         lastIRCheck = now;
         readIRSensor();
     }
 
-    // --- System Info Modal ---
-    if (sysInfoModal.isActive()) {
-        sysInfoModal.tick();
-        delay(40);
-        return;
-    }
-
-    if (wifiInfoModal.isActive()) {
-        wifiInfoModal.tick();
-        delay(40);
-        return;
-    }
-
-    if (dateModal.isActive()) {
-        dateModal.tick();
-        delay(40);
-        return;
-    }
-
-    if (mainMenuModal.isActive()) {
-        mainMenuModal.tick();
-        delay(40);
-        return;
-    }
-
-    if (deviceModal.isActive()) {
-        deviceModal.tick();
-        delay(40);
-        return;
-    }
-    if (displayModal.isActive()) {
-        displayModal.tick();
-        delay(40);
-        return;
-    }
+    // Cursor blink timer for keyboard
     if (inKeyboardMode && now - lastBlink >= blinkInterval) {
         lastBlink = now;
         keyboardBlinkTick();
     }
+
+    // Keyboard entry active
+    if (inKeyboardMode) {
+        tickKeyboard();
+        delay(40);
+        return;
+    }
+
+    // Modals
+    if (sysInfoModal.isActive()) { sysInfoModal.tick(); delay(40); return; }
+    if (wifiInfoModal.isActive()) { wifiInfoModal.tick(); delay(40); return; }
+    if (dateModal.isActive())     { dateModal.tick(); delay(40); return; }
+    if (mainMenuModal.isActive()) { mainMenuModal.tick(); delay(40); return; }
+    if (deviceModal.isActive())   { deviceModal.tick(); delay(40); return; }
+    if (displayModal.isActive())  { displayModal.tick(); delay(40); return; }
+    if (weatherModal.isActive())  { weatherModal.tick(); delay(40); return; }
 
     if (now - lastButtonCheck >= buttonInterval) {
         lastButtonCheck = now;
@@ -248,6 +216,7 @@ void loop() {
 
     if (menuActive) {
         updateMenu();
+
         static unsigned long lastAutoReturnCheck = 0;
         if (millis() - lastMenuActivity > 30000 && lastMenuActivity == lastAutoReturnCheck) {
             if (currentMenuLevel != MENU_MAIN || currentMenuIndex != 0 || menuScroll != 0) {
@@ -259,27 +228,26 @@ void loop() {
         } else {
             lastAutoReturnCheck = lastMenuActivity;
         }
+
         delay(100);
         return;
     }
 
-    // --- Main background tasks (run only if not in menu or wifi selection) ---
-
+    // Background tasks
     ArduinoOTA.handle();
     scrollWeatherDetails();
     fetchTempestData();
 
-
-    // Auto Brightness
+    // Brightness
     if (now - lastBrightnessRead >= brightnessInterval) {
         lastBrightnessRead = now;
         float lux = readBrightnessSensor();
         if (autoBrightness) {
             setDisplayBrightnessFromLux(lux);
         } else {
-            int hardwareBrightness = map(brightness, 1, 100, 3, 255);
-            dma_display->setBrightness8(hardwareBrightness);
-            Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hardwareBrightness);
+            int hwBrightness = map(brightness, 1, 100, 3, 255);
+            dma_display->setBrightness8(hwBrightness);
+            Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
     }
 
@@ -290,29 +258,20 @@ void loop() {
         displayWeatherData();
     }
 
-    // ---- Draw the selected screen ----
+    // Display screen content
     switch (currentScreen) {
-    case SCREEN_OWM:
-        if (now - prevMillis_ShowTimeDate >= interval_ShowTimeDate) {   
-            reset_Time_and_Date_Display = true;
-            prevMillis_ShowTimeDate = now;
-            drawOWMScreen();
-        }
-        // Draw rolling text line at top
-        
-        break;
-    case SCREEN_CLOCK:
-        drawClockScreen();
-        break;
-    case SCREEN_WEATHER:
-        drawWeatherScreen();
-        break;
-    case SCREEN_UDP:
-        drawUdpDataScreen();
-        break;
-    case SCREEN_SETTINGS:
-        drawSettingsScreen();
-        break;
+        case SCREEN_OWM:
+            if (now - prevMillis_ShowTimeDate >= interval_ShowTimeDate) {
+                reset_Time_and_Date_Display = true;
+                prevMillis_ShowTimeDate = now;
+                drawOWMScreen();
+            }
+            break;
+        case SCREEN_CLOCK: drawClockScreen(); break;
+        case SCREEN_WEATHER: drawWeatherScreen(); break;
+        case SCREEN_UDP: drawUdpDataScreen(); break;
+        case SCREEN_SETTINGS: drawSettingsScreen(); break;
     }
+
     delay(80);
 }

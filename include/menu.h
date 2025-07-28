@@ -23,6 +23,7 @@ void showWiFiSignalTest();
 void showMainMenuModal();
 void showDeviceSettingsModal();
 void showDisplaySettingsModal();
+void showWeatherSettingsModal();
 
 // WiFi Signal Test
 

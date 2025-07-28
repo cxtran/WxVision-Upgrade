@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
-
+#include "sensors.h"
 // Maximum buffer length for keyboard entry (including null terminator)
 #define KEYBOARD_BUFFER_LEN 64
 
@@ -32,7 +32,11 @@ void keyboardBlinkTick();
  */
 void drawKeyboard();
 
+void tickKeyboard();
+
 // --- Exposed state variables ---
+
+
 
 extern char keyboardBuffer[KEYBOARD_BUFFER_LEN];
 extern bool inKeyboardMode;

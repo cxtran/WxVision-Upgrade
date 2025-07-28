@@ -32,10 +32,14 @@ InfoModal dateModal("Set Date/Time");
 InfoModal mainMenuModal("Main Menu");
 InfoModal deviceModal("Device Settings");
 InfoModal displayModal("Display Settings");
+InfoModal weatherModal("Weather Settings");
+InfoModal calibrationModal("Calibration" );
+InfoModal systemModal("System");
 
 // Add these at top of file (not inside function)
 bool atScrollEnd = false;
 unsigned long scrollPauseStart = 0;
+String owmCountryCode = "";
 
 // Number of display columns and rows for info screen
 const int SYSINFO_MAXCOLS = 12;
@@ -211,11 +215,19 @@ void handleIR(uint32_t code)
         deviceModal.handleIR(code);
         return;
     }
+    
     if (displayModal.isActive())
     {
         displayModal.handleIR(code);
         return;
     }
+
+    if (weatherModal.isActive())
+    {
+        weatherModal.handleIR(code);
+        return;
+    }
+
 
     // -------- 1. WiFi Select Mode --------
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -773,57 +785,8 @@ void handleSelect()
 
     else if (currentMenuLevel == MENU_WEATHER)
     {
-        if (currentMenuIndex == 0)
-        {
-            startKeyboardEntry(owmCity.c_str(), [](const char *result)
-            {
-                if (result) owmCity = String(result);
-                drawMenu();
-            });
-            return;
-        }
-        if (currentMenuIndex == 1 && countryIndex == numCountries - 1)
-        {
-            startKeyboardEntry(owmCountryCustom.c_str(), [](const char *result)
-            {
-                if (result) owmCountryCustom = String(result);
-                drawMenu();
-            });
-            return;
-        }
-        if (currentMenuIndex == 2)
-        {
-            startKeyboardEntry(owmApiKey.c_str(), [](const char *result)
-            {
-                if (result) owmApiKey = String(result);
-                drawMenu();
-            });
-            return;
-        }
-        if (currentMenuIndex == 3)
-        {
-            startKeyboardEntry(wfToken.c_str(), [](const char *result)
-            {
-                if (result) wfToken = String(result);
-                drawMenu();
-            });
-            return;
-        }
-        if (currentMenuIndex == 4)
-        {
-            startKeyboardEntry(wfStationId.c_str(), [](const char *result)
-            {
-                if (result) wfStationId = String(result);
-                drawMenu();
-            });
-            return;
-        }
-        if (currentMenuIndex == weatherCount - 1)
-        {
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-        }
+        showWeatherSettingsModal();
+        return;
     }
     else if (currentMenuLevel == MENU_CALIBRATION)
     {
@@ -1156,7 +1119,7 @@ void showMainMenuModal()
             showDisplaySettingsModal();
             return;
         case 2:
-            currentMenuLevel = MENU_WEATHER;
+            showWeatherSettingsModal();
             break;
         case 3:
             currentMenuLevel = MENU_CALIBRATION;
@@ -1241,30 +1204,42 @@ void showDisplaySettingsModal() {
 
     static int autoBrightnessInt = autoBrightness ? 1 : 0;
 
+    // Match scrollSpeed to level 0–9 based on delay values
+ //   static const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
+    static int scrollLevel = 3; // Default to Medium
+    for (int i = 0; i < 10; ++i) {
+        if (scrollSpeed >= scrollDelays[i]) {
+            scrollLevel = i;
+            break;
+        }
+    }
+
     // --- Labels and Types ---
     String labels[] = {
         "Theme",            // 0 - chooser
         "Auto Brightness",  // 1 - chooser
         "Brightness",       // 2 - number
-        "Scroll Speed",     // 3 - number
+        "Scroll Speed",     // 3 - chooser (Level 1–10)
         "Custom Msg"        // 4 - text
     };
 
     InfoFieldType types[] = {
-        InfoChooser, InfoChooser, InfoNumber, InfoNumber, InfoText
+        InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText
     };
 
     // --- Choosers ---
-    int* chooserRefs[] = { &theme, &autoBrightnessInt };
+    int* chooserRefs[] = { &theme, &autoBrightnessInt, &scrollLevel };
     static const char* themeOpts[] = { "Color", "Mono" };
     static const char* autoOpts[] = { "Off", "On" };
-    static const char* const* chooserOpts[] = { themeOpts, autoOpts };
-    int chooserCounts[] = { 2, 2 };
+    static const char* speedOpts[] = {
+        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"
+    };
+    static const char* const* chooserOpts[] = { themeOpts, autoOpts, speedOpts };
+    int chooserCounts[] = { 2, 2, 10 };
 
-    // --- Number fields (must match line index 2 and 3)
+    // --- Number fields ---
     static int brightnessTemp = brightness;
-    static int scrollSpeedTemp = scrollSpeed;
-    int* numberRefs[] = { &brightnessTemp, &scrollSpeedTemp };
+    int* numberRefs[] = { &brightnessTemp };
 
     // --- Text fields ---
     static char customMsgBuf[64];
@@ -1276,19 +1251,23 @@ void showDisplaySettingsModal() {
     // --- Apply to modal ---
     displayModal.setLines(labels, types, 5);
     displayModal.setValueRefs(
-        numberRefs, 2,              // must match InfoNumber at idx 2 and 3
-        chooserRefs, 2,
+        numberRefs, 1,
+        chooserRefs, 3,
         chooserOpts, chooserCounts,
         textRefs, 1, textSizes
     );
 
     displayModal.setCallback([](bool accepted, int btnIdx) {
         if (accepted) {
-            brightness = constrain(brightnessTemp, 0, 255);
-            scrollSpeed = constrain(scrollSpeedTemp, 10, 500);
+            brightness = constrain(brightnessTemp, 1, 100);
             autoBrightness = (autoBrightnessInt > 0);
+            scrollLevel = constrain(scrollLevel, 0, 9);
+            //static const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
+            scrollSpeed = scrollDelays[scrollLevel];
             customMsg = String(customMsgBuf);
             saveDisplaySettings();
+            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d\n",
+                          brightness, scrollLevel + 1, scrollSpeed);
         }
 
         displayModal.hide();
@@ -1298,7 +1277,91 @@ void showDisplaySettingsModal() {
         drawMenu();
     });
 
-    Serial.printf("[DisplayModal] BrightnessTemp=%d, ScrollSpeedTemp=%d, Msg=\"%s\"\n", brightnessTemp, scrollSpeedTemp, customMsgBuf);
     displayModal.show();
-    Serial.println("[DisplayModal] Modal shown successfully");
+}
+
+void showWeatherSettingsModal() {
+    Serial.println("[WeatherModal] Opening Weather Settings Modal");
+
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+
+    static int owmCountryIndexTemp = owmCountryIndex;
+    static char owmCountryCustomBuf[4] = "";
+    static char owmCityBuf[32];
+    static char owmKeyBuf[48];
+    static char wfTokenBuf[48];
+    static char wfStationBuf[16];
+
+    strncpy(owmCountryCustomBuf, owmCountryCustom.c_str(), sizeof(owmCountryCustomBuf));
+    strncpy(owmCityBuf, owmCity.c_str(), sizeof(owmCityBuf));
+    strncpy(owmKeyBuf, owmApiKey.c_str(), sizeof(owmKeyBuf));
+    strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
+    strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
+
+    static const char* countryLabels[] = {
+        "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
+        "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"
+    };
+    static const char* countryCodes[] = {
+        "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""  // Custom code is manual
+    };
+    const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
+
+    // Labels and field types
+    String labels[] = {
+        "Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"
+    };
+    InfoFieldType types[] = {
+        InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText
+    };
+
+    // Set up references
+    int* chooserRefs[] = { &owmCountryIndexTemp };
+    const char* const* chooserOpts[] = { countryLabels };
+    int chooserCounts[] = { countryCount };
+
+    char* textRefs[] = {
+        owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf
+    };
+    int textSizes[] = {
+        sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf),
+        sizeof(wfTokenBuf), sizeof(wfStationBuf)
+    };
+
+    weatherModal.setLines(labels, types, 6);
+    weatherModal.setValueRefs(
+        nullptr, 0,
+        chooserRefs, 1, chooserOpts, chooserCounts,
+        textRefs, 5, textSizes
+    );
+
+    weatherModal.setCallback([](bool ok, int btnIdx) {
+        // No Save/Cancel buttons — always save
+        owmCountryIndex = owmCountryIndexTemp;
+        owmCountryCustom = String(owmCountryCustomBuf);
+        owmCity = String(owmCityBuf);
+        owmApiKey = String(owmKeyBuf);
+        wfToken = String(wfTokenBuf);
+        wfStationId = String(wfStationBuf);
+
+        // Update owmCountryCode
+        if (owmCountryIndex < 10) {
+            owmCountryCode = countryCodes[owmCountryIndex];
+        } else {
+            owmCountryCode = owmCountryCustom;
+        }
+
+        saveWeatherSettings();
+        Serial.printf("[WeatherModal] Saved Country=%s (%s), City=%s\n",
+            countryLabels[owmCountryIndex], owmCountryCode.c_str(), owmCity.c_str());
+
+        weatherModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+        drawMenu();
+    });
+
+    weatherModal.show();
 }

@@ -64,6 +64,14 @@ void switchKeyboardMode() {
     drawKeyboard();
 }
 
+void tickKeyboard() {
+    if (!inKeyboardMode) return;
+
+    drawKeyboard();  // Redraws with cursor blink
+    readIRSensor();  // ✅ Ensures IR goes to keyboard
+}
+
+
 void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const char* result), const char* title) {
     inKeyboardMode = true;
     kbEditLineActive = false;
@@ -223,20 +231,28 @@ void drawKeyboard() {
     const char** keyboardGrid = getActiveGrid();
     dma_display->fillScreen(0);
 
-    // --- Title (yellow, or customizable) ---
-    dma_display->setTextColor(dma_display->color565(255,255,0));
-    dma_display->setCursor(0, 0);
-    dma_display->print(keyboardTitle ? keyboardTitle : "Enter Text:");
+    // --- Title Background Bar ---
+    int titleHeight = 8;
+    dma_display->fillRect(0, 0, dma_display->width(), titleHeight, dma_display->color565(0, 0, 120));
+    dma_display->drawFastHLine(0, titleHeight - 1, dma_display->width(), dma_display->color565(255, 255, 255));
 
-    // --- Edit Buffer, line 1 ---
-    int bufferY = 8;
+    // --- Title Text ---
+    const char* title = keyboardTitle ? keyboardTitle : "Enter Text:";
+    int textX = (dma_display->width() - strlen(title) * 6) / 2;
+    if (textX < 0) textX = 0;
+    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    dma_display->setCursor(textX, 0);  // vertically centered in 8px bar
+    dma_display->print(title);
+
+    // --- Edit Buffer (Line 1) ---
+    int bufferY = titleHeight;  // Start immediately after title bar
     int charWidth = 8;
     int visibleChars = 8;
-    int start = (kbEditCursor > visibleChars-1) ? (kbEditCursor - (visibleChars-1)) : 0;
+    int start = (kbEditCursor > visibleChars - 1) ? (kbEditCursor - (visibleChars - 1)) : 0;
 
-    uint16_t bufferColor = kbEditLineActive 
-        ? dma_display->color565(255,220,80)   // gold/orange for active
-        : dma_display->color565(64,128,255);  // blue for inactive
+    uint16_t bufferColor = kbEditLineActive
+        ? dma_display->color565(255, 220, 80)
+        : dma_display->color565(64, 128, 255);
 
     for (int i = 0; i < visibleChars; ++i) {
         int idx = start + i;
@@ -245,61 +261,69 @@ void drawKeyboard() {
         bool isCursor = (idx == kbEditCursor);
 
         if (isCursor) {
-            dma_display->setTextColor(blinkState ? dma_display->color565(255,255,64) : bufferColor);
+            dma_display->setTextColor(blinkState ? dma_display->color565(255, 255, 64) : bufferColor);
         } else {
             dma_display->setTextColor(bufferColor);
         }
 
         dma_display->setCursor(x, bufferY);
-        if (isCursor && blinkState) {
-            dma_display->print('_');
-        } else {
-            dma_display->print(c);
-        }
+        dma_display->print(isCursor && blinkState ? '_' : c);
     }
 
-    // --- Draw Keyboard Row (line 2) ---
-    int gridY = 16;
+    // --- Draw Keyboard Row (Line 2) ---
+    int gridY = bufferY + 8;
     int row = kbRowScroll;
-    int lastRowLen = strlen(keyboardGrid[gridRows-1]);
+    int lastRowLen = strlen(keyboardGrid[gridRows - 1]);
     int lastRowSPCol = lastRowLen;
-    int colsThisRow = (row == gridRows-1 && kbdMode != MODE_SYM) ? lastRowLen+1 : strlen(keyboardGrid[row]);
+    int colsThisRow = (row == gridRows - 1 && kbdMode != MODE_SYM) ? lastRowLen + 1 : strlen(keyboardGrid[row]);
 
     for (int col = 0; col < colsThisRow; ++col) {
         int x = col * charWidth;
         bool isSel = (!kbEditLineActive && row == kbCursorRow && col == kbCursorCol && kbCursorRow < gridRows);
 
-        // Draw SP key only for upper/lower mode, not for symbol mode
-        if (row == gridRows-1 && col == lastRowSPCol && kbdMode != MODE_SYM) {
-            if (isSel) {
-                dma_display->fillRect(x-1, gridY-1, 13, 9, dma_display->color565(0,180,180));
-                dma_display->setTextColor(dma_display->color565(255,255,255));
-            } else {
-                dma_display->drawRect(x-1, gridY-1, 13, 9, dma_display->color565(64,128,128));
-                dma_display->setTextColor(dma_display->color565(64,128,128));
-            }
-            dma_display->setCursor(x, gridY);
-            dma_display->print("SP");
-        }
+if (row == gridRows - 1 && col == lastRowSPCol && kbdMode != MODE_SYM) {
+    const char* spaceLabel = "Space";
+    int spW = 28;
+    int spH = 9;
+    int spX = x - 1 + 1;  // original x-1 + shift right by 1
+    int spY = gridY - 1;
+
+    if (isSel) {
+        dma_display->fillRect(spX, spY, spW, spH, dma_display->color565(0, 180, 180));
+        dma_display->drawRect(spX, spY, spW, spH, dma_display->color565(255, 255, 255));
+        dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    } else {
+        dma_display->fillRect(spX, spY, spW, spH, dma_display->color565(20, 100, 100));
+        dma_display->drawRect(spX, spY, spW, spH, dma_display->color565(100, 200, 200));
+        dma_display->setTextColor(dma_display->color565(220, 255, 255));
+    }
+
+    // Shift label 2px from new left edge
+    int textX = spX + 2;
+    int textY = spY + 1;
+    dma_display->setCursor(textX, textY);
+    dma_display->print(spaceLabel);
+}
+
+
         else if (col < (int)strlen(keyboardGrid[row])) {
             if (isSel) {
-                dma_display->fillRect(x-1, gridY-1, 7, 9, dma_display->color565(0,128,255));
-                dma_display->setTextColor(dma_display->color565(255,255,255));
+                dma_display->fillRect(x - 1, gridY - 1, 7, 9, dma_display->color565(0, 128, 255));
+                dma_display->setTextColor(dma_display->color565(255, 255, 255));
             } else {
-                dma_display->setTextColor(dma_display->color565(180,180,180));
+                dma_display->setTextColor(dma_display->color565(180, 180, 180));
             }
             dma_display->setCursor(x, gridY);
             dma_display->print(keyboardGrid[row][col]);
         }
     }
 
-    // --- Draw BS, OK, MOD, X buttons (line 3) ---
-    int btnY = 24;
-    int screenW = 64; // Change to your display width if needed
+    // --- Draw BS, OK, MOD, X buttons (Line 3) ---
+    int btnY = gridY + 8;
+    int screenW = 64;
     int btnCount = 4;
-    int totalSpacing = (btnCount - 1) * 2; // 2px between each button
+    int totalSpacing = (btnCount - 1) * 2;
     int baseBtnW = (screenW - totalSpacing) / 4;
-    // MOD ("abc") button: +5px wider, X button: base-3px wide (was base-5, then +2 more)
     int btnWidths[4] = {baseBtnW, baseBtnW, baseBtnW + 5, baseBtnW - 3};
     const char* btnLabels[4] = {"BS", "OK", getModeButtonLabel(), "X"};
 
@@ -308,29 +332,28 @@ void drawKeyboard() {
         bool highlight = (!kbEditLineActive && kbCursorRow == gridRows && kbCursorCol == i);
 
         uint16_t fill, border, textColor;
-        if (i == 3) { // X (Cancel)
-            fill = highlight ? dma_display->color565(220,40,40) : dma_display->color565(120,0,0);
-            border = dma_display->color565(255,64,64);
-            textColor = dma_display->color565(255,255,255);
+        if (i == 3) {
+            fill = highlight ? dma_display->color565(220, 40, 40) : dma_display->color565(120, 0, 0);
+            border = dma_display->color565(255, 64, 64);
+            textColor = dma_display->color565(255, 255, 255);
         } else {
             fill = highlight
-                ? (i==2 ? dma_display->color565(180,255,0) : dma_display->color565(255,180,0))
-                : dma_display->color565(30,40,60);
-            border = dma_display->color565(255,255,0);
-            textColor = highlight ? dma_display->color565(0,0,0) : dma_display->color565(255,255,255);
+                ? (i == 2 ? dma_display->color565(180, 255, 0) : dma_display->color565(255, 180, 0))
+                : dma_display->color565(30, 40, 60);
+            border = dma_display->color565(255, 255, 0);
+            textColor = highlight ? dma_display->color565(0, 0, 0) : dma_display->color565(255, 255, 255);
         }
 
         dma_display->fillRect(xpos, btnY, btnWidths[i], 9, fill);
         dma_display->drawRect(xpos, btnY, btnWidths[i], 9, border);
 
-        // Center label, and move "X" 2px to the right
         int labelLen = strlen(btnLabels[i]);
-        int tx = xpos + (btnWidths[i] - 8*labelLen) / 2;
+        int tx = xpos + (btnWidths[i] - 8 * labelLen) / 2;
         if (i == 3) tx += 2;
         dma_display->setTextColor(textColor);
         dma_display->setCursor(tx > xpos ? tx : xpos + 1, btnY + 1);
         dma_display->print(btnLabels[i]);
 
-        xpos += btnWidths[i] + 2; // move right, keep 2px space
+        xpos += btnWidths[i] + 2;
     }
 }
