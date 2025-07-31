@@ -2,15 +2,18 @@
 #include "buzzer.h"
 #include "menu.h"
 #include "display.h"
+
 #include <Preferences.h>
 #include "settings.h"
 #include "system.h"
 #include "utils.h"
 #include "WiFi.h"
-#include "keyboard.h" // <-- Required for keyboard mode
+#include "keyboard.h"
 #include "InfoModal.h"
 #include "datetimesettings.h"
 #include "ir_codes.h"
+#include "SPIFFS.h"
+
 
 // --- System Info Colors ---
 #define SYSINFO_HEADER dma_display->color565(0, 255, 80)
@@ -22,57 +25,52 @@
 #define SYSINFO_SEL dma_display->color565(255, 255, 64)
 #define SYSINFO_UNSEL dma_display->color565(0, 255, 255)
 
+bool menuActive = false;
+
 void (*pendingModalFn)() = nullptr;
 unsigned long pendingModalTime = 0;
 
 extern ScreenMode currentScreen;
-extern const int SCREEN_COUNT;
+//extern const int SCREEN_COUNT;
 void handleScreenSwitch(int dir);
 
 InfoModal sysInfoModal("Sys Info");
 InfoModal wifiInfoModal("WiFi Info");
-InfoModal dateModal("Set Date/Time");
+InfoModal dateModal("Date/Time");
 InfoModal mainMenuModal("Main Menu");
-InfoModal deviceModal("Device ");
+InfoModal deviceModal("Device");
 InfoModal displayModal("Display");
 InfoModal weatherModal("Weather");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 
-// Add these at top of file (not inside function)
-bool atScrollEnd = false;
-unsigned long scrollPauseStart = 0;
+
+// --- Country Info for Weather Modal ---
+const char *countryLabels[] = {
+    "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
+    "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"
+};
+const char *countryCodes[] = {
+    "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""
+};
+const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
 String owmCountryCode = "";
 
-// Number of display columns and rows for info screen
-const int SYSINFO_MAXCOLS = 12;
-const int SYSINFO_CHARH = 8;
-const int SYSINFO_MAXROWS = 4;
-const int SYSINFO_INFOROWS = SYSINFO_MAXROWS - 1;
-const int SYSINFO_SCROLLSPEED = 50;
-const int SYSINFO_ENDPAUSE = 300;
-const int SYSINFO_SCREEN_WIDTH = 64; // Your display width in pixels
-static int sysInfoScrollOffset = 0;  // Pixel offset for scrolling
-static int lastSysInfoSelIndex = -1;
-static unsigned long sysInfoScrollTime = 0;
-static bool sysInfoFirstScroll = true;
-
+// --- Menu State ---
 MenuLevel currentMenuLevel = MENU_MAIN;
 int currentMenuIndex = 0;
 unsigned long lastMenuActivity = 0;
-extern bool menuActive;
+
 int menuScroll = 0;
 const int visibleLines = 4;
-extern int scrollOffset;
+//int scrollOffset = 0;
 int wifiMenuScroll = 0;
 const int wifiVisibleLines = 3;
 
 bool wifiSelecting = false;
-
 std::vector<String> foundSSIDs;
 int selectedWifiIdx = 0;
-
-String scannedSSIDs[16]; // Up to 16 SSIDs
+String scannedSSIDs[16];
 int wifiScanCount = 0;
 int wifiSelectIndex = 0;
 bool wifiSelectNeedsScan = false;
@@ -84,78 +82,404 @@ extern String owmApiKey;
 extern String wfToken;
 extern String wfStationId;
 extern int humOffset;
+extern int owmCountryIndex;
+extern String owmCountryCustom;
+extern int tempOffset;
+extern int lightGain;
+extern int units, dayFormat, forecastSrc, autoRotate, manualScreen;
+extern int theme, brightness, scrollSpeed, scrollLevel;
+extern bool autoBrightness;
+extern String customMsg;
+extern int fmt24, dateFmt, tzOffset;
 
-const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
-const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
-
-const char *deviceMenu[] = {
-    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
-const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
-
-const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
-const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
-
-const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "WF Station ID", "< Back"};
-const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
-
-const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
-const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
-
-const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
-
-CountryEntry countries[] = {
-    {"", "US"},
-    {"", "GB"},
-    {"", "VN"},
-    {"", "CA"},
-    {"", "DE"},
-    {"", "FR"},
-    {"", "AU"},
-    {"", "IN"},
-    // ... add more as you like ...
-    {"Custom...", ""} // Last item triggers keyboard
-};
-const int numCountries = sizeof(countries) / sizeof(countries[0]);
-int countryIndex = 0;          // Should be persisted with your settings!
-String customCountryCode = ""; // Stores user's custom entry
-
-// Define actual settings as global/static variables
-
+void updateMenu() { drawMenu(); }
+// Date/time modal working variables
 int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
-int dtTimezone; // in minutes, e.g., -480 for UTC-8
+int dtTimezone;
 int dtFmt24;
 int dtDateFmt;
 
-const char *const fmt24Opts[] = {"12h", "24h"};
-const char *const dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
+const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
+const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
+const char *deviceMenu[] = {
+    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
+const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
+const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
+const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
+const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "WF Station ID", "< Back"};
+const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
+const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
+const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
+const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
-void reopenModalAfterDelay(void (*modalFn)(), unsigned long delayMs = 50)
+// --- IR Handler (Modal only) ---
+void handleIR(uint32_t code)
 {
-    pendingModalFn = modalFn;
-    pendingModalTime = millis() + delayMs;
+    Serial.printf("IR Code: 0x%X\n", code);
+
+    if (code == IR_SCREEN) {
+        if (isScreenOff()) setScreenOff(false);
+        else setScreenOff(true);
+        return;
+    }
+    if (isScreenOff()) return;
+
+    if (inKeyboardMode) { handleKeyboardIR(code); return; }
+    if (sysInfoModal.isActive())     { sysInfoModal.handleIR(code); return; }
+    if (wifiInfoModal.isActive())    { wifiInfoModal.handleIR(code); return; }
+    if (dateModal.isActive())        { dateModal.handleIR(code); return; }
+    if (mainMenuModal.isActive())    { mainMenuModal.handleIR(code); return; }
+    if (deviceModal.isActive())      { deviceModal.handleIR(code); return; }
+    if (displayModal.isActive())     { displayModal.handleIR(code); return; }
+    if (weatherModal.isActive())     { weatherModal.handleIR(code); return; }
+    if (calibrationModal.isActive()) { calibrationModal.handleIR(code); return; }
+    if (systemModal.isActive())      { systemModal.handleIR(code); return; }
+
+    // WiFi select (not modal, custom menu)
+    if (currentMenuLevel == MENU_WIFI_SELECT) {
+        if (wifiScanCount == 0) {
+            currentMenuLevel = MENU_DEVICE;
+            drawMenu();
+            return;
+        }
+        if (code == IR_UP) {
+            handleUp();
+            playBuzzerTone(1000, 60);
+        }
+        else if (code == IR_DOWN) {
+            handleDown();
+            playBuzzerTone(1300, 60);
+        }
+        else if (code == IR_OK) {
+            if (wifiSelectIndex == wifiScanCount - 1) { // <Back>
+                wifiSelecting = false;
+                currentMenuLevel = MENU_DEVICE;
+                drawMenu();
+                playBuzzerTone(900, 80);
+                return;
+            }
+            if (scannedSSIDs[wifiSelectIndex] == "(No networks)") {
+                playBuzzerTone(500, 100);
+                return;
+            }
+            wifiSSID = scannedSSIDs[wifiSelectIndex];
+            Serial.printf("Selected SSID: %s\n", wifiSSID.c_str());
+            currentMenuLevel = MENU_DEVICE;
+            currentMenuIndex = 1;
+            menuScroll = 0;
+            drawMenu();
+            startKeyboardEntry(wifiPass.c_str(), [](const char *result) {
+                if (result) {
+                    wifiPass = String(result);
+                    saveDeviceSettings();
+                    connectToWiFi();
+                }
+                drawMenu();
+            });
+            playBuzzerTone(2200, 120);
+            return;
+        }
+        else if (code == IR_CANCEL) {
+            wifiSelecting = false;
+            currentMenuLevel = MENU_DEVICE;
+            drawMenu();
+            playBuzzerTone(700, 80);
+        }
+        return;
+    }
+
+    static unsigned long lastMenuToggle = 0;
+    if (!menuActive) {
+        if (code == IR_LEFT)  { handleScreenSwitch(-1); return; }
+        if (code == IR_RIGHT) { handleScreenSwitch(+1); return; }
+        if (code == IR_CANCEL) {
+            if (millis() - lastMenuToggle < 500) return;
+            menuActive = true;
+            currentMenuLevel = MENU_MAIN;
+            currentMenuIndex = 0;
+            menuScroll = 0;
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            lastMenuToggle = millis();
+            return;
+        }
+        return;
+    }
+
+    switch (code)
+    {
+        case IR_CANCEL:
+            menuActive = false;
+            dma_display->clearScreen();
+            delay(50);
+            fetchWeatherFromOWM();
+            displayClock();
+            displayDate();
+            displayWeatherData();
+            reset_Time_and_Date_Display = true;
+            lastMenuToggle = millis();
+            break;
+        case IR_UP:    handleUp();    playBuzzerTone(1500, 100); break;
+        case IR_DOWN:  handleDown();  playBuzzerTone(1200, 100); break;
+        case IR_RIGHT: handleRight(); playBuzzerTone(1800, 100); break;
+        case IR_LEFT:  handleLeft();  playBuzzerTone(900, 100);  break;
+        case IR_OK:    handleSelect();playBuzzerTone(2200, 100); break;
+        default:
+            Serial.printf("Unknown code: 0x%X\n", code);
+            playBuzzerTone(500, 100); delay(100); playBuzzerTone(500, 100);
+            break;
+    }
 }
+
+// --- Modal-based Menu Functions --- //
+
+void showMainMenuModal()
+{
+    String items[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
+    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 6);
+
+    mainMenuModal.setCallback([](bool accepted, int btnIdx) {
+        if (!accepted) {
+            menuActive = false;
+            dma_display->clearScreen();
+            delay(50);
+            fetchWeatherFromOWM();
+            displayClock();
+            displayDate();
+            displayWeatherData();
+            reset_Time_and_Date_Display = true;
+            return;
+        }
+        int selected = mainMenuModal.getSelIndex();
+        Serial.printf("[MainMenu] selected=%d\n", selected);
+        switch (selected) {
+            case 0: showDeviceSettingsModal(); return;
+            case 1: showDisplaySettingsModal(); return;
+            case 2: showWeatherSettingsModal(); return;
+            case 3: showCalibrationModal(); return;
+            case 4: showSystemModal(); return;
+            case 5: // Exit Menu
+                menuActive = false;
+                dma_display->clearScreen();
+                delay(50);
+                fetchWeatherFromOWM();
+                displayClock();
+                displayDate();
+                displayWeatherData();
+                reset_Time_and_Date_Display = true;
+                return;
+            default:
+                Serial.println("⚠️ Invalid main menu selection");
+                return;
+        }
+    });
+    mainMenuModal.show();
+}
+
+void showDeviceSettingsModal()
+{
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+    String labels[] = {"Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
+    int *chooserRefs[] = {&units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
+    static const char *unitsOpt[] = {"F+mph", "C+m/s"};
+    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
+    static const char *forecastOpt[] = {"OWM", "WF"};
+    static const char *rotateOpt[] = {"Off", "On"};
+    static const char *manualOpt[] = {"Off", "On"};
+    const char *const *chooserOpts[] = {unitsOpt, dayFmtOpt, forecastOpt, rotateOpt, manualOpt};
+    int chooserCounts[] = {2, 2, 2, 2, 2};
+
+    deviceModal.setLines(labels, types, 5);
+    deviceModal.setValueRefs(nullptr, 0, chooserRefs, 5, chooserOpts, chooserCounts);
+    deviceModal.setButtons(nullptr, 0);
+    deviceModal.setCallback([](bool accepted, int btnIdx) {
+        saveDeviceSettings();
+        deviceModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+    deviceModal.show();
+}
+
+void showDisplaySettingsModal()
+{
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+    static int autoBrightnessInt;
+    autoBrightnessInt = autoBrightness ? 1 : 0;
+    static int brightnessTemp = brightness;
+    static int scrollLevelTemp = 3;
+    for (int i = 0; i < 10; ++i) {
+        if (scrollSpeed >= scrollDelays[i]) {
+            scrollLevelTemp = i; break;
+        }
+    }
+    String labels[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Custom Msg"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText};
+    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp};
+    static const char *themeOpts[] = {"Color", "Mono"};
+    static const char *autoOpts[] = {"Off", "On"};
+    static const char *speedOpts[] = {
+        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
+    static const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts};
+    int chooserCounts[] = {2, 2, 10};
+    int *numberRefs[] = {&brightnessTemp};
+    static char customMsgBuf[64];
+    strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
+    customMsgBuf[sizeof(customMsgBuf) - 1] = 0;
+    char *textRefs[] = {customMsgBuf};
+    int textSizes[] = {sizeof(customMsgBuf)};
+    displayModal.setLines(labels, types, 5);
+    displayModal.setValueRefs(numberRefs, 1, chooserRefs, 3, chooserOpts, chooserCounts, textRefs, 1, textSizes);
+
+    displayModal.setCallback([](bool accepted, int btnIdx) {
+        if (accepted) {
+            brightness = constrain(brightnessTemp, 1, 100);
+            autoBrightness = (autoBrightnessInt > 0);
+            scrollLevel = constrain(scrollLevelTemp, 0, 9);
+            scrollSpeed = scrollDelays[scrollLevel];
+            customMsg = String(customMsgBuf);
+            saveDisplaySettings();
+            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d autoBrightness=%d\n",
+                brightness, scrollLevel + 1, scrollSpeed, autoBrightness);
+        }
+        displayModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+    displayModal.show();
+}
+
+void showWeatherSettingsModal()
+{
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+    static int owmCountryIndexTemp = owmCountryIndex;
+    static char owmCountryCustomBuf[4] = "";
+    static char owmCityBuf[32];
+    static char owmKeyBuf[48];
+    static char wfTokenBuf[48];
+    static char wfStationBuf[16];
+    strncpy(owmCountryCustomBuf, owmCountryCustom.c_str(), sizeof(owmCountryCustomBuf));
+    strncpy(owmCityBuf, owmCity.c_str(), sizeof(owmCityBuf));
+    strncpy(owmKeyBuf, owmApiKey.c_str(), sizeof(owmKeyBuf));
+    strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
+    strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
+
+    String labels[] = {"Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"};
+    InfoFieldType types[] = {InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText};
+    int *chooserRefs[] = {&owmCountryIndexTemp};
+    const char *const *chooserOpts[] = {countryLabels};
+    int chooserCounts[] = {countryCount};
+    char *textRefs[] = {owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf};
+    int textSizes[] = {sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf), sizeof(wfTokenBuf), sizeof(wfStationBuf)};
+
+    weatherModal.setLines(labels, types, 6);
+    weatherModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, textRefs, 5, textSizes);
+
+    weatherModal.setCallback([](bool ok, int btnIdx) {
+        owmCountryIndex = owmCountryIndexTemp;
+        owmCountryCustom = String(owmCountryCustomBuf);
+        owmCity = String(owmCityBuf);
+        owmApiKey = String(owmKeyBuf);
+        wfToken = String(wfTokenBuf);
+        wfStationId = String(wfStationBuf);
+
+        if (owmCountryIndex < 10) {
+            owmCountryCode = countryCodes[owmCountryIndex];
+        } else {
+            owmCountryCode = owmCountryCustom;
+        }
+
+        saveWeatherSettings();
+        Serial.printf("[WeatherModal] Saved Country=%s (%s), City=%s\n",
+            countryLabels[owmCountryIndex], owmCountryCode.c_str(), owmCity.c_str());
+        weatherModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+    weatherModal.show();
+}
+
+void showCalibrationModal()
+{
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+    static int tempOffsetTemp = tempOffset;
+    static int humOffsetTemp = humOffset;
+    static int lightGainTemp = lightGain;
+    String labels[] = {"Temp Offset", "Hum Offset", "Light Gain"};
+    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber};
+    int *numberRefs[] = {&tempOffsetTemp, &humOffsetTemp, &lightGainTemp};
+    calibrationModal.setLines(labels, types, 3);
+    calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
+
+    calibrationModal.setCallback([](bool accepted, int btnIdx) {
+        tempOffset = constrain(tempOffsetTemp, -10, 10);
+        humOffset = constrain(humOffsetTemp, -20, 20);
+        lightGain = constrain(lightGainTemp, 1, 150);
+        saveCalibrationSettings();
+        float lux = readBrightnessSensor();
+        setDisplayBrightnessFromLux(lux);
+        Serial.printf("[Saved] tempOffset=%d, humOffset=%d, lightGain=%d\n", tempOffset, humOffset, lightGain);
+        calibrationModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+    calibrationModal.show();
+}
+
+void showSystemModal()
+{
+    menuActive = true;
+    currentMenuLevel = MENU_NONE;
+    String labels[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
+    InfoFieldType types[] = {InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+    systemModal.setLines(labels, types, 7);
+    systemModal.setCallback([](bool accepted, int btnIdx) {
+        int sel = systemModal.getSelIndex();
+        systemModal.hide();
+        switch (sel) {
+            case 0: showSystemInfoScreen(); break;
+            case 1: showDateTimeModal(); break;
+            case 2: showWiFiSignalTest(); break;
+            case 3: quickRestore(); break;
+            case 4: resetPowerUsage(); break;
+            case 5: factoryReset(); break;
+            case 6: ESP.restart(); break;
+        }
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+    systemModal.show();
+}
+
+// --- Helper functions (WiFi scan, drawMenu, drawWiFiMenu, etc.) ---
 
 void scanWiFiNetworks()
 {
     wifiScanCount = 0;
     wifiSelecting = true;
-
-    WiFi.mode(WIFI_STA); // Set WiFi to Station mode (required for scanning)
+    WiFi.mode(WIFI_STA);
     delay(100);
 
     int n = WiFi.scanNetworks();
     int j = 0;
-    for (int i = 0; i < n && j < 15; ++i)
-    { // Leave room for "Back"
+    for (int i = 0; i < n && j < 15; ++i) {
         String ssid = WiFi.SSID(i);
         ssid.trim();
-        if (ssid.length() == 0)
-            continue;
+        if (ssid.length() == 0) continue;
         scannedSSIDs[j++] = ssid;
     }
-    // Always add "< Back" as last menu entry
     scannedSSIDs[j++] = "< Back";
     wifiScanCount = j;
     wifiSelectIndex = 0;
@@ -164,726 +488,112 @@ void scanWiFiNetworks()
     Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount - 1);
 }
 
-void handleIR(uint32_t code)
-{
-    Serial.printf("IR Code: 0x%X\n", code);
-
-    // --- Handle Screen On/Off IR code ---
-    //   const uint32_t IR_SCREEN = 0xFFFFF00F; // Power/Menu (toggle screen on/off)
-    if (code == IR_SCREEN)
-    {
-        if (isScreenOff())
-        {
-            setScreenOff(false); // Turn ON (restore brightness)
-        }
-        else
-        {
-            setScreenOff(true); // Turn OFF (set brightness to 0)
-        }
-        return; // Do not process further menu actions for this code
-    }
-
-    if (isScreenOff())
-    {
-        return; // Ignore all IR codes when screen is off
-    }
-    // --- Keyboard mode always has top priority ---
-    if (inKeyboardMode)
-    {
-        handleKeyboardIR(code);
-        return;
-    }
-
-    if (sysInfoModal.isActive())
-    {
-        sysInfoModal.handleIR(code);
-        return;
-    }
-
-    // --- Handle WiFi Info Modal ---
-    if (wifiInfoModal.isActive())
-    {
-        wifiInfoModal.handleIR(code);
-        return;
-    }
-
-    if (dateModal.isActive())
-    {
-        dateModal.handleIR(code);
-        return;
-    }
-
-    if (mainMenuModal.isActive())
-    {
-        mainMenuModal.handleIR(code);
-        return;
-    }
-
-    if (deviceModal.isActive())
-    {
-        deviceModal.handleIR(code);
-        return;
-    }
-
-    if (displayModal.isActive())
-    {
-        displayModal.handleIR(code);
-        return;
-    }
-
-    if (weatherModal.isActive())
-    {
-        weatherModal.handleIR(code);
-        return;
-    }
-
-    if (calibrationModal.isActive())
-    {
-        calibrationModal.handleIR(code);
-        return;
-    }
-
-    if (systemModal.isActive())
-    {
-        systemModal.handleIR(code);
-        return;
-    }
-
-    // -------- 1. WiFi Select Mode --------
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-    {
-
-        if (wifiScanCount == 0)
-        {
-            // No networks scanned, just return to device menu
-            currentMenuLevel = MENU_DEVICE;
-            drawMenu();
-            return;
-        }
-
-        if (code == IR_UP)
-        {
-            handleUp();
-            playBuzzerTone(1000, 60);
-        }
-        else if (code == IR_DOWN)
-        {
-            handleDown();
-            playBuzzerTone(1300, 60);
-        }
-        else if (code == IR_OK)
-        {
-            // --- Handle Back option ---
-            if (wifiSelectIndex == wifiScanCount - 1) // Last entry is "< Back"
-            {
-                wifiSelecting = false;
-                currentMenuLevel = MENU_DEVICE;
-                drawMenu();
-                playBuzzerTone(900, 80);
-                return;
-            }
-            // Block selecting "(No networks)"!
-            if (scannedSSIDs[wifiSelectIndex] == "(No networks)")
-            {
-                playBuzzerTone(500, 100); // error tone
-                return;                   // Do nothing if fake SSID is selected
-            }
-            // Picked a network: set SSID, prompt for password (or reuse old pass)
-            wifiSSID = scannedSSIDs[wifiSelectIndex];
-            Serial.printf("Selected SSID: %s\n", wifiSSID.c_str());
-            currentMenuLevel = MENU_DEVICE;
-            currentMenuIndex = 1; // WiFi Pass
-            menuScroll = 0;
-            drawMenu();
-            // --- Use keyboard for password entry ---
-            startKeyboardEntry(wifiPass.c_str(), [](const char *result)
-                               {
-                if(result) {
-                    wifiPass = String(result);
-                    saveDeviceSettings();
-                    connectToWiFi();
-                }
-                drawMenu(); });
-            playBuzzerTone(2200, 120);
-            return;
-        }
-        else if (code == IR_CANCEL)
-        {
-            wifiSelecting = false;
-            currentMenuLevel = MENU_DEVICE;
-            drawMenu();
-            playBuzzerTone(700, 80);
-        }
-        return; // No further menu processing
-    }
-
-    // -------- 3. Menu NOT Active --------
-    // -------- 3. Menu NOT Active --------
-    unsigned long lastMenuToggle = 0;
-
-    // In handleIR()
-    if (!menuActive)
-    {
-        if (code == IR_LEFT)
-        {
-            handleScreenSwitch(-1);
-            return;
-        }
-        else if (code == IR_RIGHT)
-        {
-            handleScreenSwitch(+1);
-            return;
-        }
-        else if (code == IR_CANCEL)
-        {
-            if (millis() - lastMenuToggle < 500)
-                return; // Prevent toggle flood
-
-            menuActive = true;
-            currentMenuLevel = MENU_MAIN;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-
-            showMainMenuModal(); // ✅ Show modal immediately
-            playBuzzerTone(3000, 100);
-            lastMenuToggle = millis();
-            return;
-        }
-
-        return;
-    }
-
-    // -------- 4. Normal Menu Navigation --------
-    switch (code)
-    {
-    case IR_CANCEL:
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        menuActive = false;
-        dma_display->clearScreen();
-        delay(50);
-        playBuzzerTone(3000, 100);
-        fetchWeatherFromOWM();
-        displayClock();
-        displayDate();
-        displayWeatherData();
-        reset_Time_and_Date_Display = true;
-        lastMenuToggle = millis(); // << Add this!
-        break;
-    case IR_UP:
-        handleUp();
-        playBuzzerTone(1500, 100);
-        break;
-    case IR_DOWN:
-        handleDown();
-        playBuzzerTone(1200, 100);
-        break;
-    case IR_RIGHT:
-        handleRight();
-        playBuzzerTone(1800, 100);
-        break;
-    case IR_LEFT:
-        handleLeft();
-        playBuzzerTone(900, 100);
-        break;
-    case IR_OK:
-        handleSelect();
-        playBuzzerTone(2200, 100);
-        break;
-    default:
-        Serial.printf("Unknown code: 0x%X\n", code);
-        playBuzzerTone(500, 100);
-        delay(100);
-        playBuzzerTone(500, 100);
-        break;
-    }
-}
-
 void drawMenu()
 {
     // If keyboard mode, let keyboard handle drawing!
-    if (inKeyboardMode)
-    {
-        drawKeyboard();
-        return;
-    }
-
-    // If using InfoModal for main menu, skip legacy draw
-    if (currentMenuLevel == MENU_MAIN)
-        return;
-
-    // If WiFi Select Mode, always call drawWiFiMenu() and return
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-    {
-        drawWiFiMenu();
-        return;
-    }
-
-    // Normal menu rendering
-    dma_display->fillScreen(dma_display->color565(0, 0, 0));
-    dma_display->setCursor(0, 0);
-    dma_display->setFont(&Font5x7Uts);
-
-    int count = (currentMenuLevel == MENU_DEVICE)        ? deviceCount
-                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
-                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
-                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
-                                                         : systemCount;
-
-    for (int i = 0; i < visibleLines; i++)
-    {
-        int itemIdx = menuScroll + i;
-        if (itemIdx >= count)
-            break;
-
-        bool isSelected = (itemIdx == currentMenuIndex);
-        uint16_t color = isSelected ? dma_display->color565(255, 0, 0) : dma_display->color565(255, 255, 255);
-
-        char line[64] = "";
-
-        if (currentMenuLevel == MENU_DEVICE && itemIdx < deviceCount)
-        {
-            if (itemIdx == 0)
-                sprintf(line, "WiFi SSID: %s", wifiSSID.c_str());
-            else if (itemIdx == 1)
-                sprintf(line, "WiFi Pass: %s", wifiPass.c_str());
-            else if (itemIdx == 2)
-                sprintf(line, "Units: %s", (units == 0) ? "F+mph" : "C+m/s");
-            else if (itemIdx == 3)
-                sprintf(line, "DayFmt: %s", (dayFormat == 0) ? "MM/DD" : "DD/MM");
-            else if (itemIdx == 4)
-                sprintf(line, "Forecast: %s", (forecastSrc == 0) ? "OWM" : "WF");
-            else if (itemIdx == 5)
-                sprintf(line, "AutoRot: %s", (autoRotate == 0) ? "Off" : "On");
-            else if (itemIdx == 6)
-                sprintf(line, "ManualScr");
-            else if (itemIdx == deviceCount - 1)
-                sprintf(line, "< Back");
-        }
-        else if (currentMenuLevel == MENU_DISPLAY && itemIdx < displayCount)
-        {
-            if (itemIdx == 0)
-                sprintf(line, "Theme: %s", (theme == 0) ? "Color" : "Mono");
-            else if (itemIdx == 1)
-                sprintf(line, autoBrightness ? "Bright: auto" : "Bright: %d%%", brightness);
-            else if (itemIdx == 2)
-                sprintf(line, "Scroll: %d", scrollSpeed);
-            else if (itemIdx == 3)
-                sprintf(line, "Custom Msg");
-            else if (itemIdx == displayCount - 1)
-                sprintf(line, "< Back");
-        }
-        else if (currentMenuLevel == MENU_WEATHER && itemIdx < weatherCount)
-        {
-            if (itemIdx == 0)
-                sprintf(line, "OWM City: %s", owmCity.c_str());
-            else if (itemIdx == 1)
-            {
-                if (owmCountryIndex < numCountries - 1)
-                    sprintf(line, "Country: %s (%s)", countries[owmCountryIndex].name, countries[owmCountryIndex].code);
-                else
-                    sprintf(line, "Country: Custom (%s)", owmCountryCustom.length() ? owmCountryCustom.c_str() : "--");
-            }
-            else if (itemIdx == 2)
-                snprintf(line, sizeof(line), "OWM Key: %.30s", owmApiKey.c_str());
-            else if (itemIdx == 3)
-                sprintf(line, "WF Token: %s", wfToken.c_str());
-            else if (itemIdx == 4)
-                sprintf(line, "WF ID: %s", wfStationId.c_str());
-            else if (itemIdx == weatherCount - 1)
-                sprintf(line, "< Back");
-        }
-        else if (currentMenuLevel == MENU_CALIBRATION && itemIdx < calibCount)
-        {
-            if (itemIdx == 0)
-                sprintf(line, "TempOff: %+d", tempOffset);
-            else if (itemIdx == 1)
-                sprintf(line, "HumOff: %+d", humOffset);
-            else if (itemIdx == 2)
-                sprintf(line, "LightG: %d%%", lightGain);
-            else if (itemIdx == calibCount - 1)
-                sprintf(line, "< Back");
-        }
-        else if (currentMenuLevel == MENU_SYSTEM && itemIdx < systemCount)
-        {
-            if (itemIdx == 0)
-                sprintf(line, "System Info");
-            else if (itemIdx == 1)
-                sprintf(line, "Set Date & Time");
-            else if (itemIdx == 2)
-                sprintf(line, "WiFi Signal Test");
-            else if (itemIdx == 3)
-                sprintf(line, "Quick Restore");
-            else if (itemIdx == 4)
-                sprintf(line, "Reset Power");
-            else if (itemIdx == 5)
-                sprintf(line, "Factory Reset");
-            else if (itemIdx == 6)
-                sprintf(line, "Reboot");
-            else if (itemIdx == systemCount - 1)
-                sprintf(line, "< Back");
-        }
-
-        if (isSelected && needsScroll(line))
-        {
-            drawScrollingText(line, i * 8, color, itemIdx);
-        }
-        else
-        {
-            dma_display->setTextColor(color);
-            dma_display->setCursor(0, i * 8);
-            dma_display->print(line);
-        }
-    }
+    if (inKeyboardMode) { drawKeyboard(); return; }
+    if (currentMenuLevel == MENU_MAIN) return;
+    if (currentMenuLevel == MENU_WIFI_SELECT) { drawWiFiMenu(); return; }
+    // You can remove any further legacy drawing.
 }
 
 void handleUp()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
-
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-    {
-        if (wifiScanCount > 0)
-        {
-            if (wifiSelectIndex > 0)
-            {
+    if (currentMenuLevel == MENU_WIFI_SELECT) {
+        if (wifiScanCount > 0) {
+            if (wifiSelectIndex > 0) {
                 wifiSelectIndex--;
-                // Scroll window up if selection goes above the visible window
-                if (wifiSelectIndex < wifiMenuScroll)
-                {
-                    wifiMenuScroll = wifiSelectIndex;
-                }
+                if (wifiSelectIndex < wifiMenuScroll) wifiMenuScroll = wifiSelectIndex;
             }
-            // Clamp scroll (for when list shrinks)
-            if (wifiMenuScroll < 0)
-                wifiMenuScroll = 0;
+            if (wifiMenuScroll < 0) wifiMenuScroll = 0;
             int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-            if (wifiMenuScroll > maxScroll)
-                wifiMenuScroll = maxScroll;
+            if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
         }
         drawWiFiMenu();
         return;
     }
-
-    // Other menu navigation unchanged
-    currentMenuIndex--;
-    if (currentMenuIndex < 0)
-        currentMenuIndex = 0;
-    if (currentMenuIndex < menuScroll)
-        menuScroll = currentMenuIndex;
-    Serial.printf("[UP] Index: %d, Scroll: %d, Visible: %d, Count: %d\n", wifiSelectIndex, wifiMenuScroll, wifiVisibleLines, wifiScanCount);
-
-    drawMenu();
 }
 
 void handleDown()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
-
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-    {
-        if (wifiScanCount > 0)
-        {
-            if (wifiSelectIndex < wifiScanCount - 1)
-            {
+    if (currentMenuLevel == MENU_WIFI_SELECT) {
+        if (wifiScanCount > 0) {
+            if (wifiSelectIndex < wifiScanCount - 1) {
                 wifiSelectIndex++;
-                // Scroll window down if selection goes below the visible window
                 if (wifiSelectIndex >= wifiMenuScroll + wifiVisibleLines)
-                {
                     wifiMenuScroll = wifiSelectIndex - wifiVisibleLines + 1;
-                }
             }
-            // Clamp scroll so we never show blank window
             int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-            if (wifiMenuScroll > maxScroll)
-                wifiMenuScroll = maxScroll;
-            if (wifiMenuScroll < 0)
-                wifiMenuScroll = 0;
+            if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
+            if (wifiMenuScroll < 0) wifiMenuScroll = 0;
         }
         drawWiFiMenu();
         return;
     }
-
-    // Other menu navigation unchanged
-    int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
-                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
-                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
-                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
-                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
-                                                         : systemCount;
-
-    currentMenuIndex++;
-    if (currentMenuIndex >= count)
-        currentMenuIndex = count - 1;
-    if (currentMenuIndex >= menuScroll + visibleLines)
-        menuScroll = currentMenuIndex - visibleLines + 1;
-
-    Serial.printf("[DOWN] Index: %d, Scroll: %d, Visible: %d, Count: %d\n", wifiSelectIndex, wifiMenuScroll, wifiVisibleLines, wifiScanCount);
-
-    drawMenu();
 }
 
 void handleLeft()
 {
     lastMenuActivity = millis();
-
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-        return; // no left/right in wifi select
-
-    if (currentMenuLevel == MENU_DEVICE)
-    {
-        if (currentMenuIndex == 2)
-            toggleUnits(-1);
-        if (currentMenuIndex == 3)
-            toggleDayFormat(-1);
-        if (currentMenuIndex == 4)
-            toggleForecastSrc(-1);
-        if (currentMenuIndex == 5)
-            toggleAutoRotate(-1);
-    }
-    else if (currentMenuLevel == MENU_DISPLAY)
-    {
-        if (currentMenuIndex == 0)
-            toggleTheme(-1);
-
-        if (currentMenuIndex == 1)
-        {
-            // If auto mode, turn OFF auto and allow manual brightness
-            if (autoBrightness)
-            {
-                autoBrightness = false;
-                playBuzzerTone(1200, 80);
-            }
-            else
-            {
-                // Manual decrease brightness, clamp 3-100
-                brightness--;
-                if (brightness < 3)
-                    brightness = 3;
-                int hardwareBrightness = map(brightness, 1, 100, 3, 255);
-                dma_display->setBrightness8(hardwareBrightness);
-                playBuzzerTone(900, 80);
-            }
-        }
-
-        if (currentMenuIndex == 2)
-            adjustScrollSpeed(-1);
-    }
-    else if (currentMenuLevel == MENU_CALIBRATION)
-    {
-        if (currentMenuIndex == 0)
-            adjustTempOffset(-1);
-        if (currentMenuIndex == 1)
-            adjustHumOffset(-1);
-        if (currentMenuIndex == 2)
-            adjustLightGain(-1);
-    }
-    else if (currentMenuLevel == MENU_WEATHER)
-    {
-        if (currentMenuIndex == 1)
-        { // OWM Country Code
-            if (owmCountryIndex > 0)
-                owmCountryIndex--;
-            else
-                owmCountryIndex = numCountries - 1;
-            drawMenu();
-            return;
-        }
-    }
-
-    drawMenu();
+    if (currentMenuLevel == MENU_WIFI_SELECT) return;
 }
 
 void handleRight()
 {
     lastMenuActivity = millis();
-
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-        return; // no left/right in wifi select
-
-    if (currentMenuLevel == MENU_DEVICE)
-    {
-        if (currentMenuIndex == 2)
-            toggleUnits(1);
-        if (currentMenuIndex == 3)
-            toggleDayFormat(1);
-        if (currentMenuIndex == 4)
-            toggleForecastSrc(1);
-        if (currentMenuIndex == 5)
-            toggleAutoRotate(1);
-    }
-    else if (currentMenuLevel == MENU_DISPLAY)
-    {
-        if (currentMenuIndex == 0)
-            toggleTheme(1);
-
-        else if (currentMenuIndex == 1)
-        {
-            // -- NEW: If in auto, toggle to manual (and vice versa elsewhere)
-            if (autoBrightness)
-            {
-                autoBrightness = false;
-                playBuzzerTone(1900, 80);
-            }
-            else
-            {
-                // manual: increment brightness %
-                brightness++;
-                if (brightness > 100)
-                    brightness = 100;
-                if (brightness < 1)
-                    brightness = 1;
-                int hardwareBrightness = map(brightness, 1, 100, 3, 255);
-                dma_display->setBrightness8(hardwareBrightness);
-                playBuzzerTone(2200, 60);
-            }
-        }
-
-        if (currentMenuIndex == 2)
-            adjustScrollSpeed(1);
-    }
-    else if (currentMenuLevel == MENU_CALIBRATION)
-    {
-        if (currentMenuIndex == 0)
-            adjustTempOffset(1);
-        if (currentMenuIndex == 1)
-            adjustHumOffset(1);
-        if (currentMenuIndex == 2)
-            adjustLightGain(1);
-    }
-    else if (currentMenuLevel == MENU_WEATHER)
-    {
-        if (currentMenuIndex == 1)
-        { // OWM Country Code
-            if (owmCountryIndex < numCountries - 1)
-                owmCountryIndex++;
-            else
-                owmCountryIndex = 0;
-            drawMenu();
-            return;
-        }
-    }
-
-    drawMenu();
+    if (currentMenuLevel == MENU_WIFI_SELECT) return;
 }
 
 void handleSelect()
 {
     lastMenuActivity = millis();
-
-    // Defensive: clamp index
     int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
-                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
-                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
-                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
-                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
+              : (currentMenuLevel == MENU_DEVICE)        ? deviceCount
+              : (currentMenuLevel == MENU_DISPLAY)       ? displayCount
+              : (currentMenuLevel == MENU_WEATHER)       ? weatherCount
+              : (currentMenuLevel == MENU_CALIBRATION)   ? calibCount
                                                          : systemCount;
+    if (currentMenuIndex < 0) currentMenuIndex = 0;
+    if (currentMenuIndex >= count) currentMenuIndex = count - 1;
+    if (inKeyboardMode) return;
 
-    if (currentMenuIndex < 0)
-        currentMenuIndex = 0;
-    if (currentMenuIndex >= count)
-        currentMenuIndex = count - 1;
+    if (currentMenuLevel == MENU_MAIN)          { showMainMenuModal();       return; }
+    else if (currentMenuLevel == MENU_DISPLAY)  { showDisplaySettingsModal();return; }
+    else if (currentMenuLevel == MENU_WEATHER)  { showWeatherSettingsModal();return; }
+    else if (currentMenuLevel == MENU_CALIBRATION){ showCalibrationModal();  return; }
+    else if (currentMenuLevel == MENU_SYSTEM)   { showSystemModal();         return; }
 
-    if (inKeyboardMode)
-        return;
-
-    // ✅ Always use modal for main menu
-    if (currentMenuLevel == MENU_MAIN)
-    {
-        showMainMenuModal();
-        return;
-    }
-
-    else if (currentMenuLevel == MENU_DISPLAY)
-    {
-        showDisplaySettingsModal();
-        return;
-    }
-
-    else if (currentMenuLevel == MENU_WEATHER)
-    {
-        showWeatherSettingsModal();
-        return;
-    }
-    else if (currentMenuLevel == MENU_CALIBRATION)
-    {
-        showCalibrationModal();
-        return;
-    }
-    else if (currentMenuLevel == MENU_SYSTEM)
-    {
-        showSystemModal();
-        return;
-    }
-
-    if (!menuActive)
-        return;
-
-    if (currentMenuLevel == MENU_WIFI_SELECT)
-    {
-        drawWiFiMenu();
-    }
-    else
-    {
-        drawMenu();
-    }
+    if (!menuActive) return;
+    if (currentMenuLevel == MENU_WIFI_SELECT)   { drawWiFiMenu(); }
+    else                                        { drawMenu();     }
 }
-
-void updateMenu() { drawMenu(); }
-
-bool wifiScanInProgress = false;
 
 void drawWiFiMenu()
 {
-    dma_display->fillScreen(dma_display->color565(0, 0, 0)); // Clear screen
+    dma_display->fillScreen(dma_display->color565(0, 0, 0));
     dma_display->setFont(&Font5x7Uts);
-
-    // Draw label
     dma_display->setTextColor(dma_display->color565(0, 255, 255));
     dma_display->setCursor(0, 0);
     dma_display->print("Select WiFi:");
-
-    // Show "Scanning..." if scan is in progress
-    if (wifiScanInProgress)
-    {
-        dma_display->setTextColor(dma_display->color565(255, 255, 80));
-        dma_display->setCursor(0, 10);
-        dma_display->print("Scanning...");
-        return;
-    }
-
-    // Show "No WiFi found" if scan is complete but none are found
-    if (wifiScanCount == 0)
-    {
+    if (wifiScanCount == 0) {
         dma_display->setTextColor(dma_display->color565(255, 80, 80));
         dma_display->setCursor(0, 10);
         dma_display->print("No WiFi found.");
         return;
     }
-
-    // Clamp scroll to avoid blanks
     int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-    if (wifiMenuScroll > maxScroll)
-        wifiMenuScroll = maxScroll;
-    if (wifiMenuScroll < 0)
-        wifiMenuScroll = 0;
-
-    const int labelHeight = 7;
-    const int listStartY = labelHeight + 1;
-    const int wifiLineHeight = 8;
-
-    for (int i = 0; i < wifiVisibleLines; ++i)
-    {
+    if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
+    if (wifiMenuScroll < 0) wifiMenuScroll = 0;
+    const int labelHeight = 7, listStartY = labelHeight + 1, wifiLineHeight = 8;
+    for (int i = 0; i < wifiVisibleLines; ++i) {
         int idx = wifiMenuScroll + i;
-        if (idx >= wifiScanCount)
-            break;
-        if (idx == wifiSelectIndex)
-            dma_display->setTextColor(dma_display->color565(255, 255, 0));
-        else
-            dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        if (idx >= wifiScanCount) break;
+        if (idx == wifiSelectIndex) dma_display->setTextColor(dma_display->color565(255, 255, 0));
+        else dma_display->setTextColor(dma_display->color565(255, 255, 255));
         dma_display->setCursor(0, listStartY + wifiLineHeight * i);
         dma_display->print(scannedSSIDs[idx]);
     }
@@ -891,19 +601,18 @@ void drawWiFiMenu()
 
 void onWiFiConnectFailed()
 {
-    // Do a scan and update scannedSSIDs[] like your menu code
-    scanWiFiNetworks(); // <-- Your safe menu-managed scanner
+    scanWiFiNetworks();
     wifiSelectIndex = 0;
     wifiMenuScroll = 0;
     currentMenuLevel = MENU_WIFI_SELECT;
     menuActive = true;
-    drawMenu(); // Will call drawWiFiMenu() as needed
+    drawMenu();
 }
 
+// --- System Info/DateTime/WiFi Test Modals (same as before) ---
 void showWiFiSignalTest()
 {
     scanWiFiNetworks();
-
     const int maxLines = 32;
     String lines[maxLines];
     InfoFieldType types[maxLines];
@@ -926,35 +635,44 @@ void showWiFiSignalTest()
     lines[lineIndex] = "Channel: " + String(WiFi.channel());
     types[lineIndex++] = InfoLabel;
 
-    // Add networks (skip <Back> entry)
-    for (int i = 0; i < wifiScanCount - 1 && lineIndex < maxLines; i++)
-    {
+    for (int i = 0; i < wifiScanCount - 1 && lineIndex < maxLines; i++) {
         lines[lineIndex] = "Net[" + String(i + 1) + "]: " + scannedSSIDs[i];
         types[lineIndex++] = InfoLabel;
     }
-
     wifiInfoModal.setLines(lines, types, lineIndex);
     wifiInfoModal.show();
 }
 
 void showSystemInfoScreen()
 {
+    uint32_t flashChipSize = ESP.getFlashChipSize();
+    uint32_t sketchSize = ESP.getSketchSize();
+    uint32_t appPartition = 0x190000;
+    uint32_t heapFree = ESP.getFreeHeap();
+    uint32_t heapTotal = 327680;
+    uint32_t heapUsed = heapTotal - heapFree;
+    float heapPct = 100.0 * heapUsed / heapTotal;
+    float flashPct = 100.0 * sketchSize / appPartition;
+    uint32_t spiffsTotal = SPIFFS.totalBytes();
+    uint32_t spiffsUsed = SPIFFS.usedBytes();
+    float spiffsPct = (spiffsTotal > 0) ? (100.0 * spiffsUsed / spiffsTotal) : 0;
+
     String lines[] = {
         "FW: 1.0.0",
         "IP: " + WiFi.localIP().toString(),
         "MAC: " + WiFi.macAddress(),
         "RSSI: " + String(WiFi.RSSI()) + " dBm",
-        "Heap: " + String(ESP.getFreeHeap()) + " B"};
-    InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    sysInfoModal.setLines(lines, types, 5);
+        "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
+        "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
+        "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"
+    };
+    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    sysInfoModal.setLines(lines, types, 7);
     sysInfoModal.show();
 }
 
 void showDateTimeModal()
 {
-    Serial.println("[Modal] showDateTimeModal opened");
-    // Read RTC and current config into working vars:
     DateTime now = rtc.now();
     dtYear = now.year();
     dtMonth = now.month();
@@ -963,69 +681,38 @@ void showDateTimeModal()
     dtMinute = now.minute();
     dtSecond = now.second();
     dtTimezone = tzOffset;
-
-    // Clamp chooser values BEFORE modal
     dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
     dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
-
     static char ntpServer[64] = "pool.ntp.org";
 
-    String lines[] = {
-        "Year", "Month", "Day", "Hour", "Minute", "Second",
-        "TimeZone", "TimeFmt", "DateFmt",
-        "NTP Server", "Sync NTP"};
-    InfoFieldType types[] = {
-        InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
-        InfoNumber, InfoChooser, InfoChooser,
-        InfoText, InfoButton};
+    String lines[] = {"Year", "Month", "Day", "Hour", "Minute", "Second", "TimeZone", "TimeFmt", "DateFmt", "NTP Server", "Sync NTP"};
+    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoChooser, InfoChooser, InfoText, InfoButton};
 
-    int *intRefs[] = {
-        &dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond,
-        &dtTimezone};
+    int *intRefs[] = {&dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond, &dtTimezone};
     int *chooserRefs[] = {&dtFmt24, &dtDateFmt};
     static const char *fmt24Opts[] = {"12h", "24h"};
     static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
     static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts};
     int chooserOptCounts[] = {2, 3};
-
     char *textRefs[] = {ntpServer};
     int textSizes[] = {64};
 
     dateModal.setLines(lines, types, 11);
-    dateModal.setValueRefs(
-        intRefs, 7,
-        chooserRefs, 2,
-        chooserOptPtrs, chooserOptCounts,
-        textRefs, 1, textSizes);
+    dateModal.setValueRefs(intRefs, 7, chooserRefs, 2, chooserOptPtrs, chooserOptCounts, textRefs, 1, textSizes);
 
-    // 🚫 No buttons — use auto-save and Sync button inline
-    dateModal.setCallback([](bool accepted, int btnIdx)
-                          {
+    dateModal.setCallback([](bool accepted, int btnIdx) {
         int sel = dateModal.getSelIndex();
-
-if (sel == 10) {
-    dateModal.hide();
-//    dateModal.resetState();
-
-    dma_display->fillScreen(0);
-    dma_display->setCursor(8, 12);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print("Syncing NTP...");
-
-    syncTimeFromNTP();
-
-    reopenModalAfterDelay(showDateTimeModal);  // ✅ reusable now
-    return;
-}
-
-
-
-
-
-
-
-        // Auto-save on close
-        // Clamp and validate values
+        if (sel == 10) {
+            dateModal.hide();
+            dma_display->fillScreen(0);
+            dma_display->setCursor(8, 12);
+            dma_display->setTextColor(myWHITE);
+            dma_display->print("Syncing NTP...");
+            syncTimeFromNTP();
+            pendingModalFn = showDateTimeModal;
+            pendingModalTime = millis() + 50;
+            return;
+        }
         dtMonth = constrain(dtMonth, 1, 12);
         dtDay = constrain(dtDay, 1, 31);
         dtHour = constrain(dtHour, 0, 23);
@@ -1033,404 +720,25 @@ if (sel == 10) {
         dtSecond = constrain(dtSecond, 0, 59);
         dtYear = constrain(dtYear, 2000, 2099);
         dtTimezone = constrain(dtTimezone, -720, 840);
-
         rtc.adjust(DateTime(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond));
         tzOffset = dtTimezone;
         fmt24 = dtFmt24;
         dateFmt = dtDateFmt;
-
-        // TODO: optionally save ntpServer if you want it persisted
         saveDateTimeSettings();
-
         dateModal.hide();
-        drawMenu(); });
-
+    });
     dateModal.show();
 }
 
 void handleScreenSwitch(int dir)
 {
-    // dir: +1 for right, -1 for left
-
     int next = (int)currentScreen + dir;
-    if (next < 0)
-        next = SCREEN_COUNT - 1;
-    if (next >= SCREEN_COUNT)
-        next = 0;
+    if (next < 0) next = SCREEN_COUNT - 1;
+    if (next >= SCREEN_COUNT) next = 0;
     currentScreen = (ScreenMode)next;
-    if (currentScreen == ScreenMode::SCREEN_OWM)
-    {
+    if (currentScreen == ScreenMode::SCREEN_OWM) {
         dma_display->clearScreen();
         delay(50);
     }
     playBuzzerTone(2000 + dir * 200, 80);
-}
-
-void showMainMenuModal()
-{
-    String items[] = {
-        "Device Settings",
-        "Display Settings",
-        "Weather Settings",
-        "Calibration",
-        "System",
-        "Exit Menu"};
-    InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-
-    mainMenuModal.setLines(items, types, 6);
-
-    // ❌ Do NOT call setButtons — this disables the button bar
-
-    mainMenuModal.setCallback([](bool accepted, int btnIdx)
-                              {
-    if (!accepted) {
-        menuActive = false;
-        dma_display->clearScreen();
-        delay(50);
-        fetchWeatherFromOWM();
-        displayClock();
-        displayDate();
-        displayWeatherData();
-        reset_Time_and_Date_Display = true;
-        return;
-    }
-
-    int selected = mainMenuModal.getSelIndex();
-    Serial.printf("[MainMenu] selected=%d\n", selected);
-
-    switch (selected) {
-        case 0:
-            showDeviceSettingsModal();
-            return;
-        case 1:
-            showDisplaySettingsModal();
-            return;
-        case 2:
-            showWeatherSettingsModal();
-            return;
-        case 3:
-            showCalibrationModal();
-            return;
-        case 4:
-            showSystemModal();
-            return;
-        case 5: // Exit Menu
-            menuActive = false;
-            dma_display->clearScreen();
-            delay(50);
-            fetchWeatherFromOWM();
-            displayClock();
-            displayDate();
-            displayWeatherData();
-            reset_Time_and_Date_Display = true;
-            return;
-        default:
-            Serial.println("⚠️ Invalid main menu selection");
-            return;
-    }
-
-    currentMenuIndex = 0;
-    menuScroll = 0;
-    drawMenu(); });
-
-    mainMenuModal.show();
-}
-
-void showDeviceSettingsModal()
-{
-    menuActive = true;
-    currentMenuLevel = MENU_NONE; // disable legacy rendering
-
-    // Labels and field types
-    String labels[] = {
-        "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"};
-    InfoFieldType types[] = {
-        InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
-
-    // Chooser value references
-    int *chooserRefs[] = {
-        &units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
-
-    // Chooser options
-    static const char *unitsOpt[] = {"F+mph", "C+m/s"};
-    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
-    static const char *forecastOpt[] = {"OWM", "WF"};
-    static const char *rotateOpt[] = {"Off", "On"};
-    static const char *manualOpt[] = {"Off", "On"};
-
-    const char *const *chooserOpts[] = {
-        unitsOpt, dayFmtOpt, forecastOpt, rotateOpt, manualOpt};
-    int chooserCounts[] = {2, 2, 2, 2, 2};
-
-    // Set modal contents
-    deviceModal.setLines(labels, types, 5);
-    deviceModal.setValueRefs(nullptr, 0, chooserRefs, 5, chooserOpts, chooserCounts);
-
-    // No buttons = dismiss with cancel only
-    deviceModal.setButtons(nullptr, 0);
-
-    // Auto-save on modal close
-    deviceModal.setCallback([](bool accepted, int btnIdx)
-                            {
-        saveDeviceSettings(); // Always save on close
-        deviceModal.hide();
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        drawMenu(); });
-
-    deviceModal.show();
-}
-
-void showDisplaySettingsModal()
-{
-    Serial.println("[DisplayModal] Opening Display Settings Modal");
-
-    menuActive = true;
-    currentMenuLevel = MENU_NONE;
-
-    // --- Sync working variables with global state ---
-    static int autoBrightnessInt;
-    autoBrightnessInt = autoBrightness ? 1 : 0;
-
-    static int brightnessTemp;
-    brightnessTemp = brightness;
-
-    // Convert scrollSpeed → scrollLevelTemp (0–9)
-    static int scrollLevelTemp = 3;
-    for (int i = 0; i < 10; ++i) {
-        if (scrollSpeed >= scrollDelays[i]) {
-            scrollLevelTemp = i;
-            break;
-        }
-    }
-
-    // --- Labels and Types ---
-    String labels[] = {
-        "Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Custom Msg"};
-
-    InfoFieldType types[] = {
-        InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText};
-
-    // --- Choosers ---
-    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp};
-    static const char *themeOpts[] = {"Color", "Mono"};
-    static const char *autoOpts[] = {"Off", "On"};
-    static const char *speedOpts[] = {
-        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
-    static const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts};
-    int chooserCounts[] = {2, 2, 10};
-
-    // --- Number fields ---
-    int *numberRefs[] = {&brightnessTemp};
-
-    // --- Text fields ---
-    static char customMsgBuf[64];
-    strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
-    customMsgBuf[sizeof(customMsgBuf) - 1] = 0;
-    char *textRefs[] = {customMsgBuf};
-    int textSizes[] = {sizeof(customMsgBuf)};
-
-    // --- Apply to modal ---
-    displayModal.setLines(labels, types, 5);
-    displayModal.setValueRefs(
-        numberRefs, 1,
-        chooserRefs, 3,
-        chooserOpts, chooserCounts,
-        textRefs, 1, textSizes);
-
-    // --- Callback ---
-    displayModal.setCallback([](bool accepted, int btnIdx) {
-        if (accepted) {
-            brightness = constrain(brightnessTemp, 1, 100);
-            autoBrightness = (autoBrightnessInt > 0);
-            scrollLevel = constrain(scrollLevelTemp, 0, 9);
-            scrollSpeed = scrollDelays[scrollLevel];
-            customMsg = String(customMsgBuf);
-
-            saveDisplaySettings();
-            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d autoBrightness=%d\n",
-                          brightness, scrollLevel + 1, scrollSpeed, autoBrightness);
-        }
-
-        displayModal.hide();
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        drawMenu();
-    });
-
-    displayModal.show();
-}
-
-void showWeatherSettingsModal()
-{
-    Serial.println("[WeatherModal] Opening Weather Settings Modal");
-
-    menuActive = true;
-    currentMenuLevel = MENU_NONE;
-
-    static int owmCountryIndexTemp = owmCountryIndex;
-    static char owmCountryCustomBuf[4] = "";
-    static char owmCityBuf[32];
-    static char owmKeyBuf[48];
-    static char wfTokenBuf[48];
-    static char wfStationBuf[16];
-
-    strncpy(owmCountryCustomBuf, owmCountryCustom.c_str(), sizeof(owmCountryCustomBuf));
-    strncpy(owmCityBuf, owmCity.c_str(), sizeof(owmCityBuf));
-    strncpy(owmKeyBuf, owmApiKey.c_str(), sizeof(owmKeyBuf));
-    strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
-    strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
-
-    static const char *countryLabels[] = {
-        "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
-        "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"};
-    static const char *countryCodes[] = {
-        "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", "" // Custom code is manual
-    };
-    const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
-
-    // Labels and field types
-    String labels[] = {
-        "Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"};
-    InfoFieldType types[] = {
-        InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText};
-
-    // Set up references
-    int *chooserRefs[] = {&owmCountryIndexTemp};
-    const char *const *chooserOpts[] = {countryLabels};
-    int chooserCounts[] = {countryCount};
-
-    char *textRefs[] = {
-        owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf};
-    int textSizes[] = {
-        sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf),
-        sizeof(wfTokenBuf), sizeof(wfStationBuf)};
-
-    weatherModal.setLines(labels, types, 6);
-    weatherModal.setValueRefs(
-        nullptr, 0,
-        chooserRefs, 1, chooserOpts, chooserCounts,
-        textRefs, 5, textSizes);
-
-    weatherModal.setCallback([](bool ok, int btnIdx)
-                             {
-        // No Save/Cancel buttons — always save
-        owmCountryIndex = owmCountryIndexTemp;
-        owmCountryCustom = String(owmCountryCustomBuf);
-        owmCity = String(owmCityBuf);
-        owmApiKey = String(owmKeyBuf);
-        wfToken = String(wfTokenBuf);
-        wfStationId = String(wfStationBuf);
-
-        // Update owmCountryCode
-        if (owmCountryIndex < 10) {
-            owmCountryCode = countryCodes[owmCountryIndex];
-        } else {
-            owmCountryCode = owmCountryCustom;
-        }
-
-        saveWeatherSettings();
-        Serial.printf("[WeatherModal] Saved Country=%s (%s), City=%s\n",
-            countryLabels[owmCountryIndex], owmCountryCode.c_str(), owmCity.c_str());
-
-        weatherModal.hide();
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        drawMenu(); });
-
-    weatherModal.show();
-}
-
-void showCalibrationModal()
-{
-    Serial.println("[CalibrationModal] Opening Calibration Settings Modal");
-
-    menuActive = true;
-    currentMenuLevel = MENU_NONE;
-
-    // Working copies
-    static int tempOffsetTemp = tempOffset;
-    static int humOffsetTemp = humOffset;
-    static int lightGainTemp = lightGain;
-
-    String labels[] = {
-        "Temp Offset", // -10 to +10
-        "Hum Offset",  // -20 to +20
-        "Light Gain"   // 1–150
-    };
-    InfoFieldType types[] = {
-        InfoNumber, InfoNumber, InfoNumber};
-
-    int *numberRefs[] = {&tempOffsetTemp, &humOffsetTemp, &lightGainTemp};
-
-    calibrationModal.setLines(labels, types, 3);
-    calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
-
-    // 🚫 No button bar
-
-    calibrationModal.setCallback([](bool accepted, int btnIdx)
-                                 {
-        tempOffset = constrain(tempOffsetTemp, -10, 10);
-        humOffset = constrain(humOffsetTemp, -20, 20);
-        lightGain = constrain(lightGainTemp, 1, 150);
-        saveCalibrationSettings();
-        float lux = readBrightnessSensor();
-        setDisplayBrightnessFromLux(lux);
-        Serial.printf("[Saved] tempOffset=%d, humOffset=%d, lightGain=%d\n",
-                      tempOffset, humOffset, lightGain);
-
-        calibrationModal.hide();
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        drawMenu(); });
-
-    calibrationModal.show();
-}
-
-void showSystemModal()
-{
-    Serial.println("[SystemModal] Opening System Menu Modal");
-
-    menuActive = true;
-    currentMenuLevel = MENU_NONE;
-
-    String labels[] = {
-        "Show System Info",
-        "Set Date & Time",
-        "WiFi Signal Test",
-        "Quick Restore",
-        "Reset Power",
-        "Factory Reset",
-        "Reboot"};
-    InfoFieldType types[] = {
-        InfoButton, InfoButton, InfoButton,
-        InfoButton, InfoButton, InfoButton, InfoButton};
-
-    systemModal.setLines(labels, types, 7);
-    systemModal.setCallback([](bool accepted, int btnIdx)
-                            {
-        int sel = systemModal.getSelIndex();
-        systemModal.hide();
-
-        switch (sel) {
-            case 0: showSystemInfoScreen(); break;
-            case 1: showDateTimeModal(); break;
-            case 2: showWiFiSignalTest(); break;
-            case 3: quickRestore(); break;
-            case 4: resetPowerUsage(); break;
-            case 5: factoryReset(); break;
-            case 6: ESP.restart(); break;
-        }
-
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-        drawMenu(); });
-
-    systemModal.show();
 }

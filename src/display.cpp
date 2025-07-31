@@ -1,12 +1,21 @@
 #include "display.h"
 #include "icons.h"
 #include "settings.h"
+#include "RTClib.h"   // For RTC DateTime
 
-
-
+extern int scrollLevel;
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
+
+/*
+const ScreenMode InfoScreenModes[] = {
+    SCREEN_UDP_DATA,
+    SCREEN_UDP_FORECAST,
+    // ...add more InfoScreen-based modes here
+};
+*/
+// const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(InfoScreenModes[0]);
 
 MatrixPanel_I2S_DMA *dma_display = nullptr;
 
@@ -39,7 +48,6 @@ void setupDisplay() {
   myYELLOW = dma_display->color565(255, 255, 0);
   myCYAN = dma_display->color565(0, 255, 255);
 }
-
 
 
 int getTextWidth(const char* text) {
@@ -90,16 +98,6 @@ const uint16_t getDayNightColorFromCode( String code){
 }
 
 
-void drawClockScreen() {
-    dma_display->fillScreen(0);
-    dma_display->setCursor(4, 8);
-    dma_display->setTextColor(dma_display->color565(255,255,0));
-    dma_display->setTextSize(2);
-    dma_display->print("12:34");
-    dma_display->setTextSize(1);
-    dma_display->setCursor(4, 26);
-    dma_display->print("Sat, Jul 20");
-}
 
 void drawWeatherScreen() {
     dma_display->fillScreen(0);
@@ -112,21 +110,7 @@ void drawWeatherScreen() {
     dma_display->print("Clear Sky");
 }
 
-void drawUdpDataScreen() {
-  
-    dma_display->fillScreen(0);
-    dma_display->setCursor(2, 12);
-    dma_display->setTextColor(dma_display->color565(255,160,0));
-    dma_display->setTextSize(1);
-    dma_display->print("UDP:");
-    dma_display->setCursor(2, 22);
-    dma_display->print("DATA HERE");
-  
-    // Fill "DATA HERE" with actual UDP data
-
-
-}
-
+ 
 void drawSettingsScreen() {
     dma_display->fillScreen(0);
     dma_display->setCursor(2, 10);
@@ -345,36 +329,87 @@ void displayWeatherData() {
     dma_display->print("%");
 }
 
+// --- Scroll state variables for weather ---
 void scrollWeatherDetails() {
+    static unsigned long lastScrollTime = 0;
+    static int scrollOffset = 0;
+
     if (!start_Scroll_Text) {
         String unitT = useImperial ? "°F" : "°C";
         String unitW = useImperial ? "mph" : "m/s";
-        scrolling_Text = "City: " + str_City + " ¦ " +
-                         "Weather: " + str_Weather_Conditions_Des + " ¦ " +
-                         "Feels Like: " + str_Feels_like + unitT + " ¦ " +
-                         "Max: " + str_Temp_max + unitT + " ¦ Min: " + str_Temp_min + unitT + " ¦ " +
-                         "Pressure: " + str_Pressure + " hPa ¦ " +
-                         "Wind: " + str_Wind_Speed + " " + unitW + " ¦ ";
+
+        scrolling_Text =
+            "City: " + str_City + " ¦ " +
+            "Weather: " + str_Weather_Conditions_Des + " ¦ " +
+            "Feels Like: " + str_Feels_like + unitT + " ¦ " +
+            "Max: " + str_Temp_max + unitT + " ¦ Min: " + str_Temp_min + unitT + " ¦ " +
+            "Pressure: " + str_Pressure + " hPa ¦ " +
+            "Wind: " + str_Wind_Speed + " " + unitW + " ¦ ";
+
         scrolling_Text_Color = myGREEN;
-        set_up_Scrolling_Text_Length = true;
+        text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
+        scrollOffset = 0;
         start_Scroll_Text = true;
     }
-    if (start_Scroll_Text && set_up_Scrolling_Text_Length) {
-        text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
-        scrolling_X_Pos = PANEL_RES_X;
-        set_up_Scrolling_Text_Length = false;
-    }
-    if (millis() - prevMill_Scroll_Text >= 35) {
-        prevMill_Scroll_Text = millis();
-        scrolling_X_Pos--;
-        if (scrolling_X_Pos < -(text_Length_In_Pixel)) {
-            set_up_Scrolling_Text_Length = true;
-            start_Scroll_Text = false;
-            return;
+
+    // Use same timing as InfoModal
+    if (millis() - lastScrollTime > scrollSpeed) {
+        lastScrollTime = millis();
+
+        if (text_Length_In_Pixel > PANEL_RES_X) {
+            scrollOffset++;
+            if (scrollOffset > text_Length_In_Pixel)
+                scrollOffset = -PANEL_RES_X; // restart
+        } else {
+            scrollOffset = 0;
         }
-        dma_display->fillRect(0, 25, 64, 7, myBLACK);
-        dma_display->setCursor(scrolling_X_Pos, 25);
+
+        dma_display->fillRect(0, 25, PANEL_RES_X, 7, myBLACK);
+        dma_display->setCursor(-scrollOffset, 25);
         dma_display->setTextColor(scrolling_Text_Color);
         dma_display->print(scrolling_Text);
     }
+}
+
+void drawClockScreen() {
+    dma_display->fillScreen(0);
+
+    // 1. Read current time from RTC
+    DateTime now = rtc.now();
+    int hour = now.hour();
+    int minute = now.minute();
+
+    // 2. Prepare strings
+    char timeStr[6];
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+
+    // Day of week and date
+    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    char dateStr[14];
+    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d", days[now.dayOfTheWeek()], now.month(), now.day());
+
+    // 3. Draw a small lock icon at the top center (6x6 pixels)
+    int lockX = 29; // center-ish
+    int lockY = 2;
+    dma_display->drawRoundRect(lockX, lockY+2, 6, 6, 2, dma_display->color565(180,180,180)); // Lock body
+    dma_display->drawCircle(lockX+3, lockY+2, 3, dma_display->color565(180,180,180));        // Shackle
+
+    // 4. Draw time, centered
+    dma_display->setFont(); // Built-in 5x7
+    dma_display->setTextSize(1);
+    int16_t x = 14, y = 14; // Start x so "HH:MM" is centered, adjust as needed
+    dma_display->setCursor(x, y);
+    dma_display->setTextColor(dma_display->color565(255,255,0));
+    dma_display->print(timeStr);
+
+    // 5. Draw date below
+    dma_display->setTextSize(1);
+    dma_display->setCursor(8, 24); // Lower, centered
+    dma_display->setTextColor(dma_display->color565(180,180,255));
+    dma_display->print(dateStr);
+
+    // 6. Optionally, show a tiny dot for seconds for "alive" feeling
+    int secY = 31;
+    int secX = 62;
+    dma_display->fillCircle(secX, secY, 1, (now.second() % 2) ? dma_display->color565(0,255,0) : dma_display->color565(0,60,0));
 }

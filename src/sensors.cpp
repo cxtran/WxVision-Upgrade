@@ -136,3 +136,13 @@ void setDisplayBrightnessFromLux(float lux) {
 }
 
 
+// --- IR receiver helper ---
+uint32_t getIRCodeNonBlocking() {
+    static decode_results results;
+    if (irrecv.decode(&results)) {
+        uint32_t code = results.value;
+        irrecv.resume();
+        return code;
+    }
+    return 0;
+}

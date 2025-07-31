@@ -18,3 +18,4 @@ float readBrightnessSensor();
 
 void setDisplayBrightnessFromLux(float lux);
 
+uint32_t getIRCodeNonBlocking();

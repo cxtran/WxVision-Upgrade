@@ -347,7 +347,7 @@ void InfoModal::draw()
                 }
                 else
                 { // --- PATCH
-                    if (scrollPauseTime && (millis() - scrollPauseTime > 5000))
+                    if (scrollPauseTime && (millis() - scrollPauseTime > 2000))
                     {                         // --- PATCH
                         scrollPaused = false; // --- PATCH
                         scrollPauseTime = 0;  // --- PATCH
@@ -407,7 +407,7 @@ void InfoModal::draw()
 
 int InfoModal::getSelIndex() const
 {
-    return selIndex;
+    return atClose ? -1 : selIndex;
 }
 
 void InfoModal::tick()
@@ -486,6 +486,7 @@ void InfoModal::handleIR(uint32_t code)
 
     if (atClose)
     {
+        selIndex = -1; // CLEAR selection when X is selected
         if (code == IR_OK || code == IR_CANCEL)
         {
             if (callback)
@@ -497,6 +498,7 @@ void InfoModal::handleIR(uint32_t code)
         if (code == IR_DOWN || code == IR_UP)
         {
             atClose = false;
+            // Restore selection to first or last line
             selIndex = (code == IR_DOWN) ? 0 : (lineCount > 0 ? lineCount - 1 : 0);
             scrollY = selIndex;
             draw();
@@ -592,8 +594,35 @@ void InfoModal::handleIR(uint32_t code)
                 else
                     (*ptr)++;
 
-                if (selIndex == 2)
-                { // Brightness
+                // --- Date/time field constraints ---
+                switch (selIndex)
+                {
+                case 0:
+                    *ptr = constrain(*ptr, 2000, 2099);
+                    break; // Year
+                case 1:
+                    *ptr = constrain(*ptr, 1, 12);
+                    break; // Month
+                case 2:
+                    *ptr = constrain(*ptr, 1, 31);
+                    break; // Day
+                case 3:
+                    *ptr = constrain(*ptr, 0, 23);
+                    break; // Hour
+                case 4:
+                    *ptr = constrain(*ptr, 0, 59);
+                    break; // Minute
+                case 5:
+                    *ptr = constrain(*ptr, 0, 59);
+                    break; // Second
+                case 6:
+                    *ptr = constrain(*ptr, -720, 840);
+                    break; // TimeZone
+                }
+
+                // Also handle Brightness live preview if on that field (by label!)
+                if (lines[selIndex] == "Brightness")
+                {
                     *ptr = constrain(*ptr, 1, 100);
                     if (!autoBrightness)
                     {
@@ -611,6 +640,7 @@ void InfoModal::handleIR(uint32_t code)
                 draw();
             }
         }
+
         else if (type == InfoChooser)
         {
             int cidx = chooserFieldIndices[selIndex];

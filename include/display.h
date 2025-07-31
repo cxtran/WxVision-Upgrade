@@ -18,16 +18,16 @@ extern MatrixPanel_I2S_DMA *dma_display;
 
 enum ScreenMode {
     SCREEN_OWM = 0,
-    SCREEN_CLOCK,
-    SCREEN_WEATHER,
-    SCREEN_UDP,
-    SCREEN_SETTINGS,
+    SCREEN_UDP_FORECAST,
+    SCREEN_UDP_DATA,
     // Add more screens as needed
+    SCREEN_COUNT
 };
 
 extern ScreenMode currentScreen;
-extern const int SCREEN_COUNT;
-
+//extern const int SCREEN_COUNT;
+extern const int NUM_INFOSCREENS;
+extern const ScreenMode InfoScreenModes[];
 
 extern uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
 

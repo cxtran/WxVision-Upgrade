@@ -5,7 +5,6 @@
 #include "sensors.h"
 #include "settings.h"
 
-
 // --- Menu Core Functions ---
 void handleIR(uint32_t code);
 void connectToWiFi();
@@ -30,51 +29,49 @@ void showWeatherSettingsModal();
 void showCalibrationModal();
 void showSystemModal();
 
-// WiFi Signal Test
+void scanWiFiNetworks();
+void handleScreenSwitch(int dir);
 
 // --- WiFi/Network Globals ---
 extern std::vector<String> foundSSIDs;
 extern int selectedWifiIdx;
 extern bool wifiSelecting;
 extern int wifiScanCount;
+extern String scannedSSIDs[16];
+extern int wifiSelectIndex;
+extern int wifiMenuScroll;
 
-// --- Menu Identifiers ---
+// --- Menu Identifiers (Modal Mode) ---
 enum MenuLevel {
-    MENU_NONE = -1, // 🟢 Add this line to indicate "no menu level (modal mode)"
+    MENU_NONE = -1, // Modal or inactive menu
     MENU_MAIN,
     MENU_DEVICE,
     MENU_DISPLAY,
     MENU_WEATHER,
     MENU_CALIBRATION,
     MENU_SYSTEM,
-    MENU_MANUAL_SCREEN,
-    MENU_WIFI_SELECT = 99,
-    MENU_BLE_SELECT
+    MENU_WIFI_SELECT = 99
 };
 
 // --- Menu State ---
 extern MenuLevel currentMenuLevel;
 extern int currentMenuIndex;
+extern int menuScroll;
+extern bool menuActive;
 
-// --- External references to core app logic ---
+// --- Core App Logic Externs ---
 extern void saveDeviceSettings();
+extern void saveDisplaySettings();
+extern void saveWeatherSettings();
+extern void saveCalibrationSettings();
+extern void saveDateTimeSettings();
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern void fetchWeatherFromOWM();
 extern bool reset_Time_and_Date_Display;
 
-// --- Country Code (OWM) support (for weather menu) ---
-struct CountryEntry {
-    const char *name;
-    const char *code;
-};
-extern CountryEntry countries[];
-extern const int numCountries;
-extern int owmCountryIndex;
-extern String owmCountryCustom;
-
-// --- Settings for Weather/Device/Display/Calibration (extern if needed) ---
+// --- Weather/Device/Display/Calibration/OWM ---
 extern String wifiSSID;
 extern String wifiPass;
 extern String owmCity;
@@ -95,4 +92,29 @@ extern int tempOffset;
 extern int humOffset;
 extern int lightGain;
 
-// --- Any additional new globals or helpers as needed (add here) ---
+extern int owmCountryIndex;
+extern String owmCountryCustom;
+extern String owmCountryCode;
+
+// --- System/Modal Navigation ---
+extern void quickRestore();
+extern void resetPowerUsage();
+extern void factoryReset();
+
+// --- Modal Instances ---
+extern InfoModal sysInfoModal;
+extern InfoModal wifiInfoModal;
+extern InfoModal dateModal;
+extern InfoModal mainMenuModal;
+extern InfoModal deviceModal;
+extern InfoModal displayModal;
+extern InfoModal weatherModal;
+extern InfoModal calibrationModal;
+extern InfoModal systemModal;
+
+// --- Helper for modal "reopen after delay" ---
+extern void (*pendingModalFn)();
+extern unsigned long pendingModalTime;
+
+
+extern int scrollOffset;
