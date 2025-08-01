@@ -2,7 +2,7 @@
 #include "buzzer.h"
 #include "menu.h"
 #include "display.h"
-
+#include <vector>
 #include <Preferences.h>
 #include "settings.h"
 #include "system.h"
@@ -25,6 +25,7 @@
 #define SYSINFO_SEL dma_display->color565(255, 255, 64)
 #define SYSINFO_UNSEL dma_display->color565(0, 255, 255)
 
+std::vector<MenuLevel> menuStack;
 bool menuActive = false;
 
 void (*pendingModalFn)() = nullptr;
@@ -44,6 +45,8 @@ InfoModal weatherModal("Weather");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 
+char wifiSSIDBuf[33]; // max SSID length + 1
+char wifiPassBuf[65];
 
 // --- Country Info for Weather Modal ---
 const char *countryLabels[] = {
@@ -92,6 +95,14 @@ extern bool autoBrightness;
 extern String customMsg;
 extern int fmt24, dateFmt, tzOffset;
 
+void pushMenu(MenuLevel newMenu)
+{
+    // Only push if different from current to avoid duplicates
+    if (menuStack.empty() || menuStack.back() != newMenu) {
+        menuStack.push_back(newMenu);
+    }
+}
+
 void updateMenu() { drawMenu(); }
 // Date/time modal working variables
 int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
@@ -101,8 +112,7 @@ int dtDateFmt;
 
 const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
-const char *deviceMenu[] = {
-    "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
+const char *deviceMenu[] = { "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
@@ -113,7 +123,7 @@ const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
-// --- IR Handler (Modal only) ---
+
 void handleIR(uint32_t code)
 {
     Serial.printf("IR Code: 0x%X\n", code);
@@ -154,8 +164,11 @@ void handleIR(uint32_t code)
         else if (code == IR_OK) {
             if (wifiSelectIndex == wifiScanCount - 1) { // <Back>
                 wifiSelecting = false;
-                currentMenuLevel = MENU_DEVICE;
-                drawMenu();
+                currentMenuLevel = MENU_MAIN;    // Return to MAIN menu instead of DEVICE menu
+                menuActive = true;
+                currentMenuIndex = 0;
+                menuScroll = 0;
+                showMainMenuModal();             // Show main menu modal
                 playBuzzerTone(900, 80);
                 return;
             }
@@ -182,8 +195,11 @@ void handleIR(uint32_t code)
         }
         else if (code == IR_CANCEL) {
             wifiSelecting = false;
-            currentMenuLevel = MENU_DEVICE;
-            drawMenu();
+            currentMenuLevel = MENU_MAIN;        // Return to MAIN menu here as well
+            menuActive = true;
+            currentMenuIndex = 0;
+            menuScroll = 0;
+            showMainMenuModal();                 // Show main menu modal on cancel
             playBuzzerTone(700, 80);
         }
         return;
@@ -236,6 +252,11 @@ void handleIR(uint32_t code)
 
 void showMainMenuModal()
 {
+        if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_MAIN;
+    menuActive = true;
     String items[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     mainMenuModal.setLines(items, types, 6);
@@ -278,38 +299,16 @@ void showMainMenuModal()
     mainMenuModal.show();
 }
 
-void showDeviceSettingsModal()
-{
-    menuActive = true;
-    currentMenuLevel = MENU_NONE;
-    String labels[] = {"Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
-    int *chooserRefs[] = {&units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
-    static const char *unitsOpt[] = {"F+mph", "C+m/s"};
-    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
-    static const char *forecastOpt[] = {"OWM", "WF"};
-    static const char *rotateOpt[] = {"Off", "On"};
-    static const char *manualOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {unitsOpt, dayFmtOpt, forecastOpt, rotateOpt, manualOpt};
-    int chooserCounts[] = {2, 2, 2, 2, 2};
-
-    deviceModal.setLines(labels, types, 5);
-    deviceModal.setValueRefs(nullptr, 0, chooserRefs, 5, chooserOpts, chooserCounts);
-    deviceModal.setButtons(nullptr, 0);
-    deviceModal.setCallback([](bool accepted, int btnIdx) {
-        saveDeviceSettings();
-        deviceModal.hide();
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
-    });
-    deviceModal.show();
-}
 
 void showDisplaySettingsModal()
 {
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_DISPLAY;
     menuActive = true;
-    currentMenuLevel = MENU_NONE;
+
+
     static int autoBrightnessInt;
     autoBrightnessInt = autoBrightness ? 1 : 0;
     static int brightnessTemp = brightness;
@@ -338,6 +337,7 @@ void showDisplaySettingsModal()
     displayModal.setValueRefs(numberRefs, 1, chooserRefs, 3, chooserOpts, chooserCounts, textRefs, 1, textSizes);
 
     displayModal.setCallback([](bool accepted, int btnIdx) {
+        
         if (accepted) {
             brightness = constrain(brightnessTemp, 1, 100);
             autoBrightness = (autoBrightnessInt > 0);
@@ -358,8 +358,13 @@ void showDisplaySettingsModal()
 
 void showWeatherSettingsModal()
 {
+    
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_WEATHER;
     menuActive = true;
-    currentMenuLevel = MENU_NONE;
+
     static int owmCountryIndexTemp = owmCountryIndex;
     static char owmCountryCustomBuf[4] = "";
     static char owmCityBuf[32];
@@ -410,8 +415,12 @@ void showWeatherSettingsModal()
 
 void showCalibrationModal()
 {
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_CALIBRATION;
     menuActive = true;
-    currentMenuLevel = MENU_NONE;
+
     static int tempOffsetTemp = tempOffset;
     static int humOffsetTemp = humOffset;
     static int lightGainTemp = lightGain;
@@ -439,8 +448,11 @@ void showCalibrationModal()
 
 void showSystemModal()
 {
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_SYSTEM;
     menuActive = true;
-    currentMenuLevel = MENU_NONE;
     String labels[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
     InfoFieldType types[] = {InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     systemModal.setLines(labels, types, 7);
@@ -612,6 +624,12 @@ void onWiFiConnectFailed()
 // --- System Info/DateTime/WiFi Test Modals (same as before) ---
 void showWiFiSignalTest()
 {
+    
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);  // Push current menu to stack
+    }
+    currentMenuLevel = MENU_SYSWIFI;  // You can define this enum, or use MENU_SYSTEM if preferred
+    menuActive = true;        
     scanWiFiNetworks();
     const int maxLines = 32;
     String lines[maxLines];
@@ -645,6 +663,13 @@ void showWiFiSignalTest()
 
 void showSystemInfoScreen()
 {
+    
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);  // Push current menu to stack
+    }
+    currentMenuLevel = MENU_SYSINFO;  // You can define this enum, or use MENU_SYSTEM if preferred
+    menuActive = true;
+
     uint32_t flashChipSize = ESP.getFlashChipSize();
     uint32_t sketchSize = ESP.getSketchSize();
     uint32_t appPartition = 0x190000;
@@ -673,6 +698,12 @@ void showSystemInfoScreen()
 
 void showDateTimeModal()
 {
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);  // Push current menu to stack
+    }
+    currentMenuLevel = MENU_SYSDATETIME;  // You can define this enum, or use MENU_SYSTEM if preferred
+    menuActive = true;
+
     DateTime now = rtc.now();
     dtYear = now.year();
     dtMonth = now.month();
@@ -741,4 +772,112 @@ void handleScreenSwitch(int dir)
         delay(50);
     }
     playBuzzerTone(2000 + dir * 200, 80);
+}
+
+void showDeviceSettingsModal()
+{
+    if (currentMenuLevel != MENU_NONE) {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_DEVICE;
+    menuActive = true;
+
+    // If WiFi is connected, skip scanning now.
+    // Instead just prepare SSID chooser with current connected SSID only.
+    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+
+    if (!wifiConnected) {
+        // Only scan WiFi networks if not connected and scan needed
+        if (wifiSelectNeedsScan || wifiScanCount == 0) {
+            scanWiFiNetworks();
+            wifiSelectNeedsScan = false;
+        }
+    } else {
+        // If connected, show only current SSID in the chooser (no scan)
+        wifiScanCount = 1;
+        scannedSSIDs[0] = WiFi.SSID();
+    }
+
+    // Find index of current SSID for default selection
+    wifiSelectIndex = 0;
+    for (int i = 0; i < wifiScanCount; ++i) {
+        if (scannedSSIDs[i] == wifiSSID) {
+            wifiSelectIndex = i;
+            break;
+        }
+    }
+
+    // Prepare persistent storage for SSID chooser
+    static String ssidStringStore[16];
+    static const char* ssidOptions[16];
+    int modalSsidCount = wifiScanCount;
+    if (modalSsidCount > 0 && scannedSSIDs[modalSsidCount-1] == "< Back") modalSsidCount--;
+
+    for (int i = 0; i < modalSsidCount; ++i) {
+        ssidStringStore[i] = scannedSSIDs[i];
+        ssidOptions[i] = ssidStringStore[i].c_str();
+    }
+
+    // Prepare password buffer
+    static char wifiPassBuf[65];
+    strncpy(wifiPassBuf, wifiPass.c_str(), sizeof(wifiPassBuf) - 1);
+    wifiPassBuf[sizeof(wifiPassBuf) - 1] = 0;
+
+    // Modal labels and field types
+    String labels[] = {
+        "WiFi SSID", "WiFi Pass",
+        "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"
+    };
+    InfoFieldType types[] = {
+        InfoChooser, InfoText,
+        InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser
+    };
+
+    int *chooserRefs[] = {&wifiSelectIndex, &units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
+    static const char *unitsOpt[] = {"F+mph", "C+m/s"};
+    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
+    static const char *forecastOpt[] = {"OWM", "WF"};
+    static const char *rotateOpt[] = {"Off", "On"};
+    static const char *manualOpt[] = {"Off", "On"};
+    const char *const *chooserOpts[] = {ssidOptions, unitsOpt, dayFmtOpt, forecastOpt, rotateOpt, manualOpt};
+    int chooserCounts[] = {modalSsidCount, 2, 2, 2, 2, 2};
+
+    char *textRefs[] = {wifiPassBuf};
+    int textSizes[] = {sizeof(wifiPassBuf)};
+
+    deviceModal.setLines(labels, types, 7);
+    deviceModal.setValueRefs(
+        nullptr, 0,
+        chooserRefs, 6,
+        chooserOpts, chooserCounts,
+        textRefs, 1, textSizes
+    );
+    deviceModal.setButtons(nullptr, 0);
+
+    deviceModal.setCallback([](bool accepted, int btnIdx) {
+        int sel = deviceModal.getSelIndex();
+        if (accepted) {
+            if (sel == 0) {
+                // User selected WiFi SSID chooser -> switch to WiFi selecting mode
+                deviceModal.hide();
+                wifiSelecting = true;
+                currentMenuLevel = MENU_WIFI_SELECT;
+                scanWiFiNetworks();
+                menuActive = true;
+                drawWiFiMenu();
+                return;
+            }
+            // Save other settings normally
+            if (wifiSelectIndex >= 0 && wifiSelectIndex < wifiScanCount)
+                wifiSSID = scannedSSIDs[wifiSelectIndex];
+            wifiPass = String(wifiPassBuf);
+            saveDeviceSettings();
+        }
+        deviceModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+
+    deviceModal.show();
 }

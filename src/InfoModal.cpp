@@ -3,10 +3,12 @@
 #include "menu.h"
 #include "keyboard.h"
 #include <cstring>
+#include <vector>
 
 extern bool autoBrightness;
 extern int scrollLevel;
 extern void saveDisplaySettings();
+extern std::vector<MenuLevel> menuStack;
 
 // --- Static trampoline for keyboard -> InfoModal::setTextValue ---
 static InfoModal *s_modalForText = nullptr;
@@ -251,10 +253,14 @@ void InfoModal::draw()
     int dataCount = lineCount;
     int scrollLimit = (dataCount > visibleRows) ? (dataCount - visibleRows) : 0;
 
-    if (selIndex < scrollY)
-        scrollY = selIndex;
-    if (selIndex >= scrollY + visibleRows)
-        scrollY = selIndex - visibleRows + 1;
+    // Adjust scrollY based on selIndex, but if atClose (X selected), no line is selected
+    if (!atClose)
+    {
+        if (selIndex < scrollY)
+            scrollY = selIndex;
+        if (selIndex >= scrollY + visibleRows)
+            scrollY = selIndex - visibleRows + 1;
+    }
     if (scrollY > scrollLimit)
         scrollY = scrollLimit;
 
@@ -264,8 +270,11 @@ void InfoModal::draw()
         if (idx >= dataCount)
             break;
 
-        bool isSelected = (selIndex == idx) && !atClose && (!inButtonBar);
+        // Determine if this line is selected
+        // When atClose==true, no line is selected, so isSelected=false
+        bool isSelected = (!atClose) && (selIndex == idx) && (!inButtonBar);
         bool isEditing = isSelected;
+
         dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
         String s = lines[idx];
 
@@ -320,6 +329,8 @@ void InfoModal::draw()
             Serial.println("Unsupported field type");
         }
 
+        int drawLineIndex = i + 1; // Lines start below header (row 0 is header)
+
         if (isSelected)
         {
             if (selIndex != lastSelIndex)
@@ -327,14 +338,14 @@ void InfoModal::draw()
                 scrollOffset = 0;
                 firstScroll = true;
                 lastSelIndex = selIndex;
-                scrollPaused = false; // --- PATCH
-                scrollPauseTime = 0;  // --- PATCH
+                scrollPaused = false;
+                scrollPauseTime = 0;
             }
             int textW = getTextWidth(s.c_str());
             if (textW > SCREEN_WIDTH)
             {
                 if (!scrollPaused)
-                { // --- PATCH
+                {
                     if (millis() - lastScrollTime > scrollSpeed)
                     {
                         lastScrollTime = millis();
@@ -346,32 +357,32 @@ void InfoModal::draw()
                     }
                 }
                 else
-                { // --- PATCH
+                {
                     if (scrollPauseTime && (millis() - scrollPauseTime > 2000))
-                    {                         // --- PATCH
-                        scrollPaused = false; // --- PATCH
-                        scrollPauseTime = 0;  // --- PATCH
-                    } // --- PATCH
-                } // --- PATCH
+                    {
+                        scrollPaused = false;
+                        scrollPauseTime = 0;
+                    }
+                }
             }
             else
             {
                 scrollOffset = 0;
                 firstScroll = true;
-                scrollPaused = false; // --- PATCH
-                scrollPauseTime = 0;  // --- PATCH
+                scrollPaused = false;
+                scrollPauseTime = 0;
             }
 
             dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
             int cursorX = -scrollOffset;
-            dma_display->setCursor(cursorX, (i + 1) * CHARH);
+            dma_display->setCursor(cursorX, drawLineIndex * CHARH);
             dma_display->print(s + (isEditing ? " <" : ""));
         }
         else
         {
             String sub = s.substring(0, MAXCOLS);
             dma_display->setTextColor(INFOMODAL_UNSEL);
-            dma_display->setCursor(0, (i + 1) * CHARH);
+            dma_display->setCursor(0, drawLineIndex * CHARH);
             dma_display->print(sub);
         }
     }
@@ -492,6 +503,55 @@ void InfoModal::handleIR(uint32_t code)
             if (callback)
                 callback(false, -1);
             hide();
+
+            // NEW: If current modal is mainMenuModal, exit menu on X
+            if (this == &mainMenuModal) {
+                menuActive = false;
+                dma_display->clearScreen();
+                drawMenu();
+                return;
+            }
+
+            // Restore previous menu if any
+            if (!menuStack.empty())
+            {
+                MenuLevel prev = menuStack.back();
+                menuStack.pop_back();
+                currentMenuLevel = prev;
+
+                switch (prev)
+                {
+                case MENU_MAIN:
+                    showMainMenuModal();
+                    break;
+                case MENU_DEVICE:
+                    showDeviceSettingsModal();
+                    break;
+                case MENU_DISPLAY:
+                    showDisplaySettingsModal();
+                    break;
+                case MENU_WEATHER:
+                    showWeatherSettingsModal();
+                    break;
+                case MENU_CALIBRATION:
+                    showCalibrationModal();
+                    break;
+                case MENU_SYSTEM:
+                    showSystemModal();
+                    break;
+                default:
+                    menuActive = false;
+                    dma_display->clearScreen();
+                    break;
+                }
+            }
+            else
+            {
+                // No previous menu — exit menu
+                menuActive = false;
+                dma_display->clearScreen();
+            }
+
             drawMenu();
             return;
         }
@@ -709,8 +769,14 @@ void InfoModal::handleIR(uint32_t code)
                     lines[selIndex].c_str());
             }
         }
+        else if (fieldTypes[selIndex] == InfoChooser)
+        {
+            // Left/Right already handle value change; disable OK for chooser lines
+            // So do nothing here on OK for chooser.
+        }
         else if (btnCount == 0 && callback)
         {
+            // Only call callback and hide if there are no buttons and field is not Text or Chooser
             callback(true, selIndex);
             hide();
             drawMenu();
@@ -730,6 +796,47 @@ void InfoModal::handleIR(uint32_t code)
         {
             callback(false, -1);
             hide();
+
+            // Restore previous menu if any
+            if (!menuStack.empty())
+            {
+                MenuLevel prev = menuStack.back();
+                menuStack.pop_back();
+                currentMenuLevel = prev;
+
+                switch (prev)
+                {
+                case MENU_MAIN:
+                    showMainMenuModal();
+                    break;
+                case MENU_DEVICE:
+                    showDeviceSettingsModal();
+                    break;
+                case MENU_DISPLAY:
+                    showDisplaySettingsModal();
+                    break;
+                case MENU_WEATHER:
+                    showWeatherSettingsModal();
+                    break;
+                case MENU_CALIBRATION:
+                    showCalibrationModal();
+                    break;
+                case MENU_SYSTEM:
+                    showSystemModal();
+                    break;
+                default:
+                    menuActive = false;
+                    dma_display->clearScreen();
+                    break;
+                }
+            }
+            else
+            {
+                // No previous menu — exit menu
+                menuActive = false;
+                dma_display->clearScreen();
+            }
+
             drawMenu();
         }
     }

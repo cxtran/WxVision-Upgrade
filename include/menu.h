@@ -41,6 +41,7 @@ extern String scannedSSIDs[16];
 extern int wifiSelectIndex;
 extern int wifiMenuScroll;
 
+
 // --- Menu Identifiers (Modal Mode) ---
 enum MenuLevel {
     MENU_NONE = -1, // Modal or inactive menu
@@ -50,9 +51,12 @@ enum MenuLevel {
     MENU_WEATHER,
     MENU_CALIBRATION,
     MENU_SYSTEM,
+    MENU_SYSINFO,
+    MENU_SYSDATETIME,
+    MENU_SYSWIFI,
     MENU_WIFI_SELECT = 99
 };
-
+extern std::vector<MenuLevel> menuStack;
 // --- Menu State ---
 extern MenuLevel currentMenuLevel;
 extern int currentMenuIndex;

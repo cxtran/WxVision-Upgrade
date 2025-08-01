@@ -33,18 +33,10 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_OWM;
 
 // --- Modal objects ---
-extern InfoModal sysInfoModal;
-extern InfoModal wifiInfoModal;
-extern InfoModal dateModal;
-extern InfoModal mainMenuModal;
-extern InfoModal deviceModal;
-extern InfoModal displayModal;
-extern InfoModal weatherModal;
-extern InfoModal calibrationModal;
-extern InfoModal systemModal;
+extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
 
-InfoScreen udpScreen("LIVE WEATHER", SCREEN_UDP_DATA);
-InfoScreen forecastScreen("FORECAST", SCREEN_UDP_FORECAST);
+InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
+InfoScreen forecastScreen("Forecast", SCREEN_UDP_FORECAST);
 
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
@@ -83,29 +75,54 @@ void scrollWeatherTick() {
     }
 }
 
+// --- Hide all InfoScreens (convenience) ---
+void hideAllInfoScreens() {
+    udpScreen.hide();
+    forecastScreen.hide();
+    // Add more InfoScreens here as needed
+}
+
+// --- Screen rotation handler ---
 void rotateScreen(int direction) {
-    // Find current screen index
     int idx = -1;
     for (int i = 0; i < NUM_INFOSCREENS; ++i) {
         if (InfoScreenModes[i] == currentScreen) { idx = i; break; }
     }
-    if (idx < 0) return; // Not found
+    if (idx < 0) return;
     int nextIdx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
     ScreenMode next = InfoScreenModes[nextIdx];
 
-    // Hide all InfoScreens so only one is ever open
-    udpScreen.hide();
-    forecastScreen.hide();
-
+    hideAllInfoScreens(); // Hide previous
     currentScreen = next;
+    // Show next if needed (not OWM)
+    if (currentScreen == SCREEN_UDP_DATA) showUdpScreen();
+    else if (currentScreen == SCREEN_UDP_FORECAST) showForecastScreen();
+    // OWM will be drawn in main loop
+}
 
-    // Show appropriate InfoScreen if needed
-    if (currentScreen == SCREEN_UDP_DATA) {
-        showUdpScreen();
-    } else if (currentScreen == SCREEN_UDP_FORECAST) {
-        showForecastScreen();
+// --- Button reset logic ---
+void handleResetButton() {
+    static bool buttonWasDown = false;
+    static unsigned long buttonDownMillis = 0;
+    static bool resetLongPressHandled = false;
+    const unsigned long resetHoldTime = 3000;
+    bool buttonDown = (digitalRead(BTN_SEL) == LOW);
+
+    if (buttonDown && !buttonWasDown) {
+        buttonDownMillis = millis();
+        resetLongPressHandled = false;
+        buttonWasDown = true;
     }
-    // OWM does NOT need a show, just handled in the main switch
+    if (buttonDown && !resetLongPressHandled) {
+        if (millis() - buttonDownMillis > resetHoldTime) {
+            resetLongPressHandled = true;
+            triggerPhysicalReset();
+        }
+    }
+    if (!buttonDown && buttonWasDown) {
+        buttonWasDown = false;
+        resetLongPressHandled = false;
+    }
 }
 
 void setup() {
@@ -174,111 +191,90 @@ void setup() {
     menuScroll = 0;
 }
 
-void loop() {
-    static unsigned long lastForecast = 0;
-    if (millis() - lastForecast > 15 * 60 * 1000) {
-        fetchForecastData();
-        lastForecast = millis();
-    }
 
+void loop() {
     unsigned long now = millis();
+    static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500;
-
-    // Handle reset button (physical long-press)
-    static bool buttonWasDown = false;
-    static unsigned long buttonDownMillis = 0;
-    static bool resetLongPressHandled = false;
-    const unsigned long resetHoldTime = 3000;
-    bool buttonDown = (digitalRead(BTN_SEL) == LOW);
-    if (buttonDown && !buttonWasDown) {
-        buttonDownMillis = millis();
-        resetLongPressHandled = false;
-        buttonWasDown = true;
-    }
-    if (buttonDown && !resetLongPressHandled) {
-        if (millis() - buttonDownMillis > resetHoldTime) {
-            resetLongPressHandled = true;
-            triggerPhysicalReset();
-        }
-    }
-    if (!buttonDown && buttonWasDown) {
-        buttonWasDown = false;
-        resetLongPressHandled = false;
+ 
+    static ScreenMode lastScreen = SCREEN_OWM;  // or whatever your default is
+    static bool needsClear = false;
+    if (currentScreen != lastScreen) {
+        needsClear = true;
+        lastScreen = currentScreen;
     }
 
-    // IR input for classic UI, not InfoScreen!
-    if (now - lastButtonCheck >= buttonInterval) {
-        lastButtonCheck = now;
-        if (!udpScreen.isActive() && !forecastScreen.isActive()) {
-            readIRSensor();
-        }
+    // --- Fetch new forecast data every 15 minutes ---
+    if (now - lastForecast > 15 * 60 * 1000) {
+        fetchForecastData();
+        lastForecast = now;
     }
 
-    // --- Global screen rotation with LEFT/RIGHT ---
-    uint32_t code = getIRCodeNonBlocking();
-    if (code == IR_LEFT)  { rotateScreen(-1); return; }
-    if (code == IR_RIGHT) { rotateScreen(+1); return; }
-
-    // Cursor blink timer for keyboard
-    if (inKeyboardMode && now - lastBlink >= blinkInterval) {
-        lastBlink = now;
-        keyboardBlinkTick();
+    // Only check physical reset if NO modal, NO keyboard, and NOT in WiFi select
+    if (
+        !inKeyboardMode &&
+        !sysInfoModal.isActive() &&
+        !wifiInfoModal.isActive() &&
+        !dateModal.isActive() &&
+        !mainMenuModal.isActive() &&
+        !deviceModal.isActive() &&
+        !displayModal.isActive() &&
+        !weatherModal.isActive() &&
+        !calibrationModal.isActive() &&
+        !systemModal.isActive() &&
+        !(wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT)
+    ) {
+        handleResetButton();
     }
 
-    // Keyboard entry active
+    // --- 1. Keyboard always has focus if active ---
     if (inKeyboardMode) {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code) handleKeyboardIR(code);
+
+        if (now - lastBlink >= blinkInterval) {
+            lastBlink = now;
+            keyboardBlinkTick();
+        }
         tickKeyboard();
         delay(40);
         return;
     }
 
-    // Modals (unchanged)
-    if (sysInfoModal.isActive())        { sysInfoModal.tick();    delay(40);      return; }
-    if (wifiInfoModal.isActive())       { wifiInfoModal.tick();   delay(40);      return; }
-    if (dateModal.isActive())           { dateModal.tick();       delay(40);      return; }
-    if (mainMenuModal.isActive())       { mainMenuModal.tick();   delay(40);      return; }
-    if (deviceModal.isActive())         { deviceModal.tick();     delay(40);      return; }
-    if (displayModal.isActive())        { displayModal.tick();    delay(40);      return; }
-    if (weatherModal.isActive())        { weatherModal.tick();    delay(40);      return; }
-    if (calibrationModal.isActive())    { calibrationModal.tick(); delay(40);     return; }
-    if (systemModal.isActive())         { systemModal.tick();      delay(40);     return; }
-    if (wifiSelecting)                  {  updateMenu();           delay(60);     return; }
+    // --- 2. If any modal is active, route IR input ONLY to modal ---
+    if (sysInfoModal.isActive())        { sysInfoModal.tick(); sysInfoModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (wifiInfoModal.isActive())       { wifiInfoModal.tick(); wifiInfoModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (dateModal.isActive())           { dateModal.tick(); dateModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (mainMenuModal.isActive())       { mainMenuModal.tick(); mainMenuModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (deviceModal.isActive())         { deviceModal.tick(); deviceModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (displayModal.isActive())        { displayModal.tick(); displayModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (weatherModal.isActive())        { weatherModal.tick(); weatherModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (calibrationModal.isActive())    { calibrationModal.tick(); calibrationModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
+    if (systemModal.isActive())         { systemModal.tick(); systemModal.handleIR(getIRCodeNonBlocking()); delay(40); return; }
 
+    // --- 3. Handle WiFi SSID selection menu ---
+    if (wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT) {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code) handleIR(code);    // Route IR to menu.cpp WiFi handler
+        drawWiFiMenu();              // Draw scanned WiFi list
+        delay(80);                  // Slight delay for smoother response
+        return;                     // Skip rest of loop while selecting WiFi
+    }
+
+    // --- 4. Pending modal delayed calls ---
     if (pendingModalFn && millis() >= pendingModalTime) {
         void (*fn)() = pendingModalFn;
         pendingModalFn = nullptr;
         pendingModalTime = 0;
         fn();
-    }
-
-    if (menuActive) {
-        updateMenu();
-        static unsigned long lastAutoReturnCheck = 0;
-        if (millis() - lastMenuActivity > 30000 && lastMenuActivity == lastAutoReturnCheck) {
-            if (currentMenuLevel != MENU_MAIN || currentMenuIndex != 0 || menuScroll != 0) {
-                currentMenuLevel = MENU_MAIN;
-                currentMenuIndex = 0;
-                menuScroll = 0;
-                drawMenu();
-            }
-        }
-        else {
-            lastAutoReturnCheck = lastMenuActivity;
-        }
-        delay(100);
         return;
     }
 
-    // Weather scroll tick
-    if (!menuActive) {
-        scrollWeatherTick();
-    }
-
-    // -------- InfoScreen MODAL (blocks everything) ---------
+    // --- 5. InfoScreens (live screens) ---
     if (udpScreen.isActive()) {
         udpScreen.tick();
-        udpScreen.handleIR(getIRCodeNonBlocking()); // Will handle [OK] to go back to OWM
+        udpScreen.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
@@ -289,24 +285,39 @@ void loop() {
         return;
     }
 
-    // ----------- Main background tasks ----------
+    // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
+    uint32_t code = getIRCodeNonBlocking();
+    if (code == IR_LEFT)  { rotateScreen(-1); return; }
+    if (code == IR_RIGHT) { rotateScreen(+1); return; }
+    if (code == IR_CANCEL) {
+        showMainMenuModal();
+        playBuzzerTone(3000, 100);
+        delay(100);
+        return;
+    }
+
+    // --- 7. Weather scroll tick ---
+    scrollWeatherTick();
+
+    // --- 8. Main background tasks ---
     ArduinoOTA.handle();
     fetchTempestData();
 
-    // Brightness
-    if (now - lastBrightnessRead >= brightnessInterval) {
+    // --- 9. Brightness control ---
+    static unsigned long lastBrightnessRead = 0;
+    if (now - lastBrightnessRead >= 5000) {
         lastBrightnessRead = now;
         float lux = readBrightnessSensor();
         if (autoBrightness) {
             setDisplayBrightnessFromLux(lux);
-        }
-        else {
+        } else {
             int hwBrightness = map(brightness, 1, 100, 3, 255);
             dma_display->setBrightness8(hwBrightness);
             Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
     }
 
+    // --- 10. Update main live screen ---
     if (reset_Time_and_Date_Display) {
         reset_Time_and_Date_Display = false;
         displayClock();
@@ -314,21 +325,30 @@ void loop() {
         displayWeatherData();
     }
 
-    // Display screen content
+    // --- 11. Screen rendering ---
     switch (currentScreen) {
-    case SCREEN_OWM:
-        if (now - prevMillis_ShowTimeDate >= interval_ShowTimeDate) {
-            reset_Time_and_Date_Display = true;
-            prevMillis_ShowTimeDate = now;
-            drawOWMScreen();
-        }
-        break;
-    case SCREEN_UDP_FORECAST:
-        showForecastScreen(); // updates, then forecastScreen.show()
-        break;
-    case SCREEN_UDP_DATA:
-        showUdpScreen();      // updates, then udpScreen.show()
-        break;
+        case SCREEN_OWM:
+            static unsigned long prevMillis_ShowTimeDate = 0;
+            if (now - prevMillis_ShowTimeDate >= 1000) {
+                reset_Time_and_Date_Display = true;
+                prevMillis_ShowTimeDate = now;
+                if (needsClear) {
+                    dma_display->fillScreen(0);
+                    needsClear = false;
+                }
+                drawOWMScreen();
+            }
+            break;
+        case SCREEN_UDP_FORECAST:
+            if (!forecastScreen.isActive()) showForecastScreen();
+            forecastScreen.tick();
+            forecastScreen.handleIR(getIRCodeNonBlocking());
+            break;
+        case SCREEN_UDP_DATA:
+            if (!udpScreen.isActive()) showUdpScreen();
+            udpScreen.tick();
+            udpScreen.handleIR(getIRCodeNonBlocking());
+            break;
     }
     delay(0);
 }
