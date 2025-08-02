@@ -1,29 +1,22 @@
 #include "InfoScreen.h"
-#include "InfoModal.h"   // For CHARH, SCREEN_WIDTH, INFOMODAL_* colors
-#include "display.h"     // For dma_display, SCREEN_WIDTH
+#include "InfoModal.h"
+#include "display.h"
 
 extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
 extern ScreenMode currentScreen;
-extern int scrollSpeed; // ms per pixel, for horizontal scroll
+extern int scrollSpeed;
 
-int InfoScreen::getTextWidth(const char* str) {
-    return strlen(str) * 6;  // 6px per char, adjust for your font if needed
-}
 
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
     : _title(title), _screenMode(mode), _lineCount(0), _active(false),
       _onExit(nullptr), scrollY(0), selIndex(0), lastSelIndex(-1),
-      scrollOffset(0), lastScrollTime(0), firstScroll(true),
-      scrollPaused(false), scrollPauseTime(0)
+      firstScroll(true), scrollPaused(false), scrollPauseTime(0)
 {
     resetHScroll();
 }
 
-void InfoScreen::setTitle(const String& title) {
-    _title = title;
-}
-
+void InfoScreen::setTitle(const String& title) { _title = title; }
 void InfoScreen::setLines(const String lines[], int n) {
     _lineCount = (n > INFOSCREEN_MAX_LINES) ? INFOSCREEN_MAX_LINES : n;
     for (int i = 0; i < _lineCount; ++i) _lines[i] = lines[i];
@@ -32,29 +25,19 @@ void InfoScreen::setLines(const String lines[], int n) {
     lastSelIndex = -1;
     resetHScroll();
 }
-
 void InfoScreen::show(void (*onExit)()) {
-    _active = true;
-    _onExit = onExit;
-    scrollY = 0;
-    selIndex = 0;
-    lastSelIndex = -1;
+    _active = true; _onExit = onExit;
+    scrollY = 0; selIndex = 0; lastSelIndex = -1;
     resetHScroll();
 }
-
-void InfoScreen::hide() {
-    _active = false;
-    if (_onExit) _onExit();
-    resetHScroll();
-}
-
-bool InfoScreen::isActive() const {
-    return _active;
-}
+void InfoScreen::hide() { _active = false; if (_onExit) _onExit(); resetHScroll(); }
+bool InfoScreen::isActive() const { return _active; }
 
 void InfoScreen::resetHScroll() {
-    scrollOffset = 0;
-    lastScrollTime = millis();
+    for (int i = 0; i < INFOSCREEN_VISIBLE_ROWS; ++i) {
+        scrollOffsets[i] = 0;
+        lastScrollTimes[i] = millis();
+    }
     firstScroll = true;
     scrollPaused = false;
     scrollPauseTime = 0;
@@ -63,17 +46,16 @@ void InfoScreen::resetHScroll() {
 void InfoScreen::draw() {
     dma_display->fillScreen(0);
 
-    // --- Header ---
+    // Header
     const int headerHeight = CHARH;
-    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, INFOMODAL_HEADERBG);
-    dma_display->setTextColor(INFOMODAL_GREEN);
+    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, INFOSCREEN_HEADERBG);
+    dma_display->setTextColor(INFOSCREEN_HEADERFG);
     dma_display->setCursor(1, 0);
-    String t = _title;
-    if (t.length() > 12) t = t.substring(0, 12);
+    String t = _title; if (t.length() > 12) t = t.substring(0, 12);
     dma_display->print(t);
     dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, INFOMODAL_ULINE);
 
-    // --- Lines ---
+    // Lines
     int y = headerHeight;
     int pageLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
 
@@ -82,25 +64,29 @@ void InfoScreen::draw() {
         String line = _lines[idx];
         if (line.length() > 40) line = line.substring(0, 40);
 
+        int lineW = getTextWidth(line.c_str());
         bool isSelected = (i == selIndex);
+        uint16_t color = isSelected ? dma_display->color565(255,255,0) : dma_display->color565(255,255,255);
 
-        dma_display->setTextColor(isSelected ? dma_display->color565(255,255,0) : dma_display->color565(255,255,255));
-        if (isSelected) {
-            int textW = getTextWidth(line.c_str());
-            if (textW > SCREEN_WIDTH) {
-                // --- True LED marquee: start off right, scroll left, restart ---
-                int cursorX = SCREEN_WIDTH - scrollOffset;
-                dma_display->setCursor(cursorX, y);
-                dma_display->print(line);
-            } else {
-                dma_display->setCursor(0, y);
+        int yPos = headerHeight + i * CHARH;
+
+        if (lineW <= SCREEN_WIDTH) {
+            dma_display->setTextColor(color);
+            dma_display->setCursor(0, yPos);
+            dma_display->print(line);
+        } else if (isSelected) {
+            int cursorX = SCREEN_WIDTH - scrollOffsets[i];
+            if (cursorX + lineW > 0 && cursorX < SCREEN_WIDTH) {
+                dma_display->setTextColor(color);
+                dma_display->setCursor(cursorX, yPos);
                 dma_display->print(line);
             }
         } else {
-            dma_display->setCursor(0, y);
+            // Too long & not selected: print entire line, let display handle overflow
+            dma_display->setTextColor(color);
+            dma_display->setCursor(0, yPos);
             dma_display->print(line);
         }
-        y += CHARH;
     }
 }
 
@@ -117,55 +103,56 @@ void InfoScreen::tick() {
         lastSelIndex = selIndex;
     }
 
-    if (selIndex < pageLines && pageLines > 0) {
-        int idx = scrollY + selIndex;
+    // Only scroll the selected line if too long
+    for (int i = 0; i < pageLines; ++i) {
+        int idx = scrollY + i;
         String line = _lines[idx];
-        int textW = getTextWidth(line.c_str());
+        int lineW = getTextWidth(line.c_str());
 
-        if (textW > SCREEN_WIDTH) {
-            // --- True marquee: scroll from off-screen right to off-screen left ---
-            const int gap = 16; // px between scrolls for readability; set 0 for none
-            int scrollRange = textW + SCREEN_WIDTH + gap;
+        int &scrollOffset = scrollOffsets[i];
+        unsigned long &lastScrollTime = lastScrollTimes[i];
+
+        if (i == selIndex && lineW > SCREEN_WIDTH) {
+            int cursorX = SCREEN_WIDTH - scrollOffset;
             if (now - lastScrollTime > (unsigned)scrollSpeed) {
                 scrollOffset++;
                 lastScrollTime = now;
-                if (scrollOffset >= scrollRange)
+                if (cursorX + lineW < 0) {
                     scrollOffset = 0;
+                }
             }
         } else {
             scrollOffset = 0;
         }
     }
-
     draw();
 }
 
 void InfoScreen::handleIR(uint32_t code) {
     if (!_active) return;
 
+    int pageLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
+
     if (code == IR_UP) {
-        if (selIndex == 0) {
-            if (scrollY > 0) scrollY--;
-            else scrollY = max(0, _lineCount - INFOSCREEN_VISIBLE_ROWS);
-        } else {
+        if (selIndex > 0) {
             selIndex--;
+        } else if (scrollY > 0) {
+            scrollY--;
+        } else {
+            scrollY = max(0, _lineCount - INFOSCREEN_VISIBLE_ROWS);
+            selIndex = min(INFOSCREEN_VISIBLE_ROWS - 1, _lineCount - 1);
         }
-        resetHScroll();
-        draw();
-        return;
+        resetHScroll(); draw(); return;
     }
     if (code == IR_DOWN) {
-        int pageLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
-        if (selIndex >= pageLines - 1) {
-            if (scrollY + INFOSCREEN_VISIBLE_ROWS < _lineCount) scrollY++;
-            else scrollY = 0;
-            selIndex = 0;
-        } else {
+        if (selIndex < pageLines - 1 && (scrollY + selIndex) < (_lineCount - 1)) {
             selIndex++;
+        } else if ((scrollY + INFOSCREEN_VISIBLE_ROWS) < _lineCount) {
+            scrollY++;
+        } else {
+            scrollY = 0; selIndex = 0;
         }
-        resetHScroll();
-        draw();
-        return;
+        resetHScroll(); draw(); return;
     }
     if (code == IR_LEFT || code == IR_RIGHT) {
         int idx = -1;
@@ -177,9 +164,7 @@ void InfoScreen::handleIR(uint32_t code) {
             ? (idx - 1 + NUM_INFOSCREENS) % NUM_INFOSCREENS
             : (idx + 1) % NUM_INFOSCREENS;
         ScreenMode next = InfoScreenModes[nextIdx];
-        hide();
-        currentScreen = next;
-        return;
+        hide(); currentScreen = next; return;
     }
     draw();
 }

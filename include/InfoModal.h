@@ -8,9 +8,6 @@
 #define INFOMODAL_GREEN    dma_display->color565(255,255,255)
 #define INFOMODAL_HEADERBG dma_display->color565(0,0,120)
 
-
-//#define INFOMODAL_GREEN    dma_display->color565(0,255,80)
-//#define INFOMODAL_HEADERBG dma_display->color565(0,20,60)
 #define INFOMODAL_UNSELXBG dma_display->color565(110,80,133)
 #define INFOMODAL_SELXBG   dma_display->color565(255,0,0)
 #define INFOMODAL_XCOLOR   dma_display->color565(255,255,255)

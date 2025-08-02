@@ -5,6 +5,8 @@
 
 #define INFOSCREEN_MAX_LINES     10
 #define INFOSCREEN_VISIBLE_ROWS  3
+#define INFOSCREEN_HEADERFG dma_display->color565(156, 255, 91)
+#define INFOSCREEN_HEADERBG dma_display->color565(0,20,60)
 
 class InfoScreen {
 public:
@@ -24,6 +26,7 @@ public:
     static const int MAXROWS = 4;
     static const int DATA_ROWS_FULL = 3; // 3 data rows if NO button bar
     static const int SCREEN_WIDTH = 64;
+
 private:
     String _title;
     String _lines[INFOSCREEN_MAX_LINES];
@@ -36,14 +39,15 @@ private:
     int selIndex;         // selected line index (relative to visible page)
     int lastSelIndex;     // last selected line index (for detecting changes)
 
-    // Horizontal scroll state for selected line
-    int scrollOffset;
-    unsigned long lastScrollTime;
+    // Independent horizontal scroll state for each visible line
+    int scrollOffsets[INFOSCREEN_VISIBLE_ROWS];
+    unsigned long lastScrollTimes[INFOSCREEN_VISIBLE_ROWS];
+
+    // (Legacy modal state fields, keep for compatibility if referenced elsewhere)
     bool firstScroll;
     bool scrollPaused;
     unsigned long scrollPauseTime;
 
     void draw();
-    int getTextWidth(const char* str);
     void resetHScroll();
 };

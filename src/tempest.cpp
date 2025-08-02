@@ -116,13 +116,13 @@ void showUdpScreen() {
 
 void showForecastScreen() {
     String lines[8];
-    lines[0] = "Day:   " + forecast.day;
-    lines[1] = "High:  " + (isnan(forecast.highTemp) ? "--" : String(forecast.highTemp, 1) + "C");
-    lines[2] = "Low:   " + (isnan(forecast.lowTemp)  ? "--" : String(forecast.lowTemp, 1) + "C");
-    lines[3] = "Rain:  " + (forecast.rainChance < 0   ? "--" : String(forecast.rainChance) + "%");
-    lines[4] = "Wind:  " + (isnan(forecast.wind)      ? "--" : String(forecast.wind, 1) + "m/s");
-    lines[5] = "Hum:   " + (isnan(forecast.humidity)  ? "--" : String(forecast.humidity, 0) + "%");
-    lines[6] = "Cond:  " + forecast.summary;
+    lines[0] = "Day:  " + forecast.day;
+    lines[1] = "High: " + (isnan(forecast.highTemp) ? "--" : String(forecast.highTemp, 1) + "C");
+    lines[2] = "Low:  " + (isnan(forecast.lowTemp)  ? "--" : String(forecast.lowTemp, 1) + "C");
+    lines[3] = "Rain: " + (forecast.rainChance < 0   ? "--" : String(forecast.rainChance) + "%");
+    lines[4] = "Wind: " + (isnan(forecast.wind)      ? "--" : String(forecast.wind, 1) + "m/s");
+    lines[5] = "Hum:  " + (isnan(forecast.humidity)  ? "--" : String(forecast.humidity, 0) + "%");
+    lines[6] = "Cond: " + forecast.summary;
     forecastScreen.setLines(lines, 7);
     forecastScreen.show([](){ currentScreen = SCREEN_OWM; });
 }
