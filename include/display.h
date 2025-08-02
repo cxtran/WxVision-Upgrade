@@ -20,6 +20,7 @@ enum ScreenMode {
     SCREEN_OWM = 0,
     SCREEN_UDP_FORECAST,
     SCREEN_UDP_DATA,
+    SCREEN_RAPID_WIND, 
     // Add more screens as needed
     SCREEN_COUNT
 };

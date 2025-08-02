@@ -1,45 +1,71 @@
 #pragma once
 #include <Arduino.h>
-#include "display.h"
-#include "InfoModal.h"
 #include "InfoScreen.h"
-// ---- Data structure to store latest Tempest values ----
+// ----------- Tempest UDP Data Structure -----------
 struct TempestData {
-    float temperature = NAN;     // °C
-    float humidity = NAN;        // %
-    float pressure = NAN;        // hPa
-    float windSpeed = NAN;       // m/s
-    float windDir = NAN;         // deg
-    float uv = NAN;              // UV index
-    float solar = NAN;           // W/m²
-    float rain = NAN;            // mm
-    float battery = NAN;         // V
-    String lastObsTime = "";     // ISO8601 or raw
-    unsigned long lastUpdate = 0; // millis()
+    uint32_t epoch;
+    double windLull;
+    double windAvg;
+    double windGust;
+    double windDir;
+    double windSampleInt;
+    double pressure;
+    double temperature;
+    double humidity;
+    double illuminance;
+    double uv;
+    double solar;
+    double rain;
+    int    precipType;
+    int    strikeCount;
+    double strikeDist;
+    double battery;
+    int    reportInt;
+    String lastObsTime;
+    unsigned long lastUpdate;
 };
 
-// ---- Data structure for forecast ----
+// ----------- WeatherFlow Better Forecast Data -----------
 struct ForecastData {
-    float highTemp = NAN;    // High temperature (°C)
-    float lowTemp = NAN;     // Low temperature (°C)
-    int rainChance = -1;     // %
-    float wind = NAN;        // m/s
-    float humidity = NAN;    // %
-    String summary = "";     // Forecast summary
-    String day = "";         // "Mon", "Tue", etc
-    unsigned long lastUpdate = 0;
+    String day;
+    double highTemp;
+    double lowTemp;
+    int    rainChance;
+    double wind;
+    double humidity;
+    String summary;
+    unsigned long lastUpdate;
 };
 
-// ---- Global objects ----
+// ----------- Global Instances -----------
 extern TempestData tempest;
 extern ForecastData forecast;
+extern InfoScreen rapidWindScreen;
 
-// ---- UDP/HTTP update and display utilities ----
+extern bool newTempestData;
+extern bool newRapidWindData;
+
+// ----------- API Functions -----------
+
+// Parse Tempest UDP JSON packet
 void updateTempestFromUDP(const char* jsonStr);
+// Poll and process any UDP data
+void fetchTempestData();
+// Get field as printable string (for InfoScreen or logging)
 String getTempestField(const char* field);
 
+// Parse WeatherFlow forecast JSON
 void updateForecastFromJson(const String& jsonStr);
-void fetchTempestData();    // Call in loop() to poll UDP and update tempest
-void fetchForecastData();   // Call to fetch and update forecast via HTTP
-void showForecastScreen();
+// Poll and process forecast from WeatherFlow API
+void fetchForecastData();
+// Get forecast field as printable string
+String getForecastField(const char* field);
+
+// Fill and show InfoScreen with Tempest data
 void showUdpScreen();
+// Fill and show InfoScreen with forecast data
+void showForecastScreen();
+
+void showRapidWindScreen();
+
+String formatEpochTime(uint32_t epoch);

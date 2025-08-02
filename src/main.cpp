@@ -25,7 +25,7 @@
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
-    SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST
+    SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,SCREEN_RAPID_WIND
 };
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -37,6 +37,9 @@ extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceMo
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Forecast", SCREEN_UDP_FORECAST);
+InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
+
+
 
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
@@ -79,6 +82,7 @@ void scrollWeatherTick() {
 void hideAllInfoScreens() {
     udpScreen.hide();
     forecastScreen.hide();
+    rapidWindScreen.hide(); 
     // Add more InfoScreens here as needed
 }
 
@@ -191,13 +195,12 @@ void setup() {
     menuScroll = 0;
 }
 
-
 void loop() {
     unsigned long now = millis();
     static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500;
- 
+
     static ScreenMode lastScreen = SCREEN_OWM;  // or whatever your default is
     static bool needsClear = false;
     if (currentScreen != lastScreen) {
@@ -205,11 +208,32 @@ void loop() {
         lastScreen = currentScreen;
     }
 
+    // === [1] --- Always-on background tasks --- ===
     // --- Fetch new forecast data every 15 minutes ---
     if (now - lastForecast > 15 * 60 * 1000) {
         fetchForecastData();
         lastForecast = now;
     }
+
+    // --- Main background tasks ---
+    ArduinoOTA.handle();
+    fetchTempestData();
+
+    // --- Brightness control ---
+    static unsigned long lastBrightnessRead = 0;
+    if (now - lastBrightnessRead >= 5000) {
+        lastBrightnessRead = now;
+        float lux = readBrightnessSensor();
+        if (autoBrightness) {
+            setDisplayBrightnessFromLux(lux);
+        } else {
+            int hwBrightness = map(brightness, 1, 100, 3, 255);
+            dma_display->setBrightness8(hwBrightness);
+            Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
+        }
+    }
+
+    // === [2] --- UI/modal/menu/infoscreen handling --- ===
 
     // Only check physical reset if NO modal, NO keyboard, and NOT in WiFi select
     if (
@@ -271,19 +295,37 @@ void loop() {
         return;
     }
 
-    // --- 5. InfoScreens (live screens) ---
+    // --- 5. InfoScreens (live screens, auto-refresh if new data) ---
     if (udpScreen.isActive()) {
+        if (newTempestData) {
+            showUdpScreen();    // Rebuilds udpScreen with latest data
+            newTempestData = false;
+        }
         udpScreen.tick();
         udpScreen.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
+
     if (forecastScreen.isActive()) {
         forecastScreen.tick();
         forecastScreen.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
+    
+    if (rapidWindScreen.isActive()) {
+        if (newRapidWindData) {
+            showRapidWindScreen(); // Only update when actual rapid_wind packet arrives!
+            newRapidWindData = false;
+        }
+        rapidWindScreen.tick();
+        rapidWindScreen.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+
+
 
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
     uint32_t code = getIRCodeNonBlocking();
@@ -296,59 +338,57 @@ void loop() {
         return;
     }
 
-    // --- 7. Weather scroll tick ---
-    scrollWeatherTick();
+    // --- 7. Update and render OWM screen ONLY if visible (no InfoScreen/modal active) ---
+    bool anyModalOrInfoScreenActive =
+        sysInfoModal.isActive() ||
+        wifiInfoModal.isActive() ||
+        dateModal.isActive() ||
+        mainMenuModal.isActive() ||
+        deviceModal.isActive() ||
+        displayModal.isActive() ||
+        weatherModal.isActive() ||
+        calibrationModal.isActive() ||
+        systemModal.isActive() ||
+        inKeyboardMode ||
+        udpScreen.isActive() ||
+        forecastScreen.isActive();
 
-    // --- 8. Main background tasks ---
-    ArduinoOTA.handle();
-    fetchTempestData();
+    if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive) {
+        scrollWeatherTick();
+        if (reset_Time_and_Date_Display) {
+            reset_Time_and_Date_Display = false;
+            displayClock();
+            displayDate();
+            displayWeatherData();
+        }
 
-    // --- 9. Brightness control ---
-    static unsigned long lastBrightnessRead = 0;
-    if (now - lastBrightnessRead >= 5000) {
-        lastBrightnessRead = now;
-        float lux = readBrightnessSensor();
-        if (autoBrightness) {
-            setDisplayBrightnessFromLux(lux);
-        } else {
-            int hwBrightness = map(brightness, 1, 100, 3, 255);
-            dma_display->setBrightness8(hwBrightness);
-            Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
+        static unsigned long prevMillis_ShowTimeDate = 0;
+        if (now - prevMillis_ShowTimeDate >= 1000) {
+            reset_Time_and_Date_Display = true;
+            prevMillis_ShowTimeDate = now;
+            if (needsClear) {
+                dma_display->fillScreen(0);
+                needsClear = false;
+            }
+            drawOWMScreen();
         }
     }
 
-    // --- 10. Update main live screen ---
-    if (reset_Time_and_Date_Display) {
-        reset_Time_and_Date_Display = false;
-        displayClock();
-        displayDate();
-        displayWeatherData();
-    }
-
-    // --- 11. Screen rendering ---
+    // --- 8. InfoScreen auto-activation (if not already active) ---
     switch (currentScreen) {
-        case SCREEN_OWM:
-            static unsigned long prevMillis_ShowTimeDate = 0;
-            if (now - prevMillis_ShowTimeDate >= 1000) {
-                reset_Time_and_Date_Display = true;
-                prevMillis_ShowTimeDate = now;
-                if (needsClear) {
-                    dma_display->fillScreen(0);
-                    needsClear = false;
-                }
-                drawOWMScreen();
-            }
-            break;
         case SCREEN_UDP_FORECAST:
             if (!forecastScreen.isActive()) showForecastScreen();
-            forecastScreen.tick();
-            forecastScreen.handleIR(getIRCodeNonBlocking());
             break;
         case SCREEN_UDP_DATA:
             if (!udpScreen.isActive()) showUdpScreen();
-            udpScreen.tick();
-            udpScreen.handleIR(getIRCodeNonBlocking());
+            break;
+        case SCREEN_RAPID_WIND:
+            if (!rapidWindScreen.isActive()) showRapidWindScreen();
+            break;
+
+        default:
             break;
     }
+
     delay(0);
 }

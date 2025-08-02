@@ -94,7 +94,7 @@ extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
 extern String customMsg;
 extern int fmt24, dateFmt, tzOffset;
-
+/*
 void pushMenu(MenuLevel newMenu)
 {
     // Only push if different from current to avoid duplicates
@@ -102,6 +102,12 @@ void pushMenu(MenuLevel newMenu)
         menuStack.push_back(newMenu);
     }
 }
+*/
+void pushMenu(MenuLevel newMenu) {
+    menuStack.push_back(newMenu);
+    Serial.printf("[PUSH] Pushed %d, stack size now %d\n", newMenu, menuStack.size());
+}
+
 
 void updateMenu() { drawMenu(); }
 // Date/time modal working variables
@@ -252,11 +258,14 @@ void handleIR(uint32_t code)
 
 void showMainMenuModal()
 {
-        if (currentMenuLevel != MENU_NONE) {
+  /*  if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
         pushMenu(currentMenuLevel);
     }
+    */
     currentMenuLevel = MENU_MAIN;
     menuActive = true;
+
+
     String items[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     mainMenuModal.setLines(items, types, 6);
@@ -448,29 +457,34 @@ void showCalibrationModal()
 
 void showSystemModal()
 {
-    if (currentMenuLevel != MENU_NONE) {
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_SYSTEM;
     menuActive = true;
+
     String labels[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
+
     InfoFieldType types[] = {InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     systemModal.setLines(labels, types, 7);
     systemModal.setCallback([](bool accepted, int btnIdx) {
         int sel = systemModal.getSelIndex();
-        systemModal.hide();
-        switch (sel) {
-            case 0: showSystemInfoScreen(); break;
-            case 1: showDateTimeModal(); break;
-            case 2: showWiFiSignalTest(); break;
-            case 3: quickRestore(); break;
-            case 4: resetPowerUsage(); break;
-            case 5: factoryReset(); break;
-            case 6: ESP.restart(); break;
+         if (accepted && btnIdx >= 0) {
+            switch (sel) {
+                case 0: showSystemInfoScreen(); break;
+                case 1: showDateTimeModal(); break;
+                case 2: showWiFiSignalTest(); break;
+                case 3: quickRestore(); break;
+                case 4: resetPowerUsage(); break;
+                case 5: factoryReset(); break;
+                case 6: ESP.restart(); break;
+            }
         }
-        currentMenuLevel = MENU_MAIN;
-        currentMenuIndex = 0;
-        menuScroll = 0;
+        systemModal.hide();
+   //     currentMenuLevel = MENU_MAIN;
+  //      currentMenuIndex = 0;
+   //     menuScroll = 0;
+
     });
     systemModal.show();
 }
@@ -663,9 +677,9 @@ void showWiFiSignalTest()
 
 void showSystemInfoScreen()
 {
-    
-    if (currentMenuLevel != MENU_NONE) {
-        pushMenu(currentMenuLevel);  // Push current menu to stack
+
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
+        pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_SYSINFO;  // You can define this enum, or use MENU_SYSTEM if preferred
     menuActive = true;
@@ -693,6 +707,10 @@ void showSystemInfoScreen()
     };
     InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     sysInfoModal.setLines(lines, types, 7);
+
+    // Minimal callback enables stack-based X/cancel navigation!
+    sysInfoModal.setCallback([](bool, int){});
+    
     sysInfoModal.show();
 }
 
