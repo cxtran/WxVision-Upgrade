@@ -224,6 +224,13 @@ void setup() {
     scrollLine.setTitleMode(true);
     
 
+    windInfo.setTitleMode(false);
+    windInfo.setLineScrollDirection(0,1);
+    String lines[] = {"This is the line for all wind related data."};
+    windInfo.setLines(lines, 1);
+    windInfo.setBounceEnabled(false);
+
+
 }
 
 void loop() {

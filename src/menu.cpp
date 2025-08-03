@@ -14,7 +14,6 @@
 #include "ir_codes.h"
 #include "SPIFFS.h"
 
-
 // --- System Info Colors ---
 #define SYSINFO_HEADER dma_display->color565(0, 255, 80)
 #define SYSINFO_HEADERBG dma_display->color565(0, 20, 60)
@@ -32,7 +31,7 @@ void (*pendingModalFn)() = nullptr;
 unsigned long pendingModalTime = 0;
 
 extern ScreenMode currentScreen;
-//extern const int SCREEN_COUNT;
+// extern const int SCREEN_COUNT;
 void handleScreenSwitch(int dir);
 
 InfoModal sysInfoModal("Sys Info");
@@ -51,11 +50,9 @@ char wifiPassBuf[65];
 // --- Country Info for Weather Modal ---
 const char *countryLabels[] = {
     "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
-    "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"
-};
+    "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"};
 const char *countryCodes[] = {
-    "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""
-};
+    "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""};
 const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
 String owmCountryCode = "";
 
@@ -66,7 +63,7 @@ unsigned long lastMenuActivity = 0;
 
 int menuScroll = 0;
 const int visibleLines = 4;
-//int scrollOffset = 0;
+// int scrollOffset = 0;
 int wifiMenuScroll = 0;
 const int wifiVisibleLines = 3;
 
@@ -103,11 +100,11 @@ void pushMenu(MenuLevel newMenu)
     }
 }
 */
-void pushMenu(MenuLevel newMenu) {
+void pushMenu(MenuLevel newMenu)
+{
     menuStack.push_back(newMenu);
     Serial.printf("[PUSH] Pushed %d, stack size now %d\n", newMenu, menuStack.size());
 }
-
 
 void updateMenu() { drawMenu(); }
 // Date/time modal working variables
@@ -118,7 +115,7 @@ int dtDateFmt;
 
 const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
-const char *deviceMenu[] = { "WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
+const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
@@ -129,56 +126,106 @@ const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
-
 void handleIR(uint32_t code)
 {
     Serial.printf("IR Code: 0x%X\n", code);
 
-    if (code == IR_SCREEN) {
-        if (isScreenOff()) setScreenOff(false);
-        else setScreenOff(true);
+    if (code == IR_SCREEN)
+    {
+        if (isScreenOff())
+            setScreenOff(false);
+        else
+            setScreenOff(true);
         return;
     }
-    if (isScreenOff()) return;
+    if (isScreenOff())
+        return;
 
-    if (inKeyboardMode) { handleKeyboardIR(code); return; }
-    if (sysInfoModal.isActive())     { sysInfoModal.handleIR(code); return; }
-    if (wifiInfoModal.isActive())    { wifiInfoModal.handleIR(code); return; }
-    if (dateModal.isActive())        { dateModal.handleIR(code); return; }
-    if (mainMenuModal.isActive())    { mainMenuModal.handleIR(code); return; }
-    if (deviceModal.isActive())      { deviceModal.handleIR(code); return; }
-    if (displayModal.isActive())     { displayModal.handleIR(code); return; }
-    if (weatherModal.isActive())     { weatherModal.handleIR(code); return; }
-    if (calibrationModal.isActive()) { calibrationModal.handleIR(code); return; }
-    if (systemModal.isActive())      { systemModal.handleIR(code); return; }
+    if (inKeyboardMode)
+    {
+        handleKeyboardIR(code);
+        return;
+    }
+    if (sysInfoModal.isActive())
+    {
+        sysInfoModal.handleIR(code);
+        return;
+    }
+    if (wifiInfoModal.isActive())
+    {
+        wifiInfoModal.handleIR(code);
+        return;
+    }
+    if (dateModal.isActive())
+    {
+        dateModal.handleIR(code);
+        return;
+    }
+    if (mainMenuModal.isActive())
+    {
+        mainMenuModal.handleIR(code);
+        return;
+    }
+    if (deviceModal.isActive())
+    {
+        deviceModal.handleIR(code);
+        return;
+    }
+    if (displayModal.isActive())
+    {
+        displayModal.handleIR(code);
+        return;
+    }
+    if (weatherModal.isActive())
+    {
+        weatherModal.handleIR(code);
+        return;
+    }
+    if (calibrationModal.isActive())
+    {
+        calibrationModal.handleIR(code);
+        return;
+    }
+    if (systemModal.isActive())
+    {
+        systemModal.handleIR(code);
+        return;
+    }
 
     // WiFi select (not modal, custom menu)
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiScanCount == 0) {
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        if (wifiScanCount == 0)
+        {
             currentMenuLevel = MENU_DEVICE;
             drawMenu();
             return;
         }
-        if (code == IR_UP) {
+        if (code == IR_UP)
+        {
             handleUp();
             playBuzzerTone(1000, 60);
         }
-        else if (code == IR_DOWN) {
+        else if (code == IR_DOWN)
+        {
             handleDown();
             playBuzzerTone(1300, 60);
         }
-        else if (code == IR_OK) {
-            if (wifiSelectIndex == wifiScanCount - 1) { // <Back>
+        else if (code == IR_OK)
+        {
+            if (wifiSelectIndex == wifiScanCount - 1)
+            { // <Back>
                 wifiSelecting = false;
-                currentMenuLevel = MENU_MAIN;    // Return to MAIN menu instead of DEVICE menu
+                currentMenuLevel = MENU_MAIN; // Return to MAIN menu instead of DEVICE menu
                 menuActive = true;
                 currentMenuIndex = 0;
                 menuScroll = 0;
-                showMainMenuModal();             // Show main menu modal
+                showMainMenuModal(); // Show main menu modal
                 playBuzzerTone(900, 80);
                 return;
             }
-            if (scannedSSIDs[wifiSelectIndex] == "(No networks)") {
+            if (scannedSSIDs[wifiSelectIndex] == "(No networks)")
+            {
                 playBuzzerTone(500, 100);
                 return;
             }
@@ -188,35 +235,47 @@ void handleIR(uint32_t code)
             currentMenuIndex = 1;
             menuScroll = 0;
             drawMenu();
-            startKeyboardEntry(wifiPass.c_str(), [](const char *result) {
+            startKeyboardEntry(wifiPass.c_str(), [](const char *result)
+                               {
                 if (result) {
                     wifiPass = String(result);
                     saveDeviceSettings();
                     connectToWiFi();
                 }
-                drawMenu();
-            });
+                drawMenu(); });
             playBuzzerTone(2200, 120);
             return;
         }
-        else if (code == IR_CANCEL) {
+        else if (code == IR_CANCEL)
+        {
             wifiSelecting = false;
-            currentMenuLevel = MENU_MAIN;        // Return to MAIN menu here as well
+            currentMenuLevel = MENU_MAIN; // Return to MAIN menu here as well
             menuActive = true;
             currentMenuIndex = 0;
             menuScroll = 0;
-            showMainMenuModal();                 // Show main menu modal on cancel
+            showMainMenuModal(); // Show main menu modal on cancel
             playBuzzerTone(700, 80);
         }
         return;
     }
 
     static unsigned long lastMenuToggle = 0;
-    if (!menuActive) {
-        if (code == IR_LEFT)  { handleScreenSwitch(-1); return; }
-        if (code == IR_RIGHT) { handleScreenSwitch(+1); return; }
-        if (code == IR_CANCEL) {
-            if (millis() - lastMenuToggle < 500) return;
+    if (!menuActive)
+    {
+        if (code == IR_LEFT)
+        {
+            handleScreenSwitch(-1);
+            return;
+        }
+        if (code == IR_RIGHT)
+        {
+            handleScreenSwitch(+1);
+            return;
+        }
+        if (code == IR_CANCEL)
+        {
+            if (millis() - lastMenuToggle < 500)
+                return;
             menuActive = true;
             currentMenuLevel = MENU_MAIN;
             currentMenuIndex = 0;
@@ -231,26 +290,43 @@ void handleIR(uint32_t code)
 
     switch (code)
     {
-        case IR_CANCEL:
-            menuActive = false;
-            dma_display->clearScreen();
-            delay(50);
-            fetchWeatherFromOWM();
-            displayClock();
-            displayDate();
-            displayWeatherData();
-            reset_Time_and_Date_Display = true;
-            lastMenuToggle = millis();
-            break;
-        case IR_UP:    handleUp();    playBuzzerTone(1500, 100); break;
-        case IR_DOWN:  handleDown();  playBuzzerTone(1200, 100); break;
-        case IR_RIGHT: handleRight(); playBuzzerTone(1800, 100); break;
-        case IR_LEFT:  handleLeft();  playBuzzerTone(900, 100);  break;
-        case IR_OK:    handleSelect();playBuzzerTone(2200, 100); break;
-        default:
-            Serial.printf("Unknown code: 0x%X\n", code);
-            playBuzzerTone(500, 100); delay(100); playBuzzerTone(500, 100);
-            break;
+    case IR_CANCEL:
+        menuActive = false;
+        dma_display->clearScreen();
+        delay(50);
+        fetchWeatherFromOWM();
+        displayClock();
+        displayDate();
+        displayWeatherData();
+        reset_Time_and_Date_Display = true;
+        lastMenuToggle = millis();
+        break;
+    case IR_UP:
+        handleUp();
+        playBuzzerTone(1500, 100);
+        break;
+    case IR_DOWN:
+        handleDown();
+        playBuzzerTone(1200, 100);
+        break;
+    case IR_RIGHT:
+        handleRight();
+        playBuzzerTone(1800, 100);
+        break;
+    case IR_LEFT:
+        handleLeft();
+        playBuzzerTone(900, 100);
+        break;
+    case IR_OK:
+        handleSelect();
+        playBuzzerTone(2200, 100);
+        break;
+    default:
+        Serial.printf("Unknown code: 0x%X\n", code);
+        playBuzzerTone(500, 100);
+        delay(100);
+        playBuzzerTone(500, 100);
+        break;
     }
 }
 
@@ -258,73 +334,64 @@ void handleIR(uint32_t code)
 
 void showMainMenuModal()
 {
-  /*  if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
-        pushMenu(currentMenuLevel);
-    }
-    */
+    // Main menu is always the root, so clear the menu stack here
+    menuStack.clear();
     currentMenuLevel = MENU_MAIN;
     menuActive = true;
 
-
-    String items[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
-    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    String items[] = {
+        "Device Settings", "Display Settings", "Weather Settings",
+        "Calibration", "System", "Exit Menu"};
+    InfoFieldType types[] = {
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     mainMenuModal.setLines(items, types, 6);
 
-    mainMenuModal.setCallback([](bool accepted, int btnIdx) {
-        if (!accepted) {
-            menuActive = false;
-            dma_display->clearScreen();
-            delay(50);
-            fetchWeatherFromOWM();
-            displayClock();
-            displayDate();
-            displayWeatherData();
-            reset_Time_and_Date_Display = true;
+    mainMenuModal.setCallback([](bool accepted, int btnIdx)
+                              {
+    if (!accepted) {
+        // Only exit to home; don't call .hide() here (modal already hidden)
+        exitToHomeScreen();
+        return;
+    }
+    int selected = mainMenuModal.getSelIndex();
+    Serial.printf("[MainMenu] selected=%d\n", selected);
+    switch (selected) {
+        case 0: showDeviceSettingsModal(); return;
+        case 1: showDisplaySettingsModal(); return;
+        case 2: showWeatherSettingsModal(); return;
+        case 3: showCalibrationModal(); return;
+        case 4: showSystemModal(); return;
+        case 5: // Exit Menu
+            mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
+            exitToHomeScreen();
             return;
-        }
-        int selected = mainMenuModal.getSelIndex();
-        Serial.printf("[MainMenu] selected=%d\n", selected);
-        switch (selected) {
-            case 0: showDeviceSettingsModal(); return;
-            case 1: showDisplaySettingsModal(); return;
-            case 2: showWeatherSettingsModal(); return;
-            case 3: showCalibrationModal(); return;
-            case 4: showSystemModal(); return;
-            case 5: // Exit Menu
-                menuActive = false;
-                dma_display->clearScreen();
-                delay(50);
-                fetchWeatherFromOWM();
-                displayClock();
-                displayDate();
-                displayWeatherData();
-                reset_Time_and_Date_Display = true;
-                return;
-            default:
-                Serial.println("⚠️ Invalid main menu selection");
-                return;
-        }
-    });
+        default:
+            Serial.println("⚠️ Invalid main menu selection");
+            return;
+    } });
+
     mainMenuModal.show();
 }
 
-
 void showDisplaySettingsModal()
 {
-    if (currentMenuLevel != MENU_NONE) {
+    if (currentMenuLevel != MENU_NONE)
+    {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_DISPLAY;
     menuActive = true;
 
-
     static int autoBrightnessInt;
     autoBrightnessInt = autoBrightness ? 1 : 0;
     static int brightnessTemp = brightness;
     static int scrollLevelTemp = 3;
-    for (int i = 0; i < 10; ++i) {
-        if (scrollSpeed >= scrollDelays[i]) {
-            scrollLevelTemp = i; break;
+    for (int i = 0; i < 10; ++i)
+    {
+        if (scrollSpeed >= scrollDelays[i])
+        {
+            scrollLevelTemp = i;
+            break;
         }
     }
     String labels[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Custom Msg"};
@@ -345,7 +412,8 @@ void showDisplaySettingsModal()
     displayModal.setLines(labels, types, 5);
     displayModal.setValueRefs(numberRefs, 1, chooserRefs, 3, chooserOpts, chooserCounts, textRefs, 1, textSizes);
 
-    displayModal.setCallback([](bool accepted, int btnIdx) {
+    displayModal.setCallback([](bool accepted, int btnIdx)
+                             {
         
         if (accepted) {
             brightness = constrain(brightnessTemp, 1, 100);
@@ -360,15 +428,15 @@ void showDisplaySettingsModal()
         displayModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0;
-    });
+        menuScroll = 0; });
     displayModal.show();
 }
 
 void showWeatherSettingsModal()
 {
-    
-    if (currentMenuLevel != MENU_NONE) {
+
+    if (currentMenuLevel != MENU_NONE)
+    {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_WEATHER;
@@ -397,7 +465,8 @@ void showWeatherSettingsModal()
     weatherModal.setLines(labels, types, 6);
     weatherModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, textRefs, 5, textSizes);
 
-    weatherModal.setCallback([](bool ok, int btnIdx) {
+    weatherModal.setCallback([](bool ok, int btnIdx)
+                             {
         owmCountryIndex = owmCountryIndexTemp;
         owmCountryCustom = String(owmCountryCustomBuf);
         owmCity = String(owmCityBuf);
@@ -417,14 +486,14 @@ void showWeatherSettingsModal()
         weatherModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0;
-    });
+        menuScroll = 0; });
     weatherModal.show();
 }
 
 void showCalibrationModal()
 {
-    if (currentMenuLevel != MENU_NONE) {
+    if (currentMenuLevel != MENU_NONE)
+    {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_CALIBRATION;
@@ -439,7 +508,8 @@ void showCalibrationModal()
     calibrationModal.setLines(labels, types, 3);
     calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
 
-    calibrationModal.setCallback([](bool accepted, int btnIdx) {
+    calibrationModal.setCallback([](bool accepted, int btnIdx)
+                                 {
         tempOffset = constrain(tempOffsetTemp, -10, 10);
         humOffset = constrain(humOffsetTemp, -20, 20);
         lightGain = constrain(lightGainTemp, 1, 150);
@@ -450,42 +520,51 @@ void showCalibrationModal()
         calibrationModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0;
-    });
+        menuScroll = 0; });
     calibrationModal.show();
 }
 
 void showSystemModal()
 {
-    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN)
+    {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_SYSTEM;
     menuActive = true;
 
-    String labels[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
+    String labels[] = {
+        "Show System Info",
+        "Set Date & Time",
+        "WiFi Signal Test",
+        "Quick Restore",
+        "Reset Power",
+        "Factory Reset",
+        "Reboot"};
 
-    InfoFieldType types[] = {InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+    InfoFieldType types[] = {
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     systemModal.setLines(labels, types, 7);
-    systemModal.setCallback([](bool accepted, int btnIdx) {
+    systemModal.setCallback([](bool accepted, int btnIdx)
+                            {
         int sel = systemModal.getSelIndex();
-         if (accepted && btnIdx >= 0) {
+        if (accepted && btnIdx >= 0) {
             switch (sel) {
-                case 0: showSystemInfoScreen(); break;
-                case 1: showDateTimeModal(); break;
-                case 2: showWiFiSignalTest(); break;
-                case 3: quickRestore(); break;
-                case 4: resetPowerUsage(); break;
-                case 5: factoryReset(); break;
-                case 6: ESP.restart(); break;
+                case 0: showSystemInfoScreen(); return;
+                case 1: showDateTimeModal();    return;
+                case 2: showWiFiSignalTest();   return;
+                case 3: quickRestore();         break;
+                case 4: resetPowerUsage();      break;
+                case 5: factoryReset();         break;
+                case 6: ESP.restart();          break;
             }
         }
+        // Always return to main menu after hiding systemModal
         systemModal.hide();
-   //     currentMenuLevel = MENU_MAIN;
-  //      currentMenuIndex = 0;
-   //     menuScroll = 0;
-
-    });
+         menuStack.clear(); 
+        currentMenuLevel = MENU_MAIN;
+        menuActive = true;
+        showMainMenuModal(); });
     systemModal.show();
 }
 
@@ -500,10 +579,12 @@ void scanWiFiNetworks()
 
     int n = WiFi.scanNetworks();
     int j = 0;
-    for (int i = 0; i < n && j < 15; ++i) {
+    for (int i = 0; i < n && j < 15; ++i)
+    {
         String ssid = WiFi.SSID(i);
         ssid.trim();
-        if (ssid.length() == 0) continue;
+        if (ssid.length() == 0)
+            continue;
         scannedSSIDs[j++] = ssid;
     }
     scannedSSIDs[j++] = "< Back";
@@ -517,9 +598,18 @@ void scanWiFiNetworks()
 void drawMenu()
 {
     // If keyboard mode, let keyboard handle drawing!
-    if (inKeyboardMode) { drawKeyboard(); return; }
-    if (currentMenuLevel == MENU_MAIN) return;
-    if (currentMenuLevel == MENU_WIFI_SELECT) { drawWiFiMenu(); return; }
+    if (inKeyboardMode)
+    {
+        drawKeyboard();
+        return;
+    }
+    if (currentMenuLevel == MENU_MAIN)
+        return;
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        drawWiFiMenu();
+        return;
+    }
     // You can remove any further legacy drawing.
 }
 
@@ -527,15 +617,21 @@ void handleUp()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiScanCount > 0) {
-            if (wifiSelectIndex > 0) {
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        if (wifiScanCount > 0)
+        {
+            if (wifiSelectIndex > 0)
+            {
                 wifiSelectIndex--;
-                if (wifiSelectIndex < wifiMenuScroll) wifiMenuScroll = wifiSelectIndex;
+                if (wifiSelectIndex < wifiMenuScroll)
+                    wifiMenuScroll = wifiSelectIndex;
             }
-            if (wifiMenuScroll < 0) wifiMenuScroll = 0;
+            if (wifiMenuScroll < 0)
+                wifiMenuScroll = 0;
             int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-            if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
+            if (wifiMenuScroll > maxScroll)
+                wifiMenuScroll = maxScroll;
         }
         drawWiFiMenu();
         return;
@@ -546,16 +642,21 @@ void handleDown()
 {
     lastMenuActivity = millis();
     scrollOffset = 0;
-    if (currentMenuLevel == MENU_WIFI_SELECT) {
-        if (wifiScanCount > 0) {
-            if (wifiSelectIndex < wifiScanCount - 1) {
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        if (wifiScanCount > 0)
+        {
+            if (wifiSelectIndex < wifiScanCount - 1)
+            {
                 wifiSelectIndex++;
                 if (wifiSelectIndex >= wifiMenuScroll + wifiVisibleLines)
                     wifiMenuScroll = wifiSelectIndex - wifiVisibleLines + 1;
             }
             int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-            if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
-            if (wifiMenuScroll < 0) wifiMenuScroll = 0;
+            if (wifiMenuScroll > maxScroll)
+                wifiMenuScroll = maxScroll;
+            if (wifiMenuScroll < 0)
+                wifiMenuScroll = 0;
         }
         drawWiFiMenu();
         return;
@@ -565,37 +666,69 @@ void handleDown()
 void handleLeft()
 {
     lastMenuActivity = millis();
-    if (currentMenuLevel == MENU_WIFI_SELECT) return;
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+        return;
 }
 
 void handleRight()
 {
     lastMenuActivity = millis();
-    if (currentMenuLevel == MENU_WIFI_SELECT) return;
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+        return;
 }
 
 void handleSelect()
 {
     lastMenuActivity = millis();
     int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
-              : (currentMenuLevel == MENU_DEVICE)        ? deviceCount
-              : (currentMenuLevel == MENU_DISPLAY)       ? displayCount
-              : (currentMenuLevel == MENU_WEATHER)       ? weatherCount
-              : (currentMenuLevel == MENU_CALIBRATION)   ? calibCount
+                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
+                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
+                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
+                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
                                                          : systemCount;
-    if (currentMenuIndex < 0) currentMenuIndex = 0;
-    if (currentMenuIndex >= count) currentMenuIndex = count - 1;
-    if (inKeyboardMode) return;
+    if (currentMenuIndex < 0)
+        currentMenuIndex = 0;
+    if (currentMenuIndex >= count)
+        currentMenuIndex = count - 1;
+    if (inKeyboardMode)
+        return;
 
-    if (currentMenuLevel == MENU_MAIN)          { showMainMenuModal();       return; }
-    else if (currentMenuLevel == MENU_DISPLAY)  { showDisplaySettingsModal();return; }
-    else if (currentMenuLevel == MENU_WEATHER)  { showWeatherSettingsModal();return; }
-    else if (currentMenuLevel == MENU_CALIBRATION){ showCalibrationModal();  return; }
-    else if (currentMenuLevel == MENU_SYSTEM)   { showSystemModal();         return; }
+    if (currentMenuLevel == MENU_MAIN)
+    {
+        showMainMenuModal();
+        return;
+    }
+    else if (currentMenuLevel == MENU_DISPLAY)
+    {
+        showDisplaySettingsModal();
+        return;
+    }
+    else if (currentMenuLevel == MENU_WEATHER)
+    {
+        showWeatherSettingsModal();
+        return;
+    }
+    else if (currentMenuLevel == MENU_CALIBRATION)
+    {
+        showCalibrationModal();
+        return;
+    }
+    else if (currentMenuLevel == MENU_SYSTEM)
+    {
+        showSystemModal();
+        return;
+    }
 
-    if (!menuActive) return;
-    if (currentMenuLevel == MENU_WIFI_SELECT)   { drawWiFiMenu(); }
-    else                                        { drawMenu();     }
+    if (!menuActive)
+        return;
+    if (currentMenuLevel == MENU_WIFI_SELECT)
+    {
+        drawWiFiMenu();
+    }
+    else
+    {
+        drawMenu();
+    }
 }
 
 void drawWiFiMenu()
@@ -605,21 +738,28 @@ void drawWiFiMenu()
     dma_display->setTextColor(dma_display->color565(0, 255, 255));
     dma_display->setCursor(0, 0);
     dma_display->print("Select WiFi:");
-    if (wifiScanCount == 0) {
+    if (wifiScanCount == 0)
+    {
         dma_display->setTextColor(dma_display->color565(255, 80, 80));
         dma_display->setCursor(0, 10);
         dma_display->print("No WiFi found.");
         return;
     }
     int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-    if (wifiMenuScroll > maxScroll) wifiMenuScroll = maxScroll;
-    if (wifiMenuScroll < 0) wifiMenuScroll = 0;
+    if (wifiMenuScroll > maxScroll)
+        wifiMenuScroll = maxScroll;
+    if (wifiMenuScroll < 0)
+        wifiMenuScroll = 0;
     const int labelHeight = 7, listStartY = labelHeight + 1, wifiLineHeight = 8;
-    for (int i = 0; i < wifiVisibleLines; ++i) {
+    for (int i = 0; i < wifiVisibleLines; ++i)
+    {
         int idx = wifiMenuScroll + i;
-        if (idx >= wifiScanCount) break;
-        if (idx == wifiSelectIndex) dma_display->setTextColor(dma_display->color565(255, 255, 0));
-        else dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        if (idx >= wifiScanCount)
+            break;
+        if (idx == wifiSelectIndex)
+            dma_display->setTextColor(dma_display->color565(255, 255, 0));
+        else
+            dma_display->setTextColor(dma_display->color565(255, 255, 255));
         dma_display->setCursor(0, listStartY + wifiLineHeight * i);
         dma_display->print(scannedSSIDs[idx]);
     }
@@ -638,12 +778,13 @@ void onWiFiConnectFailed()
 // --- System Info/DateTime/WiFi Test Modals (same as before) ---
 void showWiFiSignalTest()
 {
-    
-    if (currentMenuLevel != MENU_NONE) {
-        pushMenu(currentMenuLevel);  // Push current menu to stack
+
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel); // Push current menu to stack
     }
-    currentMenuLevel = MENU_SYSWIFI;  // You can define this enum, or use MENU_SYSTEM if preferred
-    menuActive = true;        
+    currentMenuLevel = MENU_SYSWIFI; // You can define this enum, or use MENU_SYSTEM if preferred
+    menuActive = true;
     scanWiFiNetworks();
     const int maxLines = 32;
     String lines[maxLines];
@@ -667,7 +808,8 @@ void showWiFiSignalTest()
     lines[lineIndex] = "Channel: " + String(WiFi.channel());
     types[lineIndex++] = InfoLabel;
 
-    for (int i = 0; i < wifiScanCount - 1 && lineIndex < maxLines; i++) {
+    for (int i = 0; i < wifiScanCount - 1 && lineIndex < maxLines; i++)
+    {
         lines[lineIndex] = "Net[" + String(i + 1) + "]: " + scannedSSIDs[i];
         types[lineIndex++] = InfoLabel;
     }
@@ -678,10 +820,11 @@ void showWiFiSignalTest()
 void showSystemInfoScreen()
 {
 
-    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN) {
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN)
+    {
         pushMenu(currentMenuLevel);
     }
-    currentMenuLevel = MENU_SYSINFO;  // You can define this enum, or use MENU_SYSTEM if preferred
+    currentMenuLevel = MENU_SYSINFO; // You can define this enum, or use MENU_SYSTEM if preferred
     menuActive = true;
 
     uint32_t flashChipSize = ESP.getFlashChipSize();
@@ -703,23 +846,23 @@ void showSystemInfoScreen()
         "RSSI: " + String(WiFi.RSSI()) + " dBm",
         "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
         "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
-        "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"
-    };
+        "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"};
     InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     sysInfoModal.setLines(lines, types, 7);
 
     // Minimal callback enables stack-based X/cancel navigation!
-    sysInfoModal.setCallback([](bool, int){});
-    
+    sysInfoModal.setCallback([](bool, int) {});
+
     sysInfoModal.show();
 }
 
 void showDateTimeModal()
 {
-    if (currentMenuLevel != MENU_NONE) {
-        pushMenu(currentMenuLevel);  // Push current menu to stack
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel); // Push current menu to stack
     }
-    currentMenuLevel = MENU_SYSDATETIME;  // You can define this enum, or use MENU_SYSTEM if preferred
+    currentMenuLevel = MENU_SYSDATETIME; // You can define this enum, or use MENU_SYSTEM if preferred
     menuActive = true;
 
     DateTime now = rtc.now();
@@ -749,7 +892,8 @@ void showDateTimeModal()
     dateModal.setLines(lines, types, 11);
     dateModal.setValueRefs(intRefs, 7, chooserRefs, 2, chooserOptPtrs, chooserOptCounts, textRefs, 1, textSizes);
 
-    dateModal.setCallback([](bool accepted, int btnIdx) {
+    dateModal.setCallback([](bool accepted, int btnIdx)
+                          {
         int sel = dateModal.getSelIndex();
         if (sel == 10) {
             dateModal.hide();
@@ -774,18 +918,20 @@ void showDateTimeModal()
         fmt24 = dtFmt24;
         dateFmt = dtDateFmt;
         saveDateTimeSettings();
-        dateModal.hide();
-    });
+        dateModal.hide(); });
     dateModal.show();
 }
 
 void handleScreenSwitch(int dir)
 {
     int next = (int)currentScreen + dir;
-    if (next < 0) next = SCREEN_COUNT - 1;
-    if (next >= SCREEN_COUNT) next = 0;
+    if (next < 0)
+        next = SCREEN_COUNT - 1;
+    if (next >= SCREEN_COUNT)
+        next = 0;
     currentScreen = (ScreenMode)next;
-    if (currentScreen == ScreenMode::SCREEN_OWM) {
+    if (currentScreen == ScreenMode::SCREEN_OWM)
+    {
         dma_display->clearScreen();
         delay(50);
     }
@@ -794,7 +940,8 @@ void handleScreenSwitch(int dir)
 
 void showDeviceSettingsModal()
 {
-    if (currentMenuLevel != MENU_NONE) {
+    if (currentMenuLevel != MENU_NONE)
+    {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_DEVICE;
@@ -804,13 +951,17 @@ void showDeviceSettingsModal()
     // Instead just prepare SSID chooser with current connected SSID only.
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
 
-    if (!wifiConnected) {
+    if (!wifiConnected)
+    {
         // Only scan WiFi networks if not connected and scan needed
-        if (wifiSelectNeedsScan || wifiScanCount == 0) {
+        if (wifiSelectNeedsScan || wifiScanCount == 0)
+        {
             scanWiFiNetworks();
             wifiSelectNeedsScan = false;
         }
-    } else {
+    }
+    else
+    {
         // If connected, show only current SSID in the chooser (no scan)
         wifiScanCount = 1;
         scannedSSIDs[0] = WiFi.SSID();
@@ -818,8 +969,10 @@ void showDeviceSettingsModal()
 
     // Find index of current SSID for default selection
     wifiSelectIndex = 0;
-    for (int i = 0; i < wifiScanCount; ++i) {
-        if (scannedSSIDs[i] == wifiSSID) {
+    for (int i = 0; i < wifiScanCount; ++i)
+    {
+        if (scannedSSIDs[i] == wifiSSID)
+        {
             wifiSelectIndex = i;
             break;
         }
@@ -827,11 +980,13 @@ void showDeviceSettingsModal()
 
     // Prepare persistent storage for SSID chooser
     static String ssidStringStore[16];
-    static const char* ssidOptions[16];
+    static const char *ssidOptions[16];
     int modalSsidCount = wifiScanCount;
-    if (modalSsidCount > 0 && scannedSSIDs[modalSsidCount-1] == "< Back") modalSsidCount--;
+    if (modalSsidCount > 0 && scannedSSIDs[modalSsidCount - 1] == "< Back")
+        modalSsidCount--;
 
-    for (int i = 0; i < modalSsidCount; ++i) {
+    for (int i = 0; i < modalSsidCount; ++i)
+    {
         ssidStringStore[i] = scannedSSIDs[i];
         ssidOptions[i] = ssidStringStore[i].c_str();
     }
@@ -844,12 +999,10 @@ void showDeviceSettingsModal()
     // Modal labels and field types
     String labels[] = {
         "WiFi SSID", "WiFi Pass",
-        "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"
-    };
+        "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"};
     InfoFieldType types[] = {
         InfoChooser, InfoText,
-        InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser
-    };
+        InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
 
     int *chooserRefs[] = {&wifiSelectIndex, &units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
     static const char *unitsOpt[] = {"F+mph", "C+m/s"};
@@ -868,11 +1021,11 @@ void showDeviceSettingsModal()
         nullptr, 0,
         chooserRefs, 6,
         chooserOpts, chooserCounts,
-        textRefs, 1, textSizes
-    );
+        textRefs, 1, textSizes);
     deviceModal.setButtons(nullptr, 0);
 
-    deviceModal.setCallback([](bool accepted, int btnIdx) {
+    deviceModal.setCallback([](bool accepted, int btnIdx)
+                            {
         int sel = deviceModal.getSelIndex();
         if (accepted) {
             if (sel == 0) {
@@ -894,8 +1047,20 @@ void showDeviceSettingsModal()
         deviceModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0;
-    });
+        menuScroll = 0; });
 
     deviceModal.show();
+}
+
+void exitToHomeScreen()
+{
+    menuStack.clear();
+    menuActive = false;
+    dma_display->clearScreen();
+    delay(50);
+    fetchWeatherFromOWM();
+    displayClock();
+    displayDate();
+    displayWeatherData();
+    reset_Time_and_Date_Display = true;
 }

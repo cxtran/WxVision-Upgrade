@@ -22,7 +22,11 @@ public:
     // Set colors for title text and background
     void setTitleColors(uint16_t textColor, uint16_t bgColor);
 
+    void setTitleScrollDirection(int dir) ;
+    void setLineScrollDirection(int lineIndex, int dir) ;
+    void setBounceEnabled(bool enabled);
 private:
+    bool _bounceEnabled;
     int _screenWidth;
     unsigned int _scrollSpeedMs;
 

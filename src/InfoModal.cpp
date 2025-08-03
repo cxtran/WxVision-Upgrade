@@ -502,17 +502,10 @@ void InfoModal::handleIR(uint32_t code)
         {
             if (callback)
                 callback(false, -1);
-            hide();
 
-            // NEW: If current modal is mainMenuModal, exit menu on X
-            if (this == &mainMenuModal) {
-                menuActive = false;
-                dma_display->clearScreen();
-                drawMenu();
-                return;
-            }
+            hide(); // Always hide THIS modal first!
 
-            // Restore previous menu if any
+            // --- Stack-aware navigation ---
             if (!menuStack.empty())
             {
                 MenuLevel prev = menuStack.back();
@@ -540,19 +533,23 @@ void InfoModal::handleIR(uint32_t code)
                     showSystemModal();
                     break;
                 default:
-                    menuActive = false;
-                    dma_display->clearScreen();
+                    currentMenuLevel = MENU_MAIN;
+                    showMainMenuModal();
                     break;
                 }
             }
             else
             {
-                // No previous menu — exit menu
-                menuActive = false;
-                dma_display->clearScreen();
+                // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
+                if (this == &mainMenuModal) {
+                    menuActive = false;
+                    return;
+                }
+                // Otherwise, show main menu as root
+                currentMenuLevel = MENU_MAIN;
+                menuActive = true;
+                showMainMenuModal();
             }
-
-            drawMenu();
             return;
         }
         if (code == IR_DOWN || code == IR_UP)
@@ -795,9 +792,9 @@ void InfoModal::handleIR(uint32_t code)
         else if (callback)
         {
             callback(false, -1);
-            hide();
 
-            // Restore previous menu if any
+            hide(); // Always hide THIS modal first!
+
             if (!menuStack.empty())
             {
                 MenuLevel prev = menuStack.back();
@@ -825,19 +822,31 @@ void InfoModal::handleIR(uint32_t code)
                     showSystemModal();
                     break;
                 default:
-                    menuActive = false;
-                    dma_display->clearScreen();
+                    currentMenuLevel = MENU_MAIN;
+                    showMainMenuModal();
                     break;
                 }
             }
             else
             {
-                // No previous menu — exit menu
-                menuActive = false;
-                dma_display->clearScreen();
+                // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
+                if (this == &mainMenuModal) {
+                    menuActive = false;
+                    dma_display->clearScreen();
+                    delay(50);
+                    fetchWeatherFromOWM();
+                    displayClock();
+                    displayDate();
+                    displayWeatherData();
+                    reset_Time_and_Date_Display = true;
+                    return;
+                }
+                // Otherwise, show main menu as root
+                currentMenuLevel = MENU_MAIN;
+                menuActive = true;
+                showMainMenuModal();
             }
-
-            drawMenu();
+            return;
         }
     }
 }

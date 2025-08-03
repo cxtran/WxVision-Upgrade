@@ -32,6 +32,8 @@ void showSystemModal();
 void scanWiFiNetworks();
 void handleScreenSwitch(int dir);
 
+void exitToHomeScreen();
+
 // --- WiFi/Network Globals ---
 extern std::vector<String> foundSSIDs;
 extern int selectedWifiIdx;
@@ -73,6 +75,7 @@ extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern void fetchWeatherFromOWM();
+
 extern bool reset_Time_and_Date_Display;
 
 // --- Weather/Device/Display/Calibration/OWM ---

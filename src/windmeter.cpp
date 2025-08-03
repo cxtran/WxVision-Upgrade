@@ -7,14 +7,14 @@ const float DIR_ANGLES[8] = {0, 45, 90, 135, 180, 225, 270, 315};
 
 // Lengths of lines from center to tip in pixels for 24x24 icon
 const int LINE_LENGTHS[8] = {
-    10,  // N
-    11,  // NE (one pixel longer)
-    10,  // E
-    11,  // SE (one pixel longer)
-    10,  // S
-    11,  // SW (one pixel longer)
-    10,  // W
-    11   // NW (one pixel longer)
+    7,  // N
+    8,  // NE (one pixel longer)
+    7,  // E
+    8,  // SE (one pixel longer)
+    7,  // S
+    8,  // SW (one pixel longer)
+    7,  // W
+    8   // NW (one pixel longer)
 };
 
 // Animation timing constants (ms)

@@ -8,7 +8,9 @@ extern InfoScreen forecastScreen;
 extern ScreenMode currentScreen;
 extern WindMeter windMeter;
 extern ScrollLine scrollLine;
+extern ScrollLine windInfo;
 extern int scrollSpeed;
+
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -258,6 +260,8 @@ void showWindDirectionScreen() {
     scrollLine.update();
     scrollLine.draw(0, 0, 0xFFFF); // draw at x=0,y=0 default white text
   
+    windInfo.update();
+    windInfo.draw(0,24,0xFFFF);
 
     dma_display->setTextColor(myCYAN);
     dma_display->setCursor(cx + 12, 8);

@@ -62,13 +62,9 @@ void ScrollLine::update() {
         if (_titleTextWidth <= _screenWidth) return;
 
         if (now - _titleLastScrollTime >= _scrollSpeedMs) {
-            _titleScrollOffset += _titleScrollDirection;
-            if (_titleScrollOffset > _titleTextWidth - _screenWidth) {
-                _titleScrollDirection = -1;
-                _titleScrollOffset = _titleTextWidth - _screenWidth;
-            } else if (_titleScrollOffset <= 0) {
-                _titleScrollDirection = 1;
-                _titleScrollOffset = 0;
+            _titleScrollOffset++;
+            if (_titleScrollOffset > _titleTextWidth) {
+                _titleScrollOffset = 0;  // reset to start smoothly
             }
             _titleLastScrollTime = now;
         }
@@ -79,24 +75,18 @@ void ScrollLine::update() {
         for (int i = 0; i < _lineCount; ++i) {
             int lineW = getTextWidth(_lines[i].c_str());
             int& scrollOffset = _scrollOffsets[i];
-            int& scrollDirection = _scrollDirections[i];
             unsigned long& lastScrollTime = _lastScrollTimes[i];
 
             if (i == _selIndex && lineW > _screenWidth) {
                 if (now - lastScrollTime >= _scrollSpeedMs) {
-                    scrollOffset += scrollDirection;
-                    if (scrollOffset > lineW - _screenWidth) {
-                        scrollDirection = -1;
-                        scrollOffset = lineW - _screenWidth;
-                    } else if (scrollOffset <= 0) {
-                        scrollDirection = 1;
-                        scrollOffset = 0;
+                    scrollOffset++;
+                    if (scrollOffset > lineW) {
+                        scrollOffset = 0;  // loop continuous marquee
                     }
                     lastScrollTime = now;
                 }
             } else {
                 scrollOffset = 0;
-                scrollDirection = 1;
             }
         }
     }
@@ -117,36 +107,39 @@ void ScrollLine::setTitleColors(uint16_t textColor, uint16_t bgColor) {
 
 void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
     if (_isTitleMode) {
-        // Draw background rectangle behind title text
+        // Draw background behind title
         dma_display->fillRect(x, y, _screenWidth, 8, _titleBgColor);
 
-        const uint16_t borderLineColor = dma_display->color565(220, 220, 220); 
-        // Draw the bottom border line (1px height) just below the title text area
+        // Draw bottom border line
+        const uint16_t borderLineColor = dma_display->color565(100, 100, 100);
         dma_display->drawFastHLine(x, y + 7, _screenWidth, borderLineColor);
 
         dma_display->setTextColor(_titleTextColor);
+
         if (_titleTextWidth <= _screenWidth) {
             dma_display->setCursor(x, y);
             dma_display->print(_titleText);
         } else {
+            // Draw first instance of text offset left by _titleScrollOffset
             int drawX = x - _titleScrollOffset;
             dma_display->setCursor(drawX, y);
             dma_display->print(_titleText);
-            if (drawX + _titleTextWidth < _screenWidth) {
-                dma_display->setCursor(drawX + _titleTextWidth + 1, y);
-                dma_display->print(_titleText);
-            }
+
+            // Draw second instance right after first to fill gap
+            dma_display->setCursor(drawX + _titleTextWidth + 1, y);
+            dma_display->print(_titleText);
         }
     } else {
+        // Your existing multi-line drawing code unchanged (or apply similar marquee if desired)
         int lineHeight = 8;
         for (int i = 0; i < _lineCount; ++i) {
             int drawY = y + i * lineHeight;
             String line = _lines[i];
             int lineW = getTextWidth(line.c_str());
             int scrollOffset = _scrollOffsets[i];
-            int cursorX = _screenWidth - scrollOffset;
+            int cursorX = x - scrollOffset;  // note adjusted for marquee
 
-            // Draw background rectangle behind text line
+            // Draw background behind text line
             dma_display->fillRect(x, drawY, _screenWidth, lineHeight, _bgColors[i]);
 
             uint16_t textColor = _textColors[i];
@@ -158,13 +151,13 @@ void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
                 dma_display->setCursor(x, drawY);
                 dma_display->print(line);
             } else {
-                if (i == _selIndex && cursorX + lineW > 0 && cursorX < _screenWidth) {
-                    dma_display->setCursor(cursorX, drawY);
-                    dma_display->print(line);
-                } else {
-                    dma_display->setCursor(x, drawY);
-                    dma_display->print(line);
-                }
+                // Draw first instance
+                dma_display->setCursor(cursorX, drawY);
+                dma_display->print(line);
+
+                // Draw second instance to fill gap
+                dma_display->setCursor(cursorX + lineW + 1, drawY);
+                dma_display->print(line);
             }
         }
     }
@@ -180,4 +173,17 @@ int ScrollLine::getTextWidth(const char* text) {
         width += 6; // fixed-width font assumption; replace if you have better API
     }
     return width;
+}
+
+void ScrollLine::setTitleScrollDirection(int dir) {
+    if (dir == 1 || dir == -1) _titleScrollDirection = dir;
+}
+
+void ScrollLine::setLineScrollDirection(int lineIndex, int dir) {
+    if (lineIndex >= 0 && lineIndex < MAX_LINES && (dir == 1 || dir == -1))
+        _scrollDirections[lineIndex] = dir;
+}
+
+void ScrollLine::setBounceEnabled(bool enabled) {
+    _bounceEnabled = enabled;
 }
