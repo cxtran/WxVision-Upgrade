@@ -22,11 +22,11 @@
 #include "keyboard.h"
 #include "tempest.h"
 #include "InfoScreen.h"
+#include "windmeter.h"
+#include "ScrollLine.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {
-    SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,SCREEN_RAPID_WIND
-};
+const ScreenMode InfoScreenModes[] = { SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,SCREEN_RAPID_WIND,SCREEN_WIND_DIR };
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -38,6 +38,9 @@ extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceMo
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Forecast", SCREEN_UDP_FORECAST);
 InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
+WindMeter windMeter;
+ScrollLine scrollLine(64, 40); // 64 px wide, scroll every 50ms
+ScrollLine windInfo(64,40); 
 
 
 
@@ -83,6 +86,7 @@ void hideAllInfoScreens() {
     udpScreen.hide();
     forecastScreen.hide();
     rapidWindScreen.hide(); 
+
     // Add more InfoScreens here as needed
 }
 
@@ -90,19 +94,28 @@ void hideAllInfoScreens() {
 void rotateScreen(int direction) {
     int idx = -1;
     for (int i = 0; i < NUM_INFOSCREENS; ++i) {
-        if (InfoScreenModes[i] == currentScreen) { idx = i; break; }
+        if (InfoScreenModes[i] == currentScreen) {
+            idx = i;
+            break;
+        }
     }
     if (idx < 0) return;
+
     int nextIdx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
     ScreenMode next = InfoScreenModes[nextIdx];
 
-    hideAllInfoScreens(); // Hide previous
+    hideAllInfoScreens();
     currentScreen = next;
-    // Show next if needed (not OWM)
-    if (currentScreen == SCREEN_UDP_DATA) showUdpScreen();
-    else if (currentScreen == SCREEN_UDP_FORECAST) showForecastScreen();
-    // OWM will be drawn in main loop
+
+    switch (currentScreen) {
+        case SCREEN_UDP_DATA: showUdpScreen(); break;
+        case SCREEN_UDP_FORECAST: showForecastScreen(); break;
+        case SCREEN_RAPID_WIND: showRapidWindScreen(); break;
+        case SCREEN_WIND_DIR: showWindDirectionScreen(); break;
+        case SCREEN_OWM: /* draw in loop */ break;
+    }
 }
+
 
 // --- Button reset logic ---
 void handleResetButton() {
@@ -193,6 +206,24 @@ void setup() {
     currentMenuIndex = 0;
     menuActive = false;
     menuScroll = 0;
+
+    // Setup your display and ScrollLine...
+
+    // Set lines with text
+ //   String lines[] = {"Hello world!", "Second line", "Third line"};
+  //  scrollLine.setLines(lines, 3);
+
+    // Set per-line colors: white on black, green on blue, red on yellow
+ //   uint16_t textColors[3] = {0xFFFF, 0x07E0, 0xF800};
+ //   uint16_t bgColors[3] = {0x0000, 0x001F, 0xFFE0};
+ //   scrollLine.setLineColors(textColors, bgColors, 3);
+
+    // For title mode
+    scrollLine.setTitleText("Wind Info");
+    scrollLine.setTitleColors(INFOSCREEN_HEADERFG, INFOSCREEN_HEADERBG); // white on black
+    scrollLine.setTitleMode(true);
+    
+
 }
 
 void loop() {
@@ -389,6 +420,54 @@ void loop() {
         default:
             break;
     }
+
+    if (currentScreen == SCREEN_WIND_DIR) {
+        static unsigned long lastDataUpdate = 0;
+        static unsigned long lastFrameUpdate = 0;
+        const unsigned long dataUpdateInterval = 3000;  // 3 seconds
+        const unsigned long frameUpdateInterval = 40;   // 20 FPS
+
+
+
+        unsigned long now = millis();
+
+
+
+
+
+        // Update data every 3 seconds or when new rapid wind data arrives
+        if (newRapidWindData || (now - lastDataUpdate) > dataUpdateInterval) {
+            // Just clear the flag, don't redraw full screen here
+            newRapidWindData = false;
+            lastDataUpdate = now;
+
+        }
+
+        // Animate and redraw frame every ~50 ms
+        if (now - lastFrameUpdate > frameUpdateInterval) {
+
+
+            showWindDirectionScreen();  // Draw frame with animation
+            lastFrameUpdate = now;
+        }
+
+        // IR input handling for this screen
+        uint32_t code = getIRCodeNonBlocking();
+        if (code) {
+            if (code == IR_LEFT)  { rotateScreen(-1); return; }
+            if (code == IR_RIGHT) { rotateScreen(+1); return; }
+            if (code == IR_CANCEL) {
+                showMainMenuModal();
+                return;
+            }
+        }
+
+        delay(10);
+        return;
+    }
+
+
+
 
     delay(0);
 }

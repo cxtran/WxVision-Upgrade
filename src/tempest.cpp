@@ -1,15 +1,14 @@
 #include "tempest.h"
-#include <Arduino_JSON.h>
-#include <WiFiUdp.h>
 #include <HTTPClient.h>
+#include "ScrollLine.h"
 
-
-// --- Externals (must be defined in your main) ---
 extern WiFiUDP udp;
 extern InfoScreen udpScreen;
 extern InfoScreen forecastScreen;
 extern ScreenMode currentScreen;
-
+extern WindMeter windMeter;
+extern ScrollLine scrollLine;
+extern int scrollSpeed;
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -175,19 +174,26 @@ String getForecastField(const char* field) {
 
 // --------- InfoScreen Display Functions ----------
 void showUdpScreen() {
-    String lines[8];
+    String lines[9];
     lines[0] = "Temp:  " + getTempestField("temp");
     lines[1] = "Hum:   " + getTempestField("hum");
     lines[2] = "Pres:  " + getTempestField("pres");
     lines[3] = "Wind:  " + getTempestField("wind");
-    lines[4] = "Dir: " + getTempestField("winddir");
+    lines[4] = "Dir:   " + getTempestField("winddir");
     lines[5] = "Rain:  " + getTempestField("rain");
     lines[6] = "UV:    " + getTempestField("uv");
     lines[7] = "Solar: " + getTempestField("solar");
     lines[8] = "Batt:  " + getTempestField("battery");
-    udpScreen.setLines(lines, 9);
-    udpScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+
+    if (!udpScreen.isActive()) {
+        udpScreen.setLines(lines, 9, true);
+        udpScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    } else {
+        udpScreen.setLines(lines, 9, false);  // just update text, keep scroll position
+    }
 }
+
+
 
 void showForecastScreen() {
     String lines[8];
@@ -207,9 +213,63 @@ void showRapidWindScreen() {
     lines[0] = "Speed: " + getRapidWindField("speed");
     lines[1] = "Dir:   " + getRapidWindField("dir");
     lines[2] = "Time:  " + getRapidWindField("time");
-    rapidWindScreen.setLines(lines, 3);
+    rapidWindScreen.setLines(lines, 3, false);
     rapidWindScreen.show([](){ currentScreen = SCREEN_OWM; });
 }
 
+void showWindDirectionScreen() {
+    Serial.printf("scrollSpeed: %d",scrollSpeed);
 
+    dma_display->fillScreen(0);
+
+    int cx = 10; // icon center x
+    int cy = dma_display->height() / 2;
+
+    // Draw wind meter icon
+    windMeter.drawWindDirection(cx, cy, tempest.windDir, tempest.windAvg);
+
+    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    dma_display->setCursor(cx + 12, cy - 10); // shifted 8px left from +20
+
+    if (isnan(tempest.windDir)) {
+        dma_display->print("No data");
+        return;
+    }
+
+    // Find nearest direction name
+    const char* dirNames[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    float DIR_ANGLES[8] = {0, 45, 90, 135, 180, 225, 270, 315};
+
+    float windDir = fmod(tempest.windDir, 360.0f);
+    if (windDir < 0) windDir += 360.0f;
+
+    int nearestIndex = 0;
+    float minDiff = 360.0f;
+    for (int i = 0; i < 8; ++i) {
+        float diff = fabs(windDir - DIR_ANGLES[i]);
+        if (diff > 180) diff = 360 - diff;
+        if (diff < minDiff) {
+            minDiff = diff;
+            nearestIndex = i;
+        }
+    }
+
+
+    scrollLine.update();
+    scrollLine.draw(0, 0, 0xFFFF); // draw at x=0,y=0 default white text
+  
+
+    dma_display->setTextColor(myCYAN);
+    dma_display->setCursor(cx + 12, 8);
+    // Print direction name and angle
+    dma_display->printf("%s %d°", dirNames[nearestIndex], static_cast<int>(tempest.windDir));
+
+    // Print wind speed below, shifted 8px left as well
+    dma_display->setCursor(cx + 12, cy);
+    if (isnan(tempest.windAvg)) {
+        dma_display->print("-- m/s");
+    } else {
+        dma_display->printf("%.1f m/s", tempest.windAvg);
+    }
+}
 

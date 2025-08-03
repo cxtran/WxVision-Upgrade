@@ -1,6 +1,9 @@
 #pragma once
 #include <Arduino.h>
 #include "InfoScreen.h"
+#include "display.h"
+#include "windmeter.h"
+
 // ----------- Tempest UDP Data Structure -----------
 struct TempestData {
     uint32_t epoch;
@@ -69,3 +72,5 @@ void showForecastScreen();
 void showRapidWindScreen();
 
 String formatEpochTime(uint32_t epoch);
+
+void showWindDirectionScreen();

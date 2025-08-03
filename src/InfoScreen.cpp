@@ -17,14 +17,20 @@ InfoScreen::InfoScreen(const String& title, ScreenMode mode)
 }
 
 void InfoScreen::setTitle(const String& title) { _title = title; }
-void InfoScreen::setLines(const String lines[], int n) {
+
+void InfoScreen::setLines(const String lines[], int n, bool resetPosition) {
     _lineCount = (n > INFOSCREEN_MAX_LINES) ? INFOSCREEN_MAX_LINES : n;
     for (int i = 0; i < _lineCount; ++i) _lines[i] = lines[i];
-    scrollY = 0;
-    selIndex = 0;
-    lastSelIndex = -1;
-    resetHScroll();
+
+    if (resetPosition) {
+        scrollY = 0;
+        selIndex = 0;
+        lastSelIndex = -1;
+        resetHScroll();
+    }
 }
+
+
 void InfoScreen::show(void (*onExit)()) {
     _active = true; _onExit = onExit;
     scrollY = 0; selIndex = 0; lastSelIndex = -1;

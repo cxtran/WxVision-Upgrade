@@ -3,7 +3,7 @@
 #include "display.h"
 #include "ir_codes.h"
 
-#define INFOSCREEN_MAX_LINES     10
+#define INFOSCREEN_MAX_LINES     20
 #define INFOSCREEN_VISIBLE_ROWS  3
 #define INFOSCREEN_HEADERFG dma_display->color565(156, 255, 91)
 #define INFOSCREEN_HEADERBG dma_display->color565(0,20,60)
@@ -13,7 +13,7 @@ public:
     InfoScreen(const String& title = "", ScreenMode mode = SCREEN_OWM);
 
     void setTitle(const String& title);
-    void setLines(const String lines[], int n);
+//    void setLines(const String lines[], int n);
     void show(void (*onExit)() = nullptr);
     void hide();
     bool isActive() const;
@@ -26,6 +26,11 @@ public:
     static const int MAXROWS = 4;
     static const int DATA_ROWS_FULL = 3; // 3 data rows if NO button bar
     static const int SCREEN_WIDTH = 64;
+    int getScrollY() const { return scrollY; }
+    void setScrollY(int val) { if (val < 0) val = 0;   scrollY = val; }
+
+    int getSelIndex() const { return selIndex; }
+    void setLines(const String lines[], int n, bool resetPosition = false);
 
 private:
     String _title;
