@@ -36,6 +36,7 @@ bool newTempestData = false;
 bool newRapidWindData = false;
 
 
+
 // --------- Tempest UDP JSON Parsing ----------
 void updateTempestFromUDP(const char* jsonStr) {
     JSONVar doc = JSON.parse(jsonStr);   // Only once here!
@@ -220,9 +221,7 @@ void showRapidWindScreen() {
 }
 
 void showWindDirectionScreen() {
-    Serial.printf("scrollSpeed: %d",scrollSpeed);
-
-    dma_display->fillScreen(0);
+      dma_display->fillScreen(0);
 
     int cx = 10; // icon center x
     int cy = dma_display->height() / 2;

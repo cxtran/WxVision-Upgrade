@@ -2,30 +2,34 @@
 #include <math.h>
 #include "display.h"
 
-// Directions (8 compass points) angles in degrees: N, NE, E, SE, S, SW, W, NW
-const float DIR_ANGLES[8] = {0, 45, 90, 135, 180, 225, 270, 315};
+// 3x3 sprites for moving pixel and center dot
+const uint8_t sprite_NS[3][3]    = {{1,1,1},{0,1,0},{0,1,0}};
+const uint8_t sprite_NE_SW[3][3] = {{1,1,1},{0,1,1},{1,0,1}};
+const uint8_t sprite_EW[3][3]    = {{0,0,1},{1,1,0},{0,0,1}};
+const uint8_t sprite_SE_NW[3][3] = {{1,1,1},{1,1,0},{1,0,1}};
+const uint8_t sprite_SN[3][3]    = {{0,1,0},{0,1,0},{1,1,1}};
+const uint8_t sprite_SW_NE[3][3] = {{1,1,1},{0,1,1},{1,0,1}};
+const uint8_t sprite_WE[3][3]    = {{1,0,0},{1,1,1},{1,0,0}};
+const uint8_t sprite_NW_SE[3][3] = {{1,0,1},{0,1,1},{1,1,1}};
+const uint8_t sprite_FULL[3][3]  = {{1,1,1},{1,1,1},{1,1,1}};
 
-// Lengths of lines from center to tip in pixels for 24x24 icon
-const int LINE_LENGTHS[8] = {
-    7,  // N
-    8,  // NE (one pixel longer)
-    7,  // E
-    8,  // SE (one pixel longer)
-    7,  // S
-    8,  // SW (one pixel longer)
-    7,  // W
-    8   // NW (one pixel longer)
+const uint8_t (*sprites[8])[3] = {
+    sprite_NS, sprite_NE_SW, sprite_EW, sprite_SE_NW,
+    sprite_SN, sprite_SW_NE, sprite_WE, sprite_NW_SE
 };
 
-// Animation timing constants (ms)
-const unsigned long ANIM_DURATION_MIN = 150;   // fastest (high wind)
-const unsigned long ANIM_DURATION_MAX = 1200;  // slowest (low wind)
-const float WIND_SPEED_MAX = 15.0f;             // max wind speed (m/s)
+// Directions (8 compass points)
+const float DIR_ANGLES[8] = {0, 45, 90, 135, 180, 225, 270, 315};
+// Tweak lengths to fit your display (16x16, 24x24, etc)
+const int LINE_LENGTHS[8] = {7, 8, 7, 8, 7, 8, 7, 8};
+
+const unsigned long ANIM_DURATION_MIN = 150;
+const unsigned long ANIM_DURATION_MAX = 1200;
+const float WIND_SPEED_MAX = 15.0f;
 
 int WindMeter::nearestDirection(float deg) {
     deg = fmod(deg, 360.0f);
     if (deg < 0) deg += 360.0f;
-
     int nearest = 0;
     float minDiff = 360.0f;
     for (int i = 0; i < 8; ++i) {
@@ -39,65 +43,75 @@ int WindMeter::nearestDirection(float deg) {
     return nearest;
 }
 
-void WindMeter::drawDirectionLine(int cx, int cy, int dirIndex, uint16_t color) {
-    float angleRad = DIR_ANGLES[dirIndex] * PI / 180.0f;
-    int length = LINE_LENGTHS[dirIndex];
-
-    int xEnd = cx + (int)(length * sin(angleRad));
-    int yEnd = cy - (int)(length * cos(angleRad)); // y axis inverted on screen
-
-    dma_display->drawLine(cx, cy, xEnd, yEnd, color);
+// Draw 3x3 sprite
+void WindMeter::drawSprite3x3(int x, int y, const uint8_t pattern[3][3], uint16_t color) {
+    for (int dy = 0; dy < 3; ++dy)
+        for (int dx = 0; dx < 3; ++dx)
+            if (pattern[dy][dx]) dma_display->drawPixel(x + dx, y + dy, color);
 }
 
+// Always draws tip-to-tip
+void WindMeter::drawDirectionLine(int cx, int cy, int dirIndex, uint16_t color) {
+    float angleRad = DIR_ANGLES[dirIndex] * PI / 180.0f;
+    int lenTip = LINE_LENGTHS[dirIndex];
+    int xTip = cx + int(lenTip * sin(angleRad));
+    int yTip = cy - int(lenTip * cos(angleRad));
+    float oppAngleRad = fmod(angleRad + PI, 2 * PI);
+    int lenOpp = LINE_LENGTHS[(dirIndex + 4) % 8];
+    int xOpp = cx + int(lenOpp * sin(oppAngleRad));
+    int yOpp = cy - int(lenOpp * cos(oppAngleRad));
+    dma_display->drawLine(xOpp, yOpp, xTip, yTip, color);
+}
+
+// Animate from one tip THROUGH center to opposite tip
 void WindMeter::drawMovingPixel(int cx, int cy, int dirIndex, float windSpeed, uint16_t color) {
     if (windSpeed < 0) windSpeed = 0;
     if (windSpeed > WIND_SPEED_MAX) windSpeed = WIND_SPEED_MAX;
 
-    // Map wind speed to animation duration (higher speed → shorter duration)
-    unsigned long duration = ANIM_DURATION_MAX -
-        (unsigned long)((windSpeed / WIND_SPEED_MAX) * (ANIM_DURATION_MAX - ANIM_DURATION_MIN));
-
+    unsigned long duration = ANIM_DURATION_MAX - (unsigned long)((windSpeed / WIND_SPEED_MAX) * (ANIM_DURATION_MAX - ANIM_DURATION_MIN));
     unsigned long elapsed = (millis() - animStartMillis) % duration;
-    float progress = 1.0f - ((float)elapsed / duration); // from tip (1) to center (0)
+    float progress = (float)elapsed / duration;  // 0 to 1
 
     float angleRad = DIR_ANGLES[dirIndex] * PI / 180.0f;
-    int length = LINE_LENGTHS[dirIndex];
+    int lenTip = LINE_LENGTHS[dirIndex];
 
-    int xPos = cx + (int)(length * sin(angleRad) * progress);
-    int yPos = cy - (int)(length * cos(angleRad) * progress);
+    int xTip = cx + int(lenTip * sin(angleRad));
+    int yTip = cy - int(lenTip * cos(angleRad));
 
-    dma_display->drawPixel(xPos, yPos, color);
+    float oppAngleRad = fmod(angleRad + PI, 2 * PI);
+    int lenOpp = LINE_LENGTHS[(dirIndex + 4) % 8];
+    int xOpp = cx + int(lenOpp * sin(oppAngleRad));
+    int yOpp = cy - int(lenOpp * cos(oppAngleRad));
+
+    int xPos = xTip + int((xOpp - xTip) * progress);
+    int yPos = yTip + int((yOpp - yTip) * progress);
+
+    drawSprite3x3(xPos - 1, yPos - 1, sprites[dirIndex], color);
 }
 
 void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSpeed) {
-    // Define active color (bright yellow)
-    const uint8_t activeR = 255;
-    const uint8_t activeG = 255;
-    const uint8_t activeB = 0;
-
+    const uint8_t activeR = 255, activeG = 255, activeB = 0;
     const uint16_t highlightColor = dma_display->color565(activeR, activeG, activeB);
-
-    // Create dim color by scaling down RGB of active color (e.g., 20% brightness)
-    uint8_t dimR = activeR * 0.2;
-    uint8_t dimG = activeG * 0.2;
-    uint8_t dimB = activeB * 0.2;
-
+    uint8_t dimR = activeR * 0.2, dimG = activeG * 0.2, dimB = activeB * 0.2;
     const uint16_t dimColor = dma_display->color565(dimR, dimG, dimB);
-
-    // Bright red for moving pixel
     const uint16_t pixelColor = dma_display->color565(255, 100, 100);
+    const uint16_t centerColor = dma_display->color565(40, 180, 180);
 
     dma_display->fillScreen(0);
 
     int nearestDir = nearestDirection(windDirDeg);
 
-    // Draw all 8 direction lines with either highlight or dim color
-    for (int i = 0; i < 8; ++i) {
-        uint16_t color = (i == nearestDir) ? highlightColor : dimColor;
-        drawDirectionLine(cx, cy, i, color);
-    }
+    // Draw ALL dim lines FIRST
+    for (int i = 0; i < 8; ++i)
+        if (i != nearestDir)
+            drawDirectionLine(cx, cy, i, dimColor);
 
-    // Draw moving pixel on active line
+    // Draw the active line LAST so it always appears boldest
+    drawDirectionLine(cx, cy, nearestDir, highlightColor);
+
+    // Bold 3x3 center dot
+    drawSprite3x3(cx - 1, cy - 1, sprite_FULL, centerColor);
+
+    // Animated moving 3x3 pixel
     drawMovingPixel(cx, cy, nearestDir, windSpeed, pixelColor);
 }
-
