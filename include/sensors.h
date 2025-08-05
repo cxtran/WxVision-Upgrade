@@ -26,12 +26,14 @@ void setDisplayBrightnessFromLux(float lux);
 
 uint32_t getIRCodeNonBlocking();
 
-void setupSCD40(); 
+
+void setupSensors();
+// void setupSCD40(); 
 void readSCD40();
 void showAirQualityScreen();
 void showTempHumBaroScreen();
-void setupAHT20();
-void setupBMP280();
+//void setupAHT20();
+//void setupBMP280();
 void readAHT20();
 void readBMP280();
 

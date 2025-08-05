@@ -196,17 +196,20 @@ void setup()
     setupDisplay();
     Serial.println("Display setup done.");
 
-    Serial.println("Set up SCD40 Sesnor");
-    setupSCD40();
+  //  Serial.println("Set up SCD40 Sesnor");
+  //  setupSCD40();
 
-    Serial.println("Set up AHT20 Sesnor");
-    setupAHT20();
+  //  Serial.println("Set up AHT20 Sesnor");
+  //  setupAHT20();
 
-    Serial.println("Set up BMP280 Sesnor");
-    setupBMP280();
+  //  Serial.println("Set up BMP280 Sesnor");
+  //  setupBMP280();
 
     //   Serial.println("Set up DHT Sesnor");
     //   setupDHTSensor();
+
+    // Setup Sensors
+    setupSensors();
 
     Serial.println("Setup IR Sensor");
     setupIRSensor();
@@ -463,7 +466,7 @@ void loop()
     {
         uint32_t code = getIRCodeNonBlocking();
         if (code)
-            handleIR(code); // Route IR to menu.cpp WiFi handler
+        handleIR(code); // Route IR to menu.cpp WiFi handler
         drawWiFiMenu();     // Draw scanned WiFi list
         delay(80);          // Slight delay for smoother response
         return;             // Skip rest of loop while selecting WiFi

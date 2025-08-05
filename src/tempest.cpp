@@ -216,8 +216,13 @@ void showRapidWindScreen() {
     lines[0] = "Speed: " + getRapidWindField("speed");
     lines[1] = "Dir:   " + getRapidWindField("dir");
     lines[2] = "Time:  " + getRapidWindField("time");
-    rapidWindScreen.setLines(lines, 3, false);
-    rapidWindScreen.show([](){ currentScreen = SCREEN_OWM; });
+    if(!rapidWindScreen.isActive()){
+        rapidWindScreen.setLines(lines, 3, true);
+        rapidWindScreen.show([](){ currentScreen = SCREEN_OWM; });
+    } else {
+        rapidWindScreen.setLines(lines,3, false);
+
+    }
 }
 
 void showWindDirectionScreen() {
