@@ -26,7 +26,7 @@
 #include "ScrollLine.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, SCREEN_TEMP_HUM_BARO};
+const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, SCREEN_TEMP_HUM_BARO,SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -36,10 +36,13 @@ ScreenMode currentScreen = SCREEN_OWM;
 extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
-InfoScreen forecastScreen("Forecast", SCREEN_UDP_FORECAST);
+InfoScreen forecastScreen("7-Day Fcst", SCREEN_UDP_FORECAST);
 InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
 InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
 InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
+InfoScreen currentCondScreen("Now", SCREEN_CURRENT);
+InfoScreen hourlyScreen("HourLy Fcst", SCREEN_HOURLY);
+
 
 WindMeter windMeter;
 ScrollLine scrollLine(64, 40); // 64 px wide, scroll every 50ms
@@ -105,6 +108,8 @@ void hideAllInfoScreens()
     forecastScreen.hide();
     rapidWindScreen.hide();
     tempHumBaroScreen.hide();
+    currentCondScreen.hide();
+    hourlyScreen.hide();
 
     // Add more InfoScreens here as needed
 }
@@ -149,6 +154,12 @@ void rotateScreen(int direction)
         break;
     case SCREEN_TEMP_HUM_BARO:
         showTempHumBaroScreen();
+        break;
+    case SCREEN_CURRENT:
+        showCurrentConditionsScreen();
+        break;            
+    case SCREEN_HOURLY:
+        showHourlyForecastScreen();
         break;
     case SCREEN_OWM: /* draw in loop */
         break;
@@ -504,6 +515,24 @@ void loop()
         return;
     }
 
+    if (currentCondScreen.isActive())
+    {
+        currentCondScreen.tick();
+        currentCondScreen.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+
+    if (hourlyScreen.isActive())
+    {
+        hourlyScreen.tick();
+        hourlyScreen.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+
+
+
     if (rapidWindScreen.isActive())
     {
         if (newRapidWindData)
@@ -542,6 +571,8 @@ void loop()
         delay(40);
         return;
     }
+
+    
 
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
     uint32_t code = getIRCodeNonBlocking();
@@ -620,6 +651,16 @@ void loop()
         if (!rapidWindScreen.isActive())
             showRapidWindScreen();
         break;
+    case SCREEN_CURRENT:
+        if (!currentCondScreen.isActive())
+            showCurrentConditionsScreen();
+        break;
+     
+    case SCREEN_HOURLY:
+        if (!hourlyScreen.isActive())
+            showHourlyForecastScreen();
+        break;    
+
     case SCREEN_AIR_QUALITY:
         if (!airQualityScreen.isActive())
             showAirQualityScreen();
@@ -628,6 +669,8 @@ void loop()
         if (!tempHumBaroScreen.isActive())
             showTempHumBaroScreen();
         break;
+
+
 
     default:
         break;
