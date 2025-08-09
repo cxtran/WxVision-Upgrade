@@ -134,6 +134,7 @@ const long gmtOffset_sec = -8 * 3600;
 const int daylightOffset_sec = 3600;
 RTC_DS3231 rtc;
 
+/*
 void syncTimeFromNTP1() {
     Serial.println("Syncing time from NTP...");
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1);
@@ -163,6 +164,7 @@ void syncTimeFromNTP1() {
     rtc.adjust(newTime);
     Serial.println("✅ Time set from NTP.");
 }
+*/
 
 String httpGETRequest(const char *url) {
     WiFiClient client;

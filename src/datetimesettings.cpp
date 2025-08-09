@@ -81,7 +81,7 @@ const char* ntpServer = "pool.ntp.org";
 void syncTimeFromNTP() {
     // Convert tzOffset (in minutes) to seconds for configTime()
     int tzSeconds = tzOffset * 60;
-    int daylightSeconds = 0; // Add your DST logic if needed
+    int daylightSeconds = 3600; // Add your DST logic if needed
 
     Serial.println("Syncing time from NTP...");
 
@@ -120,7 +120,11 @@ void syncTimeFromNTP() {
         timeinfo.tm_min,
         timeinfo.tm_sec
     );
-
+    // 7) Initialize RTC before adjust (prevents crash if missing)
+    if (!rtc.begin()) {
+        Serial.println("⚠️ rtc.begin() failed (module missing/not wired?)");
+        return;
+    }
     // Update RTC
     rtc.adjust(newTime);
 

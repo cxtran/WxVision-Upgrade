@@ -13,6 +13,7 @@
 #include "datetimesettings.h"
 #include "ir_codes.h"
 #include "SPIFFS.h"
+#include "units.h"
 
 // --- System Info Colors ---
 #define SYSINFO_HEADER dma_display->color565(0, 255, 80)
@@ -86,7 +87,8 @@ extern int owmCountryIndex;
 extern String owmCountryCustom;
 extern int tempOffset;
 extern int lightGain;
-extern int units, dayFormat, forecastSrc, autoRotate, manualScreen;
+extern int dayFormat, forecastSrc, autoRotate, manualScreen;
+extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
 extern String customMsg;
@@ -115,7 +117,8 @@ int dtDateFmt;
 
 const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
-const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
+
+const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
@@ -125,6 +128,7 @@ const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
+
 
 void handleIR(uint32_t code)
 {
@@ -492,35 +496,28 @@ void showWeatherSettingsModal()
 
 void showCalibrationModal()
 {
-    if (currentMenuLevel != MENU_NONE)
-    {
+    if (currentMenuLevel != MENU_NONE) {
         pushMenu(currentMenuLevel);
     }
     currentMenuLevel = MENU_CALIBRATION;
     menuActive = true;
 
-    static int tempOffsetTemp = tempOffset;
-    static int humOffsetTemp = humOffset;
-    static int lightGainTemp = lightGain;
-    String labels[] = {"Temp Offset", "Hum Offset", "Light Gain"};
+    // Bind directly to globals
+    String labels[] = {"Temp Offset (°)", "Hum Offset (%)", "Light Gain (%)"};
     InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber};
-    int *numberRefs[] = {&tempOffsetTemp, &humOffsetTemp, &lightGainTemp};
+    int* numberRefs[] = { &tempOffset, &humOffset, &lightGain };
+
     calibrationModal.setLines(labels, types, 3);
     calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
 
-    calibrationModal.setCallback([](bool accepted, int btnIdx)
-                                 {
-        tempOffset = constrain(tempOffsetTemp, -10, 10);
-        humOffset = constrain(humOffsetTemp, -20, 20);
-        lightGain = constrain(lightGainTemp, 1, 150);
-        saveCalibrationSettings();
-        float lux = readBrightnessSensor();
-        setDisplayBrightnessFromLux(lux);
-        Serial.printf("[Saved] tempOffset=%d, humOffset=%d, lightGain=%d\n", tempOffset, humOffset, lightGain);
+    // No final “OK” save. We autosave on each change in handleIR().
+    calibrationModal.setCallback([](bool, int) {
         calibrationModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0; });
+        menuScroll = 0;
+    });
+
     calibrationModal.show();
 }
 
@@ -996,36 +993,40 @@ void showDeviceSettingsModal()
     strncpy(wifiPassBuf, wifiPass.c_str(), sizeof(wifiPassBuf) - 1);
     wifiPassBuf[sizeof(wifiPassBuf) - 1] = 0;
 
-    // Modal labels and field types
+    // Modal labels and field types (Units removed)
     String labels[] = {
         "WiFi SSID", "WiFi Pass",
-        "Units", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"};
+        "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"
+    };
     InfoFieldType types[] = {
         InfoChooser, InfoText,
-        InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
+        InfoChooser, InfoChooser, InfoChooser, InfoChooser
+    };
 
-    int *chooserRefs[] = {&wifiSelectIndex, &units, &dayFormat, &forecastSrc, &autoRotate, &manualScreen};
-    static const char *unitsOpt[] = {"F+mph", "C+m/s"};
-    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
-    static const char *forecastOpt[] = {"OWM", "WF"};
-    static const char *rotateOpt[] = {"Off", "On"};
-    static const char *manualOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {ssidOptions, unitsOpt, dayFmtOpt, forecastOpt, rotateOpt, manualOpt};
-    int chooserCounts[] = {modalSsidCount, 2, 2, 2, 2, 2};
+    // Chooser refs/options (Units removed)
+    int *chooserRefs[] = { &wifiSelectIndex, &dayFormat, &forecastSrc, &autoRotate, &manualScreen };
+    static const char *dayFmtOpt[]   = { "MM/DD", "DD/MM" };
+    static const char *forecastOpt[] = { "OWM", "WF" };
+    static const char *rotateOpt[]   = { "Off", "On" };
+    static const char *manualOpt[]   = { "Off", "On" };
+    const char *const *chooserOpts[] = { ssidOptions, dayFmtOpt, forecastOpt, rotateOpt, manualOpt };
+    int chooserCounts[] = { modalSsidCount, 2, 2, 2, 2 };
 
-    char *textRefs[] = {wifiPassBuf};
-    int textSizes[] = {sizeof(wifiPassBuf)};
+    char *textRefs[] = { wifiPassBuf };
+    int textSizes[] = { sizeof(wifiPassBuf) };
 
-    deviceModal.setLines(labels, types, 7);
+    // 6 total lines, 5 choosers, 1 text
+    deviceModal.setLines(labels, types, 6);
     deviceModal.setValueRefs(
         nullptr, 0,
-        chooserRefs, 6,
+        chooserRefs, 5,
         chooserOpts, chooserCounts,
-        textRefs, 1, textSizes);
+        textRefs, 1, textSizes
+    );
     deviceModal.setButtons(nullptr, 0);
 
     deviceModal.setCallback([](bool accepted, int btnIdx)
-                            {
+    {
         int sel = deviceModal.getSelIndex();
         if (accepted) {
             if (sel == 0) {
@@ -1047,7 +1048,8 @@ void showDeviceSettingsModal()
         deviceModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0; });
+        menuScroll = 0;
+    });
 
     deviceModal.show();
 }

@@ -97,7 +97,7 @@ void InfoModal::setValueRefs(
     const char *const *chooserOptions[], const int chooserOptionCounts[],
     char *textRefs[], int textRefCount, int textSizes[])
 {
- //   Serial.println("[InfoModal] setValueRefs()");
+    //   Serial.println("[InfoModal] setValueRefs()");
 
     // --- Number references ---
     int numIndex = 0;
@@ -107,7 +107,7 @@ void InfoModal::setValueRefs(
         {
             this->intRefs[numIndex] = intRefs[numIndex];
             numberFieldIndices[i] = numIndex;
-   //         Serial.printf("  [Number] Line %d -> intRefs[%d] = %p (val = %d)\n", i, numIndex, intRefs[numIndex], *intRefs[numIndex]);
+            //         Serial.printf("  [Number] Line %d -> intRefs[%d] = %p (val = %d)\n", i, numIndex, intRefs[numIndex], *intRefs[numIndex]);
             ++numIndex;
         }
         else
@@ -130,7 +130,7 @@ void InfoModal::setValueRefs(
             this->chooserOptions[chooserIndex] = chooserOptions[chooserIndex];
             this->chooserOptionCounts[chooserIndex] = chooserOptionCounts[chooserIndex];
             chooserFieldIndices[i] = chooserIndex;
-   //         Serial.printf("  [Chooser] Line %d -> chooserRefs[%d] = %p (val = %d)\n", i, chooserIndex, chooserRefs[chooserIndex], *chooserRefs[chooserIndex]);
+            //         Serial.printf("  [Chooser] Line %d -> chooserRefs[%d] = %p (val = %d)\n", i, chooserIndex, chooserRefs[chooserIndex], *chooserRefs[chooserIndex]);
             ++chooserIndex;
         }
         else
@@ -169,7 +169,7 @@ void InfoModal::setValueRefs(
     }
 
     textFieldCount = textIndex;
-  //  Serial.printf("[InfoModal] Setup complete: %d number, %d chooser, %d text fields\n", numIndex, chooserIndex, textFieldCount);
+    //  Serial.printf("[InfoModal] Setup complete: %d number, %d chooser, %d text fields\n", numIndex, chooserIndex, textFieldCount);
 }
 
 void InfoModal::setButtons(const String btns[], int count)
@@ -285,12 +285,12 @@ void InfoModal::draw()
             {
                 int val = *(intRefs[nidx]);
                 s += ": " + String(val);
-         //       Serial.printf("intRefs[%d] = %d\n", nidx, val);
+                //       Serial.printf("intRefs[%d] = %d\n", nidx, val);
             }
             else
             {
                 s += ": ?";
-          //      Serial.printf("Invalid numberRef (nidx=%d)\n", nidx);
+                //      Serial.printf("Invalid numberRef (nidx=%d)\n", nidx);
             }
         }
         else if (fieldTypes[idx] == InfoChooser)
@@ -301,12 +301,12 @@ void InfoModal::draw()
                 chooserOptionCounts[cidx] > 0)
             {
                 s += ": " + getChooserLabel(idx);
-        //        Serial.printf("chooserRefs[%d] = %d -> \"%s\"\n", cidx, *chooserRefs[cidx], getChooserLabel(idx).c_str());
+                //        Serial.printf("chooserRefs[%d] = %d -> \"%s\"\n", cidx, *chooserRefs[cidx], getChooserLabel(idx).c_str());
             }
             else
             {
                 s += ": ?";
-      //          Serial.printf("Invalid chooserRef (cidx=%d)\n", cidx);
+                //          Serial.printf("Invalid chooserRef (cidx=%d)\n", cidx);
             }
         }
         else if (fieldTypes[idx] == InfoText)
@@ -316,17 +316,17 @@ void InfoModal::draw()
             {
                 s += ": ";
                 s += textRefs[tidx];
-       //         Serial.printf("textRefs[%d] = \"%s\"\n", tidx, textRefs[tidx]);
+                //         Serial.printf("textRefs[%d] = \"%s\"\n", tidx, textRefs[tidx]);
             }
             else
             {
                 s += ": ?";
-  //              Serial.printf("Invalid textRef (tidx=%d)\n", tidx);
+                //              Serial.printf("Invalid textRef (tidx=%d)\n", tidx);
             }
         }
         else
         {
-  //          Serial.println("Unsupported field type");
+            //          Serial.println("Unsupported field type");
         }
 
         int drawLineIndex = i + 1; // Lines start below header (row 0 is header)
@@ -358,7 +358,7 @@ void InfoModal::draw()
                 }
                 else
                 {
-                    if (scrollPauseTime && (millis() - scrollPauseTime > 1000))   // Pause time when edit
+                    if (scrollPauseTime && (millis() - scrollPauseTime > 1000)) // Pause time when edit
                     {
                         scrollPaused = false;
                         scrollPauseTime = 0;
@@ -482,7 +482,7 @@ void InfoModal::handleIR(uint32_t code)
 {
     if (!active)
         return;
- //   Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
+    //   Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
 
     if (inEdit && fieldTypes[editIndex] == InfoText)
     {
@@ -541,7 +541,8 @@ void InfoModal::handleIR(uint32_t code)
             else
             {
                 // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
-                if (this == &mainMenuModal) {
+                if (this == &mainMenuModal)
+                {
                     menuActive = false;
                     return;
                 }
@@ -652,29 +653,33 @@ void InfoModal::handleIR(uint32_t code)
                     (*ptr)++;
 
                 // --- Date/time field constraints ---
-                switch (selIndex)
+
+                if (this == &dateModal)
                 {
-                case 0:
-                    *ptr = constrain(*ptr, 2000, 2099);
-                    break; // Year
-                case 1:
-                    *ptr = constrain(*ptr, 1, 12);
-                    break; // Month
-                case 2:
-                    *ptr = constrain(*ptr, 1, 31);
-                    break; // Day
-                case 3:
-                    *ptr = constrain(*ptr, 0, 23);
-                    break; // Hour
-                case 4:
-                    *ptr = constrain(*ptr, 0, 59);
-                    break; // Minute
-                case 5:
-                    *ptr = constrain(*ptr, 0, 59);
-                    break; // Second
-                case 6:
-                    *ptr = constrain(*ptr, -720, 840);
-                    break; // TimeZone
+                    switch (selIndex)
+                    {
+                    case 0:
+                        *ptr = constrain(*ptr, 2000, 2099);
+                        break; // Year
+                    case 1:
+                        *ptr = constrain(*ptr, 1, 12);
+                        break; // Month
+                    case 2:
+                        *ptr = constrain(*ptr, 1, 31);
+                        break; // Day
+                    case 3:
+                        *ptr = constrain(*ptr, 0, 23);
+                        break; // Hour
+                    case 4:
+                        *ptr = constrain(*ptr, 0, 59);
+                        break; // Minute
+                    case 5:
+                        *ptr = constrain(*ptr, 0, 59);
+                        break; // Second
+                    case 6:
+                        *ptr = constrain(*ptr, -720, 840);
+                        break; // TimeZone
+                    }
                 }
 
                 // Also handle Brightness live preview if on that field (by label!)
@@ -685,13 +690,34 @@ void InfoModal::handleIR(uint32_t code)
                     {
                         int hw = map(*ptr, 1, 100, 3, 255);
                         dma_display->setBrightness8(hw);
-             //           Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
+                        //           Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
                     }
                     else
                     {
-             //           Serial.println("[Live] Brightness ignored (Auto ON)");
+                        //           Serial.println("[Live] Brightness ignored (Auto ON)");
                     }
                     saveDisplaySettings();
+                }
+
+                if (this == &calibrationModal )
+                {
+                    // Clamp according to which field label this is
+                    if (lines[selIndex].startsWith("Temp Offset"))   *ptr = constrain(*ptr, -10, 10);
+                    else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, -20, 20);
+                    else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, 1, 150);
+
+                    // Save to NVS right away
+                    saveCalibrationSettings();
+
+                    // Apply brightness instantly in case lightGain affects auto-bright logic
+                    float lux = readBrightnessSensor();
+                    setDisplayBrightnessFromLux(lux);
+
+                    // Hint the climate screen to refresh next tick
+                    newAHT20_BMP280Data = true;
+
+                    Serial.printf("[Calibration autosave] temp=%d hum=%d gain=%d\n",
+                                tempOffset, humOffset, lightGain);
                 }
 
                 draw();
@@ -712,13 +738,13 @@ void InfoModal::handleIR(uint32_t code)
                     if (selIndex == 1)
                     { // Auto Brightness toggle
                         autoBrightness = (val > 0);
-               //         Serial.printf("[Live] AutoBrightness: %s\n", autoBrightness ? "ON" : "OFF");
+                        //         Serial.printf("[Live] AutoBrightness: %s\n", autoBrightness ? "ON" : "OFF");
 
                         if (autoBrightness)
                         {
                             float lux = readBrightnessSensor();
                             setDisplayBrightnessFromLux(lux);
-                 //           Serial.printf("[Live] Auto ON → Brightness from Lux: %.1f\n", lux);
+                            //           Serial.printf("[Live] Auto ON → Brightness from Lux: %.1f\n", lux);
                         }
                         else
                         {
@@ -728,7 +754,7 @@ void InfoModal::handleIR(uint32_t code)
                                 int b = constrain(*intRefs[bIdx], 1, 100);
                                 int hw = map(b, 1, 100, 3, 255);
                                 dma_display->setBrightness8(hw);
-                  //              Serial.printf("[Live] Auto OFF → Brightness: %d => HW %d\n", b, hw);
+                                //              Serial.printf("[Live] Auto OFF → Brightness: %d => HW %d\n", b, hw);
                             }
                         }
                         saveDisplaySettings();
@@ -738,7 +764,7 @@ void InfoModal::handleIR(uint32_t code)
                     { // Scroll Speed chooser
                         scrollLevel = constrain(val, 0, 9);
                         scrollSpeed = scrollDelays[scrollLevel];
-              //          Serial.printf("[Live] ScrollSpeed set to %d ms (Level %d)\n", scrollSpeed, scrollLevel);
+                        //          Serial.printf("[Live] ScrollSpeed set to %d ms (Level %d)\n", scrollSpeed, scrollLevel);
                         saveDisplaySettings();
                     }
 
@@ -830,7 +856,8 @@ void InfoModal::handleIR(uint32_t code)
             else
             {
                 // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
-                if (this == &mainMenuModal) {
+                if (this == &mainMenuModal)
+                {
                     menuActive = false;
                     dma_display->clearScreen();
                     delay(50);

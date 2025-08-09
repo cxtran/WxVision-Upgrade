@@ -85,7 +85,7 @@ extern String owmCity;
 extern String owmApiKey;
 extern String wfToken;
 extern String wfStationId;
-extern int units;
+//extern int units;
 extern int dayFormat;
 extern int forecastSrc;
 extern int autoRotate;

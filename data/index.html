@@ -1,1 +1,37 @@
-<h1>VisionWX Web UI</h1><p>Status: OK</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WxVision</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="script.js"></script>
+</head>
+<body>
+<header>
+  <h1>WxVision</h1>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/config.html">Settings</a>
+  </nav>
+</header>
+
+<main class="container">
+  <section class="card">
+    <h2>Status</h2>
+    <div class="grid">
+      <div><b>WiFi:</b> <span id="st-ssid">—</span></div>
+      <div><b>IP:</b> <span id="st-ip">—</span></div>
+      <div><b>Temp:</b> <span id="st-temp">—</span></div>
+      <div><b>Humidity:</b> <span id="st-humd">—</span></div>
+      <div><b>Time:</b> <span id="st-time">—</span></div>
+    </div>
+    <div class="actions">
+      <a class="btn" href="/status">Full Status</a>
+      <a class="btn" href="/ota">OTA Update</a>
+      <a class="btn warn" href="/reboot">Reboot</a>
+    </div>
+  </section>
+</main>
+</body>
+</html>

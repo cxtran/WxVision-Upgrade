@@ -1,13 +1,13 @@
 #include <Preferences.h>
 #include "settings.h"
 #include "sensors.h"
+#include "units.h"   // <-- add this
 
 // Preferences storage object
 Preferences prefs;
 
 // ==== Global settings ====
 // --- Device ---
-int units = 0;            // 0 = F+mph, 1 = C+m/s
 int dayFormat = 0;        // 0 = MM/DD, 1 = DD/MM
 int forecastSrc = 0;      // 0 = OpenWeather, 1 = WeatherFlow
 int autoRotate = 1;       // 1 = on, 0 = off
@@ -24,7 +24,6 @@ String customMsg = "";
 const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
 
-
 // --- Weather ---
 String owmCity = "";
 String owmApiKey = "";
@@ -38,7 +37,6 @@ int tempOffset = 0;   // degrees
 int humOffset = 0;    // %
 int lightGain = 100;  // %
 
-
 // --- Date/Time/Timezone ---
 int dstAuto = 0;
 int timeZoneOffsetMinutes = 0;
@@ -51,7 +49,6 @@ void loadSettings() {
     // Device
     wifiSSID     = prefs.getString("wifiSSID", "");
     wifiPass     = prefs.getString("wifiPass", "");
-    units        = prefs.getInt("units", 0);
     dayFormat    = prefs.getInt("dayFmt", 0);
     forecastSrc  = prefs.getInt("forecast", 0);
     autoRotate   = prefs.getInt("autoRotate", 1);
@@ -62,12 +59,9 @@ void loadSettings() {
     brightness   = prefs.getInt("brightness", 10);
     scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
-
-    // Scroll speed mapping
-
-    scrollSpeed = scrollDelays[scrollLevel];
-
+    scrollSpeed  = scrollDelays[scrollLevel];
     customMsg    = prefs.getString("customMsg", "");
+    autoBrightness = prefs.getBool("autoBrightness", true);
 
     // Weather
     owmCity      = prefs.getString("owmCity", "");
@@ -81,23 +75,25 @@ void loadSettings() {
     tempOffset   = prefs.getInt("tempOffset", 0);
     humOffset    = prefs.getInt("humOffset", 0);
     lightGain    = prefs.getInt("lightGain", 100);
-    autoBrightness = prefs.getBool("autoBrightness", true);
 
     loadDateTimeSettings();
 
     prefs.end();
+
+    // Load unit preferences from Units module
+    loadUnits();
 }
 
 void saveDeviceSettings() {
     prefs.begin("visionwx", false);
     prefs.putString("wifiSSID", wifiSSID);
     prefs.putString("wifiPass", wifiPass);
-    prefs.putInt("units", units);
     prefs.putInt("dayFmt", dayFormat);
     prefs.putInt("forecast", forecastSrc);
     prefs.putInt("autoRotate", autoRotate);
     prefs.putInt("manualScreen", manualScreen);
     prefs.end();
+    // Units are saved via saveUnits() (see saveAllSettings())
 }
 
 void saveDisplaySettings() {
@@ -106,7 +102,7 @@ void saveDisplaySettings() {
         prefs.putInt("theme", theme);
         prefs.putBool("autoBrightness", autoBrightness);
         prefs.putInt("brightness", brightness);
-        prefs.putInt("scrollLevel", scrollLevel);  // ✅ Persist level only
+        prefs.putInt("scrollLevel", scrollLevel);  // persist level only
         prefs.putString("customMsg", customMsg);
         prefs.end();
         Serial.printf("[Prefs] Saved: theme=%d, auto=%d, bright=%d, scrollLevel=%d\n",
@@ -142,13 +138,11 @@ void saveAllSettings() {
     saveWeatherSettings();
     saveCalibrationSettings();
     saveDateTimeSettings();
+    // Persist unit preferences too
+    saveUnits();
 }
 
 // --- Toggles ---
-void toggleUnits(int dir) {
-    units = (units + dir + 2) % 2;
-}
-
 void toggleDayFormat(int dir) {
     dayFormat = (dayFormat + dir + 2) % 2;
 }
@@ -184,11 +178,10 @@ void adjustLightGain(int dir) {
     float lux = readBrightnessSensor();
     setDisplayBrightnessFromLux(lux);
 }
+
 void adjustScrollSpeed(int dir) {
     scrollLevel += dir;
     if (scrollLevel < 0) scrollLevel = 0;
     if (scrollLevel > 9) scrollLevel = 9;
-
-//    static const int scrollDelays[] = {10, 20, 30, 50, 75, 100, 150, 200, 300, 500};
     scrollSpeed = scrollDelays[scrollLevel];
 }

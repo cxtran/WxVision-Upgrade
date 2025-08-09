@@ -26,7 +26,7 @@
 #include "ScrollLine.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, SCREEN_TEMP_HUM_BARO,SCREEN_CURRENT, SCREEN_HOURLY};
+const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -42,7 +42,6 @@ InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
 InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
 InfoScreen currentCondScreen("Now", SCREEN_CURRENT);
 InfoScreen hourlyScreen("HourLy Fcst", SCREEN_HOURLY);
-
 
 WindMeter windMeter;
 ScrollLine scrollLine(64, 40); // 64 px wide, scroll every 50ms
@@ -110,7 +109,7 @@ void hideAllInfoScreens()
     tempHumBaroScreen.hide();
     currentCondScreen.hide();
     hourlyScreen.hide();
-
+    airQualityScreen.hide(); // ← add this
     // Add more InfoScreens here as needed
 }
 
@@ -157,7 +156,7 @@ void rotateScreen(int direction)
         break;
     case SCREEN_CURRENT:
         showCurrentConditionsScreen();
-        break;            
+        break;
     case SCREEN_HOURLY:
         showHourlyForecastScreen();
         break;
@@ -207,14 +206,14 @@ void setup()
     setupDisplay();
     Serial.println("Display setup done.");
 
-  //  Serial.println("Set up SCD40 Sesnor");
-  //  setupSCD40();
+    //  Serial.println("Set up SCD40 Sesnor");
+    //  setupSCD40();
 
-  //  Serial.println("Set up AHT20 Sesnor");
-  //  setupAHT20();
+    //  Serial.println("Set up AHT20 Sesnor");
+    //  setupAHT20();
 
-  //  Serial.println("Set up BMP280 Sesnor");
-  //  setupBMP280();
+    //  Serial.println("Set up BMP280 Sesnor");
+    //  setupBMP280();
 
     //   Serial.println("Set up DHT Sesnor");
     //   setupDHTSensor();
@@ -253,7 +252,10 @@ void setup()
 
     setupWebServer();
     Serial.println("Displaying Time...");
-    syncTimeFromNTP1();
+    
+   //  syncTimeFromNTP1();
+    syncTimeFromNTP();
+
     Serial.println("Done.");
 
     udp.begin(localPort);
@@ -477,7 +479,7 @@ void loop()
     {
         uint32_t code = getIRCodeNonBlocking();
         if (code)
-        handleIR(code); // Route IR to menu.cpp WiFi handler
+            handleIR(code); // Route IR to menu.cpp WiFi handler
         drawWiFiMenu();     // Draw scanned WiFi list
         delay(80);          // Slight delay for smoother response
         return;             // Skip rest of loop while selecting WiFi
@@ -498,50 +500,88 @@ void loop()
     {
         if (newTempestData)
         {
-            showUdpScreen(); // Rebuilds udpScreen with latest data
+            showUdpScreen();
             newTempestData = false;
         }
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         udpScreen.tick();
-        udpScreen.handleIR(getIRCodeNonBlocking());
+        udpScreen.handleIR(code);
         delay(40);
         return;
     }
 
     if (forecastScreen.isActive())
     {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         forecastScreen.tick();
-        forecastScreen.handleIR(getIRCodeNonBlocking());
+        forecastScreen.handleIR(code);
         delay(40);
         return;
     }
 
     if (currentCondScreen.isActive())
     {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         currentCondScreen.tick();
-        currentCondScreen.handleIR(getIRCodeNonBlocking());
+        currentCondScreen.handleIR(code);
         delay(40);
         return;
     }
 
     if (hourlyScreen.isActive())
     {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         hourlyScreen.tick();
-        hourlyScreen.handleIR(getIRCodeNonBlocking());
+        hourlyScreen.handleIR(code);
         delay(40);
         return;
     }
-
-
 
     if (rapidWindScreen.isActive())
     {
         if (newRapidWindData)
         {
-            showRapidWindScreen(); // Only update when actual rapid_wind packet arrives!
+            showRapidWindScreen();
             newRapidWindData = false;
         }
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         rapidWindScreen.tick();
-        rapidWindScreen.handleIR(getIRCodeNonBlocking());
+        rapidWindScreen.handleIR(code);
         delay(40);
         return;
     }
@@ -550,11 +590,19 @@ void loop()
     {
         if (newAirQualityData)
         {
-            showAirQualityScreen(); // Only update when actual rapid_wind packet arrives!
+            showAirQualityScreen();
             newAirQualityData = false;
         }
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         airQualityScreen.tick();
-        airQualityScreen.handleIR(getIRCodeNonBlocking());
+        airQualityScreen.handleIR(code);
         delay(40);
         return;
     }
@@ -563,16 +611,22 @@ void loop()
     {
         if (newAHT20_BMP280Data)
         {
-            showTempHumBaroScreen(); // Only update when actual rapid_wind packet arrives!
+            showTempHumBaroScreen();
             newAHT20_BMP280Data = false;
         }
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
         tempHumBaroScreen.tick();
-        tempHumBaroScreen.handleIR(getIRCodeNonBlocking());
+        tempHumBaroScreen.handleIR(code);
         delay(40);
         return;
     }
-
-    
 
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
     uint32_t code = getIRCodeNonBlocking();
@@ -655,11 +709,11 @@ void loop()
         if (!currentCondScreen.isActive())
             showCurrentConditionsScreen();
         break;
-     
+
     case SCREEN_HOURLY:
         if (!hourlyScreen.isActive())
             showHourlyForecastScreen();
-        break;    
+        break;
 
     case SCREEN_AIR_QUALITY:
         if (!airQualityScreen.isActive())
@@ -669,8 +723,6 @@ void loop()
         if (!tempHumBaroScreen.isActive())
             showTempHumBaroScreen();
         break;
-
-
 
     default:
         break;
