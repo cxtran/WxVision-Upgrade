@@ -6,6 +6,7 @@
 #include "menu.h"
 #include <Wire.h>
 #include "InfoScreen.h"
+#include "units.h"
 
 // Brightness Sensor
 #define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
@@ -188,16 +189,14 @@ bool newAHT20_BMP280Data = false;
 void showAirQualityScreen()
 {
   String lines[3];
-  lines[0] = "Temp: " + String(SCD40_temp, 2) + "C";
-  lines[1] = "Hum:  " + String(SCD40_hum, 2) + "%";
-  lines[2] = "CO2: " + String(SCD40_co2) + "ppm";
+  lines[0] = "Temp: " + fmtTemp(SCD40_temp, 2);     // uses C/F from settings
+  lines[1] = "Hum:  " + String(SCD40_hum, 2) + "%"; // humidity always %
+  lines[2] = "CO2:  " + String(SCD40_co2) + "ppm";  // CO2 stays ppm
 
   if (!airQualityScreen.isActive())
   {
-
     airQualityScreen.setLines(lines, 3, true);
-    airQualityScreen.show([]()
-                          { currentScreen = ScreenMode::SCREEN_OWM; });
+    airQualityScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
   }
   else
   {
@@ -208,17 +207,18 @@ void showAirQualityScreen()
 void showTempHumBaroScreen()
 {
   String lines[3];
-  lines[0] = "Temp: " + String(aht20_temp, 2) + "C";
-  lines[1] = "Hum:  " + String(aht20_hum, 2) + "%";
-  lines[2] = "Baro: " + String(bmp280_pressure, 1) + "hPa";
+  lines[0] = "Temp: " + fmtTemp(aht20_temp, 2);         // C/F per settings
+  lines[1] = "Hum:  " + String(aht20_hum, 2) + "%";     // %
+  lines[2] = "Baro: " + fmtPress(bmp280_pressure, 1);   // hPa/inHg per settings
+
   if (!tempHumBaroScreen.isActive())
   {
     tempHumBaroScreen.setLines(lines, 3, true);
-    tempHumBaroScreen.show([]()
-                           { currentScreen = ScreenMode::SCREEN_OWM; });
+    tempHumBaroScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
   }
   else
   {
     tempHumBaroScreen.setLines(lines, 3, false);
   }
 }
+

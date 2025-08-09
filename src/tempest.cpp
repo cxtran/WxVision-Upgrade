@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
 #include "ScrollLine.h"
+#include "units.h"
 
 extern WiFiUDP udp;
 extern InfoScreen udpScreen;
@@ -410,32 +411,34 @@ void fetchForecastData() {
 
 // --------- String Helpers ----------
 String getTempestField(const char* field) {
-    if (!strcmp(field, "temp"))        return isnan(tempest.temperature) ? "--" : String(tempest.temperature, 1) + "C";
-    if (!strcmp(field, "hum"))         return isnan(tempest.humidity) ? "--" : String(tempest.humidity, 0) + "%";
-    if (!strcmp(field, "pres"))        return isnan(tempest.pressure) ? "--" : String(tempest.pressure, 1) + "hPa";
-    if (!strcmp(field, "wind"))        return isnan(tempest.windAvg) ? "--" : String(tempest.windAvg, 1) + "m/s";
-    if (!strcmp(field, "winddir"))     return isnan(tempest.windDir) ? "--" : String(tempest.windDir, 0) + "°";
-    if (!strcmp(field, "uv"))          return isnan(tempest.uv) ? "--" : String(tempest.uv, 1);
-    if (!strcmp(field, "solar"))       return isnan(tempest.solar) ? "--" : String(tempest.solar, 0) + "W";
-    if (!strcmp(field, "rain"))        return isnan(tempest.rain) ? "--" : String(tempest.rain, 2) + "mm";
-    if (!strcmp(field, "battery"))     return isnan(tempest.battery) ? "--" : String(tempest.battery, 2) + "V";
+    if (!strcmp(field, "temp"))        return isnan(tempest.temperature) ? "--" : fmtTemp(tempest.temperature, 1);
+    if (!strcmp(field, "hum"))         return isnan(tempest.humidity)    ? "--" : String(tempest.humidity, 0) + "%";
+    if (!strcmp(field, "pres"))        return isnan(tempest.pressure)    ? "--" : fmtPress(tempest.pressure, 1);
+    if (!strcmp(field, "wind"))        return isnan(tempest.windAvg)     ? "--" : fmtWind(tempest.windAvg, 1);
+    if (!strcmp(field, "winddir"))     return isnan(tempest.windDir)     ? "--" : String(tempest.windDir, 0) + "°";
+    if (!strcmp(field, "uv"))          return isnan(tempest.uv)          ? "--" : String(tempest.uv, 1);
+    if (!strcmp(field, "solar"))       return isnan(tempest.solar)       ? "--" : String(tempest.solar, 0) + "W";
+    if (!strcmp(field, "rain"))        return isnan(tempest.rain)        ? "--" : fmtPrecip(tempest.rain, 2);
+    if (!strcmp(field, "battery"))     return isnan(tempest.battery)     ? "--" : String(tempest.battery, 2) + "V";
     if (!strcmp(field, "illuminance")) return isnan(tempest.illuminance) ? "--" : String(tempest.illuminance, 0) + "lx";
-    if (!strcmp(field, "gust"))        return isnan(tempest.windGust) ? "--" : String(tempest.windGust, 1) + "m/s";
-    if (!strcmp(field, "lull"))        return isnan(tempest.windLull) ? "--" : String(tempest.windLull, 1) + "m/s";
+    if (!strcmp(field, "gust"))        return isnan(tempest.windGust)    ? "--" : fmtWind(tempest.windGust, 1);
+    if (!strcmp(field, "lull"))        return isnan(tempest.windLull)    ? "--" : fmtWind(tempest.windLull, 1);
     if (!strcmp(field, "preciptype"))  return String(tempest.precipType);
     if (!strcmp(field, "strikes"))     return String(tempest.strikeCount);
-    if (!strcmp(field, "strikedist"))  return isnan(tempest.strikeDist) ? "--" : String(tempest.strikeDist, 1) + "km";
+    if (!strcmp(field, "strikedist"))  return isnan(tempest.strikeDist)  ? "--" : String(tempest.strikeDist, 1) + "km";
     if (!strcmp(field, "obs_time"))    return tempest.lastObsTime;
     return "";
 }
 
+
 String getRapidWindField(const char* field) {
-    if (!strcmp(field, "speed"))   return isnan(tempest.windAvg) ? "--" : String(tempest.windAvg, 1) + " m/s";
-    if (!strcmp(field, "dir"))     return isnan(tempest.windDir) ? "--" : String(tempest.windDir, 0) + "°";
+    if (!strcmp(field, "speed"))   return isnan(tempest.windAvg) ? String("--") : fmtWind(tempest.windAvg, 1);
+    if (!strcmp(field, "dir"))     return isnan(tempest.windDir) ? String("--") : String(tempest.windDir, 0) + "°";
     if (!strcmp(field, "epoch"))   return String(tempest.epoch);
     if (!strcmp(field, "time"))    return formatEpochTime(tempest.epoch);
     return "";
 }
+
 
 // --------- InfoScreen Display Functions ----------
 void showUdpScreen() {
@@ -475,9 +478,11 @@ void showForecastScreen() {
     for (int i = 0; i < num; ++i) {
         const ForecastDay& f = forecast.days[i];
         lines[i] = String(f.monthNum) + "/" + String(f.dayNum) + ": " +
-                   String(f.highTemp, 0) + "/" + String(f.lowTemp, 0) + "C " +
-                   f.conditions + " " + String(f.rainChance) + "%";
+                (isnan(f.highTemp) ? String("--") : fmtTemp(f.highTemp, 0)) + "/" +
+                (isnan(f.lowTemp)  ? String("--") : fmtTemp(f.lowTemp,  0)) + "  " +
+                f.conditions + " " + String(f.rainChance) + "%";
     }
+
     forecastScreen.setLines(lines, num);
     forecastScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
 }
@@ -530,11 +535,13 @@ void showHourlyForecastScreen() {
         line += ':';
         if (mm < 10) line += '0';
         line += String(mm);
+
         line += "  ";
-        line += isnan(h.temp) ? String("--") : String(h.temp, 1);
-        line += "C  ";
+        line += isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1);
+        line += "  ";
         line += (h.rainChance >= 0) ? String(h.rainChance) : String('-');
         line += '%';
+
 
         lines[i] = line;
         if (h.conditions.length()) lines[i] += "  " + h.conditions;
@@ -605,35 +612,25 @@ void showWindDirectionScreen() {
 
     dma_display->setCursor(cx + 12, cy);
     if (isnan(tempest.windAvg)) {
-        dma_display->print("-- m/s");
+        dma_display->print("--");
     } else {
-        // was: dma_display->printf("%.1f m/s", tempest.windAvg);
-        dma_display->print(String(tempest.windAvg, 1));
-        dma_display->print(" m/s");
+        dma_display->print(fmtWind(tempest.windAvg, 1));
     }
+
 }
 
 void showCurrentConditionsScreen() {
     String lines[8];
-    lines[0] = "Temp:   " + (isnan(currentCond.temp) ? String("--") : String(currentCond.temp, 1) + "C");
-    lines[1] = "Feels:  " + (isnan(currentCond.feelsLike) ? String("--") : String(currentCond.feelsLike, 1) + "C");
-    lines[2] = "DewPt:  " + (isnan(currentCond.dewPoint) ? String("--") : String(currentCond.dewPoint, 1) + "C");
-    lines[3] = "Humid:  " + (currentCond.humidity < 0 ? String("--") : String(currentCond.humidity) + "%");
-    lines[4] = "Press:  " + (isnan(currentCond.pressure) ? String("--") : String(currentCond.pressure, 1) + "hPa");
-    lines[5] = "Wind:   " + (isnan(currentCond.windAvg) ? String("--") : String(currentCond.windAvg, 1) + "m/s ") + currentCond.windCardinal;
-    lines[6] = "Gust:   " + (isnan(currentCond.windGust) ? String("--") : String(currentCond.windGust, 1) + "m/s");
+    lines[0] = "Temp:   " + (isnan(currentCond.temp)      ? String("--") : fmtTemp(currentCond.temp, 1));
+    lines[1] = "Feels:  " + (isnan(currentCond.feelsLike) ? String("--") : fmtTemp(currentCond.feelsLike, 1));
+    lines[2] = "DewPt:  " + (isnan(currentCond.dewPoint)  ? String("--") : fmtTemp(currentCond.dewPoint, 1));
+    lines[3] = "Humid:  " + (currentCond.humidity < 0     ? String("--") : String(currentCond.humidity) + "%");
+    lines[4] = "Press:  " + (isnan(currentCond.pressure)  ? String("--") : fmtPress(currentCond.pressure, 1));
+    lines[5] = "Wind:   " + (isnan(currentCond.windAvg)   ? String("--") : fmtWind(currentCond.windAvg, 1)) + " " + currentCond.windCardinal;
+    lines[6] = "Gust:   " + (isnan(currentCond.windGust)  ? String("--") : fmtWind(currentCond.windGust, 1));
     lines[7] = "Cond:   " + (String(currentCond.cond).length() == 0 ? String("--") : currentCond.cond);
     currentCondScreen.setLines(lines, 8);
     currentCondScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+
 }
 
-void debugPrintJsonKeys(JSONVar obj) {
-    if (JSON.typeof(obj) == "object") {
-        JSONVar keys = obj.keys();
-        for (int i = 0; i < keys.length(); ++i) {
-            const char* k = (const char*)keys[i];
-            Serial.print(k); Serial.print(": ");
-            Serial.println(obj[k]);
-        }
-    }
-}

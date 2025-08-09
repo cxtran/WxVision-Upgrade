@@ -205,6 +205,8 @@ void setupWebServer() {
         wifiSSID        = doc["wifiSSID"]         | "";
         wifiPass        = doc["wifiPass"]         | "";
         if (doc.containsKey("units")) jsonToUnits(doc["units"]);
+        fmt24 = units.clock24h ? 1 : 0;   // keep device clock format in sync with Unit card
+        saveDateTimeSettings();
         dayFormat       = doc["dayFormat"]        | 0;
         forecastSrc     = doc["forecastSrc"]      | 0;
         autoRotate      = doc["autoRotate"]       | 1;
