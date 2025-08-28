@@ -78,3 +78,19 @@ void togglePrecipUnit();
 // Quick presets
 void setMetric();   // C, m/s, hPa, mm
 void setImperial(); // F, mph, inHg, inch
+
+// --- Rebuild triggers for scrolling text ---
+static bool needScrollRebuild = true;
+
+// Snapshot of unit settings; force a first-time rebuild with an impossible value
+static uint16_t lastUnitSig = 0xFFFF;
+
+// Pack all unit choices into a small signature so we can detect any change.
+static inline uint16_t unitSignature() {
+  // temp (2 bits), wind (2), press (2), precip (2), clock24h (1)  => 9 bits total
+  return  ((uint16_t)units.temp   & 0x3)
+        | (((uint16_t)units.wind   & 0x3) << 2)
+        | (((uint16_t)units.press  & 0x3) << 4)
+        | (((uint16_t)units.precip & 0x3) << 6)
+        | ((units.clock24h ? 1u : 0u)     << 8);
+}

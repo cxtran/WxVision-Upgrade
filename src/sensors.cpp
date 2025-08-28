@@ -7,11 +7,13 @@
 #include <Wire.h>
 #include "InfoScreen.h"
 #include "units.h"
+#include "sensors.h"
 
 // Brightness Sensor
 #define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
 #define FIXED_RESISTOR 10000 // 10kΩ resistor (Ohms)
 
+// Light sensor gain (percentage)
 extern InfoScreen airQualityScreen;
 extern InfoScreen tempHumBaroScreen;
 

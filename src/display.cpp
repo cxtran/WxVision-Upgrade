@@ -2,12 +2,21 @@
 #include "icons.h"
 #include "settings.h"
 #include "RTClib.h"   // For RTC DateTime
+#include "sensors.h"
+//#include "fonts/FreeSans9pt7b.h"
+//#include "fonts/tahomabd7pt7b.h"
+//#include "fonts/tahomabd8pt7b.h"
+#include "fonts/verdanab8pt7b.h"
 
+#include "tempest.h"
+
+extern float aht20_temp;
+extern float aht20_hum;
 extern int scrollLevel;
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
-
+extern int theme;
 /*
 const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_DATA,
@@ -134,37 +143,6 @@ const long gmtOffset_sec = -8 * 3600;
 const int daylightOffset_sec = 3600;
 RTC_DS3231 rtc;
 
-/*
-void syncTimeFromNTP1() {
-    Serial.println("Syncing time from NTP...");
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1);
-    struct tm timeinfo;
-    if (!getLocalTime(&timeinfo)) {
-        Serial.println("❌ getLocalTime() failed");
-        return;
-    }
-    int year = timeinfo.tm_year + 1900;
-    if (year < 2020 || year > 2099) {
-        Serial.printf("⚠️ Invalid year from NTP: %d\n", year);
-        return;
-    }
-    DateTime newTime(year,
-                     timeinfo.tm_mon + 1,
-                     timeinfo.tm_mday,
-                     timeinfo.tm_hour,
-                     timeinfo.tm_min,
-                     timeinfo.tm_sec);
-    Serial.printf("Updating RTC with: %04d-%02d-%02d %02d:%02d:%02d\n",
-                  newTime.year(), newTime.month(), newTime.day(),
-                  newTime.hour(), newTime.minute(), newTime.second());
-    if (!rtc.begin()) {
-        Serial.println("⚠️ rtc.begin() failed. RTC module missing or not connected?");
-        return;
-    }
-    rtc.adjust(newTime);
-    Serial.println("✅ Time set from NTP.");
-}
-*/
 
 String httpGETRequest(const char *url) {
     WiFiClient client;
@@ -182,9 +160,8 @@ String httpGETRequest(const char *url) {
 }
 
 
-
 // === Units Toggle ===
-bool useImperial = true;
+bool useImperial = false;
 // === Clock Display Buffers ===
 byte t_second = 0, t_minute = 0, t_hour = 0, d_day = 0, d_month = 0, d_daysOfTheWeek = 0;
 int d_year = 0;
@@ -265,22 +242,44 @@ void fetchWeatherFromOWM() {
     Serial.printf("  Temp: %s | Hum: %s%% | Wind: %s %s\n",
                   str_Temp.c_str(), str_Humd.c_str(), str_Wind_Speed.c_str(),
                   useImperial ? "mph" : "m/s");
+
+    needScrollRebuild = true;
+             
 }
 
 
 
 void drawOWMScreen(){
-            getTimeFromRTC();
-            displayClock();
-            displayDate();
-            // Update weather every 10 minutes at :10s
-            if ((t_minute % 10 == 0) && (t_second == 10)) {
-                fetchWeatherFromOWM();
-                reset_Time_and_Date_Display = true;
-                displayWeatherData();
-            }
-    
+    getTimeFromRTC();
+    displayClock();
+    displayDate();
+
+    // Detect any change across temp/wind/press/precip/clock24h
+    const uint16_t curSig = unitSignature();
+    if (curSig != lastUnitSig) {
+        lastUnitSig = curSig;
+        needScrollRebuild = true;          // units changed -> rebuild marquee
+    }
+
+    // Rebuild scrolling text only when needed
+    if (needScrollRebuild) {
+        createScrollingText();             // uses fmtTemp/fmtWind/... honoring 'units'
+        // Reset marquee so it restarts smoothly
+        start_Scroll_Text = false;
+        set_up_Scrolling_Text_Length = true;
+        text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
+        needScrollRebuild = false;
+    }
+
+    // Update weather every 10 minutes at :10s
+    if ((t_minute % 10 == 0) && (t_second == 10)) {
+        fetchWeatherFromOWM();
+        reset_Time_and_Date_Display = true;
+        displayWeatherData();
+        needScrollRebuild = true;          // new values -> refresh marquee text
+    }
 }
+
 
 void drawWeatherIcon(String iconCode) {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
@@ -323,13 +322,32 @@ void displayWeatherData() {
     dma_display->fillRect(18, 0, 46, 7, myBLACK);
     dma_display->setCursor(18, 0);
     dma_display->setTextColor(myYELLOW);
-    dma_display->print(customRoundString(str_Temp.c_str()));
-    dma_display->print(useImperial ? "°F" : "°C");
+ //   dma_display->print(customRoundString(str_Temp.c_str()));  
+    dma_display->print( fmtTemp( atof(str_Temp.c_str()), 0)); 
+//    dma_display->print(useImperial ? "°F" : "°C");
     dma_display->setCursor(44, 0);
     dma_display->setTextColor(myCYAN);
     dma_display->print(str_Humd);
     dma_display->print("%");
 }
+
+void createScrollingText() {
+ //   String unitT = useImperial ? "°F" : "°C";
+ //   String unitW = useImperial ? "mph" : "m/s";
+
+    scrolling_Text =
+        "City: " + str_City + " ¦ " +
+        "Weather: " + str_Weather_Conditions_Des + " ¦ " +
+        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) +  " ¦ " +
+        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) +  " ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) +  " ¦ " +
+        "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " ¦ " +
+        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) +  " ¦ ";
+
+    scrolling_Text_Color = myGREEN;
+    text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
+}
+
+
 
 // --- Scroll state variables for weather ---
 void scrollWeatherDetails() {
@@ -339,17 +357,6 @@ void scrollWeatherDetails() {
     if (!start_Scroll_Text) {
         String unitT = useImperial ? "°F" : "°C";
         String unitW = useImperial ? "mph" : "m/s";
-
-        scrolling_Text =
-            "City: " + str_City + " ¦ " +
-            "Weather: " + str_Weather_Conditions_Des + " ¦ " +
-            "Feels Like: " + str_Feels_like + unitT + " ¦ " +
-            "Max: " + str_Temp_max + unitT + " ¦ Min: " + str_Temp_min + unitT + " ¦ " +
-            "Pressure: " + str_Pressure + " hPa ¦ " +
-            "Wind: " + str_Wind_Speed + " " + unitW + " ¦ ";
-
-        scrolling_Text_Color = myGREEN;
-        text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
         scrollOffset = 0;
         start_Scroll_Text = true;
     }
@@ -373,45 +380,304 @@ void scrollWeatherDetails() {
     }
 }
 
+
 void drawClockScreen() {
+
     dma_display->fillScreen(0);
 
-    // 1. Read current time from RTC
     DateTime now = rtc.now();
-    int hour = now.hour();
-    int minute = now.minute();
+    int hour = now.hour(), minute = now.minute(), second = now.second();
 
-    // 2. Prepare strings
-    char timeStr[6];
+    // 12h/24h handling
+    bool isPM = false;
+    if (!units.clock24h) {
+        if (hour == 0) hour = 12;
+        else if (hour >= 12) { if (hour > 12) hour -= 12; isPM = true; }
+    }
+
+    char timeStr[6]; // "HH:MM"
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
 
-    // Day of week and date
-    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char *days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
     char dateStr[14];
-    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d", days[now.dayOfTheWeek()], now.month(), now.day());
+    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d",
+             days[now.dayOfTheWeek()], now.month(), now.day());
 
-    // 3. Draw a small lock icon at the top center (6x6 pixels)
-    int lockX = 29; // center-ish
-    int lockY = 2;
-    dma_display->drawRoundRect(lockX, lockY+2, 6, 6, 2, dma_display->color565(180,180,180)); // Lock body
-    dma_display->drawCircle(lockX+3, lockY+2, 3, dma_display->color565(180,180,180));        // Shackle
-
-    // 4. Draw time, centered
-    dma_display->setFont(); // Built-in 5x7
+    // ---- TIME (big Verdana Bold)
+    dma_display->setFont(&verdanab8pt7b);
     dma_display->setTextSize(1);
-    int16_t x = 14, y = 14; // Start x so "HH:MM" is centered, adjust as needed
-    dma_display->setCursor(x, y);
-    dma_display->setTextColor(dma_display->color565(255,255,0));
+    uint16_t timeColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(255,255,80);
+    dma_display->setTextColor(timeColor);
+
+    // width of time string
+    int timeW = getTextWidth(timeStr);
+
+    // measure height for vertical centering
+    int16_t x1, y1; uint16_t w, h;
+    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+    int timeH = h;
+
+    // total width (digits + AM/PM)
+    int ampmW = 0;
+    if (!units.clock24h) {
+        ampmW = getTextWidth(isPM ? "PM" : "AM");
+    }
+    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
+
+    // center the whole block
+    int boxX = (64 - totalW) / 2;
+    if (boxX < 0) boxX = 0;
+    int boxY = (32 - timeH) / 2;
+
+    // --- draw time string (shifted up by 1)
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setCursor(boxX, boxY + timeH - 1);
     dma_display->print(timeStr);
 
-    // 5. Draw date below
+    // --- draw AM/PM inline
+    if (!units.clock24h) {
+        String ampmStr = isPM ? "PM" : "AM";
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                          : dma_display->color565(255,255,200);
+        dma_display->setTextColor(ampmColor);
+
+        // measure digit height
+        int16_t x1,y1; uint16_t w,h;
+        dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+        int digitH = h;
+
+        // measure AM/PM width & height
+        dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int ampmW = w;
+        int ampmH = h;
+
+        int ampmX = boxX + timeW + 5; // 3px padding after digits
+        // align baselines, then lift by difference − 1px for correction
+        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+
+        if (!isPM) {
+            ampmY -= 6;
+        }
+
+        // shift AM/PM up by 1 pixel
+        ampmY -= 1;
+
+        // background box (baseline Y − ampmH = top of text)
+        uint16_t bgColor;
+        if (theme == 1) {
+            bgColor = dma_display->color565(20,20,40);   // extra dim background in mono mode
+        } else {
+            bgColor = dma_display->color565(40,40,40);   // normal dark gray
+        }
+        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
+
+
+        dma_display->setCursor(ampmX, ampmY);
+        dma_display->print(ampmStr);
+    }
+
+    // ---- DATE (unchanged)
+    dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
-    dma_display->setCursor(8, 24); // Lower, centered
-    dma_display->setTextColor(dma_display->color565(180,180,255));
+    uint16_t dateColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(150,200,255);
+    dma_display->setTextColor(dateColor);
+    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
+    int dateX = (64 - (int)w) / 2;
+    if (dateX < 0) dateX = 0;
+    int dateY = 25;
+    dma_display->setCursor(dateX, dateY);
     dma_display->print(dateStr);
 
-    // 6. Optionally, show a tiny dot for seconds for "alive" feeling
-    int secY = 31;
-    int secX = 62;
-    dma_display->fillCircle(secX, secY, 1, (now.second() % 2) ? dma_display->color565(0,255,0) : dma_display->color565(0,60,0));
+    // ---- TEMPERATURES (unchanged)
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    uint16_t tempColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(200,200,255);
+    dma_display->setTextColor(tempColor);
+
+    String udpTempStr = fmtTemp(tempest.temperature, 0);  // UDP temp
+    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp
+
+    // UDP temp at (0,0)
+    dma_display->setCursor(0, 0);
+    dma_display->print(udpTempStr);
+
+    // Local temp stays right-aligned at top-right
+    dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+    int localX = 64 - w - 1;
+    int localY = 0;
+    dma_display->setCursor(localX, localY);
+    dma_display->print(localTempStr);
+
+    // ---- Seconds pulse (unchanged)
+    uint16_t pulseColor = (second % 2 == 0)
+        ? dma_display->color565(0,255,0)
+        : dma_display->color565(0,60,0);
+    dma_display->fillCircle(62, 30, 1, pulseColor);
+}
+
+
+/*
+void drawClockScreen() {
+   // extern int theme = 1; // 0 = normal, 1 = mono (dim blue)
+
+    dma_display->fillScreen(0);
+
+    DateTime now = rtc.now();
+    int hour = now.hour(), minute = now.minute(), second = now.second();
+
+    // 12h/24h handling
+    bool isPM = false;
+    if (!units.clock24h) {
+        if (hour == 0) hour = 12;
+        else if (hour >= 12) { if (hour > 12) hour -= 12; isPM = true; }
+    }
+
+    char timeStr[6]; // "HH:MM"
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+
+    const char *days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+    char dateStr[14];
+    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d",
+             days[now.dayOfTheWeek()], now.month(), now.day());
+
+    // ---- TIME (big Verdana Bold)
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setTextSize(1);
+    uint16_t timeColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(255,255,80);
+    dma_display->setTextColor(timeColor);
+
+    // width of time string
+    int timeW = getTextWidth(timeStr);
+
+    // measure height for vertical centering
+    int16_t x1, y1; uint16_t w, h;
+    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+    int timeH = h;
+
+    // total width (digits + AM/PM)
+    int ampmW = 0;
+    if (!units.clock24h) {
+        ampmW = getTextWidth(isPM ? "PM" : "AM");
+    }
+    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
+
+    // center the whole block
+    int boxX = (64 - totalW) / 2;
+    if (boxX < 0) boxX = 0;
+    int boxY = (32 - timeH) / 2;
+
+    // --- draw time string
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setCursor(boxX, boxY + timeH);
+    dma_display->print(timeStr);
+
+    // --- draw AM/PM inline
+    if (!units.clock24h) {
+        String ampmStr = isPM ? "PM" : "AM";
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                          : dma_display->color565(255,255,200);
+        dma_display->setTextColor(ampmColor);
+
+        // measure digit height
+        int16_t x1,y1; uint16_t w,h;
+        dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+        int digitH = h;
+
+        // measure AM/PM width & height
+        dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int ampmW = w;
+        int ampmH = h;
+
+        int ampmX = boxX + timeW + 5; // 3px padding after digits
+        // align baselines, then lift by difference − 1px for correction
+        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+
+        if (!isPM) {
+            ampmY -= 6;
+        }
+
+        // background box (baseline Y − ampmH = top of text)
+        uint16_t bgColor = dma_display->color565(40,40,40); // dark gray background
+        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
+
+        dma_display->setCursor(ampmX, ampmY);
+        dma_display->print(ampmStr);
+    }
+
+    // ---- DATE (unchanged)
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    uint16_t dateColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(150,200,255);
+    dma_display->setTextColor(dateColor);
+    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
+    int dateX = (64 - (int)w) / 2;
+    if (dateX < 0) dateX = 0;
+    int dateY = 25;
+    dma_display->setCursor(dateX, dateY);
+    dma_display->print(dateStr);
+
+    // ---- TEMPERATURES
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    uint16_t tempColor = (theme == 1) ? dma_display->color565(60,60,120)
+                                      : dma_display->color565(200,200,255);
+    dma_display->setTextColor(tempColor);
+
+    String udpTempStr = fmtTemp(tempest.temperature, 0);  // UDP temp
+    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp
+
+    // UDP temp at (0,0)
+    dma_display->setCursor(0, 0);
+    dma_display->print(udpTempStr);
+
+    // Local temp stays right-aligned at top-right
+    dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+    int localX = 64 - w - 1;
+    int localY = 0;
+    dma_display->setCursor(localX, localY);
+    dma_display->print(localTempStr);
+
+    // ---- Seconds pulse (unchanged color even in mono)
+    uint16_t pulseColor = (second % 2 == 0)
+        ? dma_display->color565(0,255,0)
+        : dma_display->color565(0,60,0);
+    dma_display->fillCircle(62, 30, 1, pulseColor);
+}
+*/
+
+// Public helpers
+void requestScrollRebuild() {
+  needScrollRebuild = true;
+}
+
+void notifyUnitsMaybeChanged() {
+  const uint16_t sig = unitSignature();
+  if (sig != lastUnitSig) {
+    lastUnitSig = sig;
+    needScrollRebuild = true;
+  }
+}
+
+// Call this frequently; it only rebuilds when needed.
+void serviceScrollRebuild() {
+  if (!needScrollRebuild) return;
+
+  // Rebuild the line using the latest units + data
+  createScrollingText();
+
+  // Reset marquee state so it restarts smoothly
+  start_Scroll_Text = false;
+  set_up_Scrolling_Text_Length = true;
+  text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
+
+  needScrollRebuild = false;
 }

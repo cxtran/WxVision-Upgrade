@@ -26,7 +26,9 @@
 #include "ScrollLine.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY};
+const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, 
+                                      SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, 
+                                      SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY, SCREEN_CLOCK};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -40,12 +42,16 @@ InfoScreen forecastScreen("7-Day Fcst", SCREEN_UDP_FORECAST);
 InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
 InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
 InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
-InfoScreen currentCondScreen("Now", SCREEN_CURRENT);
-InfoScreen hourlyScreen("HourLy Fcst", SCREEN_HOURLY);
+InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
+InfoScreen hourlyScreen("24-HR Fcst", SCREEN_HOURLY);
 
+// Screen Wind Info
 WindMeter windMeter;
 ScrollLine scrollLine(64, 40); // 64 px wide, scroll every 50ms
 ScrollLine windInfo(64, 40);
+
+// Screen Clock
+
 
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
@@ -85,6 +91,10 @@ unsigned long lastReadSCD40 = 0;
 const unsigned long SCD40ReadInterval = 5000;
 unsigned long lastReadAHT20_BMP280 = 0;
 const unsigned long AHT20_BMP280ReadInterval = 5000;
+
+
+// CLock Screen
+unsigned long lastClockUpdate = 0;
 
 // unsigned long lastReadDHT = 0;
 // const unsigned long DHTreadInterval = 2000;
@@ -160,6 +170,9 @@ void rotateScreen(int direction)
     case SCREEN_HOURLY:
         showHourlyForecastScreen();
         break;
+    case SCREEN_CLOCK:
+        drawClockScreen();
+        break;  
     case SCREEN_OWM: /* draw in loop */
         break;
     }
@@ -206,19 +219,7 @@ void setup()
     setupDisplay();
     Serial.println("Display setup done.");
 
-    //  Serial.println("Set up SCD40 Sesnor");
-    //  setupSCD40();
-
-    //  Serial.println("Set up AHT20 Sesnor");
-    //  setupAHT20();
-
-    //  Serial.println("Set up BMP280 Sesnor");
-    //  setupBMP280();
-
-    //   Serial.println("Set up DHT Sesnor");
-    //   setupDHTSensor();
-
-    // Setup Sensors
+     // Setup Sensors
     setupSensors();
 
     Serial.println("Setup IR Sensor");
@@ -235,6 +236,8 @@ void setup()
 
     Serial.println("Connecting WiFi...");
     connectToWiFi();
+
+    WiFi.setSleep(false);   // smooths out periodic task jitter on ESP32
 
     if (wifiSelecting)
         return;
@@ -253,7 +256,6 @@ void setup()
     setupWebServer();
     Serial.println("Displaying Time...");
     
-   //  syncTimeFromNTP1();
     syncTimeFromNTP();
 
     Serial.println("Done.");
@@ -272,6 +274,10 @@ void setup()
     displayWeatherData();
     displayClock();
     displayDate();
+    // replace the direct createScrollingText() with:
+    requestScrollRebuild();
+    serviceScrollRebuild();
+
 
     delay(2000);
     setupButtons();
@@ -302,6 +308,11 @@ void setup()
     String lines[] = {"This is the line for all wind related data."};
     windInfo.setLines(lines, 1);
     windInfo.setBounceEnabled(false);
+    // Seed timers to stagger 5s jobs (spread ~1.5s apart)
+    lastReadSCD40           = millis() - 0;      // first at ~5.0s
+    lastReadAHT20_BMP280    = millis() - 1500;   // first at ~3.5s + 5s = 6.5s
+    lastBrightnessRead      = millis() - 3000;   // first at ~2.0s + 5s = 7.0s
+
 }
 
 void loop()
@@ -665,30 +676,39 @@ void loop()
         airQualityScreen.isActive() ||
         tempHumBaroScreen.isActive();
 
-    if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
-    {
-        scrollWeatherTick();
-        if (reset_Time_and_Date_Display)
-        {
-            reset_Time_and_Date_Display = false;
-            displayClock();
-            displayDate();
-            displayWeatherData();
-        }
+if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
+{
+    // 1) Detect unit changes (C/F, mph/kph/kts/mps, inHg/hPa, inch/mm, 12h/24h)
+    notifyUnitsMaybeChanged();
 
-        static unsigned long prevMillis_ShowTimeDate = 0;
-        if (now - prevMillis_ShowTimeDate >= 1000)
-        {
-            reset_Time_and_Date_Display = true;
-            prevMillis_ShowTimeDate = now;
-            if (needsClear)
-            {
-                dma_display->fillScreen(0);
-                needsClear = false;
-            }
-            drawOWMScreen();
-        }
+    // 2) Rebuild marquee once if needed (after unit/data changes)
+    serviceScrollRebuild();
+
+    // 3) Animate at fixed cadence independent of the 1s clock redraw
+    scrollWeatherTick();
+
+    if (reset_Time_and_Date_Display)
+    {
+        reset_Time_and_Date_Display = false;
+        displayClock();
+        displayDate();
+        displayWeatherData();
     }
+
+    static unsigned long prevMillis_ShowTimeDate = 0;
+    if (now - prevMillis_ShowTimeDate >= 1000)
+    {
+        reset_Time_and_Date_Display = true;
+        prevMillis_ShowTimeDate = now;
+        if (needsClear)
+        {
+            dma_display->fillScreen(0);
+            needsClear = false;
+        }
+        drawOWMScreen();   // <- no createScrollingText() call inside this anymore
+    }
+}
+
 
     // --- 8. InfoScreen auto-activation (if not already active) ---
     switch (currentScreen)
@@ -727,6 +747,19 @@ void loop()
     default:
         break;
     }
+
+    if( currentScreen == SCREEN_CLOCK){
+        // Handle clock screen updates
+        static unsigned long lastClockUpdate = 0;
+        if (now - lastClockUpdate >= 1000) // Update every second
+        {
+            lastClockUpdate = now;
+            drawClockScreen(); // Redraw clock screen
+        }
+    }
+
+
+
 
     if (currentScreen == SCREEN_WIND_DIR)
     {

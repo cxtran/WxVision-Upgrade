@@ -26,6 +26,7 @@ enum ScreenMode {
     SCREEN_TEMP_HUM_BARO,
     SCREEN_CURRENT,
     SCREEN_HOURLY,
+    SCREEN_CLOCK,
     SCREEN_COUNT
 };
 
@@ -56,4 +57,8 @@ void drawClockScreen();
 void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();
-
+void createScrollingText();
+// display.h
+void requestScrollRebuild();     // mark that the marquee text must be rebuilt
+void notifyUnitsMaybeChanged();  // compare unit signature; request rebuild if changed
+void serviceScrollRebuild();     // if a rebuild is pending, rebuild now (cheap no-op otherwise)
