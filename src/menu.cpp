@@ -13,7 +13,9 @@
 #include "datetimesettings.h"
 #include "ir_codes.h"
 #include "SPIFFS.h"
-#include "units.h"
+#include "units.h"//
+//#include <esp_partition.h>
+#include <esp_ota_ops.h>
 
 // --- System Info Colors ---
 #define SYSINFO_HEADER dma_display->color565(0, 255, 80)
@@ -826,15 +828,20 @@ void showSystemInfoScreen()
 
     uint32_t flashChipSize = ESP.getFlashChipSize();
     uint32_t sketchSize = ESP.getSketchSize();
-    uint32_t appPartition = 0x190000;
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    uint32_t appPartition = running ? running->size : 0;  // dynamic slot size
+
     uint32_t heapFree = ESP.getFreeHeap();
     uint32_t heapTotal = 327680;
     uint32_t heapUsed = heapTotal - heapFree;
     float heapPct = 100.0 * heapUsed / heapTotal;
-    float flashPct = 100.0 * sketchSize / appPartition;
+    float flashPct = (appPartition > 0) ? (100.0 * sketchSize / appPartition) : 0;
+
     uint32_t spiffsTotal = SPIFFS.totalBytes();
     uint32_t spiffsUsed = SPIFFS.usedBytes();
     float spiffsPct = (spiffsTotal > 0) ? (100.0 * spiffsUsed / spiffsTotal) : 0;
+
 
     String lines[] = {
         "FW: 1.0.0",

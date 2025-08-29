@@ -11,7 +11,7 @@
 #include "tempest.h"
 
 extern float aht20_temp;
-extern float aht20_hum;
+extern float SCD40_temp;
 extern int scrollLevel;
 extern void displayClock();
 extern void displayDate();
@@ -449,34 +449,30 @@ void drawClockScreen() {
         dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
         int digitH = h;
 
-        // measure AM/PM width & height
+            // measure AM/PM width & height
         dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
         int ampmW = w;
         int ampmH = h;
 
-        int ampmX = boxX + timeW + 5; // 3px padding after digits
-        // align baselines, then lift by difference − 1px for correction
-        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+        // anchor to right frame (2px margin)
+        int ampmX = 64 - ampmW - 1; 
 
+        // align baseline with digits, adjusted
+        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
         if (!isPM) {
             ampmY -= 6;
         }
-
-        // shift AM/PM up by 1 pixel
+        // shift up 1 pixel as before
         ampmY -= 1;
 
-        // background box (baseline Y − ampmH = top of text)
-        uint16_t bgColor;
-        if (theme == 1) {
-            bgColor = dma_display->color565(20,20,40);   // extra dim background in mono mode
-        } else {
-            bgColor = dma_display->color565(40,40,40);   // normal dark gray
-        }
+        // background box
+        uint16_t bgColor = (theme == 1) ? dma_display->color565(20,20,40)
+                                        : dma_display->color565(40,40,40);
         dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
-
 
         dma_display->setCursor(ampmX, ampmY);
         dma_display->print(ampmStr);
+
     }
 
     // ---- DATE (unchanged)
@@ -500,7 +496,8 @@ void drawClockScreen() {
     dma_display->setTextColor(tempColor);
 
     String udpTempStr = fmtTemp(tempest.temperature, 0);  // UDP temp
-    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp
+//    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp via AHT20
+    String localTempStr = fmtTemp(SCD40_temp,0);         // Local temp via SCD40
 
     // UDP temp at (0,0)
     dma_display->setCursor(0, 0);
@@ -508,151 +505,19 @@ void drawClockScreen() {
 
     // Local temp stays right-aligned at top-right
     dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int localX = 64 - w - 1;
+    int localX = 64 - w;
     int localY = 0;
     dma_display->setCursor(localX, localY);
     dma_display->print(localTempStr);
 
-    // ---- Seconds pulse (unchanged)
+    // ---- Seconds pulse (dimmer but same color tone)
     uint16_t pulseColor = (second % 2 == 0)
-        ? dma_display->color565(0,255,0)
-        : dma_display->color565(0,60,0);
+        ? dma_display->color565(0,150,0)   // dimmer bright green
+        : dma_display->color565(0,60,0);   // dimmer dark green
     dma_display->fillCircle(62, 30, 1, pulseColor);
+
 }
 
-
-/*
-void drawClockScreen() {
-   // extern int theme = 1; // 0 = normal, 1 = mono (dim blue)
-
-    dma_display->fillScreen(0);
-
-    DateTime now = rtc.now();
-    int hour = now.hour(), minute = now.minute(), second = now.second();
-
-    // 12h/24h handling
-    bool isPM = false;
-    if (!units.clock24h) {
-        if (hour == 0) hour = 12;
-        else if (hour >= 12) { if (hour > 12) hour -= 12; isPM = true; }
-    }
-
-    char timeStr[6]; // "HH:MM"
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-
-    const char *days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
-    char dateStr[14];
-    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d",
-             days[now.dayOfTheWeek()], now.month(), now.day());
-
-    // ---- TIME (big Verdana Bold)
-    dma_display->setFont(&verdanab8pt7b);
-    dma_display->setTextSize(1);
-    uint16_t timeColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(255,255,80);
-    dma_display->setTextColor(timeColor);
-
-    // width of time string
-    int timeW = getTextWidth(timeStr);
-
-    // measure height for vertical centering
-    int16_t x1, y1; uint16_t w, h;
-    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-    int timeH = h;
-
-    // total width (digits + AM/PM)
-    int ampmW = 0;
-    if (!units.clock24h) {
-        ampmW = getTextWidth(isPM ? "PM" : "AM");
-    }
-    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
-
-    // center the whole block
-    int boxX = (64 - totalW) / 2;
-    if (boxX < 0) boxX = 0;
-    int boxY = (32 - timeH) / 2;
-
-    // --- draw time string
-    dma_display->setFont(&verdanab8pt7b);
-    dma_display->setCursor(boxX, boxY + timeH);
-    dma_display->print(timeStr);
-
-    // --- draw AM/PM inline
-    if (!units.clock24h) {
-        String ampmStr = isPM ? "PM" : "AM";
-        dma_display->setFont(&Font5x7Uts);
-        dma_display->setTextSize(1);
-        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                          : dma_display->color565(255,255,200);
-        dma_display->setTextColor(ampmColor);
-
-        // measure digit height
-        int16_t x1,y1; uint16_t w,h;
-        dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-        int digitH = h;
-
-        // measure AM/PM width & height
-        dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-        int ampmW = w;
-        int ampmH = h;
-
-        int ampmX = boxX + timeW + 5; // 3px padding after digits
-        // align baselines, then lift by difference − 1px for correction
-        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-
-        if (!isPM) {
-            ampmY -= 6;
-        }
-
-        // background box (baseline Y − ampmH = top of text)
-        uint16_t bgColor = dma_display->color565(40,40,40); // dark gray background
-        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
-
-        dma_display->setCursor(ampmX, ampmY);
-        dma_display->print(ampmStr);
-    }
-
-    // ---- DATE (unchanged)
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    uint16_t dateColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(150,200,255);
-    dma_display->setTextColor(dateColor);
-    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
-    int dateX = (64 - (int)w) / 2;
-    if (dateX < 0) dateX = 0;
-    int dateY = 25;
-    dma_display->setCursor(dateX, dateY);
-    dma_display->print(dateStr);
-
-    // ---- TEMPERATURES
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    uint16_t tempColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(200,200,255);
-    dma_display->setTextColor(tempColor);
-
-    String udpTempStr = fmtTemp(tempest.temperature, 0);  // UDP temp
-    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp
-
-    // UDP temp at (0,0)
-    dma_display->setCursor(0, 0);
-    dma_display->print(udpTempStr);
-
-    // Local temp stays right-aligned at top-right
-    dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int localX = 64 - w - 1;
-    int localY = 0;
-    dma_display->setCursor(localX, localY);
-    dma_display->print(localTempStr);
-
-    // ---- Seconds pulse (unchanged color even in mono)
-    uint16_t pulseColor = (second % 2 == 0)
-        ? dma_display->color565(0,255,0)
-        : dma_display->color565(0,60,0);
-    dma_display->fillCircle(62, 30, 1, pulseColor);
-}
-*/
 
 // Public helpers
 void requestScrollRebuild() {
