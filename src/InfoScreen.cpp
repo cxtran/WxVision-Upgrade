@@ -6,6 +6,7 @@ extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
 extern ScreenMode currentScreen;
 extern int scrollSpeed;
+extern int theme;
 
 
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
@@ -52,14 +53,21 @@ void InfoScreen::resetHScroll() {
 void InfoScreen::draw() {
     dma_display->fillScreen(0);
 
+    const bool monoTheme = (theme == 1);
+    const uint16_t headerBg = monoTheme ? dma_display->color565(20,20,40) : INFOSCREEN_HEADERBG;
+    const uint16_t headerFg = monoTheme ? dma_display->color565(60,60,120) : INFOSCREEN_HEADERFG;
+    const uint16_t lineColor = monoTheme ? dma_display->color565(40,40,90) : dma_display->color565(255,255,255);
+    const uint16_t selectedLineColor = monoTheme ? dma_display->color565(90,90,150) : dma_display->color565(255,255,0);
+
     // Header
     const int headerHeight = CHARH;
-    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, INFOSCREEN_HEADERBG);
-    dma_display->setTextColor(INFOSCREEN_HEADERFG);
+    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, headerBg);
+    dma_display->setTextColor(headerFg);
     dma_display->setCursor(1, 0);
     String t = _title; if (t.length() > 12) t = t.substring(0, 12);
     dma_display->print(t);
-    dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, INFOMODAL_ULINE);
+    const uint16_t underlineColor = monoTheme ? dma_display->color565(30,30,70) : INFOMODAL_ULINE;
+    dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, underlineColor);
 
     // Lines
     int y = headerHeight;
@@ -72,7 +80,7 @@ void InfoScreen::draw() {
 
         int lineW = getTextWidth(line.c_str());
         bool isSelected = (i == selIndex);
-        uint16_t color = isSelected ? dma_display->color565(255,255,0) : dma_display->color565(255,255,255);
+        uint16_t color = isSelected ? selectedLineColor : lineColor;
 
         int yPos = headerHeight + i * CHARH;
 

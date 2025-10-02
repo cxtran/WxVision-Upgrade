@@ -9,10 +9,67 @@ extern bool autoBrightness;
 extern int scrollLevel;
 extern void saveDisplaySettings();
 extern std::vector<MenuLevel> menuStack;
+extern int theme;
 
 // --- Static trampoline for keyboard -> InfoModal::setTextValue ---
 static InfoModal *s_modalForText = nullptr;
 static int s_textIdxForText = -1;
+
+
+namespace {
+struct ModalPalette {
+    uint16_t headerBg;
+    uint16_t headerFg;
+    uint16_t underline;
+    uint16_t closeBg;
+    uint16_t closeSelBg;
+    uint16_t closeFg;
+    uint16_t lineUnselected;
+    uint16_t lineSelected;
+    uint16_t lineEditing;
+    uint16_t buttonBg;
+    uint16_t buttonSelBg;
+    uint16_t buttonFg;
+    uint16_t buttonSelFg;
+};
+
+ModalPalette makePalette() {
+    ModalPalette p{};
+    if (theme == 1) {
+        p.headerBg = dma_display->color565(20,20,40);
+        p.headerFg = dma_display->color565(60,60,120);
+        p.underline = dma_display->color565(30,30,70);
+        p.closeBg = dma_display->color565(20,20,40);
+        p.closeSelBg = dma_display->color565(90,90,150);
+        p.closeFg = dma_display->color565(180,180,220);
+        p.lineUnselected = dma_display->color565(40,40,90);
+        p.lineSelected = dma_display->color565(90,90,150);
+        p.lineEditing = dma_display->color565(140,140,200);
+        p.buttonBg = dma_display->color565(25,25,60);
+        p.buttonSelBg = dma_display->color565(90,90,150);
+        p.buttonFg = dma_display->color565(60,60,120);
+        p.buttonSelFg = dma_display->color565(20,20,40);
+    } else {
+        p.headerBg = INFOMODAL_HEADERBG;
+        p.headerFg = INFOMODAL_GREEN;
+        p.underline = INFOMODAL_ULINE;
+        p.closeBg = INFOMODAL_UNSELXBG;
+        p.closeSelBg = INFOMODAL_SELXBG;
+        p.closeFg = INFOMODAL_XCOLOR;
+        p.lineUnselected = INFOMODAL_UNSEL;
+        p.lineSelected = INFOMODAL_SEL;
+        p.lineEditing = INFOMODAL_EDIT;
+        p.buttonBg = INFOMODAL_BTN_BG;
+        p.buttonSelBg = INFOMODAL_BTN_SELBG;
+        p.buttonFg = INFOMODAL_XCOLOR;
+        p.buttonSelFg = INFOMODAL_HEADERBG;
+    }
+    return p;
+}
+
+ModalPalette currentPalette;
+}
+
 
 static void keyboardTextDoneShim(const char *result)
 {
@@ -206,10 +263,11 @@ bool InfoModal::isActive() const { return active; }
 
 void InfoModal::drawHeader()
 {
+    const ModalPalette &palette = currentPalette;
     const int headerHeight = CHARH;
-    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, INFOMODAL_HEADERBG);
+    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, palette.headerBg);
 
-    dma_display->setTextColor(INFOMODAL_GREEN);
+    dma_display->setTextColor(palette.headerFg);
     dma_display->setCursor(1, 0);
     dma_display->print(modalTitle);
 
@@ -219,15 +277,15 @@ void InfoModal::drawHeader()
     if (xY < 0)
         xY = 0;
 
-    uint16_t xBgColor = atClose ? INFOMODAL_SELXBG : INFOMODAL_UNSELXBG;
-    uint16_t xFgColor = INFOMODAL_XCOLOR;
+    uint16_t xBgColor = atClose ? palette.closeSelBg : palette.closeBg;
+    uint16_t xFgColor = palette.closeFg;
 
     dma_display->fillRect(xX, 0, xWidth, headerHeight, xBgColor);
     dma_display->setTextColor(xFgColor);
     dma_display->setCursor(xX + 1, xY - 1);
     dma_display->print("x");
 
-    dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, INFOMODAL_ULINE);
+    dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, palette.underline);
 }
 
 String InfoModal::getChooserLabel(int idx)
@@ -245,6 +303,9 @@ String InfoModal::getChooserLabel(int idx)
 
 void InfoModal::draw()
 {
+    currentPalette = makePalette();
+    const ModalPalette &palette = currentPalette;
+
     dma_display->setFont(&Font5x7Uts);
     dma_display->fillScreen(0);
     drawHeader();
@@ -275,7 +336,7 @@ void InfoModal::draw()
         bool isSelected = (!atClose) && (selIndex == idx) && (!inButtonBar);
         bool isEditing = isSelected;
 
-        dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
+        dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
         String s = lines[idx];
 
         if (fieldTypes[idx] == InfoNumber)
@@ -373,7 +434,7 @@ void InfoModal::draw()
                 scrollPauseTime = 0;
             }
 
-            dma_display->setTextColor(isEditing ? INFOMODAL_EDIT : INFOMODAL_SEL);
+            dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
             int cursorX = -scrollOffset;
             dma_display->setCursor(cursorX, drawLineIndex * CHARH);
             dma_display->print(s + (isEditing ? " <" : ""));
@@ -381,7 +442,7 @@ void InfoModal::draw()
         else
         {
             String sub = s.substring(0, MAXCOLS);
-            dma_display->setTextColor(INFOMODAL_UNSEL);
+            dma_display->setTextColor(palette.lineUnselected);
             dma_display->setCursor(0, drawLineIndex * CHARH);
             dma_display->print(sub);
         }
@@ -405,8 +466,8 @@ void InfoModal::draw()
         for (int i = 0; i < btnCount; ++i)
         {
             bool selected = (inButtonBar && btnSel == i);
-            uint16_t btnBg = selected ? INFOMODAL_BTN_SELBG : INFOMODAL_BTN_BG;
-            uint16_t btnFg = selected ? INFOMODAL_HEADERBG : INFOMODAL_XCOLOR;
+            uint16_t btnBg = selected ? palette.buttonSelBg : palette.buttonBg;
+            uint16_t btnFg = selected ? palette.buttonSelFg : palette.buttonFg;
             dma_display->fillRect(btnX, btnY, btnWidths[i], CHARH, btnBg);
             dma_display->setTextColor(btnFg);
             dma_display->setCursor(btnX + pad, btnY);

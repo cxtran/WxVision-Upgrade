@@ -1,6 +1,8 @@
 #include "ScrollLine.h"
 #include "display.h"  // your dma_display pointer
 
+extern int theme;
+
 ScrollLine::ScrollLine(int screenWidth, unsigned int scrollSpeedMs)
     : _screenWidth(screenWidth), _scrollSpeedMs(scrollSpeedMs),
       _lineCount(0), _selIndex(0), _isTitleMode(false),
@@ -106,15 +108,18 @@ void ScrollLine::setTitleColors(uint16_t textColor, uint16_t bgColor) {
 }
 
 void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
+    const bool monoTheme = (theme == 1);
     if (_isTitleMode) {
         // Draw background behind title
-        dma_display->fillRect(x, y, _screenWidth, 8, _titleBgColor);
+        uint16_t titleBg = monoTheme ? dma_display->color565(20,20,40) : _titleBgColor;
+        dma_display->fillRect(x, y, _screenWidth, 8, titleBg);
 
         // Draw bottom border line
-        const uint16_t borderLineColor = dma_display->color565(100, 100, 100);
+        const uint16_t borderLineColor = monoTheme ? dma_display->color565(40,40,90) : dma_display->color565(100, 100, 100);
         dma_display->drawFastHLine(x, y + 7, _screenWidth, borderLineColor);
 
-        dma_display->setTextColor(_titleTextColor);
+        uint16_t titleText = monoTheme ? dma_display->color565(60,60,120) : _titleTextColor;
+        dma_display->setTextColor(titleText);
 
         if (_titleTextWidth <= _screenWidth) {
             dma_display->setCursor(x, y);
@@ -144,6 +149,7 @@ void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
 
             uint16_t textColor = _textColors[i];
             if (textColor == 0) textColor = defaultColor;
+            if (monoTheme) textColor = dma_display->color565(60,60,120);
 
             dma_display->setTextColor(textColor);
 

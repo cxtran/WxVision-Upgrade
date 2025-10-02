@@ -199,9 +199,14 @@ function parseManualToEpoch() {
   var t = document.getElementById('manualTime').value;
   if (!d || !t) return null;
   var ts = t.length === 5 ? t + ':00' : t;
+
+  // Construct local datetime
   var local = new Date(d + 'T' + ts);
+
   if (isNaN(local.getTime())) return null;
-  return Math.floor(local.getTime()/1000);
+
+  // Convert to UTC epoch
+  return Math.floor(local.getTime() / 1000);
 }
 
 function saveTimeSettings(opts){
@@ -213,23 +218,22 @@ function saveTimeSettings(opts){
   if (withEpoch) {
     var epoch = parseManualToEpoch();
     if (!epoch) { setMsg('saveTimeMsg','Invalid manual date/time',false); return; }
-    body.epoch = epoch;
+    body.epoch = epoch; // always UTC now
   }
-  fetch('/time', { method:'POST', body: JSON.stringify(body) })
-    .then(function(r){
-      setMsg('saveTimeMsg', r.ok ? 'Time saved.' : 'Failed to save time.', r.ok);
-      if (r.ok) loadAll();
-    })
-    .catch(function(){
-      setMsg('saveTimeMsg','Network error',false);
-    });
-
-    fetch('/time', {
-    method: 'POST',
+  fetch('/time', {
+    method:'POST',
     headers: { 'Content-Type':'application/json' },
     body: JSON.stringify(body)
-    });
+  })
+  .then(function(r){
+    setMsg('saveTimeMsg', r.ok ? 'Time saved.' : 'Failed to save time.', r.ok);
+    if (r.ok) loadAll();
+  })
+  .catch(function(){
+    setMsg('saveTimeMsg','Network error',false);
+  });
 }
+
 
 function syncNTP(){
   var custom = document.getElementById('ntpCustom').value.trim();

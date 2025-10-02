@@ -2,6 +2,8 @@
 #include <math.h>
 #include "display.h"
 
+extern int theme;
+
 // 3x3 sprites for moving pixel and center dot
 const uint8_t sprite_NS[3][3]    = {{1,1,1},{0,1,0},{0,1,0}};
 const uint8_t sprite_NE_SW[3][3] = {{1,1,1},{0,1,1},{1,0,1}};
@@ -91,11 +93,15 @@ void WindMeter::drawMovingPixel(int cx, int cy, int dirIndex, float windSpeed, u
 
 void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSpeed) {
     const uint8_t activeR = 255, activeG = 255, activeB = 0;
-    const uint16_t highlightColor = dma_display->color565(activeR, activeG, activeB);
+    const uint16_t highlightColor = (theme == 1) ? dma_display->color565(90,90,150)
+                                : dma_display->color565(activeR, activeG, activeB);
     uint8_t dimR = activeR * 0.2, dimG = activeG * 0.2, dimB = activeB * 0.2;
-    const uint16_t dimColor = dma_display->color565(dimR, dimG, dimB);
-    const uint16_t pixelColor = dma_display->color565(255, 100, 100);
-    const uint16_t centerColor = dma_display->color565(40, 180, 180);
+    const uint16_t dimColor = (theme == 1) ? dma_display->color565(40,40,90)
+                             : dma_display->color565(dimR, dimG, dimB);
+    const uint16_t pixelColor = (theme == 1) ? dma_display->color565(140,140,200)
+                              : dma_display->color565(255, 100, 100);
+    const uint16_t centerColor = (theme == 1) ? dma_display->color565(60,60,120)
+                               : dma_display->color565(40, 180, 180);
 
     dma_display->fillScreen(0);
 

@@ -14,6 +14,7 @@ extern WindMeter windMeter;
 extern ScrollLine scrollLine;
 extern ScrollLine windInfo;
 extern int scrollSpeed;
+extern int theme;
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -569,7 +570,16 @@ void showWindDirectionScreen() {
     int cx = 10;
     int cy = dma_display->height() / 2;
     windMeter.drawWindDirection(cx, cy, tempest.windDir, tempest.windAvg);
-    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+
+    const bool monoTheme = (theme == 1);
+    const uint16_t primaryText = monoTheme ? dma_display->color565(90,90,150)
+                                           : dma_display->color565(255, 255, 255);
+    const uint16_t accentText = monoTheme ? dma_display->color565(60,60,120)
+                                          : myCYAN;
+    const uint16_t lineColor = monoTheme ? dma_display->color565(60,60,120)
+                                         : 0xFFFF;
+
+    dma_display->setTextColor(primaryText);
     dma_display->setCursor(cx + 12, cy - 10);
 
     if (isnan(tempest.windDir)) {
@@ -595,12 +605,12 @@ void showWindDirectionScreen() {
     }
 
     scrollLine.update();
-    scrollLine.draw(0, 0, 0xFFFF);
+    scrollLine.draw(0, 0, lineColor);
 
     windInfo.update();
-    windInfo.draw(0,24,0xFFFF);
+    windInfo.draw(0,24,lineColor);
 
-    dma_display->setTextColor(myCYAN);
+    dma_display->setTextColor(accentText);
     dma_display->setCursor(cx + 12, 8);
 
     // was: dma_display->printf("%s %d°", ...)
@@ -633,4 +643,5 @@ void showCurrentConditionsScreen() {
     currentCondScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
 
 }
+
 

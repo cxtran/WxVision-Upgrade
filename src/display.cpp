@@ -284,7 +284,7 @@ void drawOWMScreen(){
 void drawWeatherIcon(String iconCode) {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
     dma_display->setCursor(1, 4);
-    dma_display->setTextColor(myYELLOW);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
     dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, getDayNightColorFromCode(iconCode));
 }
 
@@ -300,7 +300,7 @@ void displayClock() {
     }
     dma_display->fillRect(15, 9, 45, 7, myBLACK);
     dma_display->setCursor(16, 9);
-    dma_display->setTextColor(myRED);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(90,90,150) : myRED);
     dma_display->printf("%02d:", hour);
     dma_display->print(chr_t_minute);
     dma_display->print(":");
@@ -313,7 +313,7 @@ void displayClock() {
 void displayDate() {
     dma_display->fillRect(0, 17, 64, 7, myBLACK);
     dma_display->setCursor(0, 17);
-    dma_display->setTextColor(myCYAN);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(70,70,130) : myCYAN);
     dma_display->printf("%s %s.%s.%s", daysOfTheWeek[d_daysOfTheWeek], chr_d_month, chr_d_day, chr_d_year + 2);
 }
 
@@ -321,12 +321,12 @@ void displayWeatherData() {
     drawWeatherIcon(str_Weather_Icon);
     dma_display->fillRect(18, 0, 46, 7, myBLACK);
     dma_display->setCursor(18, 0);
-    dma_display->setTextColor(myYELLOW);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
  //   dma_display->print(customRoundString(str_Temp.c_str()));  
     dma_display->print( fmtTemp( atof(str_Temp.c_str()), 0)); 
 //    dma_display->print(useImperial ? "°F" : "°C");
     dma_display->setCursor(44, 0);
-    dma_display->setTextColor(myCYAN);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(70,70,130) : myCYAN);
     dma_display->print(str_Humd);
     dma_display->print("%");
 }
@@ -343,7 +343,7 @@ void createScrollingText() {
         "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " ¦ " +
         "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) +  " ¦ ";
 
-    scrolling_Text_Color = myGREEN;
+    scrolling_Text_Color = (theme == 1) ? dma_display->color565(60,60,120) : myGREEN;
     text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
 }
 
