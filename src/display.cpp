@@ -285,7 +285,9 @@ void drawWeatherIcon(String iconCode) {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
     dma_display->setCursor(1, 4);
     dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
-    dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, getDayNightColorFromCode(iconCode));
+    uint16_t iconColor = getDayNightColorFromCode(iconCode);
+    if (theme == 1) iconColor = dma_display->color565(90,90,150);
+    dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, iconColor);
 }
 
 void displayClock() {

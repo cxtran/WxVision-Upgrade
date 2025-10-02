@@ -56,6 +56,7 @@ void loadSettings() {
 
     // Display
     theme        = prefs.getInt("theme", 0);
+    theme        = constrain(theme, 0, 1);
     brightness   = prefs.getInt("brightness", 10);
     scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
@@ -156,7 +157,11 @@ void toggleAutoRotate(int dir) {
 }
 
 void toggleTheme(int dir) {
+    int previous = theme;
     theme = (theme + dir + 2) % 2;
+    if (theme != previous) {
+        saveDisplaySettings();
+    }
 }
 
 void adjustBrightness(int dir) {
