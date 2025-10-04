@@ -6,6 +6,7 @@ public:
     int nearestDirection(float deg);
     void drawDirectionLine(int cx, int cy, int dirIndex, uint16_t color);
     void drawMovingPixel(int cx, int cy, int dirIndex, float windSpeed, uint16_t color);
+    void drawArrowHead(int cx, int cy, int dirIndex, uint16_t color);
     void drawWindDirection(int cx, int cy, float windDirDeg, float windSpeed);
     unsigned long animStartMillis = 0;
 

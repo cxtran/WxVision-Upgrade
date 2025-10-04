@@ -19,9 +19,13 @@ extern int timeFormat24h;         // 1 = 24-hour, 0 = 12-hour
 extern int dayFormat;        // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
 extern int forecastSrc;      // 0 = OpenWeather, 1 = WeatherFlow
 extern int autoRotate;       // 1=on, 0=off
+extern int autoRotateInterval;  // seconds between auto rotations
 extern int manualScreen;     // 0=Main,1=Weather,2=Forecast,3=Calib
 extern String wifiSSID;
 extern String wifiPass;
+
+extern bool setupComplete;       // true once onboarding finished
+extern bool initialSetupRequired; // true when device needs first-time setup
 
 // --- Display ---
 extern int theme;            // 0 = Color, 1 = Monochrome
@@ -55,6 +59,10 @@ void saveWeatherSettings();
 void toggleDayFormat(int dir);
 void toggleForecastSrc(int dir);
 void toggleAutoRotate(int dir);
+void setAutoRotateEnabled(bool enabled, bool persist = true);
+void setAutoRotateInterval(int seconds, bool persist = true);
+
+void markSetupComplete(bool complete=true);
 
 void toggleTheme(int dir);
 void adjustBrightness(int dir);
@@ -63,3 +71,4 @@ void adjustScrollSpeed(int dir);
 void adjustTempOffset(int dir);
 void adjustHumOffset(int dir);
 void adjustLightGain(int dir);
+

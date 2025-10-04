@@ -15,6 +15,9 @@
 #define PANEL_CHAIN 1
 
 extern MatrixPanel_I2S_DMA *dma_display;
+extern uint8_t currentPanelBrightness;
+void setPanelBrightness(uint8_t value);
+extern bool rtcReady;
 
 enum ScreenMode {
     SCREEN_OWM = 0,
@@ -62,3 +65,4 @@ void createScrollingText();
 void requestScrollRebuild();     // mark that the marquee text must be rebuilt
 void notifyUnitsMaybeChanged();  // compare unit signature; request rebuild if changed
 void serviceScrollRebuild();     // if a rebuild is pending, rebuild now (cheap no-op otherwise)
+

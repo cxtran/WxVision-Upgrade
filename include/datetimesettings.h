@@ -6,8 +6,22 @@
 extern int tzOffset;        // Minutes offset from UTC, e.g. 420 for UTC+7
 extern int fmt24;           // 0 = 12h, 1 = 24h
 extern int dateFmt;         // 0 = YYYY-MM-DD, etc.
+extern char ntpServerHost[64];
+extern int ntpServerPreset; // 0..NTP_PRESET_CUSTOM
 
-void syncTimeFromNTP();
+extern const int NTP_PRESET_COUNT;
+extern const int NTP_PRESET_CUSTOM;
+
+const char *ntpPresetHost(int index);
+
+bool syncTimeFromNTP();
+bool getLocalDateTime(DateTime &out);
+void setSystemTimeFromDateTime(const DateTime &dt);
+
+DateTime utcToLocal(const DateTime &utc);
+DateTime utcToLocal(const DateTime &utc, int offsetMinutes);
+DateTime localToUtc(const DateTime &local);
+DateTime localToUtc(const DateTime &local, int offsetMinutes);
 
 void loadDateTimeSettings();
 void saveDateTimeSettings();

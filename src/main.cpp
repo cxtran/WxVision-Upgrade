@@ -15,6 +15,7 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncTCP.h>
 #include <Update.h>
+#include <WiFi.h>
 #include "settings.h"
 #include "web.h"
 #include "buzzer.h"
@@ -32,7 +33,7 @@ const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FO
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
-ScreenMode currentScreen = SCREEN_OWM;
+ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
 extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
@@ -75,6 +76,13 @@ int menuIndex = 0;
 bool inSetupMenu = false;
 WiFiUDP udp;
 const int localPort = 50222;
+
+static bool startupCompleted = false;
+bool initialSetupAwaitingWifi = false;
+static bool udpListening = false;
+
+static void completeStartupAfterWiFi(bool force = false);
+void handleInitialSetupDecision(bool wantsWiFi);
 
 // === Display Timers ===
 
@@ -119,8 +127,84 @@ void hideAllInfoScreens()
     tempHumBaroScreen.hide();
     currentCondScreen.hide();
     hourlyScreen.hide();
-    airQualityScreen.hide(); // ← add this
+    airQualityScreen.hide(); // ??? add this
     // Add more InfoScreens here as needed
+}
+
+static unsigned long lastAutoRotateMillis = 0;
+
+static bool isRotationBlocked()
+{
+    return inKeyboardMode ||
+           menuActive ||
+           wifiSelecting ||
+           sysInfoModal.isActive() ||
+           wifiInfoModal.isActive() ||
+           dateModal.isActive() ||
+           mainMenuModal.isActive() ||
+           deviceModal.isActive() ||
+           displayModal.isActive() ||
+           weatherModal.isActive() ||
+           calibrationModal.isActive() ||
+           systemModal.isActive();
+}
+
+static void renderScreenContents(ScreenMode mode)
+{
+    switch (mode)
+    {
+    case SCREEN_OWM:
+        drawOWMScreen();
+        break;
+    case SCREEN_UDP_DATA:
+        udpScreen.tick();
+        break;
+    case SCREEN_UDP_FORECAST:
+        forecastScreen.tick();
+        break;
+    case SCREEN_RAPID_WIND:
+        rapidWindScreen.tick();
+        break;
+    case SCREEN_WIND_DIR:
+        showWindDirectionScreen();
+        break;
+    case SCREEN_AIR_QUALITY:
+        airQualityScreen.tick();
+        break;
+    case SCREEN_TEMP_HUM_BARO:
+        tempHumBaroScreen.tick();
+        break;
+    case SCREEN_CURRENT:
+        currentCondScreen.tick();
+        break;
+    case SCREEN_HOURLY:
+        hourlyScreen.tick();
+        break;
+    case SCREEN_CLOCK:
+        drawClockScreen();
+        break;
+    default:
+        break;
+    }
+}
+
+static void playScreenRevealEffect(ScreenMode mode)
+{
+    uint8_t original = currentPanelBrightness;
+    if (original == 0)
+    {
+        original = map(brightness, 1, 100, 3, 255);
+        if (original == 0)
+            original = 30;
+    }
+
+    setPanelBrightness(original);
+    renderScreenContents(mode);
+}
+
+static void noteScreenRotation(unsigned long now)
+{
+    lastAutoRotateMillis = now;
 }
 
 // --- Screen rotation handler ---
@@ -176,6 +260,30 @@ void rotateScreen(int direction)
     case SCREEN_OWM: /* draw in loop */
         break;
     }
+
+    playScreenRevealEffect(currentScreen);
+    noteScreenRotation(millis());
+}
+
+static void handleAutoRotate(unsigned long now)
+{
+    if (autoRotate == 0)
+    {
+        noteScreenRotation(now);
+        return;
+    }
+    if (isRotationBlocked())
+    {
+        noteScreenRotation(now);
+        return;
+    }
+    unsigned long intervalMs = (autoRotateInterval > 0)
+        ? static_cast<unsigned long>(autoRotateInterval) * 1000UL
+        : 15000UL;
+    if (now - lastAutoRotateMillis >= intervalMs)
+    {
+        rotateScreen(+1);
+    }
 }
 
 // --- Button reset logic ---
@@ -208,6 +316,128 @@ void handleResetButton()
     }
 }
 
+static void completeStartupAfterWiFi(bool force)
+{
+    if (startupCompleted && !force)
+        return;
+
+    bool wifiOk = WiFi.status() == WL_CONNECTED;
+    if (!force && !wifiOk)
+        return;
+
+    startupCompleted = true;
+    initialSetupAwaitingWifi = false;
+
+    if (wifiOk)
+    {
+        WiFi.setSleep(false);
+        Serial.println("WiFi done.");
+        ArduinoOTA.setHostname("ESP32-Weather");
+        ArduinoOTA.begin();
+        setupWebServer();
+        Serial.println("Displaying Time...");
+        if (!syncTimeFromNTP())
+        {
+            Serial.println("[Setup] Initial NTP sync failed.");
+        }
+    }
+    else
+    {
+        Serial.println("[Setup] Starting without WiFi connection.");
+        if (udpListening)
+        {
+            udp.stop();
+            udpListening = false;
+        }
+    }
+
+    Serial.println("Done.");
+
+    if (wifiOk)
+    {
+        if (udp.begin(localPort))
+        {
+            udpListening = true;
+            Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
+        }
+        else
+        {
+            udpListening = false;
+            Serial.printf("Failed to bind UDP port %d\n", localPort);
+        }
+
+        fetchWeatherFromOWM();
+        delay(500);
+    }
+
+    getTimeFromRTC();
+
+    if (wifiOk)
+    {
+        fetchTempestData();
+        fetchForecastData();
+    }
+
+    reset_Time_and_Date_Display = true;
+
+    displayWeatherData();
+    displayClock();
+    displayDate();
+    requestScrollRebuild();
+    serviceScrollRebuild();
+
+    delay(2000);
+    setupButtons();
+
+    currentMenuLevel = MENU_MAIN;
+    currentMenuIndex = 0;
+    menuActive = false;
+    menuScroll = 0;
+    wifiSelecting = false;
+
+    scrollLine.setTitleText("Wind Info");
+    scrollLine.setTitleColors(INFOSCREEN_HEADERFG, INFOSCREEN_HEADERBG);
+    scrollLine.setTitleMode(true);
+
+    windInfo.setTitleMode(false);
+    windInfo.setLineScrollDirection(0, 1);
+    String lines[] = {"This is the line for all wind related data."};
+    windInfo.setLines(lines, 1);
+    windInfo.setBounceEnabled(false);
+    noteScreenRotation(millis());
+
+    lastReadSCD40        = millis() - 0;
+    lastReadAHT20_BMP280 = millis() - 1500;
+    lastBrightnessRead   = millis() - 3000;
+
+    if (!setupComplete)
+    {
+        markSetupComplete(true);
+    }
+}
+
+void handleInitialSetupDecision(bool wantsWiFi)
+{
+    if (wantsWiFi)
+    {
+        wifiSelecting = true;
+        currentMenuLevel = MENU_WIFI_SELECT;
+        menuActive = true;
+        menuScroll = 0;
+        wifiSelectIndex = 0;
+        scanWiFiNetworks();
+        drawMenu();
+        initialSetupAwaitingWifi = true;
+        return;
+    }
+
+    wifiSelecting = false;
+    menuActive = false;
+    markSetupComplete(true);
+    initialSetupAwaitingWifi = false;
+    completeStartupAfterWiFi(true);
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -225,19 +455,39 @@ void setup()
     Serial.println("Setup IR Sensor");
     setupIRSensor();
 
+    // Initialise RTC once sensors/I2C are ready
+    rtcReady = rtc.begin();
+    if (!rtcReady)
+    {
+        Serial.println("?????? RTC not detected; time will default to 00:00");
+    }
+    else
+    {
+        Serial.println("RTC initialised successfully.");
+    }
+
     Serial.println("\nESP32 Weather Display");
+
+    // Ensure TCP/IP stack is initialised even if we stay offline
+    WiFi.mode(WIFI_STA);
+
+    if (initialSetupRequired)
+    {
+        Serial.println("[Setup] Initial configuration required.");
+        showInitialSetupPrompt();
+        return;
+    }
 
     if (wifiSSID.isEmpty() || wifiPass.isEmpty())
     {
-        Serial.println("[WiFi] No credentials, showing WiFi menu...");
-        onWiFiConnectFailed();
+        Serial.println("[WiFi] No credentials, starting offline mode.");
+        initialSetupAwaitingWifi = false;
+        completeStartupAfterWiFi(true);
         return;
     }
 
     Serial.println("Connecting WiFi...");
     connectToWiFi();
-
-    WiFi.setSleep(false);   // smooths out periodic task jitter on ESP32
 
     if (wifiSelecting)
         return;
@@ -249,65 +499,8 @@ void setup()
         return;
     }
 
-    Serial.println("WiFi done.");
-    ArduinoOTA.setHostname("ESP32-Weather");
-    ArduinoOTA.begin();
+    completeStartupAfterWiFi(false);
 
-    setupWebServer();
-    Serial.println("Displaying Time...");
-    
-    syncTimeFromNTP();
-
-    Serial.println("Done.");
-
-    udp.begin(localPort);
-    Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
-
-    fetchWeatherFromOWM();
-    delay(500);
-    getTimeFromRTC();
-    fetchTempestData();
-    fetchForecastData();
-
-    reset_Time_and_Date_Display = true;
-
-    displayWeatherData();
-    displayClock();
-    displayDate();
-    // replace the direct createScrollingText() with:
-    requestScrollRebuild();
-    serviceScrollRebuild();
-
-
-    delay(2000);
-    setupButtons();
-
-    currentMenuLevel = MENU_MAIN;
-    currentMenuIndex = 0;
-    menuActive = false;
-    menuScroll = 0;
-
-    // Setup your display and ScrollLine...
-
-    // Set lines with text
-    //   String lines[] = {"Hello world!", "Second line", "Third line"};
-    //  scrollLine.setLines(lines, 3);
-
-    // Set per-line colors: white on black, green on blue, red on yellow
-    //   uint16_t textColors[3] = {0xFFFF, 0x07E0, 0xF800};
-    //   uint16_t bgColors[3] = {0x0000, 0x001F, 0xFFE0};
-    //   scrollLine.setLineColors(textColors, bgColors, 3);
-
-    // For title mode
-    scrollLine.setTitleText("Wind Info");
-    scrollLine.setTitleColors(INFOSCREEN_HEADERFG, INFOSCREEN_HEADERBG); // white on black
-    scrollLine.setTitleMode(true);
-
-    windInfo.setTitleMode(false);
-    windInfo.setLineScrollDirection(0, 1);
-    String lines[] = {"This is the line for all wind related data."};
-    windInfo.setLines(lines, 1);
-    windInfo.setBounceEnabled(false);
     // Seed timers to stagger 5s jobs (spread ~1.5s apart)
     lastReadSCD40           = millis() - 0;      // first at ~5.0s
     lastReadAHT20_BMP280    = millis() - 1500;   // first at ~3.5s + 5s = 6.5s
@@ -322,7 +515,18 @@ void loop()
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500;
 
-    static ScreenMode lastScreen = SCREEN_OWM; // or whatever your default is
+    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    if ((initialSetupAwaitingWifi || !startupCompleted) && wifiConnected)
+    {
+        completeStartupAfterWiFi(initialSetupAwaitingWifi);
+    }
+    else if (!wifiConnected && udpListening)
+    {
+        udp.stop();
+        udpListening = false;
+    }
+
+    static ScreenMode lastScreen = SCREEN_CLOCK; // or whatever your default is
     static bool needsClear = false;
     if (currentScreen != lastScreen)
     {
@@ -332,15 +536,22 @@ void loop()
 
     // === [1] --- Always-on background tasks --- ===
     // --- Fetch new forecast data every 15 minutes ---
-    if (now - lastForecast > 15 * 60 * 1000)
+    if (wifiConnected && (now - lastForecast > 15 * 60 * 1000))
     {
         fetchForecastData();
         lastForecast = now;
     }
 
     // --- Main background tasks ---
-    ArduinoOTA.handle();
-    fetchTempestData();
+    if (wifiConnected)
+    {
+        ArduinoOTA.handle();
+    }
+
+    if (udpListening)
+    {
+        fetchTempestData();
+    }
 
     // --- Brightness control ---
     static unsigned long lastBrightnessRead = 0;
@@ -355,7 +566,7 @@ void loop()
         else
         {
             int hwBrightness = map(brightness, 1, 100, 3, 255);
-            dma_display->setBrightness8(hwBrightness);
+            setPanelBrightness(hwBrightness);
             Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
     }
@@ -389,6 +600,7 @@ void loop()
     // Only check physical reset if NO modal, NO keyboard, and NOT in WiFi select
     if (
         !inKeyboardMode &&
+        !setupPromptModal.isActive() &&
         !sysInfoModal.isActive() &&
         !wifiInfoModal.isActive() &&
         !dateModal.isActive() &&
@@ -402,6 +614,8 @@ void loop()
     {
         handleResetButton();
     }
+
+    handleAutoRotate(now);
 
     // --- 1. Keyboard always has focus if active ---
     if (inKeyboardMode)
@@ -421,6 +635,14 @@ void loop()
     }
 
     // --- 2. If any modal is active, route IR input ONLY to modal ---
+    if (setupPromptModal.isActive())
+    {
+        setupPromptModal.tick();
+        setupPromptModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+
     if (sysInfoModal.isActive())
     {
         sysInfoModal.tick();
@@ -809,3 +1031,5 @@ if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
 
     delay(0);
 }
+
+

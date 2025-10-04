@@ -14,6 +14,7 @@
 #include "ir_codes.h"
 #include "SPIFFS.h"
 #include "units.h"//
+#include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
 
@@ -46,6 +47,7 @@ InfoModal displayModal("Display");
 InfoModal weatherModal("Weather");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
+InfoModal setupPromptModal("Welcome");
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -89,12 +91,14 @@ extern int owmCountryIndex;
 extern String owmCountryCustom;
 extern int tempOffset;
 extern int lightGain;
-extern int dayFormat, forecastSrc, autoRotate, manualScreen;
+extern int dayFormat, forecastSrc, autoRotate, autoRotateInterval, manualScreen;
 extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
 extern String customMsg;
 extern int fmt24, dateFmt, tzOffset;
+extern void handleInitialSetupDecision(bool wantsWiFi);
+extern bool initialSetupAwaitingWifi;
 /*
 void pushMenu(MenuLevel newMenu)
 {
@@ -116,13 +120,14 @@ int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
 int dtTimezone;
 int dtFmt24;
 int dtDateFmt;
+int dtNtpPreset;
 
 const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
-const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen", "< Back"};
+const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
-const char *displayMenu[] = {"Theme", "Brightness", "Scroll Spd", "Custom Msg", "< Back"};
+const char *displayMenu[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Spd", "Auto Rotate", "Rotate Interval", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
 const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "WF Station ID", "< Back"};
 const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
@@ -254,12 +259,23 @@ void handleIR(uint32_t code)
         }
         else if (code == IR_CANCEL)
         {
+            bool onboardingCancel = initialSetupAwaitingWifi;
             wifiSelecting = false;
-            currentMenuLevel = MENU_MAIN; // Return to MAIN menu here as well
-            menuActive = true;
-            currentMenuIndex = 0;
-            menuScroll = 0;
-            showMainMenuModal(); // Show main menu modal on cancel
+            if (onboardingCancel)
+            {
+                menuActive = false;
+                currentMenuLevel = MENU_NONE;
+                menuScroll = 0;
+                handleInitialSetupDecision(false);
+            }
+            else
+            {
+                currentMenuLevel = MENU_MAIN; // Return to MAIN menu here as well
+                menuActive = true;
+                currentMenuIndex = 0;
+                menuScroll = 0;
+                showMainMenuModal(); // Show main menu modal on cancel
+            }
             playBuzzerTone(700, 80);
         }
         return;
@@ -338,6 +354,35 @@ void handleIR(uint32_t code)
 
 // --- Modal-based Menu Functions --- //
 
+void showInitialSetupPrompt()
+{
+    menuStack.clear();
+    menuStack.push_back(MENU_INITIAL_SETUP);
+    menuActive = true;
+    currentMenuLevel = MENU_INITIAL_SETUP;
+
+    String lines[] = {"Welcome!", "Connect to WiFi?"};
+    InfoFieldType types[] = {InfoLabel, InfoLabel};
+    setupPromptModal.setLines(lines, types, 2);
+
+    String buttons[] = {"Connect", "Skip"};
+    setupPromptModal.setButtons(buttons, 2);
+
+    setupPromptModal.setCallback([](bool accepted, int btnIdx)
+                                 {
+        setupPromptModal.hide();
+        menuStack.clear();
+        if (!accepted)
+        {
+            handleInitialSetupDecision(false);
+            return;
+        }
+        handleInitialSetupDecision(btnIdx == 0);
+    });
+
+    setupPromptModal.show();
+}
+
 void showMainMenuModal()
 {
     // Main menu is always the root, so clear the menu stack here
@@ -372,7 +417,7 @@ void showMainMenuModal()
             exitToHomeScreen();
             return;
         default:
-            Serial.println("⚠️ Invalid main menu selection");
+            Serial.println("?????? Invalid main menu selection");
             return;
     } });
 
@@ -400,41 +445,71 @@ void showDisplaySettingsModal()
             break;
         }
     }
-    String labels[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Custom Msg"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoText};
-    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp};
+
+    static int autoRotateTemp;
+    autoRotateTemp = autoRotate ? 1 : 0;
+
+    static const int rotateIntervalValues[] = {5, 10, 15, 20, 30, 45, 60, 90, 120};
+    static const char *rotateIntervalOpt[] = {"5 s", "10 s", "15 s", "20 s", "30 s", "45 s", "60 s", "90 s", "120 s"};
+    const int rotateIntervalCount = sizeof(rotateIntervalValues) / sizeof(rotateIntervalValues[0]);
+
+    static int rotateIntervalIndex = 0;
+    rotateIntervalIndex = 0;
+    int bestIntervalDiff = (rotateIntervalValues[0] > autoRotateInterval)
+        ? rotateIntervalValues[0] - autoRotateInterval
+        : autoRotateInterval - rotateIntervalValues[0];
+    for (int i = 1; i < rotateIntervalCount; ++i)
+    {
+        int diff = (rotateIntervalValues[i] > autoRotateInterval)
+            ? rotateIntervalValues[i] - autoRotateInterval
+            : autoRotateInterval - rotateIntervalValues[i];
+        if (diff < bestIntervalDiff)
+        {
+            bestIntervalDiff = diff;
+            rotateIntervalIndex = i;
+        }
+    }
+
+    String labels[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Auto Rotate", "Rotate Interval", "Custom Msg"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoChooser, InfoChooser, InfoText};
+    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp, &autoRotateTemp, &rotateIntervalIndex};
     static const char *themeOpts[] = {"Color", "Mono"};
     static const char *autoOpts[] = {"Off", "On"};
-    static const char *speedOpts[] = {
-        "1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
-    static const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts};
-    int chooserCounts[] = {2, 2, 10};
+    static const char *speedOpts[] = {"1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
+    static const char *autoRotateOpt[] = {"Off", "On"};
+    const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts, autoRotateOpt, rotateIntervalOpt};
+    int chooserCounts[] = {2, 2, 10, 2, rotateIntervalCount};
     int *numberRefs[] = {&brightnessTemp};
+
     static char customMsgBuf[64];
     strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
     customMsgBuf[sizeof(customMsgBuf) - 1] = 0;
     char *textRefs[] = {customMsgBuf};
     int textSizes[] = {sizeof(customMsgBuf)};
-    displayModal.setLines(labels, types, 5);
-    displayModal.setValueRefs(numberRefs, 1, chooserRefs, 3, chooserOpts, chooserCounts, textRefs, 1, textSizes);
 
-    displayModal.setCallback([](bool accepted, int btnIdx)
-                             {
-        
-        if (accepted) {
+    displayModal.setLines(labels, types, 7);
+    displayModal.setValueRefs(numberRefs, 1, chooserRefs, 5, chooserOpts, chooserCounts, textRefs, 1, textSizes);
+
+    displayModal.setCallback([](bool accepted, int)
+    {
+        if (accepted)
+        {
             brightness = constrain(brightnessTemp, 1, 100);
             autoBrightness = (autoBrightnessInt > 0);
             scrollLevel = constrain(scrollLevelTemp, 0, 9);
             scrollSpeed = scrollDelays[scrollLevel];
+            setAutoRotateEnabled(autoRotateTemp > 0, true);
+            setAutoRotateInterval(rotateIntervalValues[rotateIntervalIndex], true);
             customMsg = String(customMsgBuf);
             saveDisplaySettings();
-            Serial.printf("[Saved] brightness=%d, scrollLevel=%d → scrollSpeed=%d autoBrightness=%d\n",
-                brightness, scrollLevel + 1, scrollSpeed, autoBrightness);
+            Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds\n",
+                          brightness, scrollLevel + 1, scrollSpeed, autoBrightness, autoRotate, autoRotateInterval);
         }
         displayModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
-        menuScroll = 0; });
+        menuScroll = 0;
+    });
     displayModal.show();
 }
 
@@ -505,14 +580,14 @@ void showCalibrationModal()
     menuActive = true;
 
     // Bind directly to globals
-    String labels[] = {"Temp Offset (°)", "Hum Offset (%)", "Light Gain (%)"};
+    String labels[] = {"Temp Offset (C)", "Hum Offset (%)", "Light Gain (%)"};
     InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber};
     int* numberRefs[] = { &tempOffset, &humOffset, &lightGain };
 
     calibrationModal.setLines(labels, types, 3);
     calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
 
-    // No final “OK” save. We autosave on each change in handleIR().
+    // No final ???OK??? save. We autosave on each change in handleIR().
     calibrationModal.setCallback([](bool, int) {
         calibrationModal.hide();
         currentMenuLevel = MENU_MAIN;
@@ -869,7 +944,16 @@ void showDateTimeModal()
     currentMenuLevel = MENU_SYSDATETIME; // You can define this enum, or use MENU_SYSTEM if preferred
     menuActive = true;
 
-    DateTime now = rtc.now();
+    DateTime now;
+    if (rtcReady)
+    {
+        DateTime utcNow = rtc.now();
+        now = utcToLocal(utcNow);
+    }
+    else if (!getLocalDateTime(now))
+    {
+        now = DateTime(2000, 1, 1, 0, 0, 0);
+    }
     dtYear = now.year();
     dtMonth = now.month();
     dtDay = now.day();
@@ -879,35 +963,75 @@ void showDateTimeModal()
     dtTimezone = tzOffset;
     dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
     dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
-    static char ntpServer[64] = "pool.ntp.org";
+    static char ntpServerBuf[64];
+    dtNtpPreset = ntpServerPreset;
+    if (dtNtpPreset < 0 || dtNtpPreset > NTP_PRESET_CUSTOM)
+        dtNtpPreset = NTP_PRESET_CUSTOM;
 
-    String lines[] = {"Year", "Month", "Day", "Hour", "Minute", "Second", "TimeZone", "TimeFmt", "DateFmt", "NTP Server", "Sync NTP"};
-    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoChooser, InfoChooser, InfoText, InfoButton};
+    if (dtNtpPreset == NTP_PRESET_CUSTOM)
+    {
+        strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
+    }
+    else
+    {
+        strncpy(ntpServerBuf, ntpPresetHost(dtNtpPreset), sizeof(ntpServerBuf) - 1);
+    }
+    ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
+
+    static const char *const ntpPresetOptions[] = {ntpPresetHost(0), ntpPresetHost(1), ntpPresetHost(2), "Custom"};
+
+    String lines[] = {"Year", "Month", "Day", "Hour", "Minute", "Second", "TimeZone", "TimeFmt", "DateFmt", "NTP Preset", "NTP Server", "Sync NTP"};
+    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoChooser, InfoChooser, InfoChooser, InfoText, InfoButton};
 
     int *intRefs[] = {&dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute, &dtSecond, &dtTimezone};
-    int *chooserRefs[] = {&dtFmt24, &dtDateFmt};
+    int *chooserRefs[] = {&dtFmt24, &dtDateFmt, &dtNtpPreset};
     static const char *fmt24Opts[] = {"12h", "24h"};
     static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
-    static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts};
-    int chooserOptCounts[] = {2, 3};
-    char *textRefs[] = {ntpServer};
+    static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts, ntpPresetOptions};
+    int chooserOptCounts[] = {2, 3, NTP_PRESET_CUSTOM + 1};
+    char *textRefs[] = {ntpServerBuf};
     int textSizes[] = {64};
 
-    dateModal.setLines(lines, types, 11);
-    dateModal.setValueRefs(intRefs, 7, chooserRefs, 2, chooserOptPtrs, chooserOptCounts, textRefs, 1, textSizes);
+    dateModal.setLines(lines, types, 12);
+    dateModal.setValueRefs(intRefs, 7, chooserRefs, 3, chooserOptPtrs, chooserOptCounts, textRefs, 1, textSizes);
 
     dateModal.setCallback([](bool accepted, int btnIdx)
                           {
         int sel = dateModal.getSelIndex();
-        if (sel == 10) {
+        if (sel == 11) {
             dateModal.hide();
             dma_display->fillScreen(0);
             dma_display->setCursor(8, 12);
             dma_display->setTextColor(myWHITE);
             dma_display->print("Syncing NTP...");
-            syncTimeFromNTP();
+            ntpServerPreset = dtNtpPreset;
+            if (ntpServerPreset == NTP_PRESET_CUSTOM)
+            {
+                String customHost = String(ntpServerBuf);
+                customHost.trim();
+                if (customHost.length() == 0)
+                {
+                    customHost = "pool.ntp.org";
+                }
+                customHost.toCharArray(ntpServerHost, sizeof(ntpServerHost));
+                customHost.toCharArray(ntpServerBuf, sizeof(ntpServerBuf));
+            }
+            else
+            {
+                const char *resolved = ntpPresetHost(ntpServerPreset);
+                strncpy(ntpServerHost, resolved, sizeof(ntpServerHost) - 1);
+                ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+                strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
+                ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
+            }
+            bool ok = syncTimeFromNTP();
+            dma_display->fillScreen(0);
+            dma_display->setCursor(4, 12);
+            dma_display->setTextColor(ok ? myGREEN : myRED);
+            dma_display->print(ok ? "NTP sync OK" : "NTP sync failed");
+            saveDateTimeSettings();
             pendingModalFn = showDateTimeModal;
-            pendingModalTime = millis() + 50;
+            pendingModalTime = millis() + 1500;
             return;
         }
         dtMonth = constrain(dtMonth, 1, 12);
@@ -917,10 +1041,44 @@ void showDateTimeModal()
         dtSecond = constrain(dtSecond, 0, 59);
         dtYear = constrain(dtYear, 2000, 2099);
         dtTimezone = constrain(dtTimezone, -720, 840);
-        rtc.adjust(DateTime(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond));
+        DateTime manualLocal(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond);
         tzOffset = dtTimezone;
+        DateTime manualUtc = localToUtc(manualLocal);
+        if (!rtcReady)
+        {
+            rtcReady = rtc.begin();
+        }
+        if (rtcReady)
+        {
+            rtc.adjust(manualUtc);
+        }
+        else
+        {
+            Serial.println("[RTC] Module not available; system clock updated only");
+        }
+        setSystemTimeFromDateTime(manualUtc);
         fmt24 = dtFmt24;
         dateFmt = dtDateFmt;
+        ntpServerPreset = dtNtpPreset;
+        if (ntpServerPreset == NTP_PRESET_CUSTOM)
+        {
+            String customHost = String(ntpServerBuf);
+            customHost.trim();
+            if (customHost.length() == 0)
+            {
+                customHost = "pool.ntp.org";
+            }
+            customHost.toCharArray(ntpServerHost, sizeof(ntpServerHost));
+            customHost.toCharArray(ntpServerBuf, sizeof(ntpServerBuf));
+        }
+        else
+        {
+            const char *resolved = ntpPresetHost(ntpServerPreset);
+            strncpy(ntpServerHost, resolved, sizeof(ntpServerHost) - 1);
+            ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+            strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
+            ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
+        }
         saveDateTimeSettings();
         dateModal.hide(); });
     dateModal.show();
@@ -951,13 +1109,10 @@ void showDeviceSettingsModal()
     currentMenuLevel = MENU_DEVICE;
     menuActive = true;
 
-    // If WiFi is connected, skip scanning now.
-    // Instead just prepare SSID chooser with current connected SSID only.
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
 
     if (!wifiConnected)
     {
-        // Only scan WiFi networks if not connected and scan needed
         if (wifiSelectNeedsScan || wifiScanCount == 0)
         {
             scanWiFiNetworks();
@@ -966,12 +1121,10 @@ void showDeviceSettingsModal()
     }
     else
     {
-        // If connected, show only current SSID in the chooser (no scan)
         wifiScanCount = 1;
         scannedSSIDs[0] = WiFi.SSID();
     }
 
-    // Find index of current SSID for default selection
     wifiSelectIndex = 0;
     for (int i = 0; i < wifiScanCount; ++i)
     {
@@ -982,7 +1135,6 @@ void showDeviceSettingsModal()
         }
     }
 
-    // Prepare persistent storage for SSID chooser
     static String ssidStringStore[16];
     static const char *ssidOptions[16];
     int modalSsidCount = wifiScanCount;
@@ -995,49 +1147,42 @@ void showDeviceSettingsModal()
         ssidOptions[i] = ssidStringStore[i].c_str();
     }
 
-    // Prepare password buffer
     static char wifiPassBuf[65];
     strncpy(wifiPassBuf, wifiPass.c_str(), sizeof(wifiPassBuf) - 1);
     wifiPassBuf[sizeof(wifiPassBuf) - 1] = 0;
 
-    // Modal labels and field types (Units removed)
-    String labels[] = {
-        "WiFi SSID", "WiFi Pass",
-        "Day Format", "Forecast Src", "Auto Rotate", "Manual Screen"
-    };
+    String labels[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen"};
     InfoFieldType types[] = {
         InfoChooser, InfoText,
-        InfoChooser, InfoChooser, InfoChooser, InfoChooser
+        InfoChooser, InfoChooser, InfoChooser
     };
 
-    // Chooser refs/options (Units removed)
-    int *chooserRefs[] = { &wifiSelectIndex, &dayFormat, &forecastSrc, &autoRotate, &manualScreen };
-    static const char *dayFmtOpt[]   = { "MM/DD", "DD/MM" };
-    static const char *forecastOpt[] = { "OWM", "WF" };
-    static const char *rotateOpt[]   = { "Off", "On" };
-    static const char *manualOpt[]   = { "Off", "On" };
-    const char *const *chooserOpts[] = { ssidOptions, dayFmtOpt, forecastOpt, rotateOpt, manualOpt };
-    int chooserCounts[] = { modalSsidCount, 2, 2, 2, 2 };
+    int *chooserRefs[] = {&wifiSelectIndex, &dayFormat, &forecastSrc, &manualScreen};
+    static const char *dayFmtOpt[]   = {"MM/DD", "DD/MM"};
+    static const char *forecastOpt[] = {"OWM", "WF"};
+    static const char *manualOpt[]   = {"Off", "On"};
+    const char *const *chooserOpts[] = {ssidOptions, dayFmtOpt, forecastOpt, manualOpt};
+    int chooserCounts[] = {modalSsidCount, 2, 2, 2};
 
-    char *textRefs[] = { wifiPassBuf };
-    int textSizes[] = { sizeof(wifiPassBuf) };
+    char *textRefs[] = {wifiPassBuf};
+    int textSizes[] = {sizeof(wifiPassBuf)};
 
-    // 6 total lines, 5 choosers, 1 text
-    deviceModal.setLines(labels, types, 6);
+    deviceModal.setLines(labels, types, 5);
     deviceModal.setValueRefs(
         nullptr, 0,
-        chooserRefs, 5,
+        chooserRefs, 4,
         chooserOpts, chooserCounts,
         textRefs, 1, textSizes
     );
     deviceModal.setButtons(nullptr, 0);
 
-    deviceModal.setCallback([](bool accepted, int btnIdx)
+    deviceModal.setCallback([](bool accepted, int)
     {
         int sel = deviceModal.getSelIndex();
-        if (accepted) {
-            if (sel == 0) {
-                // User selected WiFi SSID chooser -> switch to WiFi selecting mode
+        if (accepted)
+        {
+            if (sel == 0)
+            {
                 deviceModal.hide();
                 wifiSelecting = true;
                 currentMenuLevel = MENU_WIFI_SELECT;
@@ -1046,7 +1191,6 @@ void showDeviceSettingsModal()
                 drawWiFiMenu();
                 return;
             }
-            // Save other settings normally
             if (wifiSelectIndex >= 0 && wifiSelectIndex < wifiScanCount)
                 wifiSSID = scannedSSIDs[wifiSelectIndex];
             wifiPass = String(wifiPassBuf);
@@ -1073,3 +1217,7 @@ void exitToHomeScreen()
     displayWeatherData();
     reset_Time_and_Date_Display = true;
 }
+
+
+
+

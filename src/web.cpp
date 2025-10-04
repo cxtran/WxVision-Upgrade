@@ -7,9 +7,11 @@
 
 #include "settings.h"
 #include "units.h"
+#include "display.h"
+#include "datetimesettings.h"
 
 // ---- externs ----
-extern int dayFormat, forecastSrc, autoRotate, manualScreen;
+extern int dayFormat, forecastSrc, autoRotate, manualScreen, autoRotateInterval;
 extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
@@ -30,7 +32,8 @@ extern int tzOffset; // minutes
 extern int dateFmt;  // 0/1/2
 extern int fmt24;    // 0/1
 extern void saveDateTimeSettings();
-extern void syncTimeFromNTP();
+extern bool syncTimeFromNTP();
+extern char ntpServerHost[64];
 
 // from settings.h
 extern const int scrollDelays[10];
@@ -88,10 +91,17 @@ static void jsonToUnits(JsonVariantConst v)
 // Always use RTC so web clock matches on-device display
 static long currentEpoch()
 {
-  DateTime now = rtc.now();
+  DateTime now;
+  if (rtcReady)
+  {
+    now = rtc.now();
+  }
+  else if (!getLocalDateTime(now))
+  {
+    now = DateTime(2000, 1, 1, 0, 0, 0);
+  }
   return (long)now.unixtime();
 }
-
 // --- Simple timezone list ---
 struct TzItem
 {
@@ -100,7 +110,7 @@ struct TzItem
   int offsetMin;
 };
 static const TzItem kTimezones[] PROGMEM = {
-    {"Pacific/Honolulu", "Honolulu", -600}, {"America/Anchorage", "Anchorage", -540}, {"America/Los_Angeles", "Los Angeles", -480}, {"America/Denver", "Denver", -420}, {"America/Chicago", "Chicago", -360}, {"America/New_York", "New York", -300}, {"America/Halifax", "Halifax", -240}, {"America/St_Johns", "St. John's", -210}, {"America/Sao_Paulo", "São Paulo", -180}, {"Atlantic/Azores", "Azores", -60}, {"UTC", "UTC", 0}, {"Europe/London", "London", 0}, {"Europe/Berlin", "Berlin", 60}, {"Europe/Athens", "Athens", 120}, {"Europe/Moscow", "Moscow", 180}, {"Asia/Dubai", "Dubai", 240}, {"Asia/Karachi", "Karachi", 300}, {"Asia/Kolkata", "Mumbai/Delhi", 330}, {"Asia/Dhaka", "Dhaka", 360}, {"Asia/Bangkok", "Bangkok", 420}, {"Asia/Hong_Kong", "Hong Kong", 480}, {"Asia/Tokyo", "Tokyo", 540}, {"Australia/Adelaide", "Adelaide", 570}, {"Australia/Sydney", "Sydney", 600}, {"Pacific/Noumea", "Nouméa", 660}, {"Pacific/Auckland", "Auckland", 720}};
+    {"Pacific/Honolulu", "Honolulu", -600}, {"America/Anchorage", "Anchorage", -540}, {"America/Los_Angeles", "Los Angeles", -480}, {"America/Denver", "Denver", -420}, {"America/Chicago", "Chicago", -360}, {"America/New_York", "New York", -300}, {"America/Halifax", "Halifax", -240}, {"America/St_Johns", "St. John's", -210}, {"America/Sao_Paulo", "Sao Paulo", -180}, {"Atlantic/Azores", "Azores", -60}, {"UTC", "UTC", 0}, {"Europe/London", "London", 0}, {"Europe/Berlin", "Berlin", 60}, {"Europe/Athens", "Athens", 120}, {"Europe/Moscow", "Moscow", 180}, {"Asia/Dubai", "Dubai", 240}, {"Asia/Karachi", "Karachi", 300}, {"Asia/Kolkata", "Mumbai/Delhi", 330}, {"Asia/Dhaka", "Dhaka", 360}, {"Asia/Bangkok", "Bangkok", 420}, {"Asia/Hong_Kong", "Hong Kong", 480}, {"Asia/Tokyo", "Tokyo", 540}, {"Australia/Adelaide", "Adelaide", 570}, {"Australia/Sydney", "Sydney", 600}, {"Pacific/Noumea", "Noumea", 660}, {"Pacific/Auckland", "Auckland", 720}};
 static const size_t kTimezoneCount = sizeof(kTimezones) / sizeof(kTimezones[0]);
 
 static String fmtUtcLabel(int offsetMin)
@@ -158,6 +168,7 @@ void setupWebServer() {
     doc["dayFormat"]        = dayFormat;
     doc["forecastSrc"]      = forecastSrc;
     doc["autoRotate"]       = autoRotate;
+    doc["autoRotateInterval"] = autoRotateInterval;
     doc["manualScreen"]     = manualScreen;
     doc["theme"]            = theme;
     doc["brightness"]       = brightness;
@@ -174,6 +185,8 @@ void setupWebServer() {
     doc["tempOffset"]       = tempOffset;
     doc["humOffset"]        = humOffset;
     doc["lightGain"]        = lightGain;
+    doc["ntpServer"]        = ntpServerHost;
+    doc["ntpPreset"]        = ntpServerPreset;
     String json; serializeJson(doc, json);
     req->send(200, "application/json", json);
   });
@@ -206,10 +219,12 @@ void setupWebServer() {
         wifiPass        = doc["wifiPass"]         | "";
         if (doc.containsKey("units")) jsonToUnits(doc["units"]);
         fmt24 = units.clock24h ? 1 : 0;   // keep device clock format in sync with Unit card
-        saveDateTimeSettings();
         dayFormat       = doc["dayFormat"]        | 0;
         forecastSrc     = doc["forecastSrc"]      | 0;
-        autoRotate      = doc["autoRotate"]       | 1;
+        bool autoRotateValue = doc["autoRotate"]       | 1;
+        int newInterval = constrain((int)(doc["autoRotateInterval"] | autoRotateInterval), 5, 300);
+        setAutoRotateEnabled(autoRotateValue, false);
+        setAutoRotateInterval(newInterval, false);
         manualScreen    = doc["manualScreen"]     | 0;
 
         // Display
@@ -227,6 +242,45 @@ void setupWebServer() {
         scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);
         scrollSpeed = scrollDelays[scrollLevel];
         customMsg   = doc["customMsg"] | "";
+
+        if (doc.containsKey("ntpPreset"))
+        {
+          int preset = doc["ntpPreset"].as<int>();
+          if (preset < 0) preset = 0;
+          if (preset > NTP_PRESET_CUSTOM) preset = NTP_PRESET_CUSTOM;
+          ntpServerPreset = preset;
+        }
+
+        if (doc.containsKey("ntpServer"))
+        {
+          String host = doc["ntpServer"].as<String>();
+          host.trim();
+          if (host.length() == 0)
+          {
+            host = "pool.ntp.org";
+          }
+
+          bool matched = false;
+          for (int i = 0; i < NTP_PRESET_COUNT; ++i)
+          {
+            if (host.equalsIgnoreCase(ntpPresetHost(i)))
+            {
+              ntpServerPreset = i;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched)
+          {
+            ntpServerPreset = NTP_PRESET_CUSTOM;
+            host.toCharArray(ntpServerHost, sizeof(ntpServerHost));
+          }
+          else
+          {
+            strncpy(ntpServerHost, ntpPresetHost(ntpServerPreset), sizeof(ntpServerHost) - 1);
+            ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+          }
+        }
 
         // Weather
         owmCity          = doc["owmCity"]          | "";
@@ -253,6 +307,7 @@ void setupWebServer() {
         humOffset  = constrain(humOffset, -20, 20);
         lightGain  = constrain(lightGain, 1, 150);
 
+        saveDateTimeSettings();
         saveAllSettings();
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
@@ -281,7 +336,8 @@ void setupWebServer() {
     doc["tzOffset"]  = tzOffset;
     doc["tzName"]    = tzNameFromOffset(tzOffset);
     doc["dateFmt"]   = dateFmt;
-    doc["ntpServer"] = "pool.ntp.org";
+    doc["ntpServer"] = ntpServerHost;
+    doc["ntpPreset"] = ntpServerPreset;
     String out; serializeJson(doc, out);
     req->send(200, "application/json", out);
   });
@@ -321,6 +377,45 @@ void setupWebServer() {
 
         if (doc.containsKey("dateFmt")) dateFmt = (int)doc["dateFmt"].as<int>();
 
+        if (doc.containsKey("ntpPreset"))
+        {
+          int preset = doc["ntpPreset"].as<int>();
+          if (preset < 0) preset = 0;
+          if (preset > NTP_PRESET_CUSTOM) preset = NTP_PRESET_CUSTOM;
+          ntpServerPreset = preset;
+        }
+
+        if (doc.containsKey("ntpServer"))
+        {
+          String host = doc["ntpServer"].as<String>();
+          host.trim();
+          if (host.length() == 0)
+          {
+            host = "pool.ntp.org";
+          }
+
+          bool matched = false;
+          for (int i = 0; i < NTP_PRESET_COUNT; ++i)
+          {
+            if (host.equalsIgnoreCase(ntpPresetHost(i)))
+            {
+              ntpServerPreset = i;
+              matched = true;
+              break;
+            }
+          }
+          if (!matched)
+          {
+            ntpServerPreset = NTP_PRESET_CUSTOM;
+            host.toCharArray(ntpServerHost, sizeof(ntpServerHost));
+          }
+          else
+          {
+            strncpy(ntpServerHost, ntpPresetHost(ntpServerPreset), sizeof(ntpServerHost) - 1);
+            ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+          }
+        }
+
         if (doc.containsKey("epoch")) { // write RTC
           time_t t = (time_t)doc["epoch"].as<long>();
           rtc.adjust(DateTime(t));
@@ -334,15 +429,13 @@ void setupWebServer() {
 
   // ---------- NTP sync ----------
   server.on("/syncntp", HTTP_GET, [](AsyncWebServerRequest* req){
-    // (optional) read ?server= param if your sync accepts it
-    // if (req->hasParam("server")) { String s = req->getParam("server")->value(); ... }
-    syncTimeFromNTP();
-    req->send(200, "text/plain", "syncing");
+    bool ok = syncTimeFromNTP();
+    req->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
   });
 
   // ---------- Status / OTA / Reboot ----------
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
-    const char* degSym = (units.temp == TempUnit::F) ? "°F" : "°C";
+    const char* degSym = (units.temp == TempUnit::F) ? "&deg;F" : "&deg;C";
     String status = "<html><body><h2>Status</h2>";
     status += "<p>WiFi: " + String(WiFi.SSID()) + "</p>";
     status += "<p>Weather: " + str_Weather_Conditions + " " + str_Temp + degSym + "</p>";
@@ -405,3 +498,7 @@ void setupWebServer() {
 
   server.begin();
 }
+
+
+
+

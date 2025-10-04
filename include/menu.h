@@ -28,6 +28,7 @@ void showDisplaySettingsModal();
 void showWeatherSettingsModal();
 void showCalibrationModal();
 void showSystemModal();
+void showInitialSetupPrompt();
 
 void scanWiFiNetworks();
 void handleScreenSwitch(int dir);
@@ -53,6 +54,7 @@ enum MenuLevel {
     MENU_WEATHER,
     MENU_CALIBRATION,
     MENU_SYSTEM,
+    MENU_INITIAL_SETUP,
     MENU_SYSINFO,
     MENU_SYSDATETIME,
     MENU_SYSWIFI,
@@ -89,6 +91,7 @@ extern String wfStationId;
 extern int dayFormat;
 extern int forecastSrc;
 extern int autoRotate;
+extern int autoRotateInterval;
 extern int manualScreen;
 extern int theme;
 extern int brightness;
@@ -118,6 +121,7 @@ extern InfoModal displayModal;
 extern InfoModal weatherModal;
 extern InfoModal calibrationModal;
 extern InfoModal systemModal;
+extern InfoModal setupPromptModal;
 
 // --- Helper for modal "reopen after delay" ---
 extern void (*pendingModalFn)();
@@ -125,3 +129,4 @@ extern unsigned long pendingModalTime;
 
 
 extern int scrollOffset;
+

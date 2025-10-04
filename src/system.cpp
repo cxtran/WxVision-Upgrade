@@ -64,10 +64,10 @@ static uint8_t lastBrightness = 32; // Default or load from settings
 void setScreenOff(bool off) {
     if (off && !screenOff) {
         lastBrightness = brightness;
-        dma_display->setBrightness8(0);
+        setPanelBrightness(0);
         screenOff = true;
     } else if (!off && screenOff) {
-        dma_display->setBrightness8(map(lastBrightness, 1, 100, 3, 255));
+        setPanelBrightness(map(lastBrightness, 1, 100, 3, 255));
         screenOff = false;
     }
 }

@@ -4,6 +4,7 @@
 #include "keyboard.h"
 #include <cstring>
 #include <vector>
+#include <ctype.h>
 
 extern bool autoBrightness;
 extern int scrollLevel;
@@ -301,6 +302,18 @@ String InfoModal::getChooserLabel(int idx)
     return chooserOptions[cidx][v];
 }
 
+
+static String formatUtcOffsetMinutes(int minutes)
+{
+    char buf[16];
+    char sign = (minutes >= 0) ? '+' : '-';
+    int absMinutes = abs(minutes);
+    int hours = absMinutes / 60;
+    int mins = absMinutes % 60;
+    snprintf(buf, sizeof(buf), "UTC%c%02d:%02d", sign, hours, mins);
+    return String(buf);
+}
+
 void InfoModal::draw()
 {
     currentPalette = makePalette();
@@ -345,7 +358,14 @@ void InfoModal::draw()
             if (nidx >= 0 && nidx < MAX_LINES && intRefs[nidx])
             {
                 int val = *(intRefs[nidx]);
-                s += ": " + String(val);
+                if (lines[idx] == "TimeZone")
+                {
+                    s += ": " + formatUtcOffsetMinutes(val);
+                }
+                else
+                {
+                    s += ": " + String(val);
+                }
                 //       Serial.printf("intRefs[%d] = %d\n", nidx, val);
             }
             else
@@ -593,6 +613,10 @@ void InfoModal::handleIR(uint32_t code)
                 case MENU_SYSTEM:
                     showSystemModal();
                     break;
+                case MENU_INITIAL_SETUP:
+                    currentMenuLevel = MENU_NONE;
+                    menuActive = false;
+                    break;
                 default:
                     currentMenuLevel = MENU_MAIN;
                     showMainMenuModal();
@@ -689,7 +713,15 @@ void InfoModal::handleIR(uint32_t code)
         }
         else
         {
-            atClose = true; // --- PATCH: move from last line to X
+            if (btnCount > 0)
+            {
+                inButtonBar = true;
+                btnSel = 0;
+            }
+            else
+            {
+                atClose = true; // --- PATCH: move from last line to X
+            }
         }
         draw();
         return;
@@ -708,10 +740,27 @@ void InfoModal::handleIR(uint32_t code)
             if (nidx >= 0 && intRefs[nidx])
             {
                 int *ptr = intRefs[nidx];
+                int step = 1;
+                if (this == &dateModal && selIndex == 6)
+                {
+                    step = 15;
+                }
+
                 if (code == IR_LEFT)
-                    (*ptr)--;
+                    (*ptr) -= step;
                 else
-                    (*ptr)++;
+                    (*ptr) += step;
+
+                if (this == &dateModal && selIndex == 6)
+                {
+                    int remainder = *ptr % 15;
+                    if (remainder != 0)
+                    {
+                        if (remainder < 0)
+                            remainder += 15;
+                        *ptr -= remainder;
+                    }
+                }
 
                 // --- Date/time field constraints ---
 
@@ -750,7 +799,7 @@ void InfoModal::handleIR(uint32_t code)
                     if (!autoBrightness)
                     {
                         int hw = map(*ptr, 1, 100, 3, 255);
-                        dma_display->setBrightness8(hw);
+                        setPanelBrightness(hw);
                         //           Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
                     }
                     else
@@ -805,7 +854,7 @@ void InfoModal::handleIR(uint32_t code)
                         {
                             float lux = readBrightnessSensor();
                             setDisplayBrightnessFromLux(lux);
-                            //           Serial.printf("[Live] Auto ON → Brightness from Lux: %.1f\n", lux);
+                            //           Serial.printf("[Live] Auto ON ??? Brightness from Lux: %.1f\n", lux);
                         }
                         else
                         {
@@ -814,8 +863,8 @@ void InfoModal::handleIR(uint32_t code)
                             {
                                 int b = constrain(*intRefs[bIdx], 1, 100);
                                 int hw = map(b, 1, 100, 3, 255);
-                                dma_display->setBrightness8(hw);
-                                //              Serial.printf("[Live] Auto OFF → Brightness: %d => HW %d\n", b, hw);
+                                setPanelBrightness(hw);
+                                //              Serial.printf("[Live] Auto OFF ??? Brightness: %d => HW %d\n", b, hw);
                             }
                         }
                         saveDisplaySettings();
@@ -827,6 +876,36 @@ void InfoModal::handleIR(uint32_t code)
                         scrollSpeed = scrollDelays[scrollLevel];
                         //          Serial.printf("[Live] ScrollSpeed set to %d ms (Level %d)\n", scrollSpeed, scrollLevel);
                         saveDisplaySettings();
+                    }
+
+                    if (lines[selIndex] == "Auto Rotate")
+                    { // Auto Rotate toggle
+                        setAutoRotateEnabled(val > 0, true);
+                    }
+
+                    if (lines[selIndex] == "Rotate Interval")
+                    { // Rotate Interval chooser
+                        const char *label = nullptr;
+                        if (chooserOptions[cidx] && val >= 0 && val < chooserOptionCounts[cidx])
+                        {
+                            label = chooserOptions[cidx][val];
+                        }
+                        int seconds = 0;
+                        if (label)
+                        {
+                            while (*label && !isdigit(static_cast<unsigned char>(*label)))
+                                ++label;
+                            while (*label && isdigit(static_cast<unsigned char>(*label)))
+                            {
+                                seconds = seconds * 10 + (*label - '0');
+                                ++label;
+                            }
+                        }
+                        if (seconds <= 0)
+                        {
+                            seconds = autoRotateInterval;
+                        }
+                        setAutoRotateInterval(seconds, true);
                     }
 
                     draw();
@@ -908,6 +987,10 @@ void InfoModal::handleIR(uint32_t code)
                 case MENU_SYSTEM:
                     showSystemModal();
                     break;
+                case MENU_INITIAL_SETUP:
+                    currentMenuLevel = MENU_NONE;
+                    menuActive = false;
+                    break;
                 default:
                     currentMenuLevel = MENU_MAIN;
                     showMainMenuModal();
@@ -938,3 +1021,4 @@ void InfoModal::handleIR(uint32_t code)
         }
     }
 }
+

@@ -7,6 +7,7 @@
 //#include "fonts/tahomabd7pt7b.h"
 //#include "fonts/tahomabd8pt7b.h"
 #include "fonts/verdanab8pt7b.h"
+#include "datetimesettings.h"
 
 #include "tempest.h"
 
@@ -27,8 +28,15 @@ const ScreenMode InfoScreenModes[] = {
 // const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(InfoScreenModes[0]);
 
 MatrixPanel_I2S_DMA *dma_display = nullptr;
+uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+
+void setPanelBrightness(uint8_t value) {
+  if (!dma_display) return;
+  dma_display->setBrightness8(value);
+  currentPanelBrightness = value;
+}
 
 void setupDisplay() {
   HUB75_I2S_CFG::i2s_pins _pins = {
@@ -44,7 +52,7 @@ void setupDisplay() {
 
   dma_display = new MatrixPanel_I2S_DMA(mxconfig);
   dma_display->begin();
-  dma_display->setBrightness8(map(brightness, 1, 100, 3, 255));
+  setPanelBrightness(map(brightness, 1, 100, 3, 255));
   dma_display->setTextSize(1);
   dma_display->setTextWrap(false);
   dma_display->setFont(&Font5x7Uts);
@@ -142,6 +150,7 @@ const char *ntpServer1 = "pool.ntp.org";
 const long gmtOffset_sec = -8 * 3600;
 const int daylightOffset_sec = 3600;
 RTC_DS3231 rtc;
+bool rtcReady = false;
 
 
 String httpGETRequest(const char *url) {
@@ -190,8 +199,36 @@ bool set_up_Scrolling_Text_Length = true;
 bool start_Scroll_Text = false;
 
 
+
 void getTimeFromRTC() {
-    DateTime now = rtc.now();
+    DateTime now;
+    bool haveTime = false;
+    if (rtcReady)
+    {
+        DateTime utcNow = rtc.now();
+        now = utcToLocal(utcNow);
+        haveTime = true;
+    }
+    else if (getLocalDateTime(now))
+    {
+        haveTime = true;
+    }
+
+    if (!haveTime)
+    {
+        t_hour = t_minute = t_second = 0;
+        d_day = d_month = 1;
+        d_year = 2000;
+        d_daysOfTheWeek = 0;
+        sprintf(chr_t_hour, "%02d", t_hour);
+        sprintf(chr_t_minute, "%02d", t_minute);
+        sprintf(chr_t_second, "%02d", t_second);
+        sprintf(chr_d_day, "%02d", d_day);
+        sprintf(chr_d_month, "%02d", d_month);
+        sprintf(chr_d_year, "%04d", d_year);
+        return;
+    }
+
     t_hour = now.hour();
     t_minute = now.minute();
     t_second = now.second();
@@ -206,7 +243,6 @@ void getTimeFromRTC() {
     sprintf(chr_d_month, "%02d", d_month);
     sprintf(chr_d_year, "%04d", d_year);
 }
-
 
 void fetchWeatherFromOWM() {
     if (WiFi.status() != WL_CONNECTED)
@@ -326,7 +362,7 @@ void displayWeatherData() {
     dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
  //   dma_display->print(customRoundString(str_Temp.c_str()));  
     dma_display->print( fmtTemp( atof(str_Temp.c_str()), 0)); 
-//    dma_display->print(useImperial ? "°F" : "°C");
+//    dma_display->print(useImperial ? " °F" : " °C");
     dma_display->setCursor(44, 0);
     dma_display->setTextColor(theme == 1 ? dma_display->color565(70,70,130) : myCYAN);
     dma_display->print(str_Humd);
@@ -334,14 +370,14 @@ void displayWeatherData() {
 }
 
 void createScrollingText() {
- //   String unitT = useImperial ? "°F" : "°C";
+ //   String unitT = useImperial ? " °F" : " °C";
  //   String unitW = useImperial ? "mph" : "m/s";
 
     scrolling_Text =
         "City: " + str_City + " ¦ " +
         "Weather: " + str_Weather_Conditions_Des + " ¦ " +
         "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) +  " ¦ " +
-        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) +  " ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) +  " ¦ " +
+        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) +  "  ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) +  " ¦ " +
         "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " ¦ " +
         "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) +  " ¦ ";
 
@@ -387,7 +423,16 @@ void drawClockScreen() {
 
     dma_display->fillScreen(0);
 
-    DateTime now = rtc.now();
+    DateTime now;
+    if (rtcReady)
+    {
+        DateTime utcNow = rtc.now();
+        now = utcToLocal(utcNow);
+    }
+    else if (!getLocalDateTime(now))
+    {
+        now = DateTime(2000, 1, 1, 0, 0, 0);
+    }
     int hour = now.hour(), minute = now.minute(), second = now.second();
 
     // 12h/24h handling
@@ -548,3 +593,6 @@ void serviceScrollRebuild() {
 
   needScrollRebuild = false;
 }
+
+
+

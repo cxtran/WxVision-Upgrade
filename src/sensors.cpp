@@ -3,11 +3,11 @@
 #include <IRrecv.h>
 #include <pins.h>
 #include "sensors.h"
+#include "display.h"
 #include "menu.h"
 #include <Wire.h>
 #include "InfoScreen.h"
 #include "units.h"
-#include "sensors.h"
 
 // Brightness Sensor
 #define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
@@ -105,7 +105,7 @@ void setDisplayBrightnessFromLux(float lux)
   if (brightness > maxBrightness)
     brightness = maxBrightness;
 
-  dma_display->setBrightness8(brightness);
+  setPanelBrightness(brightness);
 
   Serial.printf("LogAutoBrightness: Raw Lux=%.1f Calibrated=%.1f (Gain=%d%%, Sens=%.2f) -> Brightness=%d\n",
                 lux, calibratedLux, lightGain, sensitivity, brightness);

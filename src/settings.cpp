@@ -11,13 +11,17 @@ Preferences prefs;
 int dayFormat = 0;        // 0 = MM/DD, 1 = DD/MM
 int forecastSrc = 0;      // 0 = OpenWeather, 1 = WeatherFlow
 int autoRotate = 1;       // 1 = on, 0 = off
+int autoRotateInterval = 15; // seconds between screen rotations
 int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
 String wifiSSID = "";
 String wifiPass = "";
 
+bool setupComplete = false;
+bool initialSetupRequired = false;
+
 // --- Display ---
 int theme = 0;            // 0 = Color, 1 = Mono
-int brightness = 10;      // 1–100
+int brightness = 10;      // 1???100
 int scrollSpeed = 150;    // derived from scrollLevel
 int scrollLevel = 7;      // 0 (slow) to 9 (fast)
 String customMsg = "";
@@ -52,7 +56,14 @@ void loadSettings() {
     dayFormat    = prefs.getInt("dayFmt", 0);
     forecastSrc  = prefs.getInt("forecast", 0);
     autoRotate   = prefs.getInt("autoRotate", 1);
+    autoRotateInterval = prefs.getInt("autoRotInt", 15);
+    autoRotateInterval = constrain(autoRotateInterval, 5, 300);
     manualScreen = prefs.getInt("manualScreen", 0);
+
+    bool setupFlagExists = prefs.isKey("setupReady");
+    setupComplete = setupFlagExists ? prefs.getBool("setupReady", false)
+                                    : !wifiSSID.isEmpty();
+    initialSetupRequired = !setupComplete;
 
     // Display
     theme        = prefs.getInt("theme", 0);
@@ -92,6 +103,7 @@ void saveDeviceSettings() {
     prefs.putInt("dayFmt", dayFormat);
     prefs.putInt("forecast", forecastSrc);
     prefs.putInt("autoRotate", autoRotate);
+    prefs.putInt("autoRotInt", autoRotateInterval);
     prefs.putInt("manualScreen", manualScreen);
     prefs.end();
     // Units are saved via saveUnits() (see saveAllSettings())
@@ -152,8 +164,33 @@ void toggleForecastSrc(int dir) {
     forecastSrc = (forecastSrc + dir + 2) % 2;
 }
 
+void setAutoRotateEnabled(bool enabled, bool persist) {
+    autoRotate = enabled ? 1 : 0;
+    if (persist) {
+        saveDeviceSettings();
+    }
+}
+
+void setAutoRotateInterval(int seconds, bool persist) {
+    autoRotateInterval = constrain(seconds, 5, 300);
+    if (persist) {
+        saveDeviceSettings();
+    }
+}
+
+void markSetupComplete(bool complete) {
+    setupComplete = complete;
+    initialSetupRequired = !complete;
+
+    Preferences local;
+    if (local.begin("visionwx", false)) {
+        local.putBool("setupReady", setupComplete);
+        local.end();
+    }
+}
+
 void toggleAutoRotate(int dir) {
-    autoRotate = (autoRotate + dir + 2) % 2;
+    setAutoRotateEnabled(((autoRotate + dir + 2) % 2) == 1);
 }
 
 void toggleTheme(int dir) {
@@ -190,3 +227,4 @@ void adjustScrollSpeed(int dir) {
     if (scrollLevel > 9) scrollLevel = 9;
     scrollSpeed = scrollDelays[scrollLevel];
 }
+
