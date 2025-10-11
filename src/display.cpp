@@ -418,19 +418,78 @@ void scrollWeatherDetails() {
     }
 }
 
+void drawSunIcon(int x, int y, uint16_t color)
+{
+    // Consistent 7x7 sun with center + 8 rays
+    int cx = x + 3;
+    int cy = y + 3;
+
+    dma_display->drawLine(x + 3, y, x + 3, y + 6, color);  // Vertiacal
+    dma_display->drawLine(x, y + 3, x + 6, y + 3, color); // Horizontal
+    dma_display->drawLine(x + 1, y + 1, x + 5, y + 5, color);   // diagonal 
+    dma_display->drawLine(x + 5, y + 1, x + 1, y + 5, color);   // diagonal 
+
+
+/*
+    dma_display->fillCircle(cx, cy, 1, color);   // center
+
+    // main rays
+    dma_display->drawPixel(cx, cy - 3, color);
+    dma_display->drawPixel(cx, cy + 3, color);
+    dma_display->drawPixel(cx - 3, cy, color);
+    dma_display->drawPixel(cx + 3, cy, color);
+
+    dma_display->drawPixel(x + 2, y + 2, color);
+    dma_display->drawPixel(x + 4, y + 2, color);
+    dma_display->drawPixel(x + 2, y + 4, color);
+    dma_display->drawPixel(x + 4, y + 4, color);
+
+    // diagonal rays
+    dma_display->drawPixel(cx - 2, cy - 2, color);
+    dma_display->drawPixel(cx + 2, cy - 2, color);
+    dma_display->drawPixel(cx - 2, cy + 2, color);
+    dma_display->drawPixel(cx + 2, cy + 2, color);
+    */
+}
+
+void drawHouseIcon(int x, int y, uint16_t color)
+{
+    // Larger 7x7 house matching the sun's visual weight
+    // Roof
+    dma_display->drawPixel(x + 4, 0, color);
+    dma_display->drawLine(x + 2, y + 2, x + 6, y + 2, color);
+    dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color);  // roof base
+    dma_display->drawLine(x + 3, y + 1, x + 5, y + 1, color);  // left slope
+
+
+    // Walls
+    dma_display->drawRect(x + 2, y + 4, 5, 3, color);
+
+    // Door
+    dma_display->drawLine(x + 4, y + 5, x + 4, y + 6, color);
+}
+
+void drawWiFiIcon(int x, int y, uint16_t color)
+{
+    // Simple 7x5 Wi-Fi signal icon
+    // (x,y) = top-left corner of the icon
+    // three arcs + small dot
+    dma_display->drawPixel(x + 3, y + 4, color); // bottom dot
+    dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, color); // small arc
+    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color); // mid arc
+    dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, color); // top arc
+    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, color); // support bar
+}
 
 void drawClockScreen() {
 
     dma_display->fillScreen(0);
 
     DateTime now;
-    if (rtcReady)
-    {
+    if (rtcReady) {
         DateTime utcNow = rtc.now();
         now = utcToLocal(utcNow);
-    }
-    else if (!getLocalDateTime(now))
-    {
+    } else if (!getLocalDateTime(now)) {
         now = DateTime(2000, 1, 1, 0, 0, 0);
     }
     int hour = now.hour(), minute = now.minute(), second = now.second();
@@ -457,30 +516,22 @@ void drawClockScreen() {
                                       : dma_display->color565(255,255,80);
     dma_display->setTextColor(timeColor);
 
-    // width of time string
     int timeW = getTextWidth(timeStr);
-
-    // measure height for vertical centering
     int16_t x1, y1; uint16_t w, h;
     dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
     int timeH = h;
 
-    // total width (digits + AM/PM)
     int ampmW = 0;
-    if (!units.clock24h) {
-        ampmW = getTextWidth(isPM ? "PM" : "AM");
-    }
+    if (!units.clock24h) ampmW = getTextWidth(isPM ? "PM" : "AM");
     int totalW = timeW + (ampmW ? ampmW + 2 : 0);
-
-    // center the whole block
     int boxX = (64 - totalW) / 2;
     if (boxX < 0) boxX = 0;
     int boxY = (32 - timeH) / 2;
 
-    // --- draw time string (shifted up by 1)
-    dma_display->setFont(&verdanab8pt7b);
     dma_display->setCursor(boxX, boxY + timeH - 1);
     dma_display->print(timeStr);
+
+
 
     // --- draw AM/PM inline
     if (!units.clock24h) {
@@ -491,28 +542,18 @@ void drawClockScreen() {
                                           : dma_display->color565(255,255,200);
         dma_display->setTextColor(ampmColor);
 
-        // measure digit height
         int16_t x1,y1; uint16_t w,h;
         dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
         int digitH = h;
-
-            // measure AM/PM width & height
         dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
         int ampmW = w;
         int ampmH = h;
-
-        // anchor to right frame (2px margin)
-        int ampmX = 64 - ampmW - 1; 
-
-        // align baseline with digits, adjusted
+        int ampmX = 64 - ampmW - 1;
         int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-        if (!isPM) {
-            ampmY -= 6;
-        }
-        // shift up 1 pixel as before
         ampmY -= 1;
+ //       if (!isPM) ampmY -= 6;
+ //       ampmY -= 1;
 
-        // background box
         uint16_t bgColor = (theme == 1) ? dma_display->color565(20,20,40)
                                         : dma_display->color565(40,40,40);
         dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
@@ -520,9 +561,22 @@ void drawClockScreen() {
         dma_display->setCursor(ampmX, ampmY);
         dma_display->print(ampmStr);
 
+            // ---- Draw Wi-Fi icon if connected ----
+        if (WiFi.status() == WL_CONNECTED) {
+            // Position the Wi-Fi icon just above AM/PM
+
+            int wifiX = ampmX + 5;   // just after time text
+            int wifiY = ampmY - 8;        // above AM/PM
+            uint16_t wifiColor = (theme == 1)
+                ? dma_display->color565(90, 90, 120)    // dim gray for mono
+                : dma_display->color565(100, 255, 120); // soft green for color
+            drawWiFiIcon(wifiX, wifiY, wifiColor);
     }
 
-    // ---- DATE (unchanged)
+
+    }
+
+    // ---- DATE ----
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
     uint16_t dateColor = (theme == 1) ? dma_display->color565(60,60,120)
@@ -530,39 +584,54 @@ void drawClockScreen() {
     dma_display->setTextColor(dateColor);
     dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
     int dateX = (64 - (int)w) / 2;
-    if (dateX < 0) dateX = 0;
     int dateY = 25;
     dma_display->setCursor(dateX, dateY);
     dma_display->print(dateStr);
 
-    // ---- TEMPERATURES (unchanged)
+    // ---- TEMPERATURES ----
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
     uint16_t tempColor = (theme == 1) ? dma_display->color565(60,60,120)
                                       : dma_display->color565(200,200,255);
     dma_display->setTextColor(tempColor);
+    if (tempest.temperature == 0.0) tempest.temperature = NAN;  
+    String udpTempStr = fmtTemp(tempest.temperature, 0);  // Outside
+    String localTempStr = fmtTemp(SCD40_temp, 0);         // Inside
 
-    String udpTempStr = fmtTemp(tempest.temperature, 0);  // UDP temp
-//    String localTempStr = fmtTemp(aht20_temp, 0);         // Local temp via AHT20
-    String localTempStr = fmtTemp(SCD40_temp,0);         // Local temp via SCD40
-
-    // UDP temp at (0,0)
+    // OUTSIDE TEMP (left)
     dma_display->setCursor(0, 0);
     dma_display->print(udpTempStr);
 
-    // Local temp stays right-aligned at top-right
+    // Draw sun icon to right of outside temperature
+    dma_display->getTextBounds(udpTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+    int sunX = w + 1;
+    int sunY = 0;
+    uint16_t sunColor = (theme == 1)
+        ? dma_display->color565(90,90,120)
+        : dma_display->color565(255,220,100);
+    drawSunIcon(sunX, sunY, sunColor);
+
+    // Draw house icon to the left of inside temperature
     dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
     int localX = 64 - w;
     int localY = 0;
+    int houseX = localX - 9;
+    int houseY = 0;
+    uint16_t houseColor = (theme == 1)
+        ? dma_display->color565(90,90,120)
+        : dma_display->color565(255,150,100);
+    drawHouseIcon(houseX, houseY, houseColor);
+
+
+
     dma_display->setCursor(localX, localY);
     dma_display->print(localTempStr);
 
-    // ---- Seconds pulse (dimmer but same color tone)
+    // ---- Seconds pulse ----
     uint16_t pulseColor = (second % 2 == 0)
-        ? dma_display->color565(0,150,0)   // dimmer bright green
-        : dma_display->color565(0,60,0);   // dimmer dark green
+        ? dma_display->color565(0,150,0)
+        : dma_display->color565(0,60,0);
     dma_display->fillCircle(62, 30, 1, pulseColor);
-
 }
 
 

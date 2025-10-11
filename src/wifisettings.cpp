@@ -89,15 +89,18 @@ void connectToWiFi()
         {
             dma_display->clearScreen();
             dma_display->setCursor(0, 0);
-            dma_display->setTextColor(myGREEN);
-            dma_display->print("WiFi OK");
-            dma_display->setCursor(0, 8);
             dma_display->setTextColor(myBLUE);
-            dma_display->print(WiFi.SSID());
+            dma_display->print("WiFi:");
+            dma_display->setCursor(0, 8); 
+            dma_display->setTextColor(myWHITE); 
+            dma_display->printf(" %s",WiFi.SSID());
             dma_display->setCursor(0, 16);
+            dma_display->setTextColor(myBLUE);
+            dma_display->print("IP: ");
+            dma_display->setCursor(0, 24);
             dma_display->setTextColor(myWHITE);
-            dma_display->print(WiFi.localIP().toString());
-            delay(3000);
+            dma_display->printf(" %s", WiFi.localIP().toString());
+            delay(5000);
             dma_display->clearScreen();
         }
         // Back to main menu on success

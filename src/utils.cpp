@@ -60,3 +60,10 @@ void drawScrollingText(const char* text, int y, uint16_t color, int selectedInde
     dma_display->setCursor(-scrollOffset, y);
     dma_display->print(text);
 }
+
+void drawBackArrow(int x, int y, uint16_t color){
+    dma_display->setCursor(x + 1, y );
+    dma_display->drawLine(x + 1, y + 3, x + 3, y + 1, color);
+    dma_display->drawLine(x + 1, y + 3, x + 3, y + 5, color);
+    dma_display->drawLine(x + 1, y + 3, x + 5, y + 3, color);
+}

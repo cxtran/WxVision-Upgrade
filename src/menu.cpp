@@ -34,6 +34,7 @@ bool menuActive = false;
 void (*pendingModalFn)() = nullptr;
 unsigned long pendingModalTime = 0;
 
+extern void connectToWiFi();
 extern ScreenMode currentScreen;
 // extern const int SCREEN_COUNT;
 void handleScreenSwitch(int dir);
@@ -48,6 +49,7 @@ InfoModal weatherModal("Weather");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 InfoModal setupPromptModal("Welcome");
+InfoModal wifiSettingsModal("WiFi Setting");
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -122,7 +124,7 @@ int dtFmt24;
 int dtDateFmt;
 int dtNtpPreset;
 
-const char *mainMenu[] = {"Device Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
+const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
 const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen", "< Back"};
@@ -361,9 +363,9 @@ void showInitialSetupPrompt()
     menuActive = true;
     currentMenuLevel = MENU_INITIAL_SETUP;
 
-    String lines[] = {"Welcome!", "Connect to WiFi?"};
-    InfoFieldType types[] = {InfoLabel, InfoLabel};
-    setupPromptModal.setLines(lines, types, 2);
+    String lines[] = { "Connect to WiFi?"};
+    InfoFieldType types[] = {InfoLabel};
+    setupPromptModal.setLines(lines, types, 1);
 
     String buttons[] = {"Connect", "Skip"};
     setupPromptModal.setButtons(buttons, 2);
@@ -391,11 +393,11 @@ void showMainMenuModal()
     menuActive = true;
 
     String items[] = {
-        "Device Settings", "Display Settings", "Weather Settings",
+        "Device Settings", "WiFi Settings", "Display Settings", "Weather Settings",
         "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 6);
+        InfoLabel, InfoLabel, InfoLabel,InfoLabel , InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 7);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
                               {
@@ -408,11 +410,12 @@ void showMainMenuModal()
     Serial.printf("[MainMenu] selected=%d\n", selected);
     switch (selected) {
         case 0: showDeviceSettingsModal(); return;
-        case 1: showDisplaySettingsModal(); return;
-        case 2: showWeatherSettingsModal(); return;
-        case 3: showCalibrationModal(); return;
-        case 4: showSystemModal(); return;
-        case 5: // Exit Menu
+        case 1: showWiFiSettingsModal(); return;
+        case 2: showDisplaySettingsModal(); return;
+        case 3: showWeatherSettingsModal(); return;
+        case 4: showCalibrationModal(); return;
+        case 5: showSystemModal(); return;
+        case 6: // Exit Menu
             mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
             exitToHomeScreen();
             return;
@@ -648,26 +651,38 @@ void scanWiFiNetworks()
 {
     wifiScanCount = 0;
     wifiSelecting = true;
-    WiFi.mode(WIFI_STA);
-    delay(100);
 
-    int n = WiFi.scanNetworks();
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false); // ensure radio is awake
+    delay(200);           // give it a moment to power up
+
+    Serial.println("[WiFi] Scanning networks...");
+
+    int n = WiFi.scanNetworks(false, true); // blocking, include hidden
+    if (n <= 0) {
+        Serial.println("[WiFi] No networks found, retrying...");
+        delay(500);
+        n = WiFi.scanNetworks(false, true);
+    }
+
     int j = 0;
     for (int i = 0; i < n && j < 15; ++i)
     {
         String ssid = WiFi.SSID(i);
         ssid.trim();
-        if (ssid.length() == 0)
-            continue;
+        if (ssid.isEmpty()) continue;
         scannedSSIDs[j++] = ssid;
     }
-    scannedSSIDs[j++] = "< Back";
+
+    scannedSSIDs[j++] = "< Back>";
     wifiScanCount = j;
     wifiSelectIndex = 0;
     wifiMenuScroll = 0;
     wifiSelectNeedsScan = false;
+
     Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount - 1);
 }
+
 
 void drawMenu()
 {
@@ -809,9 +824,19 @@ void drawWiFiMenu()
 {
     dma_display->fillScreen(dma_display->color565(0, 0, 0));
     dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextColor(dma_display->color565(0, 255, 255));
-    dma_display->setCursor(0, 0);
+
+    // Get actual screen width dynamically
+    int screenW = dma_display->width();
+
+    // --- Draw header background bar ---
+    uint16_t headerBg = dma_display->color565(0, 40, 80);   // dark blue background
+    uint16_t headerFg = dma_display->color565(0, 255, 255); // cyan text
+    dma_display->fillRect(0, 0, screenW, 8, headerBg);
+    dma_display->setTextColor(headerFg);
+    dma_display->setCursor(1, 0);
     dma_display->print("Select WiFi:");
+
+    // --- Handle no networks ---
     if (wifiScanCount == 0)
     {
         dma_display->setTextColor(dma_display->color565(255, 80, 80));
@@ -819,25 +844,30 @@ void drawWiFiMenu()
         dma_display->print("No WiFi found.");
         return;
     }
+
+    // --- Scroll bounds ---
     int maxScroll = max(0, wifiScanCount - wifiVisibleLines);
-    if (wifiMenuScroll > maxScroll)
-        wifiMenuScroll = maxScroll;
-    if (wifiMenuScroll < 0)
-        wifiMenuScroll = 0;
-    const int labelHeight = 7, listStartY = labelHeight + 1, wifiLineHeight = 8;
+    wifiMenuScroll = constrain(wifiMenuScroll, 0, maxScroll);
+
+    const int labelHeight = 8;
+    const int listStartY = labelHeight + 1;
+    const int wifiLineHeight = 8;
+
+    // --- List scanned SSIDs ---
     for (int i = 0; i < wifiVisibleLines; ++i)
     {
         int idx = wifiMenuScroll + i;
-        if (idx >= wifiScanCount)
-            break;
-        if (idx == wifiSelectIndex)
-            dma_display->setTextColor(dma_display->color565(255, 255, 0));
-        else
-            dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        if (idx >= wifiScanCount) break;
+
+        uint16_t color = (idx == wifiSelectIndex)
+                             ? dma_display->color565(255, 255, 0)   // yellow highlight
+                             : dma_display->color565(255, 255, 255); // white text
+        dma_display->setTextColor(color);
         dma_display->setCursor(0, listStartY + wifiLineHeight * i);
         dma_display->print(scannedSSIDs[idx]);
     }
 }
+
 
 void onWiFiConnectFailed()
 {
@@ -1103,97 +1133,37 @@ void handleScreenSwitch(int dir)
 void showDeviceSettingsModal()
 {
     if (currentMenuLevel != MENU_NONE)
-    {
         pushMenu(currentMenuLevel);
-    }
+
     currentMenuLevel = MENU_DEVICE;
     menuActive = true;
 
-    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    // --- Settings without Wi-Fi setup ---
+    String labels[] = {"Day Format", "Forecast Src", "Manual Screen"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser};
 
-    if (!wifiConnected)
-    {
-        if (wifiSelectNeedsScan || wifiScanCount == 0)
-        {
-            scanWiFiNetworks();
-            wifiSelectNeedsScan = false;
-        }
-    }
-    else
-    {
-        wifiScanCount = 1;
-        scannedSSIDs[0] = WiFi.SSID();
-    }
-
-    wifiSelectIndex = 0;
-    for (int i = 0; i < wifiScanCount; ++i)
-    {
-        if (scannedSSIDs[i] == wifiSSID)
-        {
-            wifiSelectIndex = i;
-            break;
-        }
-    }
-
-    static String ssidStringStore[16];
-    static const char *ssidOptions[16];
-    int modalSsidCount = wifiScanCount;
-    if (modalSsidCount > 0 && scannedSSIDs[modalSsidCount - 1] == "< Back")
-        modalSsidCount--;
-
-    for (int i = 0; i < modalSsidCount; ++i)
-    {
-        ssidStringStore[i] = scannedSSIDs[i];
-        ssidOptions[i] = ssidStringStore[i].c_str();
-    }
-
-    static char wifiPassBuf[65];
-    strncpy(wifiPassBuf, wifiPass.c_str(), sizeof(wifiPassBuf) - 1);
-    wifiPassBuf[sizeof(wifiPassBuf) - 1] = 0;
-
-    String labels[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen"};
-    InfoFieldType types[] = {
-        InfoChooser, InfoText,
-        InfoChooser, InfoChooser, InfoChooser
-    };
-
-    int *chooserRefs[] = {&wifiSelectIndex, &dayFormat, &forecastSrc, &manualScreen};
+    int *chooserRefs[] = {&dayFormat, &forecastSrc, &manualScreen};
     static const char *dayFmtOpt[]   = {"MM/DD", "DD/MM"};
     static const char *forecastOpt[] = {"OWM", "WF"};
     static const char *manualOpt[]   = {"Off", "On"};
-    const char *const *chooserOpts[] = {ssidOptions, dayFmtOpt, forecastOpt, manualOpt};
-    int chooserCounts[] = {modalSsidCount, 2, 2, 2};
+    const char *const *chooserOpts[] = {dayFmtOpt, forecastOpt, manualOpt};
+    int chooserCounts[] = {2, 2, 2};
 
-    char *textRefs[] = {wifiPassBuf};
-    int textSizes[] = {sizeof(wifiPassBuf)};
-
-    deviceModal.setLines(labels, types, 5);
+    // Configure modal (no text fields, no Wi-Fi choosers)
+    deviceModal.setLines(labels, types, 3);
     deviceModal.setValueRefs(
-        nullptr, 0,
-        chooserRefs, 4,
-        chooserOpts, chooserCounts,
-        textRefs, 1, textSizes
+        nullptr, 0,                     // no numeric fields
+        chooserRefs, 3,                 // 3 chooser fields
+        chooserOpts, chooserCounts,     // their options/counts
+        nullptr, 0, nullptr             // no text fields
     );
+
     deviceModal.setButtons(nullptr, 0);
 
     deviceModal.setCallback([](bool accepted, int)
     {
-        int sel = deviceModal.getSelIndex();
         if (accepted)
         {
-            if (sel == 0)
-            {
-                deviceModal.hide();
-                wifiSelecting = true;
-                currentMenuLevel = MENU_WIFI_SELECT;
-                scanWiFiNetworks();
-                menuActive = true;
-                drawWiFiMenu();
-                return;
-            }
-            if (wifiSelectIndex >= 0 && wifiSelectIndex < wifiScanCount)
-                wifiSSID = scannedSSIDs[wifiSelectIndex];
-            wifiPass = String(wifiPassBuf);
             saveDeviceSettings();
         }
         deviceModal.hide();
@@ -1219,5 +1189,137 @@ void exitToHomeScreen()
 }
 
 
+void showWiFiSettingsModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+        pushMenu(currentMenuLevel);
+
+    currentMenuLevel = MENU_MAIN;
+    menuActive = true;
+
+    // Build dynamic labels
+    String ssidLabel = "WiFi SSID: ";
+    ssidLabel += wifiSSID.length() ? wifiSSID : "(not set)";
+    String passLabel = wifiPass.isEmpty() ? "Enter Password" : "Change Password";
+
+    String labels[] = {ssidLabel, passLabel, "Connect Now"};
+    InfoFieldType types[] = {InfoButton, InfoButton, InfoButton};
+
+    wifiSettingsModal.setLines(labels, types, 3);
+    wifiSettingsModal.setValueRefs(nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, nullptr);
+
+    wifiSettingsModal.setCallback([](bool accepted, int) {
+        int sel = wifiSettingsModal.getSelIndex();
+        if (!accepted) {
+            wifiSettingsModal.hide();
+            showMainMenuModal();
+            return;
+        }
+
+        switch (sel)
+        {
+            // ====== WiFi SSID ======
+            case 0:
+            {
+                wifiSettingsModal.hide();
+
+                // Visual feedback while scanning
+                dma_display->fillScreen(0);
+                dma_display->setTextColor(dma_display->color565(0, 255, 255));
+                dma_display->setCursor(1, 8);
+                dma_display->println("Scanning");
+           //     dma_display->setTextColor(dma_display->color565(180, 180, 180));
+                dma_display->setCursor(25, 18);
+                dma_display->println("WiFi...");
+           //     dma_display->setCursor(1, 16);
+           //     dma_display->println("Please wait...");
+            //    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+                dma_display->setCursor(0, 28);
+
+                // Perform scan (blocking but reliable)
+                WiFi.mode(WIFI_STA);
+                delay(100);
+                int n = WiFi.scanNetworks();
+                Serial.printf("[WiFiSettings] Scan complete: %d networks\n", n);
+
+                if (n > 0)
+                {
+                    wifiScanCount = 0;
+                    for (int i = 0; i < n && wifiScanCount < 15; ++i)
+                    {
+                        String ssid = WiFi.SSID(i);
+                        ssid.trim();
+                        if (ssid.length() == 0)
+                            continue;
+                        scannedSSIDs[wifiScanCount++] = ssid;
+                    }
+                    scannedSSIDs[wifiScanCount++] = "< Back";
+                    wifiSelectIndex = 0;
+                    wifiMenuScroll = 0;
+
+                    // Go to WiFi select screen
+                    wifiSelecting = true;
+                    currentMenuLevel = MENU_WIFI_SELECT;
+                    menuActive = true;
+                    menuScroll = 0;
+                    drawWiFiMenu();
+                }
+                else
+                {
+                    // Show "No networks found" briefly
+                    dma_display->fillScreen(0);
+                    dma_display->setCursor(5, 10);
+                    dma_display->setTextColor(dma_display->color565(255, 100, 100));
+                    dma_display->println("No WiFi found");
+                    dma_display->setCursor(5, 20);
+                    dma_display->setTextColor(dma_display->color565(200, 200, 200));
+                    dma_display->println("Try again...");
+                    delay(1500);
+                    showWiFiSettingsModal();
+                }
+                return;
+            }
+
+            // ====== Password ======
+            case 1:
+            {
+                wifiSettingsModal.hide();
+                startKeyboardEntry(
+                    "",
+                    [](const char *result)
+                    {
+                        if (result && *result)
+                        {
+                            wifiPass = String(result);
+                            saveDeviceSettings();
+                        }
+                        showWiFiSettingsModal();
+                    },
+                    "WiFi Password");
+                return;
+            }
+
+            // ====== Connect Now ======
+            case 2:
+            {
+                saveDeviceSettings();
+                dma_display->fillScreen(0);
+                dma_display->setCursor(2, 8);
+                dma_display->setTextColor(dma_display->color565(255, 255, 0));
+                dma_display->println("Connecting...");
+                dma_display->setCursor(2, 16);
+                dma_display->setTextColor(dma_display->color565(0, 200, 255));
+                dma_display->println(wifiSSID);
+                connectToWiFi();
+                return;
+            }
+        }
+
+        wifiSettingsModal.hide();
+        showMainMenuModal();
+    });
+
+    wifiSettingsModal.show();
+}
 
 

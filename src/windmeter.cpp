@@ -65,16 +65,18 @@ void WindMeter::drawDirectionLine(int cx, int cy, int dirIndex, uint16_t color) 
     dma_display->drawLine(xOpp, yOpp, xTip, yTip, color);
 }
 
-// Animate from one tip THROUGH center to opposite tip
+// Animate from the TAIL (opposite side) THROUGH center to the TIP (wind direction)
+// Move pixel from the UPWIND TIP toward the CENTER (no overshoot)
+// Animate from the TAIL (opposite side) THROUGH center to the TIP (wind direction)
+// Animate from the TAIL (opposite side) THROUGH center to the TIP (wind direction)
 void WindMeter::drawMovingPixel(int cx, int cy, int dirIndex, float windSpeed, uint16_t color) {
     if (windSpeed < 0) windSpeed = 0;
     if (windSpeed > WIND_SPEED_MAX) windSpeed = WIND_SPEED_MAX;
 
-    unsigned long duration = ANIM_DURATION_MAX - (unsigned long)((windSpeed / WIND_SPEED_MAX) * (ANIM_DURATION_MAX - ANIM_DURATION_MIN));
+    unsigned long duration = ANIM_DURATION_MAX -
+        (unsigned long)((windSpeed / WIND_SPEED_MAX) * (ANIM_DURATION_MAX - ANIM_DURATION_MIN));
     if (duration < ANIM_DURATION_MIN) duration = ANIM_DURATION_MIN;
-    if (animStartMillis == 0) {
-        animStartMillis = millis();
-    }
+    if (animStartMillis == 0) animStartMillis = millis();
 
     unsigned long elapsed = (millis() - animStartMillis) % duration;
     float progress = (float)elapsed / duration;
@@ -83,28 +85,29 @@ void WindMeter::drawMovingPixel(int cx, int cy, int dirIndex, float windSpeed, u
     float dx = sin(angleRad);
     float dy = -cos(angleRad);
 
-    int lenTip = LINE_LENGTHS[dirIndex];
+    int lenTip  = LINE_LENGTHS[dirIndex];
     int lenTail = LINE_LENGTHS[(dirIndex + 4) % 8];
 
+    // endpoints along the highlighted spoke
+    float tipX  = cx + lenTip  * dx;
+    float tipY  = cy + lenTip  * dy;
     float tailX = cx - lenTail * dx;
     float tailY = cy - lenTail * dy;
-    float tipX = cx + lenTip * dx;
-    float tipY = cy + lenTip * dy;
+
+    // ✅ move from TAIL → TIP (reversed from your version)
+    float startX = tailX, startY = tailY;
+    float endX   = tipX,  endY   = tipY;
 
     for (int i = 0; i < 3; ++i) {
         float p = progress - i * 0.08f;
-        if (p < 0.0f) {
-            continue;
-        }
-        if (p > 1.0f) {
-            p = 1.0f;
-        }
-        float x = tailX + (tipX - tailX) * p;
-        float y = tailY + (tipY - tailY) * p;
-        dma_display->drawPixel(int(x + 0.5f), int(y + 0.5f), color);
+        if (p < 0.0f) continue;
+        if (p > 1.0f) p = 1.0f;
+
+        float x = startX + (endX - startX) * p;
+        float y = startY + (endY - startY) * p;
+        dma_display->drawPixel((int)(x + 0.5f), (int)(y + 0.5f), color);
     }
 }
-
 
 
 void WindMeter::drawArrowHead(int cx, int cy, int dirIndex, uint16_t color) {
@@ -137,7 +140,11 @@ void WindMeter::drawArrowHead(int cx, int cy, int dirIndex, uint16_t color) {
     dma_display->drawLine(x2, y2, xtip, ytip, color);
     dma_display->drawLine(x1, y1, x2, y2, color);
 }
+
 void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSpeed) {
+    // Convert FROM (meteorological) to TO (where it’s going)
+    float drawDirDeg = fmodf(windDirDeg + 180.0f, 360.0f);
+
     const uint8_t activeR = 255, activeG = 255, activeB = 0;
     const uint16_t highlightColor = (theme == 1)
         ? dma_display->color565(90, 90, 150)
@@ -159,31 +166,31 @@ void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSp
 
     dma_display->fillScreen(0);
 
-    int nearestDir = nearestDirection(windDirDeg);
+    int nearestDir = nearestDirection(drawDirDeg);   // <-- use drawDirDeg now
     static int lastDir = -1;
     if (nearestDir != lastDir) {
         animStartMillis = millis();
         lastDir = nearestDir;
     }
 
+    // dim all other spokes
     for (int i = 0; i < 8; ++i) {
         if (i != nearestDir) {
             drawDirectionLine(cx, cy, i, dimColor);
         }
     }
 
+    // highlight chosen spoke + arrow head pointing TO direction
     drawDirectionLine(cx, cy, nearestDir, highlightColor);
     const uint16_t arrowColor = (theme == 1)
         ? dma_display->color565(128, 128, 220)
         : dma_display->color565(255, 220, 100);
     drawArrowHead(cx, cy, nearestDir, arrowColor);
 
+    // center and moving pixel
     drawSprite3x3(cx - 1, cy - 1, sprite_FULL, centerColor);
     drawMovingPixel(cx, cy, nearestDir, windSpeed, pixelColor);
 }
-
-
-
 
 
 

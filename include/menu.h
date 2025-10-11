@@ -29,6 +29,7 @@ void showWeatherSettingsModal();
 void showCalibrationModal();
 void showSystemModal();
 void showInitialSetupPrompt();
+void showWiFiSettingsModal();
 
 void scanWiFiNetworks();
 void handleScreenSwitch(int dir);
@@ -50,6 +51,7 @@ enum MenuLevel {
     MENU_NONE = -1, // Modal or inactive menu
     MENU_MAIN,
     MENU_DEVICE,
+    MENU_WIFISETTINGS,
     MENU_DISPLAY,
     MENU_WEATHER,
     MENU_CALIBRATION,
@@ -122,6 +124,7 @@ extern InfoModal weatherModal;
 extern InfoModal calibrationModal;
 extern InfoModal systemModal;
 extern InfoModal setupPromptModal;
+extern InfoModal wifiSettingsModal;
 
 // --- Helper for modal "reopen after delay" ---
 extern void (*pendingModalFn)();

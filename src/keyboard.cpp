@@ -17,10 +17,10 @@ const char* keyboardGridLower[] = {
     "yz"
 };
 const char* keyboardGridSym[] = {
-    "01234567",
-    "89!@#$%^",
-    "&*()-_=+",
-    "[]{};:,."
+    "[]{};:,.",
+    "&*()-_=+",  
+    "89!@#$%^",    
+    "01234567"
 };
 
 const int gridRows = 4;
@@ -37,7 +37,13 @@ int kbEditCursor = 0;
 volatile bool blinkState = true;
 
 static void (*keyboardDoneCallback)(const char*) = nullptr;
-static const char* keyboardTitle = nullptr; // For customizable title
+// static const char* keyboardTitle = nullptr; // For customizable title
+
+// --- 🔧 Fixed title handling ---
+static char keyboardTitleBuf[64] = "Enter Text:";  // Safe persistent buffer
+static const char* keyboardTitle = keyboardTitleBuf;
+
+
 
 const char** getActiveGrid() {
     switch (kbdMode) {
@@ -49,7 +55,7 @@ const char** getActiveGrid() {
 const char* getModeButtonLabel() {
     switch (kbdMode) {
         case MODE_UPPER: return "abc";
-        case MODE_LOWER: return "#?!";
+        case MODE_LOWER: return "123";
         case MODE_SYM:   return "ABC";
         default:         return "abc";
     }
@@ -72,6 +78,7 @@ void tickKeyboard() {
 }
 
 
+// --- 🔧 Updated to copy title safely ---
 void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const char* result), const char* title) {
     inKeyboardMode = true;
     kbEditLineActive = false;
@@ -84,7 +91,17 @@ void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const c
     kbRowScroll = 0;
     kbEditCursor = editLen;
     keyboardDoneCallback = onDoneCallback;
-    keyboardTitle = title ? title : "Enter Text:";
+
+    // Copy custom title safely into persistent buffer
+    if (title && strlen(title) > 0) {
+        strncpy(keyboardTitleBuf, title, sizeof(keyboardTitleBuf) - 1);
+        keyboardTitleBuf[sizeof(keyboardTitleBuf) - 1] = '\0';
+    } else {
+        strncpy(keyboardTitleBuf, "Enter Text:", sizeof(keyboardTitleBuf) - 1);
+        keyboardTitleBuf[sizeof(keyboardTitleBuf) - 1] = '\0';
+    }
+
+    keyboardTitle = keyboardTitleBuf;
     drawKeyboard();
 }
 
@@ -237,9 +254,13 @@ void drawKeyboard() {
     dma_display->drawFastHLine(0, titleHeight - 1, dma_display->width(), dma_display->color565(255, 255, 255));
 
     // --- Title Text ---
-    const char* title = keyboardTitle ? keyboardTitle : "Enter Text:";
-    int textX = (dma_display->width() - strlen(title) * 6) / 2;
+    // 🔧 Use safe buffer instead of pointer
+    const char* title = keyboardTitleBuf;
+    int textLen = strlen(title);
+    int textX = (dma_display->width() - textLen * 6) / 2;
     if (textX < 0) textX = 0;
+
+
     dma_display->setTextColor(dma_display->color565(255, 255, 255));
     dma_display->setCursor(textX, 0);  // vertically centered in 8px bar
     dma_display->print(title);

@@ -36,15 +36,15 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
+extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
-InfoScreen forecastScreen("7-Day Fcst", SCREEN_UDP_FORECAST);
+InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
 InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
 InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
 InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
-InfoScreen hourlyScreen("24-HR Fcst", SCREEN_HOURLY);
+InfoScreen hourlyScreen("Next 24 HRS", SCREEN_HOURLY);
 
 // Screen Wind Info
 WindMeter windMeter;
@@ -52,8 +52,6 @@ ScrollLine scrollLine(64, 40); // 64 px wide, scroll every 50ms
 ScrollLine windInfo(64, 40);
 
 // Screen Clock
-
-
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
 
@@ -100,7 +98,6 @@ const unsigned long SCD40ReadInterval = 5000;
 unsigned long lastReadAHT20_BMP280 = 0;
 const unsigned long AHT20_BMP280ReadInterval = 5000;
 
-
 // CLock Screen
 unsigned long lastClockUpdate = 0;
 
@@ -143,6 +140,7 @@ static bool isRotationBlocked()
            dateModal.isActive() ||
            mainMenuModal.isActive() ||
            deviceModal.isActive() ||
+           wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
            weatherModal.isActive() ||
            calibrationModal.isActive() ||
@@ -230,6 +228,9 @@ void rotateScreen(int direction)
 
     switch (currentScreen)
     {
+     case SCREEN_CLOCK:
+        drawClockScreen();
+        break;    
     case SCREEN_UDP_DATA:
         showUdpScreen();
         break;
@@ -254,9 +255,6 @@ void rotateScreen(int direction)
     case SCREEN_HOURLY:
         showHourlyForecastScreen();
         break;
-    case SCREEN_CLOCK:
-        drawClockScreen();
-        break;  
     case SCREEN_OWM: /* draw in loop */
         break;
     }
@@ -459,7 +457,7 @@ void setup()
     rtcReady = rtc.begin();
     if (!rtcReady)
     {
-        Serial.println("?????? RTC not detected; time will default to 00:00");
+        Serial.println("RTC not detected; time will default to 00:00");
     }
     else
     {
@@ -606,6 +604,7 @@ void loop()
         !dateModal.isActive() &&
         !mainMenuModal.isActive() &&
         !deviceModal.isActive() &&
+        !wifiSettingsModal.isActive() &&
         !displayModal.isActive() &&
         !weatherModal.isActive() &&
         !calibrationModal.isActive() &&
@@ -675,6 +674,13 @@ void loop()
     {
         deviceModal.tick();
         deviceModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (wifiSettingsModal.isActive())
+    {
+        wifiSettingsModal.tick();
+        wifiSettingsModal.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
@@ -888,6 +894,7 @@ void loop()
         dateModal.isActive() ||
         mainMenuModal.isActive() ||
         deviceModal.isActive() ||
+        wifiSettingsModal.isActive() ||
         displayModal.isActive() ||
         weatherModal.isActive() ||
         calibrationModal.isActive() ||
@@ -897,39 +904,6 @@ void loop()
         forecastScreen.isActive() ||
         airQualityScreen.isActive() ||
         tempHumBaroScreen.isActive();
-
-if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
-{
-    // 1) Detect unit changes (C/F, mph/kph/kts/mps, inHg/hPa, inch/mm, 12h/24h)
-    notifyUnitsMaybeChanged();
-
-    // 2) Rebuild marquee once if needed (after unit/data changes)
-    serviceScrollRebuild();
-
-    // 3) Animate at fixed cadence independent of the 1s clock redraw
-    scrollWeatherTick();
-
-    if (reset_Time_and_Date_Display)
-    {
-        reset_Time_and_Date_Display = false;
-        displayClock();
-        displayDate();
-        displayWeatherData();
-    }
-
-    static unsigned long prevMillis_ShowTimeDate = 0;
-    if (now - prevMillis_ShowTimeDate >= 1000)
-    {
-        reset_Time_and_Date_Display = true;
-        prevMillis_ShowTimeDate = now;
-        if (needsClear)
-        {
-            dma_display->fillScreen(0);
-            needsClear = false;
-        }
-        drawOWMScreen();   // <- no createScrollingText() call inside this anymore
-    }
-}
 
 
     // --- 8. InfoScreen auto-activation (if not already active) ---
@@ -970,6 +944,7 @@ if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
         break;
     }
 
+ // Screens not use InfoScreen class   
     if( currentScreen == SCREEN_CLOCK){
         // Handle clock screen updates
         static unsigned long lastClockUpdate = 0;
@@ -979,9 +954,6 @@ if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
             drawClockScreen(); // Redraw clock screen
         }
     }
-
-
-
 
     if (currentScreen == SCREEN_WIND_DIR)
     {
@@ -1027,6 +999,39 @@ if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
 
         delay(10);
         return;
+    }
+
+    if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
+    {
+        // 1) Detect unit changes (C/F, mph/kph/kts/mps, inHg/hPa, inch/mm, 12h/24h)
+        notifyUnitsMaybeChanged();
+
+        // 2) Rebuild marquee once if needed (after unit/data changes)
+        serviceScrollRebuild();
+
+        // 3) Animate at fixed cadence independent of the 1s clock redraw
+        scrollWeatherTick();
+
+        if (reset_Time_and_Date_Display)
+        {
+            reset_Time_and_Date_Display = false;
+            displayClock();
+            displayDate();
+            displayWeatherData();
+        }
+
+        static unsigned long prevMillis_ShowTimeDate = 0;
+        if (now - prevMillis_ShowTimeDate >= 1000)
+        {
+            reset_Time_and_Date_Display = true;
+            prevMillis_ShowTimeDate = now;
+            if (needsClear)
+            {
+                dma_display->fillScreen(0);
+                needsClear = false;
+            }
+            drawOWMScreen(); // <- no createScrollingText() call inside this anymore
+        }
     }
 
     delay(0);

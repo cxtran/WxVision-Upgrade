@@ -283,8 +283,17 @@ void InfoModal::drawHeader()
 
     dma_display->fillRect(xX, 0, xWidth, headerHeight, xBgColor);
     dma_display->setTextColor(xFgColor);
-    dma_display->setCursor(xX + 1, xY - 1);
-    dma_display->print("x");
+
+    /*
+    dma_display->setCursor(xX + 1, xY );
+    dma_display->drawLine(xX + 1, xY + 3, xX + 3, xY + 1, xFgColor);
+    dma_display->drawLine(xX + 1, xY + 3, xX + 3, xY + 5, xFgColor);
+    dma_display->drawLine(xX + 1, xY + 3, xX + 5, xY + 3, xFgColor);
+    */
+    drawBackArrow(xX, xY, xFgColor);
+
+
+   // dma_display->print("<");
 
     dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, palette.underline);
 }
@@ -469,32 +478,46 @@ void InfoModal::draw()
     }
 
     // --- Button bar ---
-    if (btnCount > 0)
+// --- Button bar (fixed alignment to prevent first-letter clipping) ---
+if (btnCount > 0)
+{
+    int btnY = (MAXROWS - 1) * CHARH;
+    int totalBtnW = 0;
+    int btnWidths[MAXROWS];
+    const int padX = 3;   // inner padding
+    const int padY = 1;   // vertical offset for better centering
+
+    // Measure total width of buttons (including spacing)
+    for (int i = 0; i < btnCount; ++i)
     {
-        int btnY = (MAXROWS - 1) * CHARH;
-        int totalBtnW = 0;
-        int btnWidths[MAXROWS];
-        int pad = 3;
-
-        for (int i = 0; i < btnCount; ++i)
-        {
-            btnWidths[i] = btnLabels[i].length() * 6 + 2 * pad;
-            totalBtnW += btnWidths[i] + pad;
-        }
-
-        int btnX = (SCREEN_WIDTH - totalBtnW + pad) / 2;
-        for (int i = 0; i < btnCount; ++i)
-        {
-            bool selected = (inButtonBar && btnSel == i);
-            uint16_t btnBg = selected ? palette.buttonSelBg : palette.buttonBg;
-            uint16_t btnFg = selected ? palette.buttonSelFg : palette.buttonFg;
-            dma_display->fillRect(btnX, btnY, btnWidths[i], CHARH, btnBg);
-            dma_display->setTextColor(btnFg);
-            dma_display->setCursor(btnX + pad, btnY);
-            dma_display->print(btnLabels[i]);
-            btnX += btnWidths[i] + pad;
-        }
+        btnWidths[i] = getTextWidth(btnLabels[i].c_str()) + padX * 2;
+        totalBtnW += btnWidths[i] + padX;
     }
+
+    // Center horizontally
+    int btnX = (SCREEN_WIDTH - totalBtnW + padX) / 2;
+
+    for (int i = 0; i < btnCount; ++i)
+    {
+        bool selected = (inButtonBar && btnSel == i);
+        uint16_t btnBg = selected ? currentPalette.buttonSelBg : currentPalette.buttonBg;
+        uint16_t btnFg = selected ? currentPalette.buttonSelFg : currentPalette.buttonFg;
+
+        // Draw button background
+        dma_display->fillRect(btnX, btnY, btnWidths[i], CHARH, btnBg);
+
+        // --- FIX: add small left margin to avoid cutting first letter ---
+        int textX = btnX + padX;
+        int textY = btnY + padY;
+
+        dma_display->setTextColor(btnFg);
+        dma_display->setCursor(textX, textY);
+        dma_display->print(btnLabels[i]);
+
+        btnX += btnWidths[i] + padX;
+    }
+}
+
 }
 
 int InfoModal::getSelIndex() const
@@ -600,6 +623,9 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_DEVICE:
                     showDeviceSettingsModal();
+                    break;
+                case MENU_WIFISETTINGS:
+                    showWiFiSettingsModal();
                     break;
                 case MENU_DISPLAY:
                     showDisplaySettingsModal();
@@ -974,6 +1000,9 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_DEVICE:
                     showDeviceSettingsModal();
+                    break;
+                case MENU_WIFISETTINGS:
+                    showWiFiSettingsModal();
                     break;
                 case MENU_DISPLAY:
                     showDisplaySettingsModal();
