@@ -1,11 +1,11 @@
 #include "display.h"
 #include "icons.h"
 #include "settings.h"
-#include "RTClib.h"   // For RTC DateTime
+#include "RTClib.h" // For RTC DateTime
 #include "sensors.h"
-//#include "fonts/FreeSans9pt7b.h"
-//#include "fonts/tahomabd7pt7b.h"
-//#include "fonts/tahomabd8pt7b.h"
+// #include "fonts/FreeSans9pt7b.h"
+// #include "fonts/tahomabd7pt7b.h"
+// #include "fonts/tahomabd8pt7b.h"
 #include "fonts/verdanab8pt7b.h"
 #include "datetimesettings.h"
 
@@ -32,94 +32,122 @@ uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
 
-void setPanelBrightness(uint8_t value) {
-  if (!dma_display) return;
-  dma_display->setBrightness8(value);
-  currentPanelBrightness = value;
+void setPanelBrightness(uint8_t value)
+{
+    if (!dma_display)
+        return;
+    dma_display->setBrightness8(value);
+    currentPanelBrightness = value;
 }
 
-void setupDisplay() {
-  HUB75_I2S_CFG::i2s_pins _pins = {
-    R1_PIN, G1_PIN, B1_PIN,
-    R2_PIN, G2_PIN, B2_PIN,
-    A_PIN, B_PIN, C_PIN, D_PIN, E_PIN,
-    LAT_PIN, OE_PIN, CLK_PIN
-  };
+void setupDisplay()
+{
+    HUB75_I2S_CFG::i2s_pins _pins = {
+        R1_PIN, G1_PIN, B1_PIN,
+        R2_PIN, G2_PIN, B2_PIN,
+        A_PIN, B_PIN, C_PIN, D_PIN, E_PIN,
+        LAT_PIN, OE_PIN, CLK_PIN};
 
-  HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins);
-  mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_15M;
-  mxconfig.min_refresh_rate = 120;
+    HUB75_I2S_CFG mxconfig(PANEL_RES_X, PANEL_RES_Y, PANEL_CHAIN, _pins);
+    mxconfig.i2sspeed = HUB75_I2S_CFG::HZ_15M;
+    mxconfig.min_refresh_rate = 120;
 
-  dma_display = new MatrixPanel_I2S_DMA(mxconfig);
-  dma_display->begin();
-  setPanelBrightness(map(brightness, 1, 100, 3, 255));
-  dma_display->setTextSize(1);
-  dma_display->setTextWrap(false);
-  dma_display->setFont(&Font5x7Uts);
+    dma_display = new MatrixPanel_I2S_DMA(mxconfig);
+    dma_display->begin();
+    setPanelBrightness(map(brightness, 1, 100, 3, 255));
+    dma_display->setTextSize(1);
+    dma_display->setTextWrap(false);
+    dma_display->setFont(&Font5x7Uts);
 
-  myRED    = dma_display->color565(255, 0, 0);
-  myGREEN  = dma_display->color565(0, 255, 0);
-  myBLUE   = dma_display->color565(0, 0, 255);
-  myWHITE  = dma_display->color565(255, 255, 255);
-  myBLACK  = dma_display->color565(0, 0, 0);
-  myYELLOW = dma_display->color565(255, 255, 0);
-  myCYAN = dma_display->color565(0, 255, 255);
+    myRED = dma_display->color565(255, 0, 0);
+    myGREEN = dma_display->color565(0, 255, 0);
+    myBLUE = dma_display->color565(0, 0, 255);
+    myWHITE = dma_display->color565(255, 255, 255);
+    myBLACK = dma_display->color565(0, 0, 0);
+    myYELLOW = dma_display->color565(255, 255, 0);
+    myCYAN = dma_display->color565(0, 255, 255);
 }
 
-
-int getTextWidth(const char* text) {
-  int16_t x1, y1;
-  uint16_t w, h;
-  dma_display->getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-  return w;
+int getTextWidth(const char *text)
+{
+    int16_t x1, y1;
+    uint16_t w, h;
+    dma_display->getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+    return w;
 }
 
-const uint8_t* getWeatherIconFromCode(String code) {
- // Serial.printf("Code: %s", code);
-  if (code.startsWith("01n")) return icon_clear_night;
-  if (code.startsWith("02n")) return icon_cloud_night;
-  if (code.startsWith("01d")) return icon_clear;
-  if (code.startsWith("02d")) return icon_cloudy;
-  if (code.startsWith("03") || code.startsWith("04")) return icon_cloudy;
-  if (code.startsWith("09") || code.startsWith("10")) return icon_rain;
-  if (code.startsWith("11")) return icon_thunder;
-  if (code.startsWith("13")) return icon_snow;
-  if (code.startsWith("50")) return icon_fog;
-  return icon_clear; // fallback
+const uint8_t *getWeatherIconFromCode(String code)
+{
+    // Serial.printf("Code: %s", code);
+    if (code.startsWith("01n"))
+        return icon_clear_night;
+    if (code.startsWith("02n"))
+        return icon_cloud_night;
+    if (code.startsWith("01d"))
+        return icon_clear;
+    if (code.startsWith("02d"))
+        return icon_cloudy;
+    if (code.startsWith("03") || code.startsWith("04"))
+        return icon_cloudy;
+    if (code.startsWith("09") || code.startsWith("10"))
+        return icon_rain;
+    if (code.startsWith("11"))
+        return icon_thunder;
+    if (code.startsWith("13"))
+        return icon_snow;
+    if (code.startsWith("50"))
+        return icon_fog;
+    return icon_clear; // fallback
 }
 
-const uint8_t* getWeatherIconFromCondition(String condition) {
-  condition.toLowerCase();
-  if (condition.indexOf("clear") >= 0) return icon_clear;
-  if (condition.indexOf("cloud") >= 0) return icon_cloudy;
-  if (condition.indexOf("rain") >= 0) return icon_rain;
-  if (condition.indexOf("storm") >= 0) return icon_thunder;
-  if (condition.indexOf("snow") >= 0) return icon_snow;
-  if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0) return icon_fog;
-  return icon_clear;
+const uint8_t *getWeatherIconFromCondition(String condition)
+{
+    condition.toLowerCase();
+    if (condition.indexOf("clear") >= 0)
+        return icon_clear;
+    if (condition.indexOf("cloud") >= 0)
+        return icon_cloudy;
+    if (condition.indexOf("rain") >= 0)
+        return icon_rain;
+    if (condition.indexOf("storm") >= 0)
+        return icon_thunder;
+    if (condition.indexOf("snow") >= 0)
+        return icon_snow;
+    if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+        return icon_fog;
+    return icon_clear;
 }
 
-const uint16_t getIconColorFromCondition(String condition){
-  if (condition.indexOf("clear") >= 0) return dma_display->color565(255, 255, 0); // (yellow)
-  if (condition.indexOf("cloud") >= 0) return dma_display->color565(180, 180, 180);
-  if (condition.indexOf("rain") >= 0) return dma_display->color565(0, 200, 255);
-  if (condition.indexOf("storm") >= 0) return dma_display->color565(255, 255, 0);
-  if (condition.indexOf("snow") >= 0) return dma_display->color565(220, 255, 255);
-  if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0) return dma_display->color565(180, 180, 180);
-  return dma_display->color565(255, 255, 0);
+const uint16_t getIconColorFromCondition(String condition)
+{
+    if (condition.indexOf("clear") >= 0)
+        return dma_display->color565(255, 255, 0); // (yellow)
+    if (condition.indexOf("cloud") >= 0)
+        return dma_display->color565(180, 180, 180);
+    if (condition.indexOf("rain") >= 0)
+        return dma_display->color565(0, 200, 255);
+    if (condition.indexOf("storm") >= 0)
+        return dma_display->color565(255, 255, 0);
+    if (condition.indexOf("snow") >= 0)
+        return dma_display->color565(220, 255, 255);
+    if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+        return dma_display->color565(180, 180, 180);
+    return dma_display->color565(255, 255, 0);
 }
 
-const uint16_t getDayNightColorFromCode( String code){
-  if (code.indexOf("d") >= 0) return dma_display->color565(255, 170, 51); // day color
-  else return myBLUE; // night color
+const uint16_t getDayNightColorFromCode(String code)
+{
+    if (code.indexOf("d") >= 0)
+        return dma_display->color565(255, 170, 51); // day color
+    else
+        return myBLUE; // night color
 }
 
-
-
-void drawWeatherScreen() {
+void drawWeatherScreen()
+{
     dma_display->fillScreen(0);
     dma_display->setCursor(0, 8);
-    dma_display->setTextColor(dma_display->color565(80,255,255));
+    dma_display->setTextColor(dma_display->color565(80, 255, 255));
     dma_display->setTextSize(2);
     dma_display->print("72 F");
     dma_display->setTextSize(1);
@@ -127,15 +155,14 @@ void drawWeatherScreen() {
     dma_display->print("Clear Sky");
 }
 
- 
-void drawSettingsScreen() {
+void drawSettingsScreen()
+{
     dma_display->fillScreen(0);
     dma_display->setCursor(2, 10);
-    dma_display->setTextColor(dma_display->color565(255,255,255));
+    dma_display->setTextColor(dma_display->color565(255, 255, 255));
     dma_display->print("Settings");
     // Draw options, etc.
 }
-
 
 // OWS Weather /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -152,22 +179,24 @@ const int daylightOffset_sec = 3600;
 RTC_DS3231 rtc;
 bool rtcReady = false;
 
-
-String httpGETRequest(const char *url) {
+String httpGETRequest(const char *url)
+{
     WiFiClient client;
     HTTPClient http;
     http.begin(client, url);
     int httpCode = http.GET();
     String payload = "{}";
-    if (httpCode > 0) {
+    if (httpCode > 0)
+    {
         payload = http.getString();
-    } else {
+    }
+    else
+    {
         Serial.printf("GET failed: %d\n", httpCode);
     }
     http.end();
     return payload;
 }
-
 
 // === Units Toggle ===
 bool useImperial = false;
@@ -198,9 +227,8 @@ uint16_t text_Length_In_Pixel = 0;
 bool set_up_Scrolling_Text_Length = true;
 bool start_Scroll_Text = false;
 
-
-
-void getTimeFromRTC() {
+void getTimeFromRTC()
+{
     DateTime now;
     bool haveTime = false;
     if (rtcReady)
@@ -244,7 +272,8 @@ void getTimeFromRTC() {
     sprintf(chr_d_year, "%04d", d_year);
 }
 
-void fetchWeatherFromOWM() {
+void fetchWeatherFromOWM()
+{
     if (WiFi.status() != WL_CONNECTED)
         return;
     String units = useImperial ? "imperial" : "metric";
@@ -254,7 +283,8 @@ void fetchWeatherFromOWM() {
     if (jsonBuffer == "{}")
         return;
     JSONVar data = JSON.parse(jsonBuffer);
-    if (JSON.typeof(data) == "undefined") {
+    if (JSON.typeof(data) == "undefined")
+    {
         Serial.println("Failed to parse weather JSON");
         return;
     }
@@ -280,26 +310,26 @@ void fetchWeatherFromOWM() {
                   useImperial ? "mph" : "m/s");
 
     needScrollRebuild = true;
-             
 }
 
-
-
-void drawOWMScreen(){
+void drawOWMScreen()
+{
     getTimeFromRTC();
     displayClock();
     displayDate();
 
     // Detect any change across temp/wind/press/precip/clock24h
     const uint16_t curSig = unitSignature();
-    if (curSig != lastUnitSig) {
+    if (curSig != lastUnitSig)
+    {
         lastUnitSig = curSig;
-        needScrollRebuild = true;          // units changed -> rebuild marquee
+        needScrollRebuild = true; // units changed -> rebuild marquee
     }
 
     // Rebuild scrolling text only when needed
-    if (needScrollRebuild) {
-        createScrollingText();             // uses fmtTemp/fmtWind/... honoring 'units'
+    if (needScrollRebuild)
+    {
+        createScrollingText(); // uses fmtTemp/fmtWind/... honoring 'units'
         // Reset marquee so it restarts smoothly
         start_Scroll_Text = false;
         set_up_Scrolling_Text_Length = true;
@@ -308,37 +338,43 @@ void drawOWMScreen(){
     }
 
     // Update weather every 10 minutes at :10s
-    if ((t_minute % 10 == 0) && (t_second == 10)) {
+    if ((t_minute % 10 == 0) && (t_second == 10))
+    {
         fetchWeatherFromOWM();
         reset_Time_and_Date_Display = true;
         displayWeatherData();
-        needScrollRebuild = true;          // new values -> refresh marquee text
+        needScrollRebuild = true; // new values -> refresh marquee text
     }
 }
 
-
-void drawWeatherIcon(String iconCode) {
+void drawWeatherIcon(String iconCode)
+{
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
     dma_display->setCursor(1, 4);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
     uint16_t iconColor = getDayNightColorFromCode(iconCode);
-    if (theme == 1) iconColor = dma_display->color565(90,90,150);
+    if (theme == 1)
+        iconColor = dma_display->color565(90, 90, 150);
     dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, iconColor);
 }
 
-void displayClock() {
+void displayClock()
+{
     int hour = atoi(chr_t_hour);
     char amPm[] = "A";
-    if (hour >= 12) {
+    if (hour >= 12)
+    {
         if (hour > 12)
             hour -= 12;
         strcpy(amPm, "P");
-    } else if (hour == 0) {
+    }
+    else if (hour == 0)
+    {
         hour = 12;
     }
     dma_display->fillRect(15, 9, 45, 7, myBLACK);
     dma_display->setCursor(16, 9);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(90,90,150) : myRED);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(90, 90, 150) : myRED);
     dma_display->printf("%02d:", hour);
     dma_display->print(chr_t_minute);
     dma_display->print(":");
@@ -348,51 +384,54 @@ void displayClock() {
     dma_display->printf("%s", amPm);
 }
 
-void displayDate() {
+void displayDate()
+{
     dma_display->fillRect(0, 17, 64, 7, myBLACK);
     dma_display->setCursor(0, 17);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(70,70,130) : myCYAN);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
     dma_display->printf("%s %s.%s.%s", daysOfTheWeek[d_daysOfTheWeek], chr_d_month, chr_d_day, chr_d_year + 2);
 }
 
-void displayWeatherData() {
+void displayWeatherData()
+{
     drawWeatherIcon(str_Weather_Icon);
     dma_display->fillRect(18, 0, 46, 7, myBLACK);
     dma_display->setCursor(18, 0);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(110,110,180) : myYELLOW);
- //   dma_display->print(customRoundString(str_Temp.c_str()));  
-    dma_display->print( fmtTemp( atof(str_Temp.c_str()), 0)); 
-//    dma_display->print(useImperial ? " °F" : " °C");
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
+    //   dma_display->print(customRoundString(str_Temp.c_str()));
+    dma_display->print(fmtTemp(atof(str_Temp.c_str()), 0));
+    //    dma_display->print(useImperial ? " °F" : " °C");
     dma_display->setCursor(44, 0);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(70,70,130) : myCYAN);
+    dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
     dma_display->print(str_Humd);
     dma_display->print("%");
 }
 
-void createScrollingText() {
- //   String unitT = useImperial ? " °F" : " °C";
- //   String unitW = useImperial ? "mph" : "m/s";
+void createScrollingText()
+{
+    //   String unitT = useImperial ? " °F" : " °C";
+    //   String unitW = useImperial ? "mph" : "m/s";
 
     scrolling_Text =
         "City: " + str_City + " ¦ " +
         "Weather: " + str_Weather_Conditions_Des + " ¦ " +
-        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) +  " ¦ " +
-        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) +  "  ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) +  " ¦ " +
+        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) + " ¦ " +
+        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) + "  ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) + " ¦ " +
         "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " ¦ " +
-        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) +  " ¦ ";
+        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) + " ¦ ";
 
-    scrolling_Text_Color = (theme == 1) ? dma_display->color565(60,60,120) : myGREEN;
+    scrolling_Text_Color = (theme == 1) ? dma_display->color565(60, 60, 120) : myGREEN;
     text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
 }
 
-
-
 // --- Scroll state variables for weather ---
-void scrollWeatherDetails() {
+void scrollWeatherDetails()
+{
     static unsigned long lastScrollTime = 0;
     static int scrollOffset = 0;
 
-    if (!start_Scroll_Text) {
+    if (!start_Scroll_Text)
+    {
         String unitT = useImperial ? "°F" : "°C";
         String unitW = useImperial ? "mph" : "m/s";
         scrollOffset = 0;
@@ -400,14 +439,18 @@ void scrollWeatherDetails() {
     }
 
     // Use same timing as InfoModal
-    if (millis() - lastScrollTime > scrollSpeed) {
+    if (millis() - lastScrollTime > scrollSpeed)
+    {
         lastScrollTime = millis();
 
-        if (text_Length_In_Pixel > PANEL_RES_X) {
+        if (text_Length_In_Pixel > PANEL_RES_X)
+        {
             scrollOffset++;
             if (scrollOffset > text_Length_In_Pixel)
                 scrollOffset = -PANEL_RES_X; // restart
-        } else {
+        }
+        else
+        {
             scrollOffset = 0;
         }
 
@@ -424,32 +467,31 @@ void drawSunIcon(int x, int y, uint16_t color)
     int cx = x + 3;
     int cy = y + 3;
 
-    dma_display->drawLine(x + 3, y, x + 3, y + 6, color);  // Vertiacal
-    dma_display->drawLine(x, y + 3, x + 6, y + 3, color); // Horizontal
-    dma_display->drawLine(x + 1, y + 1, x + 5, y + 5, color);   // diagonal 
-    dma_display->drawLine(x + 5, y + 1, x + 1, y + 5, color);   // diagonal 
+    dma_display->drawLine(x + 3, y, x + 3, y + 6, color);     // Vertiacal
+    dma_display->drawLine(x, y + 3, x + 6, y + 3, color);     // Horizontal
+    dma_display->drawLine(x + 1, y + 1, x + 5, y + 5, color); // diagonal
+    dma_display->drawLine(x + 5, y + 1, x + 1, y + 5, color); // diagonal
 
+    /*
+        dma_display->fillCircle(cx, cy, 1, color);   // center
 
-/*
-    dma_display->fillCircle(cx, cy, 1, color);   // center
+        // main rays
+        dma_display->drawPixel(cx, cy - 3, color);
+        dma_display->drawPixel(cx, cy + 3, color);
+        dma_display->drawPixel(cx - 3, cy, color);
+        dma_display->drawPixel(cx + 3, cy, color);
 
-    // main rays
-    dma_display->drawPixel(cx, cy - 3, color);
-    dma_display->drawPixel(cx, cy + 3, color);
-    dma_display->drawPixel(cx - 3, cy, color);
-    dma_display->drawPixel(cx + 3, cy, color);
+        dma_display->drawPixel(x + 2, y + 2, color);
+        dma_display->drawPixel(x + 4, y + 2, color);
+        dma_display->drawPixel(x + 2, y + 4, color);
+        dma_display->drawPixel(x + 4, y + 4, color);
 
-    dma_display->drawPixel(x + 2, y + 2, color);
-    dma_display->drawPixel(x + 4, y + 2, color);
-    dma_display->drawPixel(x + 2, y + 4, color);
-    dma_display->drawPixel(x + 4, y + 4, color);
-
-    // diagonal rays
-    dma_display->drawPixel(cx - 2, cy - 2, color);
-    dma_display->drawPixel(cx + 2, cy - 2, color);
-    dma_display->drawPixel(cx - 2, cy + 2, color);
-    dma_display->drawPixel(cx + 2, cy + 2, color);
-    */
+        // diagonal rays
+        dma_display->drawPixel(cx - 2, cy - 2, color);
+        dma_display->drawPixel(cx + 2, cy - 2, color);
+        dma_display->drawPixel(cx - 2, cy + 2, color);
+        dma_display->drawPixel(cx + 2, cy + 2, color);
+        */
 }
 
 void drawHouseIcon(int x, int y, uint16_t color)
@@ -458,9 +500,8 @@ void drawHouseIcon(int x, int y, uint16_t color)
     // Roof
     dma_display->drawPixel(x + 4, 0, color);
     dma_display->drawLine(x + 2, y + 2, x + 6, y + 2, color);
-    dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color);  // roof base
-    dma_display->drawLine(x + 3, y + 1, x + 5, y + 1, color);  // left slope
-
+    dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color); // roof base
+    dma_display->drawLine(x + 3, y + 1, x + 5, y + 1, color); // left slope
 
     // Walls
     dma_display->drawRect(x + 2, y + 4, 5, 3, color);
@@ -474,37 +515,48 @@ void drawWiFiIcon(int x, int y, uint16_t color)
     // Simple 7x5 Wi-Fi signal icon
     // (x,y) = top-left corner of the icon
     // three arcs + small dot
-    dma_display->drawPixel(x + 3, y + 4, color); // bottom dot
+    dma_display->drawPixel(x + 3, y + 4, color);              // bottom dot
     dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, color); // small arc
     dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color); // mid arc
     dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, color); // top arc
     dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, color); // support bar
 }
 
-void drawClockScreen() {
+void drawClockScreen()
+{
 
     dma_display->fillScreen(0);
 
     DateTime now;
-    if (rtcReady) {
+    if (rtcReady)
+    {
         DateTime utcNow = rtc.now();
         now = utcToLocal(utcNow);
-    } else if (!getLocalDateTime(now)) {
+    }
+    else if (!getLocalDateTime(now))
+    {
         now = DateTime(2000, 1, 1, 0, 0, 0);
     }
     int hour = now.hour(), minute = now.minute(), second = now.second();
 
     // 12h/24h handling
     bool isPM = false;
-    if (!units.clock24h) {
-        if (hour == 0) hour = 12;
-        else if (hour >= 12) { if (hour > 12) hour -= 12; isPM = true; }
+    if (!units.clock24h)
+    {
+        if (hour == 0)
+            hour = 12;
+        else if (hour >= 12)
+        {
+            if (hour > 12)
+                hour -= 12;
+            isPM = true;
+        }
     }
 
     char timeStr[6]; // "HH:MM"
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
 
-    const char *days[] = {"Sun","Mon","Tue","Wed","Thu","Fri","Sat"};
+    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     char dateStr[14];
     snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d",
              days[now.dayOfTheWeek()], now.month(), now.day());
@@ -512,37 +564,51 @@ void drawClockScreen() {
     // ---- TIME (big Verdana Bold)
     dma_display->setFont(&verdanab8pt7b);
     dma_display->setTextSize(1);
-    uint16_t timeColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(255,255,80);
+    uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                      : dma_display->color565(255, 255, 80);
     dma_display->setTextColor(timeColor);
 
     int timeW = getTextWidth(timeStr);
-    int16_t x1, y1; uint16_t w, h;
+    int16_t x1, y1;
+    uint16_t w, h;
     dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
     int timeH = h;
 
     int ampmW = 0;
-    if (!units.clock24h) ampmW = getTextWidth(isPM ? "PM" : "AM");
+    if (!units.clock24h)
+        ampmW = getTextWidth(isPM ? "PM" : "AM");
     int totalW = timeW + (ampmW ? ampmW + 2 : 0);
     int boxX = (64 - totalW) / 2;
-    if (boxX < 0) boxX = 0;
+
+    // Shift slightly left when 24-hour mode (to balance space)
+    if (units.clock24h)
+        boxX -= 3;
+
+    if (boxX < 0)
+        boxX = 0;
+
     int boxY = (32 - timeH) / 2;
+
 
     dma_display->setCursor(boxX, boxY + timeH - 1);
     dma_display->print(timeStr);
 
-
-
     // --- draw AM/PM inline
-    if (!units.clock24h) {
+    if (!units.clock24h)
+    {
         String ampmStr = isPM ? "PM" : "AM";
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
-        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                          : dma_display->color565(255,255,200);
-        dma_display->setTextColor(ampmColor);
+        
 
-        int16_t x1,y1; uint16_t w,h;
+
+        /*
+        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                          : dma_display->color565(255, 255, 200);
+        dma_display->setTextColor(ampmColor);
+*/
+        int16_t x1, y1;
+        uint16_t w, h;
         dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
         int digitH = h;
         dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
@@ -551,36 +617,62 @@ void drawClockScreen() {
         int ampmX = 64 - ampmW - 1;
         int ampmY = boxY + digitH - (digitH - ampmH) - 1;
         ampmY -= 1;
- //       if (!isPM) ampmY -= 6;
- //       ampmY -= 1;
-
-        uint16_t bgColor = (theme == 1) ? dma_display->color565(20,20,40)
-                                        : dma_display->color565(40,40,40);
+        //       if (!isPM) ampmY -= 6;
+        //       ampmY -= 1;
+/*
+        uint16_t bgColor = (theme == 1) ? dma_display->color565(20, 20, 40)
+                                        : dma_display->color565(40, 40, 40);
         dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
+*/
+
+        uint16_t ampmColor, bgColor;
+
+        if (theme == 1) {
+            // Mono theme: both AM/PM are dim gray-blue
+            ampmColor = dma_display->color565(100, 100, 140);
+            bgColor   = dma_display->color565(20, 20, 40);
+        }
+        else {
+            if (isPM) {
+                // Evening / night → warm amber on darker background
+                ampmColor = dma_display->color565(255, 170, 60);   // warm orange-gold text
+                bgColor   = dma_display->color565(50, 30, 0);      // dusk background
+            } else {
+                // Morning / day → cool blue on soft gray background
+                ampmColor = dma_display->color565(100, 200, 255);  // light sky-blue text
+                bgColor   = dma_display->color565(10, 30, 50);     // early-morning gray-blue
+            }
+        }
+
+        dma_display->setTextColor(ampmColor);
+        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
+
 
         dma_display->setCursor(ampmX, ampmY);
         dma_display->print(ampmStr);
-
-            // ---- Draw Wi-Fi icon if connected ----
-        if (WiFi.status() == WL_CONNECTED) {
-            // Position the Wi-Fi icon just above AM/PM
-
-            int wifiX = ampmX + 5;   // just after time text
-            int wifiY = ampmY - 8;        // above AM/PM
-            uint16_t wifiColor = (theme == 1)
-                ? dma_display->color565(90, 90, 120)    // dim gray for mono
-                : dma_display->color565(100, 255, 120); // soft green for color
-            drawWiFiIcon(wifiX, wifiY, wifiColor);
     }
+    // ---- Draw Wi-Fi icon if connected ----
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        // Position the Wi-Fi icon just above AM/PM
 
+        int wifiX = 57;
+        int wifiY = 7;
+        /*
+                    int wifiX = ampmX + 5;   // just after time text
+                    int wifiY = ampmY - 8;        // above AM/PM
+        */
 
+        uint16_t wifiColor = (theme == 1)
+                                 ? dma_display->color565(90, 90, 120)    // dim gray for mono
+                                 : dma_display->color565(100, 255, 120); // soft green for color
+        drawWiFiIcon(wifiX, wifiY, wifiColor);
     }
-
     // ---- DATE ----
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
-    uint16_t dateColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(150,200,255);
+    uint16_t dateColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                      : dma_display->color565(150, 200, 255);
     dma_display->setTextColor(dateColor);
     dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
     int dateX = (64 - (int)w) / 2;
@@ -591,12 +683,13 @@ void drawClockScreen() {
     // ---- TEMPERATURES ----
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
-    uint16_t tempColor = (theme == 1) ? dma_display->color565(60,60,120)
-                                      : dma_display->color565(200,200,255);
+    uint16_t tempColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                      : dma_display->color565(200, 200, 255);
     dma_display->setTextColor(tempColor);
-    if (tempest.temperature == 0.0) tempest.temperature = NAN;  
-    String udpTempStr = fmtTemp(tempest.temperature, 0);  // Outside
-    String localTempStr = fmtTemp(SCD40_temp, 0);         // Inside
+    if (tempest.temperature == 0.0)
+        tempest.temperature = NAN;
+    String udpTempStr = fmtTemp(tempest.temperature, 0); // Outside
+    String localTempStr = fmtTemp(SCD40_temp, 0);        // Inside
 
     // OUTSIDE TEMP (left)
     dma_display->setCursor(0, 0);
@@ -606,9 +699,10 @@ void drawClockScreen() {
     dma_display->getTextBounds(udpTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
     int sunX = w + 1;
     int sunY = 0;
+// --- Outdoor (Sun) color ---
     uint16_t sunColor = (theme == 1)
-        ? dma_display->color565(90,90,120)
-        : dma_display->color565(255,220,100);
+        ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
+        : dma_display->color565(255, 200, 60);    // bright golden yellow
     drawSunIcon(sunX, sunY, sunColor);
 
     // Draw house icon to the left of inside temperature
@@ -617,51 +711,51 @@ void drawClockScreen() {
     int localY = 0;
     int houseX = localX - 9;
     int houseY = 0;
+    // --- Indoor (House) color ---
     uint16_t houseColor = (theme == 1)
-        ? dma_display->color565(90,90,120)
-        : dma_display->color565(255,150,100);
+        ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
+        : dma_display->color565(100, 180, 255);   // cool sky blue for indoor comfort
     drawHouseIcon(houseX, houseY, houseColor);
-
-
 
     dma_display->setCursor(localX, localY);
     dma_display->print(localTempStr);
 
     // ---- Seconds pulse ----
     uint16_t pulseColor = (second % 2 == 0)
-        ? dma_display->color565(0,150,0)
-        : dma_display->color565(0,60,0);
+                              ? dma_display->color565(0, 150, 0)
+                              : dma_display->color565(0, 60, 0);
     dma_display->fillCircle(62, 30, 1, pulseColor);
 }
 
-
 // Public helpers
-void requestScrollRebuild() {
-  needScrollRebuild = true;
+void requestScrollRebuild()
+{
+    needScrollRebuild = true;
 }
 
-void notifyUnitsMaybeChanged() {
-  const uint16_t sig = unitSignature();
-  if (sig != lastUnitSig) {
-    lastUnitSig = sig;
-    needScrollRebuild = true;
-  }
+void notifyUnitsMaybeChanged()
+{
+    const uint16_t sig = unitSignature();
+    if (sig != lastUnitSig)
+    {
+        lastUnitSig = sig;
+        needScrollRebuild = true;
+    }
 }
 
 // Call this frequently; it only rebuilds when needed.
-void serviceScrollRebuild() {
-  if (!needScrollRebuild) return;
+void serviceScrollRebuild()
+{
+    if (!needScrollRebuild)
+        return;
 
-  // Rebuild the line using the latest units + data
-  createScrollingText();
+    // Rebuild the line using the latest units + data
+    createScrollingText();
 
-  // Reset marquee state so it restarts smoothly
-  start_Scroll_Text = false;
-  set_up_Scrolling_Text_Length = true;
-  text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
+    // Reset marquee state so it restarts smoothly
+    start_Scroll_Text = false;
+    set_up_Scrolling_Text_Length = true;
+    text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
 
-  needScrollRebuild = false;
+    needScrollRebuild = false;
 }
-
-
-

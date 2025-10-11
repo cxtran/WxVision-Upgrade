@@ -255,7 +255,7 @@ void handleIR(uint32_t code)
                     saveDeviceSettings();
                     connectToWiFi();
                 }
-                drawMenu(); });
+                drawMenu(); },"Enter Pwd:");
             playBuzzerTone(2200, 120);
             return;
         }
