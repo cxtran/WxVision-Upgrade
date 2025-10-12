@@ -36,7 +36,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal;
+extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal, unitSettingsModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
@@ -688,6 +688,13 @@ void loop()
     {
         displayModal.tick();
         displayModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (unitSettingsModal.isActive())
+    {
+        unitSettingsModal.tick();
+        unitSettingsModal.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }

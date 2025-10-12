@@ -102,32 +102,6 @@ static long currentEpoch()
   }
   return (long)now.unixtime();
 }
-// --- Simple timezone list ---
-struct TzItem
-{
-  const char *id;
-  const char *city;
-  int offsetMin;
-};
-static const TzItem kTimezones[] PROGMEM = {
-    {"Pacific/Honolulu", "Honolulu", -600}, {"America/Anchorage", "Anchorage", -540}, {"America/Los_Angeles", "Los Angeles", -480}, {"America/Denver", "Denver", -420}, {"America/Chicago", "Chicago", -360}, {"America/New_York", "New York", -300}, {"America/Halifax", "Halifax", -240}, {"America/St_Johns", "St. John's", -210}, {"America/Sao_Paulo", "Sao Paulo", -180}, {"Atlantic/Azores", "Azores", -60}, {"UTC", "UTC", 0}, {"Europe/London", "London", 0}, {"Europe/Berlin", "Berlin", 60}, {"Europe/Athens", "Athens", 120}, {"Europe/Moscow", "Moscow", 180}, {"Asia/Dubai", "Dubai", 240}, {"Asia/Karachi", "Karachi", 300}, {"Asia/Kolkata", "Mumbai/Delhi", 330}, {"Asia/Dhaka", "Dhaka", 360}, {"Asia/Bangkok", "Bangkok", 420}, {"Asia/Hong_Kong", "Hong Kong", 480}, {"Asia/Tokyo", "Tokyo", 540}, {"Australia/Adelaide", "Adelaide", 570}, {"Australia/Sydney", "Sydney", 600}, {"Pacific/Noumea", "Noumea", 660}, {"Pacific/Auckland", "Auckland", 720}};
-static const size_t kTimezoneCount = sizeof(kTimezones) / sizeof(kTimezones[0]);
-
-static String fmtUtcLabel(int offsetMin)
-{
-  char buf[16];
-  int m = abs(offsetMin), h = m / 60, mi = m % 60;
-  snprintf(buf, sizeof(buf), "UTC%s%02d:%02d", (offsetMin >= 0 ? "+" : "-"), h, mi);
-  return String(buf);
-}
-static const char *tzNameFromOffset(int offsetMin)
-{
-  for (size_t i = 0; i < kTimezoneCount; i++)
-    if (kTimezones[i].offsetMin == offsetMin)
-      return kTimezones[i].id;
-  return "Custom";
-}
-
 void setupWebServer() {
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS Mount Failed!");
@@ -319,12 +293,16 @@ void setupWebServer() {
   server.on("/timezones.json", HTTP_GET, [](AsyncWebServerRequest* req){
     JsonDocument doc;
     JsonArray arr = doc.to<JsonArray>();
-    for (size_t i=0;i<kTimezoneCount;i++) {
+    size_t count = timezoneCount();
+    for (size_t i = 0; i < count; ++i) {
+      const TimezoneInfo& info = timezoneInfoAt(i);
       JsonObject o = arr.add<JsonObject>();
-      o["id"]     = kTimezones[i].id;
-      o["city"]   = kTimezones[i].city;
-      o["offset"] = kTimezones[i].offsetMin;
-      o["label"]  = String(kTimezones[i].city) + " (" + fmtUtcLabel(kTimezones[i].offsetMin) + ")";
+      o["id"]        = info.id;
+      o["city"]      = info.city;
+      o["country"]   = info.country;
+      o["offset"]    = info.offsetMinutes;
+      o["label"]     = timezoneLabelAt(i);
+      o["supportsDst"] = timezoneSupportsDst(i);
     }
     String out; serializeJson(doc, out);
     req->send(200, "application/json", out);
@@ -334,7 +312,21 @@ void setupWebServer() {
     JsonDocument doc;
     doc["epoch"]     = (long)currentEpoch();  // <- RTC
     doc["tzOffset"]  = tzOffset;
-    doc["tzName"]    = tzNameFromOffset(tzOffset);
+    doc["tzStdOffset"] = tzStandardOffset;
+    doc["tzName"]    = timezoneIsCustom() ? "" : currentTimezoneId();
+    doc["tzAutoDst"] = tzAutoDst;
+    int currentIdx = timezoneCurrentIndex();
+    bool hasSelection = currentIdx >= 0;
+    if (hasSelection)
+    {
+      doc["tzLabel"] = timezoneLabelAt(static_cast<size_t>(currentIdx));
+      doc["tzSupportsDst"] = timezoneSupportsDst(static_cast<size_t>(currentIdx));
+    }
+    else
+    {
+      doc["tzLabel"] = "Custom Offset";
+      doc["tzSupportsDst"] = false;
+    }
     doc["dateFmt"]   = dateFmt;
     doc["ntpServer"] = ntpServerHost;
     doc["ntpPreset"] = ntpServerPreset;
@@ -361,18 +353,40 @@ void setupWebServer() {
         }
         delete body; req->_tempObject = nullptr;
 
+        bool timezoneUpdated = false;
         if (doc.containsKey("tzName")) {
           String tz = doc["tzName"].as<String>();
-          bool found = false;
-          for (size_t i=0;i<kTimezoneCount;i++) {
-            if (tz.equalsIgnoreCase(kTimezones[i].id) || tz.equalsIgnoreCase(kTimezones[i].city)) {
-              tzOffset = kTimezones[i].offsetMin;
-              found = true; break;
+          tz.trim();
+          if (tz.length() > 0) {
+            int idx = timezoneIndexFromId(tz.c_str());
+            if (idx < 0) {
+              for (size_t i = 0; i < timezoneCount(); ++i) {
+                const TimezoneInfo& info = timezoneInfoAt(i);
+                if (tz.equalsIgnoreCase(info.city)) {
+                  idx = static_cast<int>(i);
+                  break;
+                }
+              }
+            }
+            if (idx >= 0) {
+              selectTimezoneByIndex(idx);
+              timezoneUpdated = true;
             }
           }
-          if (!found && doc.containsKey("tzOffset")) tzOffset = (int)doc["tzOffset"].as<int>();
-        } else if (doc.containsKey("tzOffset")) {
-          tzOffset = (int)doc["tzOffset"].as<int>();
+        }
+        if (!timezoneUpdated && doc.containsKey("tzOffset")) {
+          int offset = doc["tzOffset"].as<int>();
+          setCustomTimezoneOffset(offset);
+          timezoneUpdated = true;
+        }
+
+        if (doc.containsKey("tzAutoDst"))
+        {
+          setTimezoneAutoDst(doc["tzAutoDst"].as<bool>());
+        }
+        else if (doc.containsKey("autoDst"))
+        {
+          setTimezoneAutoDst(doc["autoDst"].as<bool>());
         }
 
         if (doc.containsKey("dateFmt")) dateFmt = (int)doc["dateFmt"].as<int>();

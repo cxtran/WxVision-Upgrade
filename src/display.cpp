@@ -759,3 +759,9 @@ void serviceScrollRebuild()
 
     needScrollRebuild = false;
 }
+
+void applyUnitPreferences()
+{
+    useImperial = (units.temp == TempUnit::F);
+    notifyUnitsMaybeChanged();
+}

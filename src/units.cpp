@@ -1,5 +1,6 @@
 #include "units.h"
 #include <Preferences.h>
+#include "display.h"
 
 UnitPrefs units;                 // the global
 static Preferences u_prefs;
@@ -30,6 +31,7 @@ void saveUnits() {
   u_prefs.putUChar(K_PREC,  static_cast<uint8_t>(units.precip));
   u_prefs.putBool (K_24H,   units.clock24h);
   u_prefs.end();
+  applyUnitPreferences();
 }
 
 // ---- formatters (cast dp to unsigned int so the right String ctor is chosen) ----

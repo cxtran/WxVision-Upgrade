@@ -50,6 +50,7 @@ InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
+InfoModal unitSettingsModal("Units");
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -98,7 +99,7 @@ extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
 extern String customMsg;
-extern int fmt24, dateFmt, tzOffset;
+extern int fmt24, dateFmt;
 extern void handleInitialSetupDecision(bool wantsWiFi);
 extern bool initialSetupAwaitingWifi;
 /*
@@ -119,10 +120,13 @@ void pushMenu(MenuLevel newMenu)
 void updateMenu() { drawMenu(); }
 // Date/time modal working variables
 int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
-int dtTimezone;
+int dtTimezoneIndex;
+int dtManualOffset;
 int dtFmt24;
 int dtDateFmt;
 int dtNtpPreset;
+int dtAutoDst;
+int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
 
 const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
@@ -135,7 +139,7 @@ const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "
 const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
@@ -172,6 +176,11 @@ void handleIR(uint32_t code)
     if (dateModal.isActive())
     {
         dateModal.handleIR(code);
+        return;
+    }
+    if (unitSettingsModal.isActive())
+    {
+        unitSettingsModal.handleIR(code);
         return;
     }
     if (mainMenuModal.isActive())
@@ -613,6 +622,7 @@ void showSystemModal()
     String labels[] = {
         "Show System Info",
         "Set Date & Time",
+        "Unit Settings",
         "WiFi Signal Test",
         "Quick Restore",
         "Reset Power",
@@ -620,25 +630,64 @@ void showSystemModal()
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
-    systemModal.setLines(labels, types, 7);
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+    systemModal.setLines(labels, types, 8);
     systemModal.setCallback([](bool accepted, int btnIdx)
                             {
-        int sel = systemModal.getSelIndex();
-        if (accepted && btnIdx >= 0) {
-            switch (sel) {
-                case 0: showSystemInfoScreen(); return;
-                case 1: showDateTimeModal();    return;
-                case 2: showWiFiSignalTest();   return;
-                case 3: quickRestore();         break;
-                case 4: resetPowerUsage();      break;
-                case 5: factoryReset();         break;
-                case 6: ESP.restart();          break;
+        int action = -1;
+        if (btnIdx >= 0)
+        {
+            action = btnIdx;
+        }
+        else if (accepted)
+        {
+            action = systemModal.getSelIndex();
+        }
+
+        if (action >= 0)
+        {
+            switch (action)
+            {
+            case 0:
+                systemModal.hide();
+                showSystemInfoScreen();
+                return;
+            case 1:
+                systemModal.hide();
+                showDateTimeModal();
+                return;
+            case 2:
+                systemModal.hide();
+                pendingModalFn = showUnitSettingsModal;
+                pendingModalTime = millis();
+                return;
+            case 3:
+                systemModal.hide();
+                showWiFiSignalTest();
+                return;
+            case 4:
+                systemModal.hide();
+                quickRestore();
+                break;
+            case 5:
+                systemModal.hide();
+                resetPowerUsage();
+                break;
+            case 6:
+                systemModal.hide();
+                factoryReset();
+                break;
+            case 7:
+                systemModal.hide();
+                ESP.restart();
+                return;
+            default:
+                break;
             }
         }
         // Always return to main menu after hiding systemModal
         systemModal.hide();
-         menuStack.clear(); 
+        menuStack.clear();
         currentMenuLevel = MENU_MAIN;
         menuActive = true;
         showMainMenuModal(); });
@@ -965,6 +1014,7 @@ void showSystemInfoScreen()
     sysInfoModal.show();
 }
 
+
 void showDateTimeModal()
 {
     if (currentMenuLevel != MENU_NONE)
@@ -984,7 +1034,26 @@ void showDateTimeModal()
     dtHour = now.hour();
     dtMinute = now.minute();
     dtSecond = now.second();
-    dtTimezone = tzOffset;
+
+    size_t tzCount = timezoneCount();
+    if (tzCount > 31)
+        tzCount = 31;
+
+    int currentIndex = timezoneCurrentIndex();
+    dtManualOffset = tzStandardOffset;
+    dtAutoDst = tzAutoDst ? 1 : 0;
+    if (currentIndex >= 0 && currentIndex < static_cast<int>(tzCount))
+    {
+        dtTimezoneIndex = currentIndex;
+        dtManualOffset = timezoneInfoAt(currentIndex).offsetMinutes;
+    }
+    else
+    {
+        dtTimezoneIndex = static_cast<int>(tzCount);
+        dtAutoDst = 0;
+    }
+    dtManualOffset = constrain(dtManualOffset, -720, 840);
+
     dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
     dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
 
@@ -1002,35 +1071,47 @@ void showDateTimeModal()
     static const char *const ntpPresetOptions[] = {
         ntpPresetHost(0), ntpPresetHost(1), ntpPresetHost(2), "Custom"};
 
+    static const char *timezoneOptions[32];
+    size_t tzOptCount = tzCount;
+    for (size_t i = 0; i < tzOptCount; ++i)
+    {
+        timezoneOptions[i] = timezoneLabelAt(i);
+    }
+    timezoneOptions[tzOptCount] = "Custom Offset";
+    int timezoneChooserCount = static_cast<int>(tzOptCount) + 1;
+
+    static const char *fmt24Opts[] = {"12h", "24h"};
+    static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
+    static const char *autoDstOpts[] = {"Off", "On"};
+
     String lines[] = {"Year", "Month", "Day", "Hour", "Minute", "Second",
-                      "TimeZone", "TimeFmt", "DateFmt",
+                      "Timezone", "Manual Offset (min)", "Auto DST",
+                      "Time Format", "Date Format",
                       "NTP Preset", "NTP Server", "Sync NTP"};
-    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber,
-                             InfoNumber, InfoNumber, InfoNumber,
+    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
+                             InfoChooser, InfoNumber, InfoChooser,
                              InfoChooser, InfoChooser,
                              InfoChooser, InfoText, InfoButton};
 
     int *intRefs[] = {&dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute,
-                      &dtSecond, &dtTimezone};
-    int *chooserRefs[] = {&dtFmt24, &dtDateFmt, &dtNtpPreset};
-    static const char *fmt24Opts[] = {"12h", "24h"};
-    static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
-    static const char *const *chooserOptPtrs[] = {fmt24Opts, dateFmtOpts, ntpPresetOptions};
-    int chooserOptCounts[] = {2, 3, NTP_PRESET_CUSTOM + 1};
+                      &dtSecond, &dtManualOffset};
+    int *chooserRefs[] = {&dtTimezoneIndex, &dtAutoDst, &dtFmt24, &dtDateFmt, &dtNtpPreset};
+    const char *const *chooserOptPtrs[] = {timezoneOptions, autoDstOpts, fmt24Opts, dateFmtOpts, ntpPresetOptions};
+    int chooserOptCounts[] = {timezoneChooserCount, 2, 2, 3, NTP_PRESET_CUSTOM + 1};
     char *textRefs[] = {ntpServerBuf};
     int textSizes[] = {64};
 
-    dateModal.setLines(lines, types, 12);
-    dateModal.setValueRefs(intRefs, 7, chooserRefs, 3,
+    dateModal.setLines(lines, types, 14);
+    dateModal.setValueRefs(intRefs, 7, chooserRefs, 5,
                            chooserOptPtrs, chooserOptCounts,
                            textRefs, 1, textSizes);
 
-    dateModal.setCallback([](bool accepted, int btnIdx)
+    dateModal.setCallback([](bool accepted, int /*btnIdx*/)
     {
         int sel = dateModal.getSelIndex();
+        constexpr int kSyncButtonIndex = 13;
 
-        // --- Sync NTP button ---
-        if (sel == 11) {
+        if (sel == kSyncButtonIndex) {
             dateModal.hide();
             dma_display->fillScreen(0);
             dma_display->setCursor(8, 12);
@@ -1063,19 +1144,36 @@ void showDateTimeModal()
             return;
         }
 
-        // --- Apply constraints ---
         dtMonth = constrain(dtMonth, 1, 12);
         dtDay = constrain(dtDay, 1, 31);
         dtHour = constrain(dtHour, 0, 23);
         dtMinute = constrain(dtMinute, 0, 59);
         dtSecond = constrain(dtSecond, 0, 59);
         dtYear = constrain(dtYear, 2000, 2099);
-        dtTimezone = constrain(dtTimezone, -720, 840);
+        dtManualOffset = constrain(dtManualOffset, -720, 840);
+
+        int tzCountInt = static_cast<int>(timezoneCount());
+        if (tzCountInt > 31)
+            tzCountInt = 31;
+        dtTimezoneIndex = constrain(dtTimezoneIndex, 0, tzCountInt);
+        bool useCustomTz = (dtTimezoneIndex == tzCountInt);
+
+        if (useCustomTz)
+        {
+            setCustomTimezoneOffset(dtManualOffset);
+            dtAutoDst = 0;
+        }
+        else
+        {
+            selectTimezoneByIndex(dtTimezoneIndex);
+            setTimezoneAutoDst(dtAutoDst != 0);
+            dtManualOffset = tzStandardOffset;
+        }
 
         DateTime manualLocal(dtYear, dtMonth, dtDay,
                              dtHour, dtMinute, dtSecond);
-        tzOffset = dtTimezone;
-        DateTime manualUtc = localToUtc(manualLocal);
+        int effectiveOffset = timezoneOffsetForLocal(manualLocal);
+        DateTime manualUtc = localToUtc(manualLocal, effectiveOffset);
 
         if (!rtcReady)
             rtcReady = rtc.begin();
@@ -1085,11 +1183,11 @@ void showDateTimeModal()
             Serial.println("[RTC] Module not available; system clock updated only");
 
         setSystemTimeFromDateTime(manualUtc);
+        updateTimezoneOffsetWithUtc(manualUtc);
 
-        // --- Save and refresh ---
         bool formatChanged = (fmt24 != dtFmt24);
         fmt24 = dtFmt24;
-        units.clock24h = (fmt24 == 1);   // ✅ keep consistent with web.cpp
+        units.clock24h = (fmt24 == 1);
         dateFmt = dtDateFmt;
         ntpServerPreset = dtNtpPreset;
 
@@ -1108,12 +1206,12 @@ void showDateTimeModal()
         }
 
         saveDateTimeSettings();
-        saveAllSettings();   // ✅ mirror web.cpp persistence
+        saveAllSettings();
 
         if (formatChanged) {
             reset_Time_and_Date_Display = true;
             dma_display->clearScreen();
-            drawClockScreen();      // ✅ live update, like web
+            drawClockScreen();
             displayDate();
             displayWeatherData();
         }
@@ -1122,6 +1220,110 @@ void showDateTimeModal()
     });
 
     dateModal.show();
+}
+
+void showUnitSettingsModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+        pushMenu(currentMenuLevel);
+    currentMenuLevel = MENU_SYSUNITS;
+    menuActive = true;
+
+    unitTempSel = (units.temp == TempUnit::F) ? 1 : 0;
+    unitPressSel = (units.press == PressUnit::INHG) ? 1 : 0;
+    unitClockSel = units.clock24h ? 1 : 0;
+    switch (units.wind)
+    {
+    case WindUnit::MPH:
+        unitWindSel = 1;
+        break;
+    case WindUnit::KTS:
+        unitWindSel = 2;
+        break;
+    case WindUnit::KPH:
+        unitWindSel = 3;
+        break;
+    default:
+        unitWindSel = 0;
+        break;
+    }
+    unitPrecipSel = (units.precip == PrecipUnit::INCH) ? 1 : 0;
+
+    static const char *tempOpts[] = {"Celsius", "Fahrenheit"};
+    static const char *pressOpts[] = {"hPa", "inHg"};
+    static const char *clockOpts[] = {"12h", "24h"};
+    static const char *windOpts[] = {"m/s", "mph", "knots", "km/h"};
+    static const char *precipOpts[] = {"mm", "inches"};
+
+    String labels[] = {"Temperature", "Pressure", "Clock Format", "Wind Speed", "Precipitation"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
+    int *chooserRefs[] = {&unitTempSel, &unitPressSel, &unitClockSel, &unitWindSel, &unitPrecipSel};
+    const char *const *chooserOpts[] = {tempOpts, pressOpts, clockOpts, windOpts, precipOpts};
+    int chooserCounts[] = {2, 2, 2, 4, 2};
+
+    unitSettingsModal.setLines(labels, types, 5);
+    unitSettingsModal.setValueRefs(nullptr, 0, chooserRefs, 5, chooserOpts, chooserCounts);
+
+    unitSettingsModal.setCallback([](bool /*accepted*/, int)
+    {
+        unitTempSel = constrain(unitTempSel, 0, 1);
+        unitPressSel = constrain(unitPressSel, 0, 1);
+        unitClockSel = constrain(unitClockSel, 0, 1);
+        unitWindSel = constrain(unitWindSel, 0, 3);
+        unitPrecipSel = constrain(unitPrecipSel, 0, 1);
+
+        uint16_t prevSig = unitSignature();
+        int prevFmt24 = fmt24;
+
+        units.temp = (unitTempSel == 1) ? TempUnit::F : TempUnit::C;
+        units.press = (unitPressSel == 1) ? PressUnit::INHG : PressUnit::HPA;
+        fmt24 = (unitClockSel == 1) ? 1 : 0;
+        units.clock24h = (fmt24 == 1);
+        switch (unitWindSel)
+        {
+        case 1:
+            units.wind = WindUnit::MPH;
+            break;
+        case 2:
+            units.wind = WindUnit::KTS;
+            break;
+        case 3:
+            units.wind = WindUnit::KPH;
+            break;
+        default:
+            units.wind = WindUnit::MPS;
+            break;
+        }
+        units.precip = (unitPrecipSel == 1) ? PrecipUnit::INCH : PrecipUnit::MM;
+
+        uint16_t newSig = unitSignature();
+
+        applyUnitPreferences();
+        saveUnits();
+        saveDateTimeSettings();
+
+        bool clockChanged = (prevFmt24 != fmt24);
+        bool signatureChanged = (newSig != prevSig);
+
+        if (signatureChanged)
+        {
+            displayWeatherData();
+            requestScrollRebuild();
+            serviceScrollRebuild();
+            fetchWeatherFromOWM();
+        }
+        if (clockChanged)
+        {
+            reset_Time_and_Date_Display = true;
+            displayClock();
+            displayDate();
+        }
+
+        unitSettingsModal.hide();
+        currentMenuLevel = MENU_SYSTEM;
+    });
+
+    unitSettingsModal.show();
 }
 
 void handleScreenSwitch(int dir)

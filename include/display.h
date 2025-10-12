@@ -39,6 +39,7 @@ extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
 
 extern uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+extern bool useImperial;
 
 void setupDisplay();
 int getTextWidth(const char* text);
@@ -65,4 +66,5 @@ void createScrollingText();
 void requestScrollRebuild();     // mark that the marquee text must be rebuilt
 void notifyUnitsMaybeChanged();  // compare unit signature; request rebuild if changed
 void serviceScrollRebuild();     // if a rebuild is pending, rebuild now (cheap no-op otherwise)
+void applyUnitPreferences();     // sync derived display flags from UnitPrefs
 

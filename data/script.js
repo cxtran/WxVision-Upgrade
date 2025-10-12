@@ -48,6 +48,25 @@ function applyAutoBrightnessUI(){
   b.title = (ab === 1) ? 'Disabled when Auto Brightness is ON' : '';
 }
 
+function applyAutoDstAvailability(){
+  var tzSel = document.getElementById('tzSelect');
+  var autoDstEl = document.getElementById('autoDst');
+  if (!tzSel || !autoDstEl) return;
+  var idx = tzSel.selectedIndex;
+  var supports = false;
+  if (idx >= 0 && idx < tzList.length){
+    supports = !!tzList[idx].supportsDst;
+  }
+  if (!supports){
+    autoDstEl.value = '0';
+    autoDstEl.disabled = true;
+    autoDstEl.title = 'DST not observed in this timezone';
+  } else {
+    autoDstEl.disabled = false;
+    autoDstEl.title = '';
+  }
+}
+
 function loadIndexStatus(){
   fetch('/status.json')
     .then(function(r){
@@ -80,7 +99,11 @@ function loadAll(){
   ])
   .then(function(results){
     var s = results[0], t = results[1];
-    tzList = results[2];
+    tzList = (results[2] || []).map(function(item){
+      if (!item) return item;
+      item.supportsDst = !!item.supportsDst;
+      return item;
+    });
 
     if (typeof wifiSSID !== 'undefined') wifiSSID.value = s.wifiSSID || '';
     if (typeof wifiPass !== 'undefined') wifiPass.value = s.wifiPass || '';
@@ -125,20 +148,29 @@ function loadAll(){
       tzSel.innerHTML = '';
       tzList.forEach(function(z){
         var opt = document.createElement('option');
-        opt.value = z.id;
+        opt.value = z.id || '';
         opt.textContent = z.label || (z.city + ' (' + fmtUtc(z.offset) + ')');
+        opt.dataset.supportsDst = z.supportsDst ? '1' : '0';
         tzSel.appendChild(opt);
       });
-      var tzName = t.tzName || 'Custom';
+      var tzName = t.tzName || '';
       var idx = -1;
-      for (var i=0;i<tzList.length;i++){ if (tzList[i].id === tzName) { idx=i; break; } }
+      if (tzName) {
+        var lower = tzName.toLowerCase();
+        for (var i=0;i<tzList.length;i++){ if ((tzList[i].id || '').toLowerCase() === lower) { idx=i; break; } }
+      }
       if (idx < 0) { for (var j=0;j<tzList.length;j++){ if (tzList[j].offset === tzOffset) { idx=j; break; } } }
       if (idx >= 0) tzSel.selectedIndex = idx;
       var tzNameTag = document.getElementById('tzNameTag');
-      if (tzNameTag) tzNameTag.textContent = 'TZ: ' + tzName;
+      if (tzNameTag) { tzNameTag.textContent = 'TZ: ' + (t.tzLabel || tzName || 'Custom'); }
       var tzOffsetTag = document.getElementById('tzOffsetTag');
       if (tzOffsetTag) tzOffsetTag.textContent = fmtUtc(tzOffset);
     }
+    var autoDstEl = document.getElementById('autoDst');
+    if (autoDstEl) {
+      autoDstEl.value = (t.tzAutoDst ? '1' : '0');
+    }
+    applyAutoDstAvailability();
 
     startMs = Date.now();
     if (tickTimer) clearInterval(tickTimer);
@@ -212,9 +244,12 @@ function parseManualToEpoch() {
 function saveTimeSettings(opts){
   opts = opts || {};
   var withEpoch = opts.withEpoch || false;
-  var tzName = document.getElementById('tzSelect').value;
+  var tzSelect = document.getElementById('tzSelect');
+  var tzName = tzSelect ? tzSelect.value : '';
   var dateFmt = +document.getElementById('dateFmt').value;
-  var body = { tzName: tzName, dateFmt: dateFmt };
+  var autoDstEl = document.getElementById('autoDst');
+  var autoDstEnabled = !!(autoDstEl && !autoDstEl.disabled && autoDstEl.value === '1');
+  var body = { tzName: tzName, dateFmt: dateFmt, autoDst: autoDstEnabled };
   if (withEpoch) {
     var epoch = parseManualToEpoch();
     if (!epoch) { setMsg('saveTimeMsg','Invalid manual date/time',false); return; }
@@ -256,6 +291,8 @@ window.addEventListener('load', function(){
     document.getElementById('btnSaveTime').addEventListener('click', function(){saveTimeSettings({withEpoch:false});});
     document.getElementById('btnSetManual').addEventListener('click', function(){saveTimeSettings({withEpoch:true});});
     document.getElementById('btnSyncNTP').addEventListener('click', syncNTP);
+    var tzSelectEl = document.getElementById('tzSelect');
+    if (tzSelectEl) tzSelectEl.addEventListener('change', applyAutoDstAvailability);
   } else {
     loadIndexStatus();
   }

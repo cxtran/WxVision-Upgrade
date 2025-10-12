@@ -2,6 +2,7 @@
 #include "settings.h"
 #include "sensors.h"
 #include "units.h"   // <-- add this
+#include "display.h"
 
 // Preferences storage object
 Preferences prefs;
@@ -94,6 +95,7 @@ void loadSettings() {
 
     // Load unit preferences from Units module
     loadUnits();
+    applyUnitPreferences();
 }
 
 void saveDeviceSettings() {

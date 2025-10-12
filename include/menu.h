@@ -28,6 +28,7 @@ void showDisplaySettingsModal();
 void showWeatherSettingsModal();
 void showCalibrationModal();
 void showSystemModal();
+void showUnitSettingsModal();
 void showInitialSetupPrompt();
 void showWiFiSettingsModal();
 
@@ -59,6 +60,7 @@ enum MenuLevel {
     MENU_INITIAL_SETUP,
     MENU_SYSINFO,
     MENU_SYSDATETIME,
+    MENU_SYSUNITS,
     MENU_SYSWIFI,
     MENU_WIFI_SELECT = 99
 };
@@ -125,6 +127,7 @@ extern InfoModal calibrationModal;
 extern InfoModal systemModal;
 extern InfoModal setupPromptModal;
 extern InfoModal wifiSettingsModal;
+extern InfoModal unitSettingsModal;
 
 // --- Helper for modal "reopen after delay" ---
 extern void (*pendingModalFn)();

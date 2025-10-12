@@ -871,7 +871,7 @@ void InfoModal::handleIR(uint32_t code)
                 {
                     val = (val + (code == IR_LEFT ? count - 1 : 1)) % count;
 
-                    if (selIndex == 1)
+                    if (lines[selIndex].equalsIgnoreCase("Auto Brightness"))
                     { // Auto Brightness toggle
                         autoBrightness = (val > 0);
                         //         Serial.printf("[Live] AutoBrightness: %s\n", autoBrightness ? "ON" : "OFF");
@@ -896,7 +896,7 @@ void InfoModal::handleIR(uint32_t code)
                         saveDisplaySettings();
                     }
 
-                    if (selIndex == 3)
+                    if (lines[selIndex].equalsIgnoreCase("Scroll Speed"))
                     { // Scroll Speed chooser
                         scrollLevel = constrain(val, 0, 9);
                         scrollSpeed = scrollDelays[scrollLevel];
