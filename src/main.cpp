@@ -36,7 +36,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, calibrationModal, systemModal, unitSettingsModal;
+extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, unitSettingsModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
@@ -143,6 +143,7 @@ static bool isRotationBlocked()
            wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
            weatherModal.isActive() ||
+           tempestModal.isActive() ||
            calibrationModal.isActive() ||
            systemModal.isActive();
 }
@@ -445,12 +446,18 @@ void setup()
     loadSettings();
     delay(500);
     setupDisplay();
+    int clampedSplashSec = constrain(splashDurationSec, 1, 10);
+    uint16_t splashMs = static_cast<uint16_t>(clampedSplashSec * 1000);
+    splashBegin(splashMs);
+    splashUpdate("Display On", 1, 6);
     Serial.println("Display setup done.");
 
      // Setup Sensors
+    splashUpdate("Sensors", 2, 6);
     setupSensors();
 
     Serial.println("Setup IR Sensor");
+    splashUpdate("IR Remote", 3, 6);
     setupIRSensor();
 
     // Initialise RTC once sensors/I2C are ready
@@ -458,20 +465,25 @@ void setup()
     if (!rtcReady)
     {
         Serial.println("RTC not detected; time will default to 00:00");
+        splashUpdate("RTC Check", 4, 6);
     }
     else
     {
         Serial.println("RTC initialised successfully.");
+        splashUpdate("RTC Check", 4, 6);
     }
 
     Serial.println("\nESP32 Weather Display");
 
     // Ensure TCP/IP stack is initialised even if we stay offline
     WiFi.mode(WIFI_STA);
+    splashUpdate("WiFi Prep", 5, 6);
 
     if (initialSetupRequired)
     {
         Serial.println("[Setup] Initial configuration required.");
+        splashUpdate("Startup", 6, 6);
+        splashEnd();
         showInitialSetupPrompt();
         return;
     }
@@ -480,23 +492,32 @@ void setup()
     {
         Serial.println("[WiFi] No credentials, starting offline mode.");
         initialSetupAwaitingWifi = false;
+        splashUpdate("Offline", 6, 6);
+        splashEnd();
         completeStartupAfterWiFi(true);
         return;
     }
 
     Serial.println("Connecting WiFi...");
+    splashUpdate("WiFi Link", 6, 6);
     connectToWiFi();
 
     if (wifiSelecting)
+    {
+        splashEnd();
         return;
+    }
 
     if (WiFi.status() != WL_CONNECTED)
     {
         Serial.println("[WiFi] Connection failed, showing WiFi menu...");
+        splashEnd();
         onWiFiConnectFailed();
         return;
     }
 
+    splashUpdate("Startup", 6, 6);
+    splashEnd();
     completeStartupAfterWiFi(false);
 
     // Seed timers to stagger 5s jobs (spread ~1.5s apart)
@@ -607,6 +628,7 @@ void loop()
         !wifiSettingsModal.isActive() &&
         !displayModal.isActive() &&
         !weatherModal.isActive() &&
+        !tempestModal.isActive() &&
         !calibrationModal.isActive() &&
         !systemModal.isActive() &&
         !(wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT))
@@ -702,6 +724,13 @@ void loop()
     {
         weatherModal.tick();
         weatherModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (tempestModal.isActive())
+    {
+        tempestModal.tick();
+        tempestModal.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
@@ -904,6 +933,7 @@ void loop()
         wifiSettingsModal.isActive() ||
         displayModal.isActive() ||
         weatherModal.isActive() ||
+        tempestModal.isActive() ||
         calibrationModal.isActive() ||
         systemModal.isActive() ||
         inKeyboardMode ||

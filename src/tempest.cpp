@@ -3,6 +3,7 @@
 #include <Arduino_JSON.h>
 #include "ScrollLine.h"
 #include "units.h"
+#include "settings.h"
 
 extern WiFiUDP udp;
 extern InfoScreen udpScreen;
@@ -379,14 +380,25 @@ void fetchTempestData() {
 // --------- WeatherFlow Forecast Fetch ----------
 void fetchForecastData() {
     HTTPClient http;
-    const char* url =
-        "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=79762&token=b802af9d-477d-4490-8da2-3f78badb07a7";
+    String stationId = wfStationId;
+    String token = wfToken;
+    stationId.trim();
+    token.trim();
 
+    if (stationId.isEmpty() || token.isEmpty()) {
+        Serial.println("[Tempest] Missing WeatherFlow credentials");
+        forecast.numHours = 0;
+        forecast.hourlyKeyPresent = false;
+        return;
+    }
+
+    String url = "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=" + stationId +
+                 "&token=" + token;
     // Keep it simple: HTTP/1.0 + longer timeout helps on some networks
     http.useHTTP10(true);
     http.setTimeout(15000);
 
-    if (!http.begin(url)) {
+    if (!http.begin(url.c_str())) {
         Serial.println("[HTTP] begin() failed");
         forecast.numHours = 0;
         forecast.hourlyKeyPresent = false;

@@ -26,6 +26,7 @@ void showMainMenuModal();
 void showDeviceSettingsModal();
 void showDisplaySettingsModal();
 void showWeatherSettingsModal();
+void showWfTempestModal();
 void showCalibrationModal();
 void showSystemModal();
 void showUnitSettingsModal();
@@ -55,6 +56,7 @@ enum MenuLevel {
     MENU_WIFISETTINGS,
     MENU_DISPLAY,
     MENU_WEATHER,
+    MENU_TEMPEST,
     MENU_CALIBRATION,
     MENU_SYSTEM,
     MENU_INITIAL_SETUP,
@@ -123,6 +125,7 @@ extern InfoModal mainMenuModal;
 extern InfoModal deviceModal;
 extern InfoModal displayModal;
 extern InfoModal weatherModal;
+extern InfoModal tempestModal;
 extern InfoModal calibrationModal;
 extern InfoModal systemModal;
 extern InfoModal setupPromptModal;

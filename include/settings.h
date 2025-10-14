@@ -34,6 +34,7 @@ extern int scrollSpeed;      // derived from level
 extern String customMsg;
 extern int scrollLevel;      // <-- fixed name (was scrollingLevel)
 extern bool autoBrightness;
+extern int splashDurationSec; // minimum splash display time
 
 // --- Weather ---
 extern String owmCity;

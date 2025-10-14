@@ -10,6 +10,7 @@
 #include "datetimesettings.h"
 
 #include "tempest.h"
+#include "weather_countries.h"
 
 extern float aht20_temp;
 extern float SCD40_temp;
@@ -31,6 +32,18 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+
+static bool splashActive = false;
+static uint16_t splashAccent = 0;
+static uint16_t splashStatusBg = 0;
+static uint16_t splashShadow = 0;
+static uint16_t splashMinimumMs = 0;
+static unsigned long splashStartMs = 0;
+static const int SPLASH_BAR_X = 6;
+static const int SPLASH_BAR_Y = 25;
+static const int SPLASH_BAR_W = PANEL_RES_X - 12;
+static const int SPLASH_BAR_H = 5;
+static const int SPLASH_STATUS_BASELINE = SPLASH_BAR_Y - 2;
 
 void setPanelBrightness(uint8_t value)
 {
@@ -66,6 +79,129 @@ void setupDisplay()
     myBLACK = dma_display->color565(0, 0, 0);
     myYELLOW = dma_display->color565(255, 255, 0);
     myCYAN = dma_display->color565(0, 255, 255);
+}
+
+void splashBegin(uint16_t minimumMs)
+{
+    if (!dma_display)
+        return;
+
+    splashActive = true;
+    splashMinimumMs = minimumMs;
+    splashStartMs = millis();
+    splashAccent = dma_display->color565(255, 180, 40);
+    splashStatusBg = dma_display->color565(10, 35, 60);
+    splashShadow = dma_display->color565(5, 20, 35);
+
+    // Soft gradient background
+    for (int y = 0; y < PANEL_RES_Y; ++y)
+    {
+        uint8_t r = 3 + (y * 3);
+        uint8_t g = 18 + (y * 4);
+        uint8_t b = 38 + (y * 3);
+        uint16_t c = dma_display->color565(r, g, b);
+        dma_display->drawFastHLine(0, y, PANEL_RES_X, c);
+        delay(6);
+    }
+
+    // Weather glyph with subtle shadow
+    dma_display->drawBitmap(7, 9, icon_clear, 16, 16, splashShadow);
+    dma_display->drawBitmap(6, 8, icon_clear, 16, 16, splashAccent);
+
+    dma_display->setTextWrap(false);
+    dma_display->setTextSize(1);
+
+    // Title
+    dma_display->setCursor(26, 13);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print("Wx");
+    dma_display->setTextColor(splashAccent);
+    dma_display->print("Vision");
+
+    // Tagline
+    dma_display->setTextColor(myWHITE);
+    dma_display->setCursor(26, 20);
+    dma_display->print("Weather Hub");
+
+    // Baseline progress bar container
+    dma_display->drawRoundRect(SPLASH_BAR_X, SPLASH_BAR_Y, SPLASH_BAR_W, SPLASH_BAR_H, 2, myWHITE);
+    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, SPLASH_BAR_W - 2, SPLASH_BAR_H - 2, splashStatusBg);
+
+    // Initial status placeholder
+    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 7, splashStatusBg);
+    dma_display->setCursor(14, SPLASH_STATUS_BASELINE);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print("Booting...");
+}
+
+void splashUpdate(const char *status, uint8_t step, uint8_t total)
+{
+    if (!dma_display || !splashActive)
+        return;
+
+    if (total == 0)
+        total = 1;
+    if (step > total)
+        step = total;
+
+    // Update progress bar fill
+    int innerWidth = SPLASH_BAR_W - 2;
+    int filled = (innerWidth * step + total / 2) / total;
+    if (filled < 0)
+        filled = 0;
+    if (filled > innerWidth)
+        filled = innerWidth;
+
+    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, innerWidth, SPLASH_BAR_H - 2, splashStatusBg);
+    if (filled > 0)
+    {
+        dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, filled, SPLASH_BAR_H - 2, splashAccent);
+    }
+
+    // Status text area
+    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 7, splashStatusBg);
+    dma_display->setTextColor(myWHITE);
+    dma_display->setTextSize(1);
+
+    String text = status ? String(status) : String("");
+    if (text.length() > 16)
+    {
+        text = text.substring(0, 16);
+    }
+    int textWidth = getTextWidth(text.c_str());
+    int cursorX = (PANEL_RES_X - textWidth) / 2;
+    if (cursorX < 0)
+        cursorX = 0;
+    dma_display->setCursor(cursorX, SPLASH_STATUS_BASELINE);
+    dma_display->print(text);
+    delay(140);
+}
+
+void splashEnd()
+{
+    if (!dma_display || !splashActive)
+        return;
+
+    while ((uint32_t)(millis() - splashStartMs) < splashMinimumMs)
+    {
+        delay(15);
+    }
+
+    uint8_t original = currentPanelBrightness;
+    if (original == 0)
+        original = map(brightness, 1, 100, 3, 255);
+
+    for (int level = original; level > 15; level -= 15)
+    {
+        setPanelBrightness(level);
+        delay(25);
+    }
+    dma_display->fillScreen(0);
+    setPanelBrightness(original);
+    splashActive = false;
+    splashMinimumMs = 0;
+    dma_display->setTextColor(myWHITE);
+    dma_display->setTextSize(1);
 }
 
 int getTextWidth(const char *text)
@@ -277,8 +413,45 @@ void fetchWeatherFromOWM()
     if (WiFi.status() != WL_CONNECTED)
         return;
     String units = useImperial ? "imperial" : "metric";
-    String url = "http://api.openweathermap.org/data/2.5/weather?q=" + city + "," + countryCode +
-                 "&units=" + units + "&appid=" + openWeatherMapApiKey;
+
+    String apiKey = owmApiKey;
+    apiKey.trim();
+    if (apiKey.isEmpty()) {
+        apiKey = openWeatherMapApiKey;
+    }
+
+    String selectedCity = owmCity;
+    selectedCity.trim();
+    if (selectedCity.isEmpty()) {
+        selectedCity = city;
+    }
+
+    String selectedCountry;
+    if (owmCountryIndex >= 0 && owmCountryIndex < (countryCount - 1)) {
+        selectedCountry = countryCodes[owmCountryIndex];
+    } else {
+        selectedCountry = owmCountryCustom;
+    }
+    selectedCountry.trim();
+    selectedCountry.toUpperCase();
+    if (selectedCountry.isEmpty()) {
+        selectedCountry = countryCode;
+    }
+
+    if (apiKey.isEmpty() || selectedCity.isEmpty()) {
+        Serial.println("[OWM] Missing API key or city; skip fetch");
+        return;
+    }
+
+    // Minimal encoding for city names with spaces/commas
+    selectedCity.replace(" ", "%20");
+    selectedCity.replace(",", "%2C");
+
+    String url = "http://api.openweathermap.org/data/2.5/weather?q=" + selectedCity;
+    if (!selectedCountry.isEmpty()) {
+        url += "," + selectedCountry;
+    }
+    url += "&units=" + units + "&appid=" + apiKey;
     String jsonBuffer = httpGETRequest(url.c_str());
     if (jsonBuffer == "{}")
         return;
@@ -288,26 +461,62 @@ void fetchWeatherFromOWM()
         Serial.println("Failed to parse weather JSON");
         return;
     }
+    auto toCelsius = [](double raw) -> double {
+        if (isnan(raw))
+            return raw;
+        if (useImperial)
+            return (raw - 32.0) * (5.0 / 9.0);
+        return raw;
+    };
+    auto toMetersPerSecond = [](double raw) -> double {
+        if (isnan(raw))
+            return raw;
+        if (useImperial)
+            return raw * 0.44704; // mph -> m/s
+        return raw;
+    };
+    auto readNumber = [&](JSONVar obj, const char *key) -> double {
+        if (JSON.typeof(obj) != "object")
+            return NAN;
+        JSONVar v = obj[key];
+        if (JSON.typeof(v) == "undefined")
+            return NAN;
+        return double(v);
+    };
+
+    JSONVar mainBlock = data["main"];
+    JSONVar windBlock = data["wind"];
+
+    double tempC = toCelsius(readNumber(mainBlock, "temp"));
+    double tempMaxC = toCelsius(readNumber(mainBlock, "temp_max"));
+    double tempMinC = toCelsius(readNumber(mainBlock, "temp_min"));
+    double feelsC = toCelsius(readNumber(mainBlock, "feels_like"));
+    double humidity = readNumber(mainBlock, "humidity");
+    double pressure = readNumber(mainBlock, "pressure");
+    double windSpeed = toMetersPerSecond(readNumber(windBlock, "speed"));
+    double windDir = readNumber(windBlock, "deg");
+
     str_Weather_Icon = JSON.stringify(data["weather"][0]["icon"]);
     str_Weather_Icon.replace("\"", "");
     str_Weather_Conditions = JSON.stringify(data["weather"][0]["main"]);
     str_Weather_Conditions.replace("\"", "");
     str_Weather_Conditions_Des = JSON.stringify(data["weather"][0]["description"]);
     str_Weather_Conditions_Des.replace("\"", "");
-    str_Temp = JSON.stringify(data["main"]["temp"]);
-    str_Humd = JSON.stringify(data["main"]["humidity"]);
-    str_Pressure = JSON.stringify(data["main"]["pressure"]);
-    str_Wind_Speed = JSON.stringify(data["wind"]["speed"]);
-    str_Wind_Direction = JSON.stringify(data["wind"]["deg"]);
     str_City = JSON.stringify(data["name"]);
     str_City.replace("\"", "");
-    str_Temp_max = JSON.stringify(data["main"]["temp_max"]);
-    str_Temp_min = JSON.stringify(data["main"]["temp_min"]);
-    str_Feels_like = JSON.stringify(data["main"]["feels_like"]);
+
+    str_Temp = String(tempC, 2);
+    str_Temp_max = String(tempMaxC, 2);
+    str_Temp_min = String(tempMinC, 2);
+    str_Feels_like = String(feelsC, 2);
+    str_Humd = isnan(humidity) ? String("--") : String(humidity, 0);
+    str_Pressure = isnan(pressure) ? String("--") : String(pressure, 0);
+    str_Wind_Speed = String(windSpeed, 2);
+    str_Wind_Direction = isnan(windDir) ? String("--") : String(windDir, 0);
+
     Serial.println("Weather Updated:");
-    Serial.printf("  Temp: %s | Hum: %s%% | Wind: %s %s\n",
-                  str_Temp.c_str(), str_Humd.c_str(), str_Wind_Speed.c_str(),
-                  useImperial ? "mph" : "m/s");
+    Serial.printf("  Temp: %.1fC | Hum: %s%% | Wind: %.2fm/s\n",
+                  tempC, str_Humd.c_str(), windSpeed);
 
     needScrollRebuild = true;
 }

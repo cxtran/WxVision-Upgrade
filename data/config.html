@@ -52,17 +52,24 @@
         </select>
       </div>
       <div class="row">
+        <label for="autoRotateInterval">Rotate Interval (s)</label>
+        <input id="autoRotateInterval" type="number" min="5" max="300" step="5" placeholder="15">
+      </div>
+      <div class="row">
         <label for="manualScreen">Manual Screen</label>
         <select id="manualScreen">
           <option value="0">Main</option>
-          <option value="1">Weather</option>
+          <option value="1">OW Map</option>
           <option value="2">Forecast</option>
           <option value="3">Calibration</option>
         </select>
       </div>
     </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveDevice">Save Device</button>
+      <span class="msg" id="saveDeviceMsg"></span>
+    </div>
   </section>
-
   <!-- Units -->
   <section class="card" id="card-units">
     <h2>Units</h2>
@@ -105,6 +112,10 @@
         </select>
       </div>
     </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveUnits">Save Units</button>
+      <span class="msg" id="saveUnitsMsg"></span>
+    </div>
   </section>
 
   <!-- Display -->
@@ -130,6 +141,10 @@
         <input id="brightness" type="number" min="1" max="100">
       </div>
       <div class="row">
+        <label for="splashDuration">Splash Duration (s)</label>
+        <input id="splashDuration" type="number" min="1" max="10" step="1" placeholder="3">
+      </div>
+      <div class="row">
         <label for="scrollLevel">Scroll Speed</label>
         <select id="scrollLevel">
           <option value="0">1 - Slow</option>
@@ -149,11 +164,15 @@
       <label for="customMsg">Custom Message</label>
       <textarea id="customMsg" placeholder="Optional text to scroll…"></textarea>
     </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveDisplay">Save Display</button>
+      <span class="msg" id="saveDisplayMsg"></span>
+    </div>
   </section>
 
-  <!-- Weather -->
-  <section class="card" id="card-weather">
-    <h2>Weather</h2>
+  <!-- OW Map -->
+  <section class="card" id="card-owmap">
+    <h2>OW Map</h2>
     <div class="grid2">
       <div class="row">
         <label for="owmCity">OWM City</label>
@@ -164,6 +183,25 @@
         <input id="owmApiKey" type="text" placeholder="Your OpenWeather API Key">
       </div>
       <div class="row">
+        <label for="owmCountryIndex">Country</label>
+        <select id="owmCountryIndex"></select>
+      </div>
+      <div class="row">
+        <label for="owmCountryCustom">Custom Country Code</label>
+        <input id="owmCountryCustom" type="text" maxlength="3" placeholder="e.g. VN">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveOWM">Save OW Map</button>
+      <span class="msg" id="saveOWMMsg"></span>
+    </div>
+  </section>
+
+  <!-- WF Tempest -->
+  <section class="card" id="card-tempest">
+    <h2>WF Tempest</h2>
+    <div class="grid2">
+      <div class="row">
         <label for="wfToken">WF Token</label>
         <input id="wfToken" type="text" placeholder="WeatherFlow Token">
       </div>
@@ -171,14 +209,10 @@
         <label for="wfStationId">WF Station ID</label>
         <input id="wfStationId" type="text" placeholder="Station ID">
       </div>
-      <div class="row">
-        <label for="owmCountryIndex">Country Index (0–10)</label>
-        <input id="owmCountryIndex" type="number" min="0" max="10">
-      </div>
-      <div class="row">
-        <label for="owmCountryCustom">Custom Country Code</label>
-        <input id="owmCountryCustom" type="text" maxlength="3" placeholder="e.g. VN">
-      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveTempest">Save WF Tempest</button>
+      <span class="msg" id="saveTempestMsg"></span>
     </div>
   </section>
 
@@ -198,6 +232,10 @@
         <label for="lightGain">Light Gain (%)</label>
         <input id="lightGain" type="number" step="1" min="1" max="150">
       </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveCalibration">Save Calibration</button>
+      <span class="msg" id="saveCalibrationMsg"></span>
     </div>
   </section>
 

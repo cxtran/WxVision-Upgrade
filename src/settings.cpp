@@ -28,6 +28,7 @@ int scrollLevel = 7;      // 0 (slow) to 9 (fast)
 String customMsg = "";
 const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
+int splashDurationSec = 3;
 
 // --- Weather ---
 String owmCity = "";
@@ -75,6 +76,8 @@ void loadSettings() {
     scrollSpeed  = scrollDelays[scrollLevel];
     customMsg    = prefs.getString("customMsg", "");
     autoBrightness = prefs.getBool("autoBrightness", true);
+    splashDurationSec = prefs.getInt("splashDur", 3);
+    splashDurationSec = constrain(splashDurationSec, 1, 10);
 
     // Weather
     owmCity      = prefs.getString("owmCity", "");
@@ -119,6 +122,8 @@ void saveDisplaySettings() {
         prefs.putInt("brightness", brightness);
         prefs.putInt("scrollLevel", scrollLevel);  // persist level only
         prefs.putString("customMsg", customMsg);
+        splashDurationSec = constrain(splashDurationSec, 1, 10);
+        prefs.putInt("splashDur", splashDurationSec);
         prefs.end();
         Serial.printf("[Prefs] Saved: theme=%d, auto=%d, bright=%d, scrollLevel=%d\n",
             theme, autoBrightness, brightness, scrollLevel);

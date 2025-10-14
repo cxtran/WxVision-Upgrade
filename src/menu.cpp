@@ -13,7 +13,8 @@
 #include "datetimesettings.h"
 #include "ir_codes.h"
 #include "SPIFFS.h"
-#include "units.h"//
+#include "units.h"
+#include "weather_countries.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -45,7 +46,8 @@ InfoModal dateModal("Date/Time");
 InfoModal mainMenuModal("Main Menu");
 InfoModal deviceModal("Device");
 InfoModal displayModal("Display");
-InfoModal weatherModal("Weather");
+InfoModal weatherModal("OW Map");
+InfoModal tempestModal("WF Tempest");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
 InfoModal setupPromptModal("Welcome");
@@ -56,12 +58,6 @@ char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
 
 // --- Country Info for Weather Modal ---
-const char *countryLabels[] = {
-    "Vietnam (VN)", "United States (US)", "Japan (JP)", "Germany (DE)", "India (IN)",
-    "France (FR)", "Canada (CA)", "United Kingdom (GB)", "Australia (AU)", "Brazil (BR)", "Custom"};
-const char *countryCodes[] = {
-    "VN", "US", "JP", "DE", "IN", "FR", "CA", "GB", "AU", "BR", ""};
-const int countryCount = sizeof(countryLabels) / sizeof(countryLabels[0]);
 String owmCountryCode = "";
 
 // --- Menu State ---
@@ -128,15 +124,17 @@ int dtNtpPreset;
 int dtAutoDst;
 int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
 
-const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "Weather Settings", "Calibration", "System", "Exit Menu"};
+const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
 const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Spd", "Auto Rotate", "Rotate Interval", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
-const char *weatherMenu[] = {"OWM City", "Country", "OWM API Key", "WF Token", "WF Station ID", "< Back"};
+const char *weatherMenu[] = {"Country", "Custom Code", "OWM City", "OWM API Key", "< Back"};
 const int weatherCount = sizeof(weatherMenu) / sizeof(weatherMenu[0]);
+const char *tempestMenu[] = {"WF Token", "WF Station ID", "< Back"};
+const int tempestCount = sizeof(tempestMenu) / sizeof(tempestMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
@@ -201,6 +199,11 @@ void handleIR(uint32_t code)
     if (weatherModal.isActive())
     {
         weatherModal.handleIR(code);
+        return;
+    }
+    if (tempestModal.isActive())
+    {
+        tempestModal.handleIR(code);
         return;
     }
     if (calibrationModal.isActive())
@@ -402,11 +405,11 @@ void showMainMenuModal()
     menuActive = true;
 
     String items[] = {
-        "Device Settings", "WiFi Settings", "Display Settings", "Weather Settings",
-        "Calibration", "System", "Exit Menu"};
+        "Device Settings", "WiFi Settings", "Display Settings",
+        "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel,InfoLabel , InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 7);
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 8);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
                               {
@@ -417,17 +420,18 @@ void showMainMenuModal()
     }
     int selected = mainMenuModal.getSelIndex();
     Serial.printf("[MainMenu] selected=%d\n", selected);
-    switch (selected) {
-        case 0: showDeviceSettingsModal(); return;
-        case 1: showWiFiSettingsModal(); return;
-        case 2: showDisplaySettingsModal(); return;
-        case 3: showWeatherSettingsModal(); return;
-        case 4: showCalibrationModal(); return;
-        case 5: showSystemModal(); return;
-        case 6: // Exit Menu
-            mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
-            exitToHomeScreen();
-            return;
+        switch (selected) {
+            case 0: showDeviceSettingsModal(); return;
+            case 1: showWiFiSettingsModal(); return;
+            case 2: showDisplaySettingsModal(); return;
+            case 3: showWeatherSettingsModal(); return;
+            case 4: showWfTempestModal(); return;
+            case 5: showCalibrationModal(); return;
+            case 6: showSystemModal(); return;
+            case 7: // Exit Menu
+                mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
+                exitToHomeScreen();
+                return;
         default:
             Serial.println("?????? Invalid main menu selection");
             return;
@@ -539,24 +543,20 @@ void showWeatherSettingsModal()
     static char owmCountryCustomBuf[4] = "";
     static char owmCityBuf[32];
     static char owmKeyBuf[48];
-    static char wfTokenBuf[48];
-    static char wfStationBuf[16];
     strncpy(owmCountryCustomBuf, owmCountryCustom.c_str(), sizeof(owmCountryCustomBuf));
     strncpy(owmCityBuf, owmCity.c_str(), sizeof(owmCityBuf));
     strncpy(owmKeyBuf, owmApiKey.c_str(), sizeof(owmKeyBuf));
-    strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
-    strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
 
-    String labels[] = {"Country", "Custom Code", "City", "OWM API Key", "WF Token", "WF Station ID"};
-    InfoFieldType types[] = {InfoChooser, InfoText, InfoText, InfoText, InfoText, InfoText};
+    String labels[] = {"Country", "Custom Code", "City", "OWM API Key"};
+    InfoFieldType types[] = {InfoChooser, InfoText, InfoText, InfoText};
     int *chooserRefs[] = {&owmCountryIndexTemp};
     const char *const *chooserOpts[] = {countryLabels};
     int chooserCounts[] = {countryCount};
-    char *textRefs[] = {owmCountryCustomBuf, owmCityBuf, owmKeyBuf, wfTokenBuf, wfStationBuf};
-    int textSizes[] = {sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf), sizeof(wfTokenBuf), sizeof(wfStationBuf)};
+    char *textRefs[] = {owmCountryCustomBuf, owmCityBuf, owmKeyBuf};
+    int textSizes[] = {sizeof(owmCountryCustomBuf), sizeof(owmCityBuf), sizeof(owmKeyBuf)};
 
-    weatherModal.setLines(labels, types, 6);
-    weatherModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, textRefs, 5, textSizes);
+    weatherModal.setLines(labels, types, 4);
+    weatherModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, textRefs, 3, textSizes);
 
     weatherModal.setCallback([](bool ok, int btnIdx)
                              {
@@ -564,8 +564,6 @@ void showWeatherSettingsModal()
         owmCountryCustom = String(owmCountryCustomBuf);
         owmCity = String(owmCityBuf);
         owmApiKey = String(owmKeyBuf);
-        wfToken = String(wfTokenBuf);
-        wfStationId = String(wfStationBuf);
 
         if (owmCountryIndex < 10) {
             owmCountryCode = countryCodes[owmCountryIndex];
@@ -581,6 +579,43 @@ void showWeatherSettingsModal()
         currentMenuIndex = 0;
         menuScroll = 0; });
     weatherModal.show();
+}
+
+void showWfTempestModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_TEMPEST;
+    menuActive = true;
+
+    static char wfTokenBuf[48];
+    static char wfStationBuf[16];
+    strncpy(wfTokenBuf, wfToken.c_str(), sizeof(wfTokenBuf));
+    wfTokenBuf[sizeof(wfTokenBuf) - 1] = '\0';
+    strncpy(wfStationBuf, wfStationId.c_str(), sizeof(wfStationBuf));
+    wfStationBuf[sizeof(wfStationBuf) - 1] = '\0';
+
+    String labels[] = {"WF Token", "WF Station ID"};
+    InfoFieldType types[] = {InfoText, InfoText};
+    char *textRefs[] = {wfTokenBuf, wfStationBuf};
+    int textSizes[] = {sizeof(wfTokenBuf), sizeof(wfStationBuf)};
+
+    tempestModal.setLines(labels, types, 2);
+    tempestModal.setValueRefs(nullptr, 0, nullptr, 0, nullptr, nullptr, textRefs, 2, textSizes);
+
+    tempestModal.setCallback([](bool, int) {
+        wfToken = String(wfTokenBuf);
+        wfStationId = String(wfStationBuf);
+        saveWeatherSettings();
+        tempestModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+
+    tempestModal.show();
 }
 
 void showCalibrationModal()
@@ -818,11 +853,12 @@ void handleRight()
 void handleSelect()
 {
     lastMenuActivity = millis();
-    int count = (currentMenuLevel == MENU_MAIN)          ? mainCount
-                : (currentMenuLevel == MENU_DEVICE)      ? deviceCount
-                : (currentMenuLevel == MENU_DISPLAY)     ? displayCount
-                : (currentMenuLevel == MENU_WEATHER)     ? weatherCount
-                : (currentMenuLevel == MENU_CALIBRATION) ? calibCount
+    int count = (currentMenuLevel == MENU_MAIN)           ? mainCount
+               : (currentMenuLevel == MENU_DEVICE)        ? deviceCount
+               : (currentMenuLevel == MENU_DISPLAY)       ? displayCount
+               : (currentMenuLevel == MENU_WEATHER)       ? weatherCount
+               : (currentMenuLevel == MENU_TEMPEST)       ? tempestCount
+               : (currentMenuLevel == MENU_CALIBRATION)   ? calibCount
                                                          : systemCount;
     if (currentMenuIndex < 0)
         currentMenuIndex = 0;
@@ -844,6 +880,11 @@ void handleSelect()
     else if (currentMenuLevel == MENU_WEATHER)
     {
         showWeatherSettingsModal();
+        return;
+    }
+    else if (currentMenuLevel == MENU_TEMPEST)
+    {
+        showWfTempestModal();
         return;
     }
     else if (currentMenuLevel == MENU_CALIBRATION)

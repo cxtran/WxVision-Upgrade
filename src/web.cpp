@@ -13,7 +13,7 @@
 // ---- externs ----
 extern int dayFormat, forecastSrc, autoRotate, manualScreen, autoRotateInterval;
 extern UnitPrefs units;
-extern int theme, brightness, scrollSpeed, scrollLevel;
+extern int theme, brightness, scrollSpeed, scrollLevel, splashDurationSec;
 extern bool autoBrightness;
 extern String customMsg;
 extern String wifiSSID, wifiPass;
@@ -124,9 +124,11 @@ void setupWebServer() {
   // ---------- JSON endpoints ----------
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     JsonDocument doc;
+    String dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
     doc["wifiSSID"] = WiFi.SSID();
     doc["ip"]       = WiFi.localIP().toString();
-    doc["temp"]     = str_Temp;
+    doc["temp"]     = dispTemp;
+    doc["tempUnit"] = (units.temp == TempUnit::F) ? "°F" : "°C";
     doc["humidity"] = str_Humd;
     doc["conditions"] = str_Weather_Conditions;
     doc["time"]     = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
@@ -149,6 +151,7 @@ void setupWebServer() {
     doc["autoBrightness"]   = autoBrightness;
     doc["scrollSpeed"]      = scrollSpeed;
     doc["scrollLevel"]      = scrollLevel;
+    doc["splashDuration"]   = splashDurationSec;
     doc["customMsg"]        = customMsg;
     doc["owmCity"]          = owmCity;
     doc["owmCountryIndex"]  = owmCountryIndex;
@@ -189,21 +192,39 @@ void setupWebServer() {
         }
 
         // Device
-        wifiSSID        = doc["wifiSSID"]         | "";
-        wifiPass        = doc["wifiPass"]         | "";
+        if (doc.containsKey("wifiSSID")) {
+          wifiSSID = doc["wifiSSID"] | wifiSSID;
+        }
+        if (doc.containsKey("wifiPass")) {
+          wifiPass = doc["wifiPass"] | wifiPass;
+        }
         if (doc.containsKey("units")) jsonToUnits(doc["units"]);
         fmt24 = units.clock24h ? 1 : 0;   // keep device clock format in sync with Unit card
-        dayFormat       = doc["dayFormat"]        | 0;
-        forecastSrc     = doc["forecastSrc"]      | 0;
-        bool autoRotateValue = doc["autoRotate"]       | 1;
-        int newInterval = constrain((int)(doc["autoRotateInterval"] | autoRotateInterval), 5, 300);
-        setAutoRotateEnabled(autoRotateValue, false);
-        setAutoRotateInterval(newInterval, false);
-        manualScreen    = doc["manualScreen"]     | 0;
+        if (doc.containsKey("dayFormat")) {
+          dayFormat = doc["dayFormat"] | dayFormat;
+        }
+        if (doc.containsKey("forecastSrc")) {
+          forecastSrc = doc["forecastSrc"] | forecastSrc;
+        }
+        if (doc.containsKey("autoRotate")) {
+          bool autoRotateValue = (doc["autoRotate"] | autoRotate) != 0;
+          setAutoRotateEnabled(autoRotateValue, false);
+        }
+        if (doc.containsKey("autoRotateInterval")) {
+          int newInterval = constrain((int)(doc["autoRotateInterval"] | autoRotateInterval), 5, 300);
+          setAutoRotateInterval(newInterval, false);
+        }
+        if (doc.containsKey("manualScreen")) {
+          manualScreen = doc["manualScreen"] | manualScreen;
+        }
 
         // Display
-        theme           = doc["theme"]            | 0;
-        brightness      = constrain((int)(doc["brightness"] | 50), 1, 100);
+        if (doc.containsKey("theme")) {
+          theme = doc["theme"] | theme;
+        }
+        if (doc.containsKey("brightness")) {
+          brightness = constrain((int)(doc["brightness"] | brightness), 1, 100);
+        }
         if (doc.containsKey("autoBrightness")) {
           JsonVariant v = doc["autoBrightness"];
           if (v.is<bool>()) autoBrightness = v.as<bool>();
@@ -213,9 +234,17 @@ void setupWebServer() {
             autoBrightness = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0);
           }
         }
-        scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);
-        scrollSpeed = scrollDelays[scrollLevel];
-        customMsg   = doc["customMsg"] | "";
+        if (doc.containsKey("splashDuration")) {
+          int dur = doc["splashDuration"].as<int>();
+          splashDurationSec = constrain(dur, 1, 10);
+        }
+        if (doc.containsKey("scrollLevel")) {
+          scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);
+          scrollSpeed = scrollDelays[scrollLevel];
+        }
+        if (doc.containsKey("customMsg")) {
+          customMsg = doc["customMsg"] | customMsg;
+        }
 
         if (doc.containsKey("ntpPreset"))
         {
@@ -257,12 +286,24 @@ void setupWebServer() {
         }
 
         // Weather
-        owmCity          = doc["owmCity"]          | "";
-        owmCountryIndex  = doc["owmCountryIndex"]  | 0;
-        owmCountryCustom = doc["owmCountryCustom"] | "";
-        owmApiKey        = doc["owmApiKey"]        | "";
-        wfToken          = doc["wfToken"]          | "";
-        wfStationId      = doc["wfStationId"]      | "";
+        if (doc.containsKey("owmCity")) {
+          owmCity = doc["owmCity"] | owmCity;
+        }
+        if (doc.containsKey("owmCountryIndex")) {
+          owmCountryIndex = doc["owmCountryIndex"] | owmCountryIndex;
+        }
+        if (doc.containsKey("owmCountryCustom")) {
+          owmCountryCustom = doc["owmCountryCustom"] | owmCountryCustom;
+        }
+        if (doc.containsKey("owmApiKey")) {
+          owmApiKey = doc["owmApiKey"] | owmApiKey;
+        }
+        if (doc.containsKey("wfToken")) {
+          wfToken = doc["wfToken"] | wfToken;
+        }
+        if (doc.containsKey("wfStationId")) {
+          wfStationId = doc["wfStationId"] | wfStationId;
+        }
 
         // Calibration (robust)
         if (doc.containsKey("tempOffset")) {
@@ -485,10 +526,10 @@ void setupWebServer() {
 
   // ---------- Status / OTA / Reboot ----------
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
-    const char* degSym = (units.temp == TempUnit::F) ? "&deg;F" : "&deg;C";
+    String tempDisp = fmtTemp(atof(str_Temp.c_str()), 0);
     String status = "<html><body><h2>Status</h2>";
     status += "<p>WiFi: " + String(WiFi.SSID()) + "</p>";
-    status += "<p>Weather: " + str_Weather_Conditions + " " + str_Temp + degSym + "</p>";
+    status += "<p>Weather: " + str_Weather_Conditions + " " + tempDisp + "</p>";
     status += "<p>Humidity: " + str_Humd + "%</p>";
     status += "<p>Time: " + String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second) + "</p>";
     status += "<p><a href='/ota'>Start OTA</a> | <a href='/reboot'>Reboot</a> | <a href='/'>Settings</a></p></body></html>";
@@ -525,21 +566,6 @@ void setupWebServer() {
       }
     }
   );
-
-  // ---------- JSON status for index.html ----------
-  server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
-    JsonDocument doc;
-    doc["wifiSSID"] = WiFi.SSID();
-    doc["ip"]       = WiFi.localIP().toString();
-    doc["temp"]     = str_Temp;
-    doc["humidity"] = str_Humd;
-    doc["conditions"] = str_Weather_Conditions;
-    doc["time"]     = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
-    String json; serializeJson(doc, json);
-    req->send(200, "application/json", json);
-  });
-
-
 
   // ---------- 404 ----------
   server.onNotFound([](AsyncWebServerRequest *request) {

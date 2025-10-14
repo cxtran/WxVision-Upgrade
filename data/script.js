@@ -16,6 +16,46 @@ var tzOffset = 0;
 var tickTimer = null;
 var startMs = Date.now();
 
+const COUNTRY_OPTIONS = [
+  { label: 'Vietnam (VN)', code: 'VN' },
+  { label: 'United States (US)', code: 'US' },
+  { label: 'Japan (JP)', code: 'JP' },
+  { label: 'Germany (DE)', code: 'DE' },
+  { label: 'India (IN)', code: 'IN' },
+  { label: 'France (FR)', code: 'FR' },
+  { label: 'Canada (CA)', code: 'CA' },
+  { label: 'United Kingdom (GB)', code: 'GB' },
+  { label: 'Australia (AU)', code: 'AU' },
+  { label: 'Brazil (BR)', code: 'BR' },
+  { label: 'Custom', code: '' }
+];
+
+function populateCountryDropdown(selectEl) {
+  if (!selectEl || selectEl.options.length > 0) return;
+  COUNTRY_OPTIONS.forEach(function(option, index) {
+    var opt = document.createElement('option');
+    opt.value = String(index);
+    opt.textContent = option.label;
+    selectEl.appendChild(opt);
+  });
+}
+
+function applyCountryCustomAvailability() {
+  var selectEl = document.getElementById('owmCountryIndex');
+  var customEl = document.getElementById('owmCountryCustom');
+  if (!selectEl || !customEl) return;
+  var idx = parseInt(selectEl.value, 10);
+  if (!isFinite(idx)) idx = 0;
+  var isCustom = idx === COUNTRY_OPTIONS.length - 1;
+  customEl.disabled = !isCustom;
+  customEl.title = isCustom ? '' : 'Selected country already provides its code';
+  if (!isCustom) {
+    customEl.placeholder = COUNTRY_OPTIONS[idx].code || 'Code';
+  } else {
+    customEl.placeholder = 'e.g. VN';
+  }
+}
+
 function fmtUtc(offsetMin){
   var sign = offsetMin >= 0 ? '+' : '-';
   var m = Math.abs(offsetMin);
@@ -76,21 +116,30 @@ function loadIndexStatus(){
     .then(function(st){
       var el;
       el = document.getElementById('st-ssid');
-      if (el) el.innerText = st.wifiSSID || '—';
+      if (el) el.innerText = st.wifiSSID || '--';
       el = document.getElementById('st-ip');
-      if (el) el.innerText = st.ip || '—';
+      if (el) el.innerText = st.ip || '--';
       el = document.getElementById('st-temp');
-      if (el) el.innerText = st.temp ? (st.temp + '°') : '—';
+      if (el) {
+        if (st.temp && st.temp !== '--') {
+          var tempText = st.temp;
+          if (st.tempUnit && tempText.indexOf(st.tempUnit) === -1) {
+            tempText += st.tempUnit;
+          }
+          el.innerText = tempText;
+        } else {
+          el.innerText = '--';
+        }
+      }
       el = document.getElementById('st-humd');
-      if (el) el.innerText = st.humidity ? (st.humidity + '%') : '—';
+      if (el) el.innerText = st.humidity ? (st.humidity + '%') : '--';
       el = document.getElementById('st-time');
-      if (el) el.innerText = st.time || '—';
+      if (el) el.innerText = st.time || '--';
     })
     .catch(function(e){
       console.warn("Status load failed:", e);
     });
 }
-
 function loadAll(){
   Promise.all([
     fetch('/settings.json').then(function(r){return r.json();}),
@@ -105,38 +154,83 @@ function loadAll(){
       return item;
     });
 
-    if (typeof wifiSSID !== 'undefined') wifiSSID.value = s.wifiSSID || '';
-    if (typeof wifiPass !== 'undefined') wifiPass.value = s.wifiPass || '';
-    if (typeof dayFormat !== 'undefined') dayFormat.value = (typeof s.dayFormat !== 'undefined' ? s.dayFormat : 0);
-    if (typeof forecastSrc !== 'undefined') forecastSrc.value = (typeof s.forecastSrc !== 'undefined' ? s.forecastSrc : 0);
-    if (typeof autoRotate !== 'undefined') autoRotate.value = (typeof s.autoRotate !== 'undefined' ? s.autoRotate : 1);
-    if (typeof manualScreen !== 'undefined') manualScreen.value = (typeof s.manualScreen !== 'undefined' ? s.manualScreen : 0);
+    var wifiSSIDEl = document.getElementById('wifiSSID');
+    if (wifiSSIDEl) wifiSSIDEl.value = s.wifiSSID || '';
+    var wifiPassEl = document.getElementById('wifiPass');
+    if (wifiPassEl) wifiPassEl.value = s.wifiPass || '';
+    var dayFormatEl = document.getElementById('dayFormat');
+    if (dayFormatEl) dayFormatEl.value = (typeof s.dayFormat !== 'undefined' ? s.dayFormat : 0);
+    var forecastSrcEl = document.getElementById('forecastSrc');
+    if (forecastSrcEl) forecastSrcEl.value = (typeof s.forecastSrc !== 'undefined' ? s.forecastSrc : 0);
+    var autoRotateEl = document.getElementById('autoRotate');
+    if (autoRotateEl) autoRotateEl.value = (typeof s.autoRotate !== 'undefined' ? s.autoRotate : 1);
+    var autoRotateIntervalEl = document.getElementById('autoRotateInterval');
+    if (autoRotateIntervalEl) {
+      var autoRotateIntervalVal = parseInt(s.autoRotateInterval, 10);
+      if (!isFinite(autoRotateIntervalVal)) {
+        autoRotateIntervalVal = parseInt(autoRotateIntervalEl.getAttribute('placeholder') || '15', 10);
+      }
+      if (!isFinite(autoRotateIntervalVal)) autoRotateIntervalVal = 15;
+      if (autoRotateIntervalVal < 5) autoRotateIntervalVal = 5;
+      if (autoRotateIntervalVal > 300) autoRotateIntervalVal = 300;
+      autoRotateIntervalEl.value = autoRotateIntervalVal;
+    }
+    var manualScreenEl = document.getElementById('manualScreen');
+    if (manualScreenEl) manualScreenEl.value = (typeof s.manualScreen !== 'undefined' ? s.manualScreen : 0);
 
     if (s.units){
-      if (typeof uTemp !== 'undefined')   uTemp.value   = (typeof s.units.temp !== 'undefined' ? s.units.temp : 0);
-      if (typeof uWind !== 'undefined')   uWind.value   = (typeof s.units.wind !== 'undefined' ? s.units.wind : 0);
-      if (typeof uPress !== 'undefined')  uPress.value  = (typeof s.units.press !== 'undefined' ? s.units.press : 0);
-      if (typeof uPrecip !== 'undefined') uPrecip.value = (typeof s.units.precip !== 'undefined' ? s.units.precip : 0);
-      if (typeof uClock !== 'undefined')  uClock.value  = (s.units.clock24h ? 1 : 0);
+      var uTempEl = document.getElementById('uTemp');
+      if (uTempEl) uTempEl.value = (typeof s.units.temp !== 'undefined' ? s.units.temp : 0);
+      var uWindEl = document.getElementById('uWind');
+      if (uWindEl) uWindEl.value = (typeof s.units.wind !== 'undefined' ? s.units.wind : 0);
+      var uPressEl = document.getElementById('uPress');
+      if (uPressEl) uPressEl.value = (typeof s.units.press !== 'undefined' ? s.units.press : 0);
+      var uPrecipEl = document.getElementById('uPrecip');
+      if (uPrecipEl) uPrecipEl.value = (typeof s.units.precip !== 'undefined' ? s.units.precip : 0);
+      var uClockEl = document.getElementById('uClock');
+      if (uClockEl) uClockEl.value = (s.units.clock24h ? 1 : 0);
     }
 
-    if (typeof theme !== 'undefined')          theme.value        = (typeof s.theme !== 'undefined' ? s.theme : 0);
-    if (typeof brightness !== 'undefined')     brightness.value   = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
-    if (typeof autoBrightness !== 'undefined') autoBrightness.value = (s.autoBrightness ? 1 : 0);
-    if (typeof scrollLevel !== 'undefined')    scrollLevel.value  = (typeof s.scrollLevel !== 'undefined' ? s.scrollLevel : 7);
-    if (typeof customMsg !== 'undefined')      customMsg.value    = (typeof s.customMsg !== 'undefined' ? s.customMsg : '');
+    var themeEl = document.getElementById('theme');
+    if (themeEl) themeEl.value = (typeof s.theme !== 'undefined' ? s.theme : 0);
+    var brightnessEl = document.getElementById('brightness');
+    if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
+    var autoBrightnessEl = document.getElementById('autoBrightness');
+    if (autoBrightnessEl) autoBrightnessEl.value = (s.autoBrightness ? 1 : 0);
+    var splashDurationEl = document.getElementById('splashDuration');
+    if (splashDurationEl) splashDurationEl.value = (typeof s.splashDuration !== 'undefined' ? s.splashDuration : 3);
+    var scrollLevelEl = document.getElementById('scrollLevel');
+    if (scrollLevelEl) scrollLevelEl.value = (typeof s.scrollLevel !== 'undefined' ? s.scrollLevel : 7);
+    var customMsgEl = document.getElementById('customMsg');
+    if (customMsgEl) customMsgEl.value = (typeof s.customMsg !== 'undefined' ? s.customMsg : '');
     applyAutoBrightnessUI();
 
-    if (typeof owmCity !== 'undefined')          owmCity.value          = s.owmCity || '';
-    if (typeof owmApiKey !== 'undefined')        owmApiKey.value        = s.owmApiKey || '';
-    if (typeof wfToken !== 'undefined')          wfToken.value          = s.wfToken || '';
-    if (typeof wfStationId !== 'undefined')      wfStationId.value      = s.wfStationId || '';
-    if (typeof owmCountryIndex !== 'undefined')  owmCountryIndex.value  = (typeof s.owmCountryIndex !== 'undefined' ? s.owmCountryIndex : 0);
-    if (typeof owmCountryCustom !== 'undefined') owmCountryCustom.value = s.owmCountryCustom || '';
+    var owmCityEl = document.getElementById('owmCity');
+    if (owmCityEl) owmCityEl.value = s.owmCity || '';
+    var owmApiKeyEl = document.getElementById('owmApiKey');
+    if (owmApiKeyEl) owmApiKeyEl.value = s.owmApiKey || '';
+    var owmCountryIndexEl = document.getElementById('owmCountryIndex');
+    if (owmCountryIndexEl) {
+      populateCountryDropdown(owmCountryIndexEl);
+      var storedIndex = (typeof s.owmCountryIndex !== 'undefined' ? s.owmCountryIndex : 0);
+      if (storedIndex < 0 || storedIndex >= COUNTRY_OPTIONS.length) storedIndex = 0;
+      owmCountryIndexEl.value = String(storedIndex);
+    }
+    var owmCountryCustomEl = document.getElementById('owmCountryCustom');
+    if (owmCountryCustomEl) owmCountryCustomEl.value = s.owmCountryCustom || '';
+    applyCountryCustomAvailability();
 
-    if (typeof tempOffset !== 'undefined') tempOffset.value = (typeof s.tempOffset !== 'undefined' ? s.tempOffset : 0);
-    if (typeof humOffset !== 'undefined')  humOffset.value  = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
-    if (typeof lightGain !== 'undefined')  lightGain.value  = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
+    var wfTokenEl = document.getElementById('wfToken');
+    if (wfTokenEl) wfTokenEl.value = s.wfToken || '';
+    var wfStationIdEl = document.getElementById('wfStationId');
+    if (wfStationIdEl) wfStationIdEl.value = s.wfStationId || '';
+
+    var tempOffsetEl = document.getElementById('tempOffset');
+    if (tempOffsetEl) tempOffsetEl.value = (typeof s.tempOffset !== 'undefined' ? s.tempOffset : 0);
+    var humOffsetEl = document.getElementById('humOffset');
+    if (humOffsetEl) humOffsetEl.value = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
+    var lightGainEl = document.getElementById('lightGain');
+    if (lightGainEl) lightGainEl.value = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
 
     currentEpoch = t.epoch || Math.floor(Date.now()/1000);
     tzOffset = (typeof t.tzOffset !== 'undefined' ? t.tzOffset : 0);
@@ -179,51 +273,155 @@ function loadAll(){
   });
 }
 
-function saveAllSettings(){
-  var payload = {
-    wifiSSID: wifiSSID.value.trim(),
-    wifiPass: wifiPass.value,
+
+function readSettingsForm() {
+  function byId(id) {
+    return document.getElementById(id);
+  }
+
+  var autoRotateIntervalEl = byId('autoRotateInterval');
+  var autoRotateInterval = parseInt(autoRotateIntervalEl && autoRotateIntervalEl.value, 10);
+  if (!isFinite(autoRotateInterval)) autoRotateInterval = parseInt(autoRotateIntervalEl && autoRotateIntervalEl.getAttribute('placeholder') || '15', 10);
+  if (!isFinite(autoRotateInterval)) autoRotateInterval = 15;
+  autoRotateInterval = Math.min(300, Math.max(5, autoRotateInterval));
+  if (autoRotateIntervalEl) autoRotateIntervalEl.value = autoRotateInterval;
+
+  var splashDurationEl = byId('splashDuration');
+  var splashDuration = parseInt(splashDurationEl && splashDurationEl.value, 10);
+  if (!isFinite(splashDuration)) splashDuration = parseInt(splashDurationEl && splashDurationEl.getAttribute('placeholder') || '3', 10);
+  if (!isFinite(splashDuration)) splashDuration = 3;
+  splashDuration = Math.min(10, Math.max(1, splashDuration));
+  if (splashDurationEl) splashDurationEl.value = splashDuration;
+
+  return {
+    wifiSSID: (byId('wifiSSID')?.value || '').trim(),
+    wifiPass: byId('wifiPass')?.value || '',
     units: {
-      temp:   +uTemp.value,
-      wind:   +uWind.value,
-      press:  +uPress.value,
-      precip: +uPrecip.value,
-      clock24h: (+uClock.value) === 1
+      temp:   +(byId('uTemp')?.value ?? 0),
+      wind:   +(byId('uWind')?.value ?? 0),
+      press:  +(byId('uPress')?.value ?? 0),
+      precip: +(byId('uPrecip')?.value ?? 0),
+      clock24h: +(byId('uClock')?.value ?? 1) === 1
     },
-    dayFormat:   +dayFormat.value,
-    forecastSrc: +forecastSrc.value,
-    autoRotate:  +autoRotate.value,
-    manualScreen:+manualScreen.value,
-    theme:       +theme.value,
-    brightness:  +brightness.value,
-    autoBrightness: +autoBrightness.value,
-    scrollLevel: +scrollLevel.value,
-    customMsg:   customMsg.value,
-    owmCity:          owmCity.value,
-    owmCountryIndex:  +owmCountryIndex.value,
-    owmCountryCustom: owmCountryCustom.value,
-    owmApiKey:        owmApiKey.value,
-    wfToken:          wfToken.value,
-    wfStationId:      wfStationId.value,
-    tempOffset:  +tempOffset.value,
-    humOffset:   +humOffset.value,
-    lightGain:   +lightGain.value
+    dayFormat:   +(byId('dayFormat')?.value ?? 0),
+    forecastSrc: +(byId('forecastSrc')?.value ?? 0),
+    autoRotate:  +(byId('autoRotate')?.value ?? 1),
+    autoRotateInterval: autoRotateInterval,
+    manualScreen:+(byId('manualScreen')?.value ?? 0),
+    theme:       +(byId('theme')?.value ?? 0),
+    brightness:  +(byId('brightness')?.value ?? 10),
+    autoBrightness: +(byId('autoBrightness')?.value ?? 0),
+    splashDuration: splashDuration,
+    scrollLevel: +(byId('scrollLevel')?.value ?? 7),
+    customMsg:   byId('customMsg')?.value || '',
+    owmCity:          (byId('owmCity')?.value || '').trim(),
+    owmCountryIndex:  +(byId('owmCountryIndex')?.value ?? 0),
+    owmCountryCustom: (byId('owmCountryCustom')?.value || '').trim(),
+    owmApiKey:        (byId('owmApiKey')?.value || '').trim(),
+    wfToken:          (byId('wfToken')?.value || '').trim(),
+    wfStationId:      (byId('wfStationId')?.value || '').trim(),
+    tempOffset:  +(byId('tempOffset')?.value ?? 0),
+    humOffset:   +(byId('humOffset')?.value ?? 0),
+    lightGain:   +(byId('lightGain')?.value ?? 100)
   };
-  fetch('/settings', {method:'POST', body: JSON.stringify(payload)})
-    .then(function(r){
-      setMsg('saveAllMsg', r.ok ? 'Saved.' : 'Save failed.', r.ok);
-    })
-    .catch(function(){
-      setMsg('saveAllMsg', 'Network error', false);
+}
+
+function pickSettings(all, keys) {
+  var out = {};
+  keys.forEach(function(key){
+    if (Object.prototype.hasOwnProperty.call(all, key)) {
+      out[key] = all[key];
+    }
+  });
+  return out;
+}
+
+async function submitSettings(payload, msgId) {
+  if (!payload || Object.keys(payload).length === 0) {
+    setMsg(msgId, 'Nothing to save.', false);
+    return false;
+  }
+  try {
+    const res = await fetch('/settings', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify(payload)
     });
+    if (!res.ok) {
+      const text = await res.text();
+      setMsg(msgId, text || 'Save failed.', false);
+      return false;
+    }
+    setMsg(msgId, 'Saved.', true);
+    loadAll();
+    return true;
+  } catch (err) {
+    console.error('Save failed', err);
+    setMsg(msgId, 'Network error', false);
+    return false;
+  }
+}
 
-    fetch('/settings', {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(payload)
-    });
+async function saveAllSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = readSettingsForm();
+  await submitSettings(payload, 'saveAllMsg');
+}
 
+async function saveDeviceSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), [
+    'wifiSSID','wifiPass','dayFormat','forecastSrc','autoRotate','autoRotateInterval','manualScreen'
+  ]);
+  await submitSettings(payload, 'saveDeviceMsg');
+}
 
+async function saveUnitsSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['units']);
+  await submitSettings(payload, 'saveUnitsMsg');
+}
+
+async function saveDisplaySettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), [
+    'theme','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
+  ]);
+  await submitSettings(payload, 'saveDisplayMsg');
+}
+
+async function saveOwmSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), [
+    'owmCity','owmCountryIndex','owmCountryCustom','owmApiKey'
+  ]);
+  await submitSettings(payload, 'saveOWMMsg');
+}
+
+async function saveTempestSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['wfToken','wfStationId']);
+  await submitSettings(payload, 'saveTempestMsg');
+}
+
+async function saveCalibrationSettings(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['tempOffset','humOffset','lightGain']);
+  await submitSettings(payload, 'saveCalibrationMsg');
 }
 
 function parseManualToEpoch() {
@@ -286,13 +484,32 @@ function syncNTP(){
 window.addEventListener('load', function(){
   if (document.getElementById('btnSaveAll')) {
     loadAll();
-    document.getElementById('btnSaveAll').addEventListener('click', saveAllSettings);
-    document.getElementById('autoBrightness').addEventListener('change', applyAutoBrightnessUI);
-    document.getElementById('btnSaveTime').addEventListener('click', function(){saveTimeSettings({withEpoch:false});});
-    document.getElementById('btnSetManual').addEventListener('click', function(){saveTimeSettings({withEpoch:true});});
-    document.getElementById('btnSyncNTP').addEventListener('click', syncNTP);
+    var btn = document.getElementById('btnSaveAll');
+    if (btn) btn.addEventListener('click', saveAllSettings);
+    btn = document.getElementById('btnSaveDevice');
+    if (btn) btn.addEventListener('click', saveDeviceSettings);
+    btn = document.getElementById('btnSaveUnits');
+    if (btn) btn.addEventListener('click', saveUnitsSettings);
+    btn = document.getElementById('btnSaveDisplay');
+    if (btn) btn.addEventListener('click', saveDisplaySettings);
+    btn = document.getElementById('btnSaveOWM');
+    if (btn) btn.addEventListener('click', saveOwmSettings);
+    btn = document.getElementById('btnSaveTempest');
+    if (btn) btn.addEventListener('click', saveTempestSettings);
+    btn = document.getElementById('btnSaveCalibration');
+    if (btn) btn.addEventListener('click', saveCalibrationSettings);
+    var autoBrightnessEl = document.getElementById('autoBrightness');
+    if (autoBrightnessEl) autoBrightnessEl.addEventListener('change', applyAutoBrightnessUI);
+    btn = document.getElementById('btnSaveTime');
+    if (btn) btn.addEventListener('click', function(){saveTimeSettings({withEpoch:false});});
+    btn = document.getElementById('btnSetManual');
+    if (btn) btn.addEventListener('click', function(){saveTimeSettings({withEpoch:true});});
+    btn = document.getElementById('btnSyncNTP');
+    if (btn) btn.addEventListener('click', syncNTP);
     var tzSelectEl = document.getElementById('tzSelect');
     if (tzSelectEl) tzSelectEl.addEventListener('change', applyAutoDstAvailability);
+    var countrySelectEl = document.getElementById('owmCountryIndex');
+    if (countrySelectEl) countrySelectEl.addEventListener('change', applyCountryCustomAvailability);
   } else {
     loadIndexStatus();
   }
@@ -300,16 +517,9 @@ window.addEventListener('load', function(){
 
 // after loadIndexStatus() in script.js
 window.addEventListener('load', function(){
-  if (document.getElementById('st-ssid')) {
-    loadIndexStatus();
-    setInterval(loadIndexStatus, 5000); // refresh every 5s
-  } else {
-    // settings page
-    loadAll();
-    document.getElementById('btnSaveAll').addEventListener('click', saveAllSettings);
-    document.getElementById('autoBrightness').addEventListener('change', applyAutoBrightnessUI);
-    document.getElementById('btnSaveTime').addEventListener('click', function(){saveTimeSettings({withEpoch:false});});
-    document.getElementById('btnSetManual').addEventListener('click', function(){saveTimeSettings({withEpoch:true});});
-    document.getElementById('btnSyncNTP').addEventListener('click', syncNTP);
+  if (!document.getElementById('st-ssid')) {
+    return;
   }
+  loadIndexStatus();
+  setInterval(loadIndexStatus, 5000); // refresh every 5s
 });
