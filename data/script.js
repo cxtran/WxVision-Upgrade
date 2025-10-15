@@ -56,6 +56,35 @@ function applyCountryCustomAvailability() {
   }
 }
 
+function applyDataSourceVisibility() {
+  var selectEl = document.getElementById('dataSource');
+  if (!selectEl) return;
+  var value = parseInt(selectEl.value, 10);
+  if (!isFinite(value)) value = 0;
+  var isOwm = value === 0;
+  var isWeatherFlow = value === 1;
+  var isNone = value === 2;
+
+  var owmCard = document.getElementById('card-owmap');
+  if (owmCard) owmCard.classList.toggle('hidden', !isOwm);
+  var wfCard = document.getElementById('card-tempest');
+  if (wfCard) wfCard.classList.toggle('hidden', !isWeatherFlow);
+
+  var toggleDisable = function(selector, disabled) {
+    var nodes = document.querySelectorAll(selector);
+    Array.prototype.forEach.call(nodes, function(el){
+      el.disabled = !!disabled;
+    });
+  };
+
+  toggleDisable('#card-owmap input, #card-owmap select, #card-owmap button', !isOwm);
+  toggleDisable('#card-tempest input, #card-tempest select, #card-tempest button', !isWeatherFlow);
+
+  if (isOwm) {
+    applyCountryCustomAvailability();
+  }
+}
+
 function fmtUtc(offsetMin){
   var sign = offsetMin >= 0 ? '+' : '-';
   var m = Math.abs(offsetMin);
@@ -160,8 +189,17 @@ function loadAll(){
     if (wifiPassEl) wifiPassEl.value = s.wifiPass || '';
     var dayFormatEl = document.getElementById('dayFormat');
     if (dayFormatEl) dayFormatEl.value = (typeof s.dayFormat !== 'undefined' ? s.dayFormat : 0);
-    var forecastSrcEl = document.getElementById('forecastSrc');
-    if (forecastSrcEl) forecastSrcEl.value = (typeof s.forecastSrc !== 'undefined' ? s.forecastSrc : 0);
+    var dataSourceEl = document.getElementById('dataSource');
+    if (dataSourceEl) {
+      var dsValue = (typeof s.dataSource !== 'undefined')
+        ? s.dataSource
+        : (typeof s.forecastSrc !== 'undefined' ? s.forecastSrc : 0);
+      dsValue = parseInt(dsValue, 10);
+      if (!isFinite(dsValue)) dsValue = 0;
+      if (dsValue < 0 || dsValue > 2) dsValue = 0;
+      dataSourceEl.value = String(dsValue);
+      applyDataSourceVisibility();
+    }
     var autoRotateEl = document.getElementById('autoRotate');
     if (autoRotateEl) autoRotateEl.value = (typeof s.autoRotate !== 'undefined' ? s.autoRotate : 1);
     var autoRotateIntervalEl = document.getElementById('autoRotateInterval');
@@ -304,7 +342,12 @@ function readSettingsForm() {
       clock24h: +(byId('uClock')?.value ?? 1) === 1
     },
     dayFormat:   +(byId('dayFormat')?.value ?? 0),
-    forecastSrc: +(byId('forecastSrc')?.value ?? 0),
+    dataSource:  (function(){
+      var val = parseInt(byId('dataSource')?.value, 10);
+      if (!isFinite(val)) val = 0;
+      if (val < 0 || val > 2) val = 0;
+      return val;
+    })(),
     autoRotate:  +(byId('autoRotate')?.value ?? 1),
     autoRotateInterval: autoRotateInterval,
     manualScreen:+(byId('manualScreen')?.value ?? 0),
@@ -375,7 +418,7 @@ async function saveDeviceSettings(event){
     event.preventDefault();
   }
   const payload = pickSettings(readSettingsForm(), [
-    'wifiSSID','wifiPass','dayFormat','forecastSrc','autoRotate','autoRotateInterval','manualScreen'
+    'wifiSSID','wifiPass','dayFormat','dataSource','autoRotate','autoRotateInterval','manualScreen'
   ]);
   await submitSettings(payload, 'saveDeviceMsg');
 }
@@ -500,6 +543,8 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', saveCalibrationSettings);
     var autoBrightnessEl = document.getElementById('autoBrightness');
     if (autoBrightnessEl) autoBrightnessEl.addEventListener('change', applyAutoBrightnessUI);
+    var dataSourceEl = document.getElementById('dataSource');
+    if (dataSourceEl) dataSourceEl.addEventListener('change', applyDataSourceVisibility);
     btn = document.getElementById('btnSaveTime');
     if (btn) btn.addEventListener('click', function(){saveTimeSettings({withEpoch:false});});
     btn = document.getElementById('btnSetManual');
@@ -510,6 +555,7 @@ window.addEventListener('load', function(){
     if (tzSelectEl) tzSelectEl.addEventListener('change', applyAutoDstAvailability);
     var countrySelectEl = document.getElementById('owmCountryIndex');
     if (countrySelectEl) countrySelectEl.addEventListener('change', applyCountryCustomAvailability);
+    applyDataSourceVisibility();
   } else {
     loadIndexStatus();
   }

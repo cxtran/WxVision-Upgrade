@@ -91,7 +91,7 @@ extern int owmCountryIndex;
 extern String owmCountryCustom;
 extern int tempOffset;
 extern int lightGain;
-extern int dayFormat, forecastSrc, autoRotate, autoRotateInterval, manualScreen;
+extern int dayFormat, dataSource, autoRotate, autoRotateInterval, manualScreen;
 extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel;
 extern bool autoBrightness;
@@ -128,7 +128,7 @@ int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
 const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
-const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Forecast Src", "Manual Screen", "< Back"};
+const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Data Source", "Manual Screen", "< Back"};
 const int deviceCount = sizeof(deviceMenu) / sizeof(deviceMenu[0]);
 const char *displayMenu[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Spd", "Auto Rotate", "Rotate Interval", "Custom Msg", "< Back"};
 const int displayCount = sizeof(displayMenu) / sizeof(displayMenu[0]);
@@ -331,7 +331,10 @@ void handleIR(uint32_t code)
         menuActive = false;
         dma_display->clearScreen();
         delay(50);
-        fetchWeatherFromOWM();
+        if (isDataSourceOwm())
+        {
+            fetchWeatherFromOWM();
+        }
         displayClock();
         displayDate();
         displayWeatherData();
@@ -623,7 +626,7 @@ void showWfTempestModal()
         wfStationId = newStation;
         saveWeatherSettings();
 
-        if (credsChanged)
+        if (credsChanged && isDataSourceWeatherFlow())
         {
             fetchForecastData();
         }
@@ -1446,7 +1449,10 @@ void showUnitSettingsModal()
             displayWeatherData();
             requestScrollRebuild();
             serviceScrollRebuild();
-            fetchWeatherFromOWM();
+            if (isDataSourceOwm())
+            {
+                fetchWeatherFromOWM();
+            }
         }
         if (clockChanged)
         {
@@ -1487,15 +1493,15 @@ void showDeviceSettingsModal()
     menuActive = true;
 
     // --- Settings without Wi-Fi setup ---
-    String labels[] = {"Day Format", "Forecast Src", "Manual Screen"};
+    String labels[] = {"Day Format", "Data Source", "Manual Screen"};
     InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser};
 
-    int *chooserRefs[] = {&dayFormat, &forecastSrc, &manualScreen};
+    int *chooserRefs[] = {&dayFormat, &dataSource, &manualScreen};
     static const char *dayFmtOpt[]   = {"MM/DD", "DD/MM"};
-    static const char *forecastOpt[] = {"OWM", "WF"};
+    static const char *dataSourceOpt[] = {"OWM", "WeatherFlow", "None"};
     static const char *manualOpt[]   = {"Off", "On"};
-    const char *const *chooserOpts[] = {dayFmtOpt, forecastOpt, manualOpt};
-    int chooserCounts[] = {2, 2, 2};
+    const char *const *chooserOpts[] = {dayFmtOpt, dataSourceOpt, manualOpt};
+    int chooserCounts[] = {2, 3, 2};
 
     // Configure modal (no text fields, no Wi-Fi choosers)
     deviceModal.setLines(labels, types, 3);
@@ -1529,7 +1535,10 @@ void exitToHomeScreen()
     menuActive = false;
     dma_display->clearScreen();
     delay(50);
-    fetchWeatherFromOWM();
+    if (isDataSourceOwm())
+    {
+        fetchWeatherFromOWM();
+    }
     displayClock();
     displayDate();
     displayWeatherData();
@@ -1669,5 +1678,3 @@ void showWiFiSettingsModal()
 
     wifiSettingsModal.show();
 }
-
-

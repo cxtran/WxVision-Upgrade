@@ -128,6 +128,11 @@ void hideAllInfoScreens()
     // Add more InfoScreens here as needed
 }
 
+static void playScreenRevealEffect(ScreenMode mode);
+static void noteScreenRotation(unsigned long now);
+static void ensureCurrentScreenAllowed();
+static void applyDataSourcePolicies(bool wifiConnected);
+
 static unsigned long lastAutoRotateMillis = 0;
 
 static bool isRotationBlocked()
@@ -150,6 +155,9 @@ static bool isRotationBlocked()
 
 static void renderScreenContents(ScreenMode mode)
 {
+    if (!screenIsAllowed(mode))
+        return;
+
     switch (mode)
     {
     case SCREEN_OWM:
@@ -189,6 +197,9 @@ static void renderScreenContents(ScreenMode mode)
 
 static void playScreenRevealEffect(ScreenMode mode)
 {
+    if (!screenIsAllowed(mode))
+        return;
+
     uint8_t original = currentPanelBrightness;
     if (original == 0)
     {
@@ -206,32 +217,86 @@ static void noteScreenRotation(unsigned long now)
     lastAutoRotateMillis = now;
 }
 
+static void ensureCurrentScreenAllowed()
+{
+    ScreenMode allowed = enforceAllowedScreen(currentScreen);
+    if (allowed != currentScreen)
+    {
+        hideAllInfoScreens();
+        currentScreen = allowed;
+        playScreenRevealEffect(currentScreen);
+        noteScreenRotation(millis());
+    }
+}
+
+static void applyDataSourcePolicies(bool wifiConnected)
+{
+    static int lastSource = -1;
+
+    if (isDataSourceWeatherFlow())
+    {
+        if (!udpListening && wifiConnected)
+        {
+            if (udp.begin(localPort))
+            {
+                udpListening = true;
+                Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
+            }
+            else
+            {
+                udpListening = false;
+                Serial.printf("Failed to bind UDP port %d\n", localPort);
+            }
+        }
+    }
+    else if (udpListening)
+    {
+        udp.stop();
+        udpListening = false;
+    }
+
+    if (lastSource != dataSource)
+    {
+        if (wifiConnected)
+        {
+            if (isDataSourceWeatherFlow())
+            {
+                fetchForecastData();
+            }
+            else if (isDataSourceOwm())
+            {
+                fetchWeatherFromOWM();
+            }
+        }
+        ensureCurrentScreenAllowed();
+        lastSource = dataSource;
+    }
+}
+
 // --- Screen rotation handler ---
 void rotateScreen(int direction)
 {
-    int idx = -1;
-    for (int i = 0; i < NUM_INFOSCREENS; ++i)
-    {
-        if (InfoScreenModes[i] == currentScreen)
-        {
-            idx = i;
-            break;
-        }
-    }
-    if (idx < 0)
-        return;
+    currentScreen = enforceAllowedScreen(currentScreen);
 
-    int nextIdx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
-    ScreenMode next = InfoScreenModes[nextIdx];
+    ScreenMode next = nextAllowedScreen(currentScreen, direction);
+    if (!screenIsAllowed(next))
+        next = enforceAllowedScreen(next);
+
+    if (next == currentScreen)
+    {
+        playScreenRevealEffect(currentScreen);
+        noteScreenRotation(millis());
+        return;
+    }
 
     hideAllInfoScreens();
     currentScreen = next;
 
     switch (currentScreen)
     {
-     case SCREEN_CLOCK:
+    case SCREEN_CLOCK:
         drawClockScreen();
-        break;    
+        break;
     case SCREEN_UDP_DATA:
         showUdpScreen();
         break;
@@ -256,14 +321,15 @@ void rotateScreen(int direction)
     case SCREEN_HOURLY:
         showHourlyForecastScreen();
         break;
-    case SCREEN_OWM: /* draw in loop */
+    case SCREEN_OWM:
+        break;
+    default:
         break;
     }
 
     playScreenRevealEffect(currentScreen);
     noteScreenRotation(millis());
 }
-
 static void handleAutoRotate(unsigned long now)
 {
     if (autoRotate == 0)
@@ -354,24 +420,38 @@ static void completeStartupAfterWiFi(bool force)
 
     if (wifiOk)
     {
-        if (udp.begin(localPort))
+        if (isDataSourceWeatherFlow())
         {
-            udpListening = true;
-            Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
+            if (!udpListening)
+            {
+                if (udp.begin(localPort))
+                {
+                    udpListening = true;
+                    Serial.printf("Listening for Tempest on UDP port %d\n", localPort);
+                }
+                else
+                {
+                    udpListening = false;
+                    Serial.printf("Failed to bind UDP port %d\n", localPort);
+                }
+            }
         }
-        else
+        else if (udpListening)
         {
+            udp.stop();
             udpListening = false;
-            Serial.printf("Failed to bind UDP port %d\n", localPort);
         }
 
-        fetchWeatherFromOWM();
-        delay(500);
+        if (isDataSourceOwm())
+        {
+            fetchWeatherFromOWM();
+            delay(500);
+        }
     }
 
     getTimeFromRTC();
 
-    if (wifiOk)
+    if (wifiOk && isDataSourceWeatherFlow())
     {
         fetchTempestData();
         fetchForecastData();
@@ -545,6 +625,8 @@ void loop()
         udpListening = false;
     }
 
+    applyDataSourcePolicies(wifiConnected);
+
     static ScreenMode lastScreen = SCREEN_CLOCK; // or whatever your default is
     static bool needsClear = false;
     if (currentScreen != lastScreen)
@@ -555,7 +637,7 @@ void loop()
 
     // === [1] --- Always-on background tasks --- ===
     // --- Fetch new forecast data every 15 minutes ---
-    if (wifiConnected && (now - lastForecast > 15 * 60 * 1000))
+    if (wifiConnected && isDataSourceWeatherFlow() && (now - lastForecast > 15 * 60 * 1000))
     {
         fetchForecastData();
         lastForecast = now;
@@ -1073,5 +1155,3 @@ void loop()
 
     delay(0);
 }
-
-

@@ -19,6 +19,17 @@ extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
 extern int theme;
+extern TempestData tempest;
+extern CurrentConditions currentCond;
+extern const ScreenMode InfoScreenModes[];
+extern const int NUM_INFOSCREENS;
+extern bool isDataSourceOwm();
+extern bool isDataSourceWeatherFlow();
+extern bool isDataSourceNone();
+extern String str_Temp;
+extern String str_Humd;
+extern String str_Weather_Conditions_Des;
+extern const uint8_t *getWeatherIconFromCondition(String condition);
 /*
 const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_DATA,
@@ -33,6 +44,118 @@ uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
 
+bool screenIsAllowed(ScreenMode mode)
+{
+    switch (mode)
+    {
+    case SCREEN_OWM:
+        return isDataSourceOwm();
+    case SCREEN_UDP_DATA:
+    case SCREEN_UDP_FORECAST:
+    case SCREEN_RAPID_WIND:
+    case SCREEN_WIND_DIR:
+    case SCREEN_CURRENT:
+    case SCREEN_HOURLY:
+        return isDataSourceWeatherFlow();
+    default:
+        return true;
+    }
+}
+
+ScreenMode nextAllowedScreen(ScreenMode start, int direction)
+{
+    if (direction == 0)
+        direction = 1;
+
+    int startIdx = -1;
+    for (int i = 0; i < NUM_INFOSCREENS; ++i)
+    {
+        if (InfoScreenModes[i] == start)
+        {
+            startIdx = i;
+            break;
+        }
+    }
+    if (startIdx < 0)
+        startIdx = 0;
+
+    int idx = startIdx;
+    for (int steps = 0; steps < NUM_INFOSCREENS; ++steps)
+    {
+        idx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
+        ScreenMode candidate = InfoScreenModes[idx];
+        if (screenIsAllowed(candidate))
+            return candidate;
+    }
+    return SCREEN_CLOCK;
+}
+
+ScreenMode enforceAllowedScreen(ScreenMode desired)
+{
+    if (screenIsAllowed(desired))
+        return desired;
+
+    ScreenMode candidate = nextAllowedScreen(desired, +1);
+    if (screenIsAllowed(candidate))
+        return candidate;
+
+    candidate = nextAllowedScreen(desired, -1);
+    if (screenIsAllowed(candidate))
+        return candidate;
+
+    return SCREEN_CLOCK;
+}
+static String formatOutdoorTemperature()
+{
+    if (isDataSourceNone())
+        return String("--");
+
+    if (isDataSourceWeatherFlow())
+    {
+        if (!isnan(tempest.temperature))
+            return fmtTemp(tempest.temperature, 0);
+    }
+    else
+    {
+        if (str_Temp.length() > 0)
+            return fmtTemp(atof(str_Temp.c_str()), 0);
+    }
+
+    if (!isnan(tempest.temperature))
+        return fmtTemp(tempest.temperature, 0);
+    if (str_Temp.length() > 0)
+        return fmtTemp(atof(str_Temp.c_str()), 0);
+    return String("--");
+}
+static String formatOutdoorHumidity()
+{
+    if (isDataSourceNone())
+        return String("--");
+
+    if (isDataSourceWeatherFlow())
+    {
+        if (!isnan(tempest.humidity))
+            return String((int)(tempest.humidity + 0.5f));
+    }
+
+    if (str_Humd.length() > 0)
+        return str_Humd;
+
+    if (!isnan(tempest.humidity))
+        return String((int)(tempest.humidity + 0.5f));
+
+    return String("--");
+}
+static void drawWeatherFlowIcon()
+{
+    dma_display->fillRect(0, 0, 16, 16, myBLACK);
+    String cond = currentCond.cond;
+    if (cond.isEmpty())
+        cond = str_Weather_Conditions_Des;
+    const uint8_t *icon = getWeatherIconFromCondition(cond);
+    uint16_t color = getIconColorFromCondition(cond);
+    dma_display->drawBitmap(0, 0, icon, 16, 16, color);
+}
 static bool splashActive = false;
 static uint16_t splashAccent = 0;
 static uint16_t splashStatusBg = 0;
@@ -605,22 +728,46 @@ void displayDate()
 
 void displayWeatherData()
 {
-    drawWeatherIcon(str_Weather_Icon);
+    if (isDataSourceNone())
+    {
+        dma_display->fillRect(0, 0, 64, 7, myBLACK);
+        return;
+    }
+
+    if (isDataSourceWeatherFlow())
+    {
+        drawWeatherFlowIcon();
+    }
+    else
+    {
+        drawWeatherIcon(str_Weather_Icon);
+    }
+
     dma_display->fillRect(18, 0, 46, 7, myBLACK);
     dma_display->setCursor(18, 0);
     dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
-    //   dma_display->print(customRoundString(str_Temp.c_str()));
-    dma_display->print(fmtTemp(atof(str_Temp.c_str()), 0));
-    //    dma_display->print(useImperial ? " °F" : " °C");
-    dma_display->setCursor(44, 0);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
-    dma_display->print(str_Humd);
-    dma_display->print("%");
+    dma_display->print(formatOutdoorTemperature());
+
+    String humidityStr = formatOutdoorHumidity();
+    if (humidityStr != "--")
+    {
+        dma_display->setCursor(44, 0);
+        dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
+        dma_display->print(humidityStr);
+        dma_display->print("%");
+    }
 }
 
 void createScrollingText()
 {
-    //   String unitT = useImperial ? " °F" : " °C";
+    if (!isDataSourceOwm())
+    {
+        scrolling_Text = "";
+        text_Length_In_Pixel = 0;
+        return;
+    }
+
+//   String unitT = useImperial ? " °F" : " °C";
     //   String unitW = useImperial ? "mph" : "m/s";
 
     scrolling_Text =
@@ -638,6 +785,9 @@ void createScrollingText()
 // --- Scroll state variables for weather ---
 void scrollWeatherDetails()
 {
+    if (!isDataSourceOwm())
+        return;
+
     static unsigned long lastScrollTime = 0;
     static int scrollOffset = 0;
 
@@ -899,24 +1049,25 @@ void drawClockScreen()
     uint16_t tempColor = (theme == 1) ? dma_display->color565(60, 60, 120)
                                       : dma_display->color565(200, 200, 255);
     dma_display->setTextColor(tempColor);
-    if (tempest.temperature == 0.0)
-        tempest.temperature = NAN;
-    String udpTempStr = fmtTemp(tempest.temperature, 0); // Outside
+    String outdoorTempStr = formatOutdoorTemperature();
+    bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
     String localTempStr = fmtTemp(SCD40_temp, 0);        // Inside
 
-    // OUTSIDE TEMP (left)
-    dma_display->setCursor(0, 0);
-    dma_display->print(udpTempStr);
+    dma_display->fillRect(0, 0, 24, 7, myBLACK);
 
-    // Draw sun icon to right of outside temperature
-    dma_display->getTextBounds(udpTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int sunX = w + 1;
-    int sunY = 0;
-// --- Outdoor (Sun) color ---
-    uint16_t sunColor = (theme == 1)
-        ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
-        : dma_display->color565(255, 200, 60);    // bright golden yellow
-    drawSunIcon(sunX, sunY, sunColor);
+    if (showOutdoor)
+    {
+        dma_display->setCursor(0, 0);
+        dma_display->print(outdoorTempStr);
+
+        dma_display->getTextBounds(outdoorTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int sunX = w + 1;
+        int sunY = 0;
+        uint16_t sunColor = (theme == 1)
+            ? dma_display->color565(100, 100, 140)
+            : dma_display->color565(255, 200, 60);
+        drawSunIcon(sunX, sunY, sunColor);
+    }
 
     // Draw house icon to the left of inside temperature
     dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
@@ -978,3 +1129,6 @@ void applyUnitPreferences()
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
 }
+
+
+

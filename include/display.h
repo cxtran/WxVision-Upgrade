@@ -68,6 +68,10 @@ void notifyUnitsMaybeChanged();  // compare unit signature; request rebuild if c
 void serviceScrollRebuild();     // if a rebuild is pending, rebuild now (cheap no-op otherwise)
 void applyUnitPreferences();     // sync derived display flags from UnitPrefs
 
+bool screenIsAllowed(ScreenMode mode);
+ScreenMode nextAllowedScreen(ScreenMode start, int direction);
+ScreenMode enforceAllowedScreen(ScreenMode desired);
+
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);
 void splashUpdate(const char* status, uint8_t step, uint8_t total);

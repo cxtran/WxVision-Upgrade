@@ -1,6 +1,7 @@
 #include "InfoModal.h"
 #include "display.h"
 #include "menu.h"
+#include "settings.h"
 #include "keyboard.h"
 #include <cstring>
 #include <vector>
@@ -1034,7 +1035,9 @@ void InfoModal::handleIR(uint32_t code)
                     menuActive = false;
                     dma_display->clearScreen();
                     delay(50);
+                    if (isDataSourceOwm()) {
                     fetchWeatherFromOWM();
+                }
                     displayClock();
                     displayDate();
                     displayWeatherData();
@@ -1050,4 +1053,5 @@ void InfoModal::handleIR(uint32_t code)
         }
     }
 }
+
 

@@ -95,7 +95,7 @@ extern String wfToken;
 extern String wfStationId;
 //extern int units;
 extern int dayFormat;
-extern int forecastSrc;
+extern int dataSource;
 extern int autoRotate;
 extern int autoRotateInterval;
 extern int manualScreen;

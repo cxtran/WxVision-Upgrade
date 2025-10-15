@@ -44,3 +44,4 @@ input[type="date"],
 input[type="time"] {
   color-scheme: dark; /* helps keep the text/icons light in supported browsers */
 }
+.hidden { display:none !important; }

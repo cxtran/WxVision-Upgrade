@@ -10,7 +10,7 @@ Preferences prefs;
 // ==== Global settings ====
 // --- Device ---
 int dayFormat = 0;        // 0 = MM/DD, 1 = DD/MM
-int forecastSrc = 0;      // 0 = OpenWeather, 1 = WeatherFlow
+int dataSource = DATA_SOURCE_OWM; // 0 = OpenWeather, 1 = WeatherFlow, 2 = None
 int autoRotate = 1;       // 1 = on, 0 = off
 int autoRotateInterval = 15; // seconds between screen rotations
 int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
@@ -56,7 +56,8 @@ void loadSettings() {
     wifiSSID     = prefs.getString("wifiSSID", "");
     wifiPass     = prefs.getString("wifiPass", "");
     dayFormat    = prefs.getInt("dayFmt", 0);
-    forecastSrc  = prefs.getInt("forecast", 0);
+    int storedSource = prefs.getInt("forecast", DATA_SOURCE_OWM);
+    setDataSource(storedSource);
     autoRotate   = prefs.getInt("autoRotate", 1);
     autoRotateInterval = prefs.getInt("autoRotInt", 15);
     autoRotateInterval = constrain(autoRotateInterval, 5, 300);
@@ -106,7 +107,7 @@ void saveDeviceSettings() {
     prefs.putString("wifiSSID", wifiSSID);
     prefs.putString("wifiPass", wifiPass);
     prefs.putInt("dayFmt", dayFormat);
-    prefs.putInt("forecast", forecastSrc);
+    prefs.putInt("forecast", dataSource);
     prefs.putInt("autoRotate", autoRotate);
     prefs.putInt("autoRotInt", autoRotateInterval);
     prefs.putInt("manualScreen", manualScreen);
@@ -134,7 +135,7 @@ void saveDisplaySettings() {
 
 void saveWeatherSettings() {
     prefs.begin("visionwx", false);
-    prefs.putInt("forecast", forecastSrc);
+    prefs.putInt("forecast", dataSource);
     prefs.putString("owmCity", owmCity);
     prefs.putString("owmApiKey", owmApiKey);
     prefs.putInt("owmCountryIndex", owmCountryIndex);
@@ -167,8 +168,34 @@ void toggleDayFormat(int dir) {
     dayFormat = (dayFormat + dir + 2) % 2;
 }
 
-void toggleForecastSrc(int dir) {
-    forecastSrc = (forecastSrc + dir + 2) % 2;
+void setDataSource(int source) {
+    if (source < DATA_SOURCE_OWM || source > DATA_SOURCE_NONE) {
+        source = DATA_SOURCE_OWM;
+    }
+    dataSource = source;
+}
+
+bool isDataSourceOwm() {
+    return dataSource == DATA_SOURCE_OWM;
+}
+
+bool isDataSourceWeatherFlow() {
+    return dataSource == DATA_SOURCE_WEATHERFLOW;
+}
+
+bool isDataSourceNone() {
+    return dataSource == DATA_SOURCE_NONE;
+}
+
+void toggleDataSource(int dir) {
+    if (dir == 0) return;
+    int next = dataSource + (dir > 0 ? 1 : -1);
+    if (next > DATA_SOURCE_NONE) {
+        next = DATA_SOURCE_OWM;
+    } else if (next < DATA_SOURCE_OWM) {
+        next = DATA_SOURCE_NONE;
+    }
+    setDataSource(next);
 }
 
 void setAutoRotateEnabled(bool enabled, bool persist) {
@@ -234,4 +261,3 @@ void adjustScrollSpeed(int dir) {
     if (scrollLevel > 9) scrollLevel = 9;
     scrollSpeed = scrollDelays[scrollLevel];
 }
-

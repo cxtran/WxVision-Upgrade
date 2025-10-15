@@ -12,7 +12,7 @@
 #include "tempest.h"
 
 // ---- externs ----
-extern int dayFormat, forecastSrc, autoRotate, manualScreen, autoRotateInterval;
+extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
 extern UnitPrefs units;
 extern int theme, brightness, scrollSpeed, scrollLevel, splashDurationSec;
 extern bool autoBrightness;
@@ -150,7 +150,8 @@ void setupWebServer() {
     doc["wifiPass"]         = wifiPass;
     unitsToJson(doc.createNestedObject("units"));
     doc["dayFormat"]        = dayFormat;
-    doc["forecastSrc"]      = forecastSrc;
+    doc["dataSource"]       = dataSource;
+    doc["forecastSrc"]      = dataSource; // legacy field for older clients
     doc["autoRotate"]       = autoRotate;
     doc["autoRotateInterval"] = autoRotateInterval;
     doc["manualScreen"]     = manualScreen;
@@ -211,9 +212,14 @@ void setupWebServer() {
         if (doc.containsKey("dayFormat")) {
           dayFormat = doc["dayFormat"] | dayFormat;
         }
-        if (doc.containsKey("forecastSrc")) {
-          forecastSrc = doc["forecastSrc"] | forecastSrc;
+
+        int newSource = dataSource;
+        if (doc.containsKey("dataSource")) {
+          newSource = doc["dataSource"].as<int>();
+        } else if (doc.containsKey("forecastSrc")) {
+          newSource = doc["forecastSrc"].as<int>();
         }
+        setDataSource(newSource);
         if (doc.containsKey("autoRotate")) {
           bool autoRotateValue = (doc["autoRotate"] | autoRotate) != 0;
           setAutoRotateEnabled(autoRotateValue, false);
@@ -350,7 +356,7 @@ void setupWebServer() {
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
 
-        if (wfCredsChanged) {
+        if (wfCredsChanged && isDataSourceWeatherFlow()) {
           fetchForecastData();
         }
       }

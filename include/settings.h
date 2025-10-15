@@ -15,9 +15,15 @@ extern int timeZoneOffsetMinutes; // Time Zone offset in minutes, e.g. 420 for U
 extern int dateFormat;            // 0 = YYYY-MM-DD, 1 = MM/DD/YYYY, 2 = DD/MM/YYYY
 extern int timeFormat24h;         // 1 = 24-hour, 0 = 12-hour
 
+enum DataSourceType : uint8_t {
+    DATA_SOURCE_OWM = 0,
+    DATA_SOURCE_WEATHERFLOW = 1,
+    DATA_SOURCE_NONE = 2
+};
+
 // --- Device ---
 extern int dayFormat;        // 0 = MM/DD/YYYY, 1 = DD/MM/YYYY
-extern int forecastSrc;      // 0 = OpenWeather, 1 = WeatherFlow
+extern int dataSource;       // see DataSourceType
 extern int autoRotate;       // 1=on, 0=off
 extern int autoRotateInterval;  // seconds between auto rotations
 extern int manualScreen;     // 0=Main,1=Weather,2=Forecast,3=Calib
@@ -58,7 +64,11 @@ void saveWeatherSettings();
 
 // --- UI helpers ---
 void toggleDayFormat(int dir);
-void toggleForecastSrc(int dir);
+void toggleDataSource(int dir);
+void setDataSource(int source);
+bool isDataSourceOwm();
+bool isDataSourceWeatherFlow();
+bool isDataSourceNone();
 void toggleAutoRotate(int dir);
 void setAutoRotateEnabled(bool enabled, bool persist = true);
 void setAutoRotateInterval(int seconds, bool persist = true);

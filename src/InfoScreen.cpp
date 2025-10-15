@@ -169,16 +169,12 @@ void InfoScreen::handleIR(uint32_t code) {
         resetHScroll(); draw(); return;
     }
     if (code == IR_LEFT || code == IR_RIGHT) {
-        int idx = -1;
-        for (int i = 0; i < NUM_INFOSCREENS; ++i) {
-            if (InfoScreenModes[i] == _screenMode) { idx = i; break; }
-        }
-        if (idx < 0) return;
-        int nextIdx = (code == IR_LEFT)
-            ? (idx - 1 + NUM_INFOSCREENS) % NUM_INFOSCREENS
-            : (idx + 1) % NUM_INFOSCREENS;
-        ScreenMode next = InfoScreenModes[nextIdx];
-        hide(); currentScreen = next; return;
+        int direction = (code == IR_LEFT) ? -1 : 1;
+        ScreenMode next = nextAllowedScreen(_screenMode, direction);
+        next = enforceAllowedScreen(next);
+        hide();
+        currentScreen = next;
+        return;
     }
     draw();
 }
