@@ -328,17 +328,7 @@ void handleIR(uint32_t code)
     switch (code)
     {
     case IR_CANCEL:
-        menuActive = false;
-        dma_display->clearScreen();
-        delay(50);
-        if (isDataSourceOwm())
-        {
-            fetchWeatherFromOWM();
-        }
-        displayClock();
-        displayDate();
-        displayWeatherData();
-        reset_Time_and_Date_Display = true;
+        exitToHomeScreen();
         lastMenuToggle = millis();
         break;
     case IR_UP:
@@ -1533,6 +1523,7 @@ void exitToHomeScreen()
 {
     menuStack.clear();
     menuActive = false;
+    currentScreen = enforceAllowedScreen(currentScreen);
     dma_display->clearScreen();
     delay(50);
     if (isDataSourceOwm())
