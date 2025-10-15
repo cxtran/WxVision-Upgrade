@@ -1,6 +1,7 @@
 #include "tempest.h"
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
+#include <WiFi.h>
 #include "ScrollLine.h"
 #include "units.h"
 #include "settings.h"
@@ -389,6 +390,11 @@ void fetchForecastData() {
         Serial.println("[Tempest] Missing WeatherFlow credentials");
         forecast.numHours = 0;
         forecast.hourlyKeyPresent = false;
+        return;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[Tempest] Forecast fetch skipped (WiFi offline)");
         return;
     }
 

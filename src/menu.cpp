@@ -15,6 +15,7 @@
 #include "SPIFFS.h"
 #include "units.h"
 #include "weather_countries.h"
+#include "tempest.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -606,9 +607,27 @@ void showWfTempestModal()
     tempestModal.setValueRefs(nullptr, 0, nullptr, 0, nullptr, nullptr, textRefs, 2, textSizes);
 
     tempestModal.setCallback([](bool, int) {
-        wfToken = String(wfTokenBuf);
-        wfStationId = String(wfStationBuf);
+        String prevToken = wfToken;
+        String prevStation = wfStationId;
+        prevToken.trim();
+        prevStation.trim();
+
+        String newToken = String(wfTokenBuf);
+        String newStation = String(wfStationBuf);
+        newToken.trim();
+        newStation.trim();
+
+        bool credsChanged = !newToken.equals(prevToken) || !newStation.equals(prevStation);
+
+        wfToken = newToken;
+        wfStationId = newStation;
         saveWeatherSettings();
+
+        if (credsChanged)
+        {
+            fetchForecastData();
+        }
+
         tempestModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;
@@ -1125,14 +1144,90 @@ void showDateTimeModal()
     static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
     static const char *autoDstOpts[] = {"Off", "On"};
 
-    String lines[] = {"Year", "Month", "Day", "Hour", "Minute", "Second",
-                      "Timezone", "Manual Offset (min)", "Auto DST",
-                      "Time Format", "Date Format",
-                      "NTP Preset", "NTP Server", "Sync NTP"};
-    InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber,
-                             InfoChooser, InfoNumber, InfoChooser,
-                             InfoChooser, InfoChooser,
-                             InfoChooser, InfoText, InfoButton};
+    char timeBuf[16];
+    snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", dtHour, dtMinute, dtSecond);
+
+    int activeOffset = timezoneOffsetForLocal(now);
+    char offsetBuf[16];
+    char offsetSign = (activeOffset >= 0) ? '+' : '-';
+    int absOffset = abs(activeOffset);
+    int offsetHours = absOffset / 60;
+    int offsetMinutes = absOffset % 60;
+    snprintf(offsetBuf, sizeof(offsetBuf), "UTC%c%02d:%02d", offsetSign, offsetHours, offsetMinutes);
+
+    int currentIdx = timezoneCurrentIndex();
+    bool dstActive = tzAutoDst && (activeOffset != tzStandardOffset);
+
+    String tzShort = "Custom";
+    if (currentIdx >= 0 && !timezoneIsCustom())
+    {
+        tzShort = timezoneInfoAt(static_cast<size_t>(currentIdx)).city;
+    }
+
+    String localSummary = "Local ";
+    localSummary += timeBuf;
+    localSummary += " (";
+    localSummary += offsetBuf;
+    if (tzAutoDst)
+    {
+        localSummary += dstActive ? " DST" : " Std";
+    }
+    else if (currentIdx >= 0 && timezoneSupportsDst(static_cast<size_t>(currentIdx)))
+    {
+        localSummary += " DST-off";
+    }
+    if (tzShort.length() > 0)
+    {
+        localSummary += ", ";
+        localSummary += tzShort;
+    }
+    localSummary += ")";
+
+    if (localSummary.length() > 44)
+    {
+        localSummary.remove(44);
+        localSummary += "...";
+    }
+
+    String rtcNote = "RTC stores UTC; display applies TZ & DST";
+
+    String lines[16];
+    InfoFieldType types[16];
+    int lineIdx = 0;
+
+    lines[lineIdx] = localSummary;
+    types[lineIdx++] = InfoLabel;
+
+    lines[lineIdx] = "Year";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Month";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Day";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Hour";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Minute";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Second";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Timezone";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Manual Offset (min)";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Auto DST";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Time Format";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Date Format";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "NTP Preset";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "NTP Server";
+    types[lineIdx++] = InfoText;
+    lines[lineIdx] = "Sync NTP";
+    types[lineIdx++] = InfoButton;
+    lines[lineIdx] = rtcNote;
+    types[lineIdx++] = InfoLabel;
 
     int *intRefs[] = {&dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute,
                       &dtSecond, &dtManualOffset};
@@ -1142,7 +1237,7 @@ void showDateTimeModal()
     char *textRefs[] = {ntpServerBuf};
     int textSizes[] = {64};
 
-    dateModal.setLines(lines, types, 14);
+    dateModal.setLines(lines, types, lineIdx);
     dateModal.setValueRefs(intRefs, 7, chooserRefs, 5,
                            chooserOptPtrs, chooserOptCounts,
                            textRefs, 1, textSizes);
@@ -1150,7 +1245,7 @@ void showDateTimeModal()
     dateModal.setCallback([](bool accepted, int /*btnIdx*/)
     {
         int sel = dateModal.getSelIndex();
-        constexpr int kSyncButtonIndex = 13;
+        constexpr int kSyncButtonIndex = 14;
 
         if (sel == kSyncButtonIndex) {
             dateModal.hide();

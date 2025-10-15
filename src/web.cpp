@@ -9,6 +9,7 @@
 #include "units.h"
 #include "display.h"
 #include "datetimesettings.h"
+#include "tempest.h"
 
 // ---- externs ----
 extern int dayFormat, forecastSrc, autoRotate, manualScreen, autoRotateInterval;
@@ -91,16 +92,23 @@ static void jsonToUnits(JsonVariantConst v)
 // Always use RTC so web clock matches on-device display
 static long currentEpoch()
 {
-  DateTime now;
+  DateTime utcNow;
   if (rtcReady)
   {
-    now = rtc.now();
+    utcNow = rtc.now();
   }
-  else if (!getLocalDateTime(now))
+  else
   {
-    now = DateTime(2000, 1, 1, 0, 0, 0);
+    DateTime localNow;
+    if (!getLocalDateTime(localNow))
+    {
+      DateTime fallback(2000, 1, 1, 0, 0, 0);
+      return (long)fallback.unixtime();
+    }
+    utcNow = localToUtc(localNow);
   }
-  return (long)now.unixtime();
+  updateTimezoneOffsetWithUtc(utcNow);
+  return (long)utcNow.unixtime();
 }
 void setupWebServer() {
   if (!SPIFFS.begin(true)) {
@@ -298,11 +306,26 @@ void setupWebServer() {
         if (doc.containsKey("owmApiKey")) {
           owmApiKey = doc["owmApiKey"] | owmApiKey;
         }
+        bool wfCredsChanged = false;
         if (doc.containsKey("wfToken")) {
-          wfToken = doc["wfToken"] | wfToken;
+          String prev = wfToken;
+          prev.trim();
+          String updated = doc["wfToken"].as<String>();
+          updated.trim();
+          if (!updated.equals(prev)) {
+            wfCredsChanged = true;
+          }
+          wfToken = updated;
         }
         if (doc.containsKey("wfStationId")) {
-          wfStationId = doc["wfStationId"] | wfStationId;
+          String prev = wfStationId;
+          prev.trim();
+          String updated = doc["wfStationId"].as<String>();
+          updated.trim();
+          if (!updated.equals(prev)) {
+            wfCredsChanged = true;
+          }
+          wfStationId = updated;
         }
 
         // Calibration (robust)
@@ -326,6 +349,10 @@ void setupWebServer() {
         saveAllSettings();
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
+
+        if (wfCredsChanged) {
+          fetchForecastData();
+        }
       }
     }
   );

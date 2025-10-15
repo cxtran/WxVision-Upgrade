@@ -370,7 +370,9 @@ void getTimeFromRTC()
     if (rtcReady)
     {
         DateTime utcNow = rtc.now();
-        now = utcToLocal(utcNow);
+        int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utcNow);
+        now = utcToLocal(utcNow, offsetMinutes);
+        updateTimezoneOffsetWithUtc(utcNow);
         haveTime = true;
     }
     else if (getLocalDateTime(now))
@@ -740,7 +742,9 @@ void drawClockScreen()
     if (rtcReady)
     {
         DateTime utcNow = rtc.now();
-        now = utcToLocal(utcNow);
+        int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utcNow);
+        now = utcToLocal(utcNow, offsetMinutes);
+        updateTimezoneOffsetWithUtc(utcNow);
     }
     else if (!getLocalDateTime(now))
     {
