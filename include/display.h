@@ -73,6 +73,7 @@ void applyUnitPreferences();     // sync derived display flags from UnitPrefs
 bool screenIsAllowed(ScreenMode mode);
 ScreenMode nextAllowedScreen(ScreenMode start, int direction);
 ScreenMode enforceAllowedScreen(ScreenMode desired);
+ScreenMode homeScreenForDataSource();
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);

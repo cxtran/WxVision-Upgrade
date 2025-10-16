@@ -198,7 +198,7 @@ void showAirQualityScreen()
   if (!airQualityScreen.isActive())
   {
     airQualityScreen.setLines(lines, 3, true);
-    airQualityScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    airQualityScreen.show([](){ currentScreen = homeScreenForDataSource(); });
   }
   else
   {
@@ -216,7 +216,7 @@ void showTempHumBaroScreen()
   if (!tempHumBaroScreen.isActive())
   {
     tempHumBaroScreen.setLines(lines, 3, true);
-    tempHumBaroScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    tempHumBaroScreen.show([](){ currentScreen = homeScreenForDataSource(); });
   }
   else
   {

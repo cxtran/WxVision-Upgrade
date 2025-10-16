@@ -105,6 +105,13 @@ ScreenMode enforceAllowedScreen(ScreenMode desired)
 
     return SCREEN_CLOCK;
 }
+
+ScreenMode homeScreenForDataSource()
+{
+    if (isDataSourceOwm())
+        return SCREEN_OWM;
+    return SCREEN_CLOCK;
+}
 static String formatOutdoorTemperature()
 {
     if (isDataSourceNone())

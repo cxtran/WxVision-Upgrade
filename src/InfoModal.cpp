@@ -655,7 +655,7 @@ void InfoModal::handleIR(uint32_t code)
                 // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
                 if (this == &mainMenuModal)
                 {
-                    menuActive = false;
+                    exitToHomeScreen();
                     return;
                 }
                 // Otherwise, show main menu as root
@@ -1032,16 +1032,7 @@ void InfoModal::handleIR(uint32_t code)
                 // --- PATCH: If this is Main Menu, exit menu system and go to info/home screen ---
                 if (this == &mainMenuModal)
                 {
-                    menuActive = false;
-                    dma_display->clearScreen();
-                    delay(50);
-                    if (isDataSourceOwm()) {
-                    fetchWeatherFromOWM();
-                }
-                    displayClock();
-                    displayDate();
-                    displayWeatherData();
-                    reset_Time_and_Date_Display = true;
+                    exitToHomeScreen();
                     return;
                 }
                 // Otherwise, show main menu as root

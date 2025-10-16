@@ -474,7 +474,7 @@ void showUdpScreen() {
 
     if (!udpScreen.isActive()) {
         udpScreen.setLines(lines, 9, true);
-        udpScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+        udpScreen.show([](){ currentScreen = homeScreenForDataSource(); });
     } else {
         udpScreen.setLines(lines, 9, false);
     }
@@ -491,7 +491,7 @@ void showForecastScreen() {
     if (num == 0) {
         lines[0] = "No forecast data!";
         forecastScreen.setLines(lines, 1);
-        forecastScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+        forecastScreen.show([](){ currentScreen = homeScreenForDataSource(); });
         return;
     }
     for (int i = 0; i < num; ++i) {
@@ -503,7 +503,7 @@ void showForecastScreen() {
     }
 
     forecastScreen.setLines(lines, num);
-    forecastScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    forecastScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 }
 
 void showHourlyForecastScreen() {
@@ -515,7 +515,7 @@ void showHourlyForecastScreen() {
         String lines[1];
         lines[0] = "No hour data.";
         hourlyScreen.setLines(lines, 1, true);
-        hourlyScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+        hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
         return;
     }
 
@@ -532,7 +532,7 @@ void showHourlyForecastScreen() {
         String lines[1];
         lines[0] = "No upcoming hour data.";
         hourlyScreen.setLines(lines, 1, true);
-        hourlyScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+        hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
         return;
     }
 
@@ -567,7 +567,7 @@ void showHourlyForecastScreen() {
     }
 
     hourlyScreen.setLines(lines, count, true);
-    hourlyScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 }
 
 void showRapidWindScreen() {
@@ -577,7 +577,7 @@ void showRapidWindScreen() {
     lines[2] = "Time:  " + getRapidWindField("time");
     if (!rapidWindScreen.isActive()) {
         rapidWindScreen.setLines(lines, 3, true);
-        rapidWindScreen.show([](){ currentScreen = SCREEN_OWM; });
+        rapidWindScreen.show([](){ currentScreen = homeScreenForDataSource(); });
     } else {
         rapidWindScreen.setLines(lines, 3, false);
     }
@@ -658,7 +658,7 @@ void showCurrentConditionsScreen() {
     lines[6] = "Gust:   " + (isnan(currentCond.windGust)  ? String("--") : fmtWind(currentCond.windGust, 1));
     lines[7] = "Cond:   " + (String(currentCond.cond).length() == 0 ? String("--") : currentCond.cond);
     currentCondScreen.setLines(lines, 8);
-    currentCondScreen.show([](){ currentScreen = ScreenMode::SCREEN_OWM; });
+    currentCondScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 
 }
 
