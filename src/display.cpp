@@ -14,6 +14,8 @@
 
 extern float aht20_temp;
 extern float SCD40_temp;
+extern float SCD40_hum;
+extern float aht20_hum;
 extern int scrollLevel;
 extern void displayClock();
 extern void displayDate();
@@ -153,6 +155,28 @@ static String formatOutdoorHumidity()
 
     return String("--");
 }
+
+static String formatIndoorHumidity()
+{
+    float humiditySource = SCD40_hum;
+    if (isnan(humiditySource))
+        humiditySource = aht20_hum;
+
+    if (!isnan(humiditySource))
+    {
+        int rounded = static_cast<int>(humiditySource + 0.5f);
+        if (rounded < 0)
+            rounded = 0;
+        if (rounded > 100)
+            rounded = 100;
+        return String(rounded);
+    }
+
+    if (str_Humd.length() > 0 && str_Humd != "--")
+        return str_Humd;
+
+    return String("--");
+}
 static void drawWeatherFlowIcon()
 {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
@@ -165,24 +189,17 @@ static void drawWeatherFlowIcon()
 }
 static bool splashActive = false;
 static uint16_t splashAccent = 0;
-static uint16_t splashStatusBg = 0;
 static uint16_t splashShadow = 0;
+static uint16_t splashHighlight = 0;
 static uint16_t splashMinimumMs = 0;
 static unsigned long splashStartMs = 0;
-static uint16_t splashIdle = 0;
-static uint16_t splashHighlight = 0;
-static float splashPrevProgress = 0.0f;
 static uint8_t splashGradStartR = 0;
 static uint8_t splashGradStartG = 0;
 static uint8_t splashGradStartB = 0;
 static uint8_t splashGradStepR = 0;
 static uint8_t splashGradStepG = 0;
 static uint8_t splashGradStepB = 0;
-static const int SPLASH_BAR_X = 6;
-static const int SPLASH_BAR_Y = 25;
-static const int SPLASH_BAR_W = PANEL_RES_X - 12;
-static const int SPLASH_BAR_H = 5;
-static const int SPLASH_STATUS_BASELINE = SPLASH_BAR_Y - 2;
+static float splashTextIntensity = 1.0f;
 
 int getTextWidth(const char *text);
 
@@ -205,6 +222,27 @@ static uint16_t splashRowColor(int y)
     return dma_display->color565(r, g, b);
 }
 
+static uint16_t scaleSplashColor(uint16_t color, float factor)
+{
+    if (!dma_display)
+        return 0;
+
+    if (factor <= 0.0f)
+        return 0;
+    if (factor > 1.0f)
+        factor = 1.0f;
+
+    uint8_t r = ((color >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((color >> 5) & 0x3F) * 255 / 63;
+    uint8_t b = (color & 0x1F) * 255 / 31;
+
+    r = static_cast<uint8_t>(r * factor + 0.5f);
+    g = static_cast<uint8_t>(g * factor + 0.5f);
+    b = static_cast<uint8_t>(b * factor + 0.5f);
+
+    return dma_display->color565(r, g, b);
+}
+
 static void drawSplashBackdrop()
 {
     for (int y = 0; y < PANEL_RES_Y; ++y)
@@ -215,169 +253,82 @@ static void drawSplashBackdrop()
     dma_display->drawFastHLine(0, 0, PANEL_RES_X, splashHighlight);
 }
 
-static void drawSplashBranding()
-{
-    // Halo behind the weather icon
-    dma_display->fillRect(4, 6, 20, 20, splashShadow);
-
-    dma_display->drawBitmap(7, 9, icon_clear, 16, 16, splashShadow);
-    dma_display->drawBitmap(6, 8, icon_clear, 16, 16, splashAccent);
-
-    dma_display->setTextWrap(false);
-    dma_display->setTextSize(1);
-
-    const char *titleMain = "Vision";
-    const char *titleAccent = "WX";
-    int titleWidth = getTextWidth("VisionWX");
-    int titleX = (PANEL_RES_X - titleWidth) / 2;
-    if (titleX < 2)
-        titleX = 2;
-    dma_display->setCursor(titleX, 12);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print(titleMain);
-    dma_display->setTextColor(splashAccent);
-    dma_display->print(titleAccent);
-
-    String tagline = "Weather Hub";
-    int tagWidth = getTextWidth(tagline.c_str());
-    int tagX = (PANEL_RES_X - tagWidth) / 2;
-    if (tagX < 2)
-        tagX = 2;
-    dma_display->setCursor(tagX, 20);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print(tagline);
-}
-
-static void renderSplashFrame()
-{
-    dma_display->drawRoundRect(SPLASH_BAR_X, SPLASH_BAR_Y, SPLASH_BAR_W, SPLASH_BAR_H, 2, myWHITE);
-    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, SPLASH_BAR_W - 2, SPLASH_BAR_H - 2, splashIdle);
-}
-
-static void renderSplashBadge(uint8_t step, uint8_t total)
-{
-    const int badgeX = PANEL_RES_X - 20;
-    const int badgeY = 2;
-    const int badgeW = 18;
-    const int badgeH = 10;
-
-    for (int y = badgeY; y < badgeY + badgeH; ++y)
-    {
-        dma_display->drawFastHLine(badgeX, y, badgeW, splashRowColor(y));
-    }
-
-    if (total <= 1)
-        return;
-
-    if (step > total)
-        step = total;
-
-    dma_display->drawRoundRect(badgeX, badgeY, badgeW, badgeH, 2, splashAccent);
-    dma_display->fillRect(badgeX + 1, badgeY + 1, badgeW - 2, badgeH - 2, splashShadow);
-
-    char buf[10];
-    snprintf(buf, sizeof(buf), "%u/%u", step, total);
-    int textWidth = getTextWidth(buf);
-    int cursorX = badgeX + (badgeW - textWidth) / 2;
-    if (cursorX < badgeX + 1)
-        cursorX = badgeX + 1;
-    dma_display->setCursor(cursorX, badgeY + badgeH - 2);
-    dma_display->setTextSize(1);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print(buf);
-}
-
-static void renderSplashBar(float progress, bool animate)
+static void drawSplashBranding(float intensity)
 {
     if (!dma_display)
         return;
 
-    if (progress < 0.0f)
-        progress = 0.0f;
-    if (progress > 1.0f)
-        progress = 1.0f;
+    if (intensity < 0.0f)
+        intensity = 0.0f;
+    if (intensity > 1.0f)
+        intensity = 1.0f;
 
-    if (progress < 0.0f)
-        progress = 0.0f;
-    if (progress > 1.0f)
-        progress = 1.0f;
+    const uint16_t panelShade = scaleSplashColor(splashShadow, 0.35f + 0.25f * (1.0f - intensity));
+    const uint16_t borderColor = scaleSplashColor(splashHighlight, 0.45f + 0.55f * intensity);
+    dma_display->fillRect(6, 8, PANEL_RES_X - 12, 16, panelShade);
+    dma_display->drawRoundRect(5, 7, PANEL_RES_X - 10, 18, 4, borderColor);
 
-    const int barInnerX = SPLASH_BAR_X + 1;
-    const int barInnerY = SPLASH_BAR_Y + 1;
-    const int barInnerW = SPLASH_BAR_W - 2;
-    const int barInnerH = SPLASH_BAR_H - 2;
-
-    int prevPixels = static_cast<int>(barInnerW * splashPrevProgress + 0.5f);
-    if (prevPixels < 0)
-        prevPixels = 0;
-    if (prevPixels > barInnerW)
-        prevPixels = barInnerW;
-
-    int targetPixels = static_cast<int>(barInnerW * progress + 0.5f);
-    if (targetPixels < 0)
-        targetPixels = 0;
-    if (targetPixels > barInnerW)
-        targetPixels = barInnerW;
-
-    // If progress moved backwards (shouldn't happen) redraw everything.
-    if (targetPixels < prevPixels)
+    const int innerX = 7;
+    const int innerW = PANEL_RES_X - 14;
+    for (int i = 0; i < 3; ++i)
     {
-        prevPixels = 0;
-        dma_display->fillRect(barInnerX, barInnerY, barInnerW, barInnerH, splashStatusBg);
+        float topBlend = (3 - i) / 3.0f;
+        float bottomBlend = (i + 1) / 3.0f;
+        uint16_t topColor = scaleSplashColor(splashHighlight, (0.35f + 0.35f * intensity) * topBlend);
+        uint16_t bottomColor = scaleSplashColor(splashShadow, 0.25f + 0.35f * bottomBlend);
+        dma_display->drawFastHLine(innerX, 8 + i, innerW, topColor);
+        dma_display->drawFastHLine(innerX, 8 + 15 - i, innerW, bottomColor);
     }
 
-    // Ensure base fill exists before animating.
-    if (prevPixels == 0 && targetPixels >= 0)
-    {
-        dma_display->fillRect(barInnerX, barInnerY, barInnerW, barInnerH, splashStatusBg);
-    }
+    const char *title = "WxVision";
+    dma_display->setTextWrap(false);
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setTextSize(1);
 
-    if (animate && targetPixels > prevPixels)
+    int16_t x1, y1;
+    uint16_t w, h;
+    dma_display->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
+    const int targetTop = (PANEL_RES_Y - static_cast<int>(h)) / 2;
+    const int cursorX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
+    const int cursorY = targetTop - y1;
+
+    uint16_t shadowColor = scaleSplashColor(splashShadow, 0.5f * intensity);
+    dma_display->setCursor(cursorX + 1, cursorY + 2);
+    dma_display->setTextColor(shadowColor);
+    dma_display->print(title);
+
+    const uint16_t accentColor = scaleSplashColor(splashAccent, intensity);
+    const uint16_t bodyColor = scaleSplashColor(myWHITE, intensity);
+    dma_display->setCursor(cursorX, cursorY);
+    dma_display->setTextColor(accentColor);
+    dma_display->print("Wx");
+    dma_display->setTextColor(bodyColor);
+    dma_display->print("Vision");
+
+    dma_display->setFont();
+    dma_display->setTextSize(1);
+
+    if (intensity > 0.0f)
     {
-        for (int x = prevPixels; x < targetPixels; ++x)
+        const uint16_t underlineColor = scaleSplashColor(splashAccent, 0.75f * intensity);
+        int underlineY = targetTop + static_cast<int>(h) + 1;
+        if (underlineY >= 0 && underlineY < PANEL_RES_Y)
         {
-            dma_display->drawFastVLine(barInnerX + x, barInnerY, barInnerH, splashAccent);
-            dma_display->drawPixel(barInnerX + x, barInnerY, splashHighlight);
-            delay(10);
+            const int underlineX = 12;
+            const int underlineW = PANEL_RES_X - 24;
+            if (underlineW > 0)
+                dma_display->drawFastHLine(underlineX, underlineY, underlineW, underlineColor);
         }
     }
-    else if (targetPixels > prevPixels)
-    {
-        dma_display->fillRect(barInnerX + prevPixels, barInnerY, targetPixels - prevPixels, barInnerH, splashAccent);
-        dma_display->drawFastHLine(barInnerX + prevPixels, barInnerY, targetPixels - prevPixels, splashHighlight);
-    }
-
-    if (targetPixels < barInnerW)
-    {
-        dma_display->fillRect(barInnerX + targetPixels, barInnerY, barInnerW - targetPixels, barInnerH, splashIdle);
-    }
-
-    splashPrevProgress = progress;
 }
 
-static void renderSplashStatusText(const String &rawStatus)
+static void drawSplashScreen(float intensity)
 {
     if (!dma_display)
         return;
 
-    String status = rawStatus;
-    status.trim();
-    if (status.isEmpty())
-        status = "Starting...";
-    if (status.length() > 18)
-        status.remove(18);
-
-    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 8, splashShadow);
-
-    int textWidth = getTextWidth(status.c_str());
-    int cursorX = (PANEL_RES_X - textWidth) / 2;
-    if (cursorX < 2)
-        cursorX = 2;
-
-    dma_display->setCursor(cursorX, SPLASH_STATUS_BASELINE);
-    dma_display->setTextSize(1);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print(status);
+    drawSplashBackdrop();
+    drawSplashBranding(intensity);
 }
 
 void setPanelBrightness(uint8_t value)
@@ -428,9 +379,7 @@ void splashBegin(uint16_t minimumMs)
     {
         // Monochrome theme palette
         splashAccent = dma_display->color565(210, 210, 230);
-        splashStatusBg = dma_display->color565(40, 44, 68);
         splashShadow = dma_display->color565(18, 20, 34);
-        splashIdle = dma_display->color565(26, 28, 44);
         splashHighlight = dma_display->color565(255, 255, 255);
         splashGradStartR = 14;
         splashGradStartG = 14;
@@ -443,9 +392,7 @@ void splashBegin(uint16_t minimumMs)
     {
         // Color theme palette
         splashAccent = dma_display->color565(90, 210, 255);
-        splashStatusBg = dma_display->color565(12, 40, 70);
         splashShadow = dma_display->color565(8, 22, 38);
-        splashIdle = dma_display->color565(16, 32, 54);
         splashHighlight = dma_display->color565(230, 250, 255);
         splashGradStartR = 10;
         splashGradStartG = 26;
@@ -454,14 +401,8 @@ void splashBegin(uint16_t minimumMs)
         splashGradStepG = 2;
         splashGradStepB = 3;
     }
-    splashPrevProgress = 0.0f;
-
-    drawSplashBackdrop();
-    drawSplashBranding();
-    renderSplashFrame();
-    renderSplashBar(0.0f, false);
-    renderSplashBadge(0, 0);
-    renderSplashStatusText("Starting...");
+    splashTextIntensity = 1.0f;
+    drawSplashScreen(splashTextIntensity);
 }
 
 void splashUpdate(const char *status, uint8_t step, uint8_t total)
@@ -469,28 +410,29 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
     if (!dma_display || !splashActive)
         return;
 
+    (void)status;
+
     if (total == 0)
         total = 1;
     if (step > total)
         step = total;
 
-    float target = static_cast<float>(step) / static_cast<float>(total);
-    if (target < 0.0f)
-        target = 0.0f;
-    if (target > 1.0f)
-        target = 1.0f;
+    float progress = static_cast<float>(step) / static_cast<float>(total);
+    if (progress < 0.0f)
+        progress = 0.0f;
+    if (progress > 1.0f)
+        progress = 1.0f;
 
-    String text = status ? String(status) : String("");
-    text.trim();
-    if (text.length() == 0)
+    float targetIntensity = 1.0f - progress;
+    if (targetIntensity < 0.0f)
+        targetIntensity = 0.0f;
+
+    if ((targetIntensity + 0.01f) < splashTextIntensity || (targetIntensity - 0.01f) > splashTextIntensity)
     {
-        text = "Working...";
+        splashTextIntensity = targetIntensity;
+        drawSplashScreen(splashTextIntensity);
     }
-
-    renderSplashBar(target, true);
-    renderSplashBadge(step, total);
-    renderSplashStatusText(text);
-    delay(25);
+    delay(20);
 }
 
 void splashEnd()
@@ -502,6 +444,10 @@ void splashEnd()
     {
         delay(15);
     }
+
+    splashTextIntensity = 0.0f;
+    drawSplashScreen(splashTextIntensity);
+    delay(40);
 
     uint8_t original = currentPanelBrightness;
     if (original == 0)
@@ -516,7 +462,6 @@ void splashEnd()
     setPanelBrightness(original);
     splashActive = false;
     splashMinimumMs = 0;
-    splashPrevProgress = 0.0f;
     dma_display->setTextColor(myWHITE);
     dma_display->setTextSize(1);
 }
@@ -1065,6 +1010,18 @@ void drawHouseIcon(int x, int y, uint16_t color)
     dma_display->drawLine(x + 4, y + 5, x + 4, y + 6, color);
 }
 
+void drawHumidityIcon(int x, int y, uint16_t color)
+{
+    // 7x7 droplet with pointed tip and rounded base
+    dma_display->drawPixel(x + 3, y, color);                               // tip
+    dma_display->drawLine(x + 2, y + 1, x + 4, y + 1, color);              // gentle slope
+    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color);              // upper bulb
+    dma_display->drawLine(x + 1, y + 3, x + 5, y + 3, color);              // body
+    dma_display->drawLine(x + 1, y + 4, x + 5, y + 4, color);              // body
+    dma_display->drawLine(x + 2, y + 5, x + 4, y + 5, color);              // rounding into base
+//    dma_display->drawLine(x + 1, y + 6, x + 5, y + 6, color);              // flat bottom
+}
+
 void drawWiFiIcon(int x, int y, uint16_t color)
 {
     // Simple 7x5 Wi-Fi signal icon
@@ -1245,9 +1202,11 @@ void drawClockScreen()
     dma_display->setTextColor(tempColor);
     String outdoorTempStr = formatOutdoorTemperature();
     bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
+    String indoorHumidityStr = formatIndoorHumidity();
+    bool showIndoorHumidity = isDataSourceNone() && indoorHumidityStr != "--";
     String localTempStr = fmtTemp(SCD40_temp, 0);        // Inside
 
-    dma_display->fillRect(0, 0, 24, 7, myBLACK);
+    dma_display->fillRect(0, 0, 32, 7, myBLACK);
 
     if (showOutdoor)
     {
@@ -1261,6 +1220,20 @@ void drawClockScreen()
             ? dma_display->color565(100, 100, 140)
             : dma_display->color565(255, 200, 60);
         drawSunIcon(sunX, sunY, sunColor);
+    }
+    else if (showIndoorHumidity)
+    {
+        String humidityDisplay = indoorHumidityStr + "%";
+        dma_display->setCursor(0, 0);
+        dma_display->print(humidityDisplay);
+
+        dma_display->getTextBounds(humidityDisplay.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int dropX = w + 1;
+        int dropY = 0;
+        uint16_t dropColor = (theme == 1)
+                                 ? dma_display->color565(100, 100, 160)
+                                 : dma_display->color565(100, 200, 255);
+        drawHumidityIcon(dropX, dropY, dropColor);
     }
 
     // Draw house icon to the left of inside temperature
