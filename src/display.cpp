@@ -1210,30 +1210,34 @@ void drawClockScreen()
 
     if (showOutdoor)
     {
-        dma_display->setCursor(0, 0);
-        dma_display->print(outdoorTempStr);
-
-        dma_display->getTextBounds(outdoorTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-        int sunX = w + 1;
+        const int iconWidth = 7;
+        const int padding = 1;
+        int sunX = 0;
         int sunY = 0;
         uint16_t sunColor = (theme == 1)
             ? dma_display->color565(100, 100, 140)
             : dma_display->color565(255, 200, 60);
         drawSunIcon(sunX, sunY, sunColor);
+
+        int tempX = sunX + iconWidth + padding;
+        dma_display->setCursor(tempX, 0);
+        dma_display->print(outdoorTempStr);
     }
     else if (showIndoorHumidity)
     {
         String humidityDisplay = indoorHumidityStr + "%";
-        dma_display->setCursor(0, 0);
-        dma_display->print(humidityDisplay);
-
-        dma_display->getTextBounds(humidityDisplay.c_str(), 0, 0, &x1, &y1, &w, &h);
-        int dropX = w + 1;
+        const int iconWidth = 7;
+        const int padding = 1;
+        int dropX = 0;
         int dropY = 0;
         uint16_t dropColor = (theme == 1)
                                  ? dma_display->color565(100, 100, 160)
                                  : dma_display->color565(100, 200, 255);
         drawHumidityIcon(dropX, dropY, dropColor);
+
+        int humidityX = dropX + iconWidth + padding;
+        dma_display->setCursor(humidityX, 0);
+        dma_display->print(humidityDisplay);
     }
 
     // Draw house icon to the left of inside temperature
