@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
 #include <WiFi.h>
+#include <math.h>
 #include "ScrollLine.h"
 #include "units.h"
 #include "settings.h"
@@ -17,6 +18,11 @@ extern ScrollLine scrollLine;
 extern ScrollLine windInfo;
 extern int scrollSpeed;
 extern int theme;
+
+static String formatWindDirectionLabel(double degrees);
+static String formatSampleInterval(double seconds);
+static String formatWindTimestamp(uint32_t epoch);
+static String composeWindInfoLine();
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -65,7 +71,12 @@ void updateTempestFromUDP(const char* jsonStr) {
         tempest.reportInt     = (int)obs[17];
         tempest.lastObsTime   = String((uint32_t)obs[0]);
         tempest.lastUpdate    = millis();
+        tempest.obsWindAvg    = tempest.windAvg;
+        tempest.obsWindDir    = tempest.windDir;
+        tempest.obsEpoch      = tempest.epoch;
+        tempest.obsLastUpdate = tempest.lastUpdate;
         newTempestData = true;
+        updateWindInfoScroll(false);
     }
     else if (type == "rapid_wind" && doc.hasOwnProperty("ob")) {
         JSONVar ob = doc["ob"];
@@ -74,6 +85,10 @@ void updateTempestFromUDP(const char* jsonStr) {
             tempest.windAvg    = (double)ob[1];
             tempest.windDir    = (double)ob[2];
             tempest.lastUpdate = millis();
+            tempest.rapidWindAvg    = tempest.windAvg;
+            tempest.rapidWindDir    = tempest.windDir;
+            tempest.rapidEpoch      = tempest.epoch;
+            tempest.rapidLastUpdate = tempest.lastUpdate;
             newRapidWindData   = true;
 
             // was: Serial.printf("rapid_wind: epoch=%lu windAvg=%.2f windDir=%.1f\n", ...)
@@ -83,6 +98,7 @@ void updateTempestFromUDP(const char* jsonStr) {
             Serial.print(tempest.windAvg, 2);
             Serial.print(" windDir=");
             Serial.println(tempest.windDir, 1);
+            updateWindInfoScroll(false);
         } else {
             Serial.println("rapid_wind: ob array not length 3!");
         }
@@ -124,6 +140,84 @@ String extractJsonArray(const String& json, const String& key) {
     }
     if (arrayEnd < 0) return "";
     return json.substring(arrayStart, arrayEnd + 1);
+}
+
+static String formatWindDirectionLabel(double degrees) {
+    if (isnan(degrees)) return "--";
+    static const char* names[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+    double normalized = fmod(degrees, 360.0);
+    if (normalized < 0) normalized += 360.0;
+    int index = static_cast<int>(floor((normalized + 22.5) / 45.0)) % 8;
+    int degInt = static_cast<int>(floor(normalized + 0.5));
+    if (degInt >= 360) degInt -= 360;
+    return String(names[index]) + " " + String(degInt) + "°";
+}
+
+static String formatSampleInterval(double seconds) {
+    if (isnan(seconds)) return String("--");
+    int sec = static_cast<int>(floor(seconds + 0.5));
+    if (sec < 0) sec = 0;
+    return String(sec) + "s";
+}
+
+static String formatWindTimestamp(uint32_t epoch) {
+    if (epoch == 0) return "--";
+    time_t rawTime = static_cast<time_t>(epoch);
+    struct tm* ti = localtime(&rawTime);
+    if (!ti) return "--";
+    char buf[9];
+    strftime(buf, sizeof(buf), "%H:%M:%S", ti);
+    return String(buf);
+}
+
+static String composeWindInfoLine() {
+    String line;
+    line.reserve(192);
+
+    const String obsAvg = isnan(tempest.obsWindAvg) ? String("--") : fmtWind(tempest.obsWindAvg, 1);
+    const String gust   = isnan(tempest.windGust)   ? String("--") : fmtWind(tempest.windGust, 1);
+    const String lull   = isnan(tempest.windLull)   ? String("--") : fmtWind(tempest.windLull, 1);
+    const String obsDir = formatWindDirectionLabel(tempest.obsWindDir);
+    const String sample = formatSampleInterval(tempest.windSampleInt);
+    const String obsAt  = formatWindTimestamp(tempest.obsEpoch);
+
+    const String rapidAvg = isnan(tempest.rapidWindAvg) ? String("--") : fmtWind(tempest.rapidWindAvg, 1);
+    const String rapidDir = formatWindDirectionLabel(tempest.rapidWindDir);
+    const String rapidAt  = formatWindTimestamp(tempest.rapidEpoch);
+
+
+    line += "¦ Observe at: " + obsAt + " ¦";
+    line += " Avg: " + obsAvg  + " ¦";
+    line += " Gust: " + gust  + " ¦";
+    line += " Lull: " + lull  + " ¦";
+    line += " Dir: " + ((obsDir == "--") ? String("--") : obsDir) + " ¦";
+    /* 
+    line += " Sample: " + sample + " ¦";
+    line += " Rapid: " + rapidAvg ;
+    if (rapidDir != "--") {
+        line += " " + rapidDir;
+    }
+    line += " at: " + rapidAt;
+    */
+    return line;
+}
+
+void updateWindInfoScroll(bool resetPosition) {
+    String line = composeWindInfoLine();
+    if (line.length() == 0) {
+        line = "No wind data available";
+    }
+
+    static String previousLine;
+    bool contentChanged = (line != previousLine);
+    if (!contentChanged && !resetPosition) {
+        return;
+    }
+
+    String lines[1];
+    lines[0] = line;
+    windInfo.setLines(lines, 1, resetPosition);
+    previousLine = line;
 }
 
 // ============ Forecast parsing (split) ============

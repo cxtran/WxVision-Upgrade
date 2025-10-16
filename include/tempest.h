@@ -54,6 +54,14 @@ struct TempestData {
     int    reportInt;
     String lastObsTime;
     unsigned long lastUpdate;
+    double obsWindAvg = NAN;
+    double obsWindDir = NAN;
+    uint32_t obsEpoch = 0;
+    unsigned long obsLastUpdate = 0;
+    double rapidWindAvg = NAN;
+    double rapidWindDir = NAN;
+    uint32_t rapidEpoch = 0;
+    unsigned long rapidLastUpdate = 0;
 };
 
 // ----------- WeatherFlow 7-Day Forecast Data -----------
@@ -138,3 +146,4 @@ String formatEpochTime(uint32_t epoch);
 void debugPrintJsonKeys(JSONVar obj);
 String extractJsonArray(const String& json, const String& key);
 String extractJsonObject(const String& src, const char* key);
+void updateWindInfoScroll(bool resetPosition = false);
