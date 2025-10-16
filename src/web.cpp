@@ -10,6 +10,7 @@
 #include "display.h"
 #include "datetimesettings.h"
 #include "tempest.h"
+#include "weather_countries.h"
 
 // ---- externs ----
 extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
@@ -21,6 +22,7 @@ extern String wifiSSID, wifiPass;
 extern String owmCity, owmApiKey, wfToken, wfStationId;
 extern int owmCountryIndex;
 extern String owmCountryCustom;
+extern String owmCountryCode;
 extern int tempOffset, humOffset, lightGain;
 extern void saveAllSettings();
 extern void loadSettings();
@@ -38,6 +40,7 @@ extern char ntpServerHost[64];
 
 // from settings.h
 extern const int scrollDelays[10];
+extern bool reset_Time_and_Date_Display;
 
 AsyncWebServer server(80);
 
@@ -77,15 +80,15 @@ static void jsonToUnits(JsonVariantConst v)
   if (!v.is<JsonObjectConst>())
     return;
   JsonObjectConst obj = v.as<JsonObjectConst>();
-  if (obj.containsKey("temp"))
+  if (!obj["temp"].isNull())
     units.temp = static_cast<TempUnit>(obj["temp"].as<uint8_t>());
-  if (obj.containsKey("wind"))
+  if (!obj["wind"].isNull())
     units.wind = static_cast<WindUnit>(obj["wind"].as<uint8_t>());
-  if (obj.containsKey("press"))
+  if (!obj["press"].isNull())
     units.press = static_cast<PressUnit>(obj["press"].as<uint8_t>());
-  if (obj.containsKey("precip"))
+  if (!obj["precip"].isNull())
     units.precip = static_cast<PrecipUnit>(obj["precip"].as<uint8_t>());
-  if (obj.containsKey("clock24h"))
+  if (!obj["clock24h"].isNull())
     units.clock24h = obj["clock24h"].as<bool>();
 }
 
@@ -201,45 +204,45 @@ void setupWebServer() {
         }
 
         // Device
-        if (doc.containsKey("wifiSSID")) {
+        if (!doc["wifiSSID"].isNull()) {
           wifiSSID = doc["wifiSSID"] | wifiSSID;
         }
-        if (doc.containsKey("wifiPass")) {
+        if (!doc["wifiPass"].isNull()) {
           wifiPass = doc["wifiPass"] | wifiPass;
         }
-        if (doc.containsKey("units")) jsonToUnits(doc["units"]);
+        if (!doc["units"].isNull()) jsonToUnits(doc["units"]);
         fmt24 = units.clock24h ? 1 : 0;   // keep device clock format in sync with Unit card
-        if (doc.containsKey("dayFormat")) {
+        if (!doc["dayFormat"].isNull()) {
           dayFormat = doc["dayFormat"] | dayFormat;
         }
 
         int newSource = dataSource;
-        if (doc.containsKey("dataSource")) {
+        if (!doc["dataSource"].isNull()) {
           newSource = doc["dataSource"].as<int>();
-        } else if (doc.containsKey("forecastSrc")) {
+        } else if (!doc["forecastSrc"].isNull()) {
           newSource = doc["forecastSrc"].as<int>();
         }
         setDataSource(newSource);
-        if (doc.containsKey("autoRotate")) {
+        if (!doc["autoRotate"].isNull()) {
           bool autoRotateValue = (doc["autoRotate"] | autoRotate) != 0;
           setAutoRotateEnabled(autoRotateValue, false);
         }
-        if (doc.containsKey("autoRotateInterval")) {
+        if (!doc["autoRotateInterval"].isNull()) {
           int newInterval = constrain((int)(doc["autoRotateInterval"] | autoRotateInterval), 5, 300);
           setAutoRotateInterval(newInterval, false);
         }
-        if (doc.containsKey("manualScreen")) {
+        if (!doc["manualScreen"].isNull()) {
           manualScreen = doc["manualScreen"] | manualScreen;
         }
 
         // Display
-        if (doc.containsKey("theme")) {
+        if (!doc["theme"].isNull()) {
           theme = doc["theme"] | theme;
         }
-        if (doc.containsKey("brightness")) {
+        if (!doc["brightness"].isNull()) {
           brightness = constrain((int)(doc["brightness"] | brightness), 1, 100);
         }
-        if (doc.containsKey("autoBrightness")) {
+        if (!doc["autoBrightness"].isNull()) {
           JsonVariant v = doc["autoBrightness"];
           if (v.is<bool>()) autoBrightness = v.as<bool>();
           else if (v.is<int>()) autoBrightness = (v.as<int>() != 0);
@@ -248,19 +251,19 @@ void setupWebServer() {
             autoBrightness = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0);
           }
         }
-        if (doc.containsKey("splashDuration")) {
+        if (!doc["splashDuration"].isNull()) {
           int dur = doc["splashDuration"].as<int>();
           splashDurationSec = constrain(dur, 1, 10);
         }
-        if (doc.containsKey("scrollLevel")) {
+        if (!doc["scrollLevel"].isNull()) {
           scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);
           scrollSpeed = scrollDelays[scrollLevel];
         }
-        if (doc.containsKey("customMsg")) {
+        if (!doc["customMsg"].isNull()) {
           customMsg = doc["customMsg"] | customMsg;
         }
 
-        if (doc.containsKey("ntpPreset"))
+        if (!doc["ntpPreset"].isNull())
         {
           int preset = doc["ntpPreset"].as<int>();
           if (preset < 0) preset = 0;
@@ -268,7 +271,7 @@ void setupWebServer() {
           ntpServerPreset = preset;
         }
 
-        if (doc.containsKey("ntpServer"))
+        if (!doc["ntpServer"].isNull())
         {
           String host = doc["ntpServer"].as<String>();
           host.trim();
@@ -300,20 +303,40 @@ void setupWebServer() {
         }
 
         // Weather
-        if (doc.containsKey("owmCity")) {
-          owmCity = doc["owmCity"] | owmCity;
+        bool owmSettingsChanged = false;
+        if (!doc["owmCity"].isNull()) {
+          String updated = doc["owmCity"].as<String>();
+          updated.trim();
+          if (!updated.equals(owmCity)) {
+            owmSettingsChanged = true;
+          }
+          owmCity = updated;
         }
-        if (doc.containsKey("owmCountryIndex")) {
-          owmCountryIndex = doc["owmCountryIndex"] | owmCountryIndex;
+        if (!doc["owmCountryIndex"].isNull()) {
+          int updated = doc["owmCountryIndex"].as<int>();
+          if (updated != owmCountryIndex) {
+            owmSettingsChanged = true;
+          }
+          owmCountryIndex = updated;
         }
-        if (doc.containsKey("owmCountryCustom")) {
-          owmCountryCustom = doc["owmCountryCustom"] | owmCountryCustom;
+        if (!doc["owmCountryCustom"].isNull()) {
+          String updated = doc["owmCountryCustom"].as<String>();
+          updated.trim();
+          if (!updated.equals(owmCountryCustom)) {
+            owmSettingsChanged = true;
+          }
+          owmCountryCustom = updated;
         }
-        if (doc.containsKey("owmApiKey")) {
-          owmApiKey = doc["owmApiKey"] | owmApiKey;
+        if (!doc["owmApiKey"].isNull()) {
+          String updated = doc["owmApiKey"].as<String>();
+          updated.trim();
+          if (!updated.equals(owmApiKey)) {
+            owmSettingsChanged = true;
+          }
+          owmApiKey = updated;
         }
         bool wfCredsChanged = false;
-        if (doc.containsKey("wfToken")) {
+        if (!doc["wfToken"].isNull()) {
           String prev = wfToken;
           prev.trim();
           String updated = doc["wfToken"].as<String>();
@@ -323,7 +346,7 @@ void setupWebServer() {
           }
           wfToken = updated;
         }
-        if (doc.containsKey("wfStationId")) {
+        if (!doc["wfStationId"].isNull()) {
           String prev = wfStationId;
           prev.trim();
           String updated = doc["wfStationId"].as<String>();
@@ -335,15 +358,15 @@ void setupWebServer() {
         }
 
         // Calibration (robust)
-        if (doc.containsKey("tempOffset")) {
+        if (!doc["tempOffset"].isNull()) {
           JsonVariant v = doc["tempOffset"];
           tempOffset = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
         }
-        if (doc.containsKey("humOffset")) {
+        if (!doc["humOffset"].isNull()) {
           JsonVariant v = doc["humOffset"];
           humOffset = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
         }
-        if (doc.containsKey("lightGain")) {
+        if (!doc["lightGain"].isNull()) {
           JsonVariant v = doc["lightGain"];
           lightGain = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
         }
@@ -355,6 +378,22 @@ void setupWebServer() {
         saveAllSettings();
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
+
+        if (owmCountryIndex >= 0 && owmCountryIndex < (countryCount - 1)) {
+          owmCountryCode = countryCodes[owmCountryIndex];
+        } else {
+          owmCountryCode = owmCountryCustom;
+        }
+
+        if (owmSettingsChanged) {
+          if (WiFi.status() == WL_CONNECTED) {
+            fetchWeatherFromOWM();
+            requestScrollRebuild();
+            serviceScrollRebuild();
+            displayWeatherData();
+          }
+          reset_Time_and_Date_Display = true;
+        }
 
         if (wfCredsChanged && isDataSourceWeatherFlow()) {
           fetchForecastData();
@@ -428,7 +467,7 @@ void setupWebServer() {
         delete body; req->_tempObject = nullptr;
 
         bool timezoneUpdated = false;
-        if (doc.containsKey("tzName")) {
+        if (!doc["tzName"].isNull()) {
           String tz = doc["tzName"].as<String>();
           tz.trim();
           if (tz.length() > 0) {
@@ -448,24 +487,24 @@ void setupWebServer() {
             }
           }
         }
-        if (!timezoneUpdated && doc.containsKey("tzOffset")) {
+        if (!timezoneUpdated && !doc["tzOffset"].isNull()) {
           int offset = doc["tzOffset"].as<int>();
           setCustomTimezoneOffset(offset);
           timezoneUpdated = true;
         }
 
-        if (doc.containsKey("tzAutoDst"))
+        if (!doc["tzAutoDst"].isNull())
         {
           setTimezoneAutoDst(doc["tzAutoDst"].as<bool>());
         }
-        else if (doc.containsKey("autoDst"))
+        else if (!doc["autoDst"].isNull())
         {
           setTimezoneAutoDst(doc["autoDst"].as<bool>());
         }
 
-        if (doc.containsKey("dateFmt")) dateFmt = (int)doc["dateFmt"].as<int>();
+        if (!doc["dateFmt"].isNull()) dateFmt = (int)doc["dateFmt"].as<int>();
 
-        if (doc.containsKey("ntpPreset"))
+        if (!doc["ntpPreset"].isNull())
         {
           int preset = doc["ntpPreset"].as<int>();
           if (preset < 0) preset = 0;
@@ -473,7 +512,7 @@ void setupWebServer() {
           ntpServerPreset = preset;
         }
 
-        if (doc.containsKey("ntpServer"))
+        if (!doc["ntpServer"].isNull())
         {
           String host = doc["ntpServer"].as<String>();
           host.trim();
@@ -504,7 +543,7 @@ void setupWebServer() {
           }
         }
 
-        if (doc.containsKey("epoch")) { // write RTC
+        if (!doc["epoch"].isNull()) { // write RTC
           time_t t = (time_t)doc["epoch"].as<long>();
           rtc.adjust(DateTime(t));
         }
@@ -607,6 +646,7 @@ void setupWebServer() {
 
   server.begin();
 }
+
 
 
 

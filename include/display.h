@@ -61,6 +61,8 @@ void drawClockScreen();
 void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();
+void displayWeatherData();
+void fetchWeatherFromOWM();
 void createScrollingText();
 // display.h
 void requestScrollRebuild();     // mark that the marquee text must be rebuilt

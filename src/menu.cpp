@@ -537,6 +537,7 @@ void showWeatherSettingsModal()
     static char owmCountryCustomBuf[4] = "";
     static char owmCityBuf[32];
     static char owmKeyBuf[48];
+    owmCountryIndexTemp = owmCountryIndex;
     strncpy(owmCountryCustomBuf, owmCountryCustom.c_str(), sizeof(owmCountryCustomBuf));
     strncpy(owmCityBuf, owmCity.c_str(), sizeof(owmCityBuf));
     strncpy(owmKeyBuf, owmApiKey.c_str(), sizeof(owmKeyBuf));
@@ -554,10 +555,30 @@ void showWeatherSettingsModal()
 
     weatherModal.setCallback([](bool ok, int btnIdx)
                              {
-        owmCountryIndex = owmCountryIndexTemp;
-        owmCountryCustom = String(owmCountryCustomBuf);
-        owmCity = String(owmCityBuf);
-        owmApiKey = String(owmKeyBuf);
+        String prevCity = owmCity;
+        String prevApiKey = owmApiKey;
+        int prevCountryIndex = owmCountryIndex;
+        String prevCountryCustom = owmCountryCustom;
+        String prevCountryCode = owmCountryCode;
+
+        int newCountryIndex = owmCountryIndexTemp;
+        String newCountryCustom = String(owmCountryCustomBuf);
+        newCountryCustom.trim();
+        String newCity = String(owmCityBuf);
+        newCity.trim();
+        String newApiKey = String(owmKeyBuf);
+        newApiKey.trim();
+
+        bool settingsChanged =
+            (newCountryIndex != prevCountryIndex) ||
+            !newCountryCustom.equals(prevCountryCustom) ||
+            !newCity.equals(prevCity) ||
+            !newApiKey.equals(prevApiKey);
+
+        owmCountryIndex = newCountryIndex;
+        owmCountryCustom = newCountryCustom;
+        owmCity = newCity;
+        owmApiKey = newApiKey;
 
         if (owmCountryIndex < 10) {
             owmCountryCode = countryCodes[owmCountryIndex];
@@ -568,6 +589,19 @@ void showWeatherSettingsModal()
         saveWeatherSettings();
         Serial.printf("[WeatherModal] Saved Country=%s (%s), City=%s\n",
             countryLabels[owmCountryIndex], owmCountryCode.c_str(), owmCity.c_str());
+
+        if (settingsChanged)
+        {
+            if (WiFi.status() == WL_CONNECTED)
+            {
+                fetchWeatherFromOWM();
+                requestScrollRebuild();
+                serviceScrollRebuild();
+                displayWeatherData();
+            }
+            reset_Time_and_Date_Display = true;
+        }
+
         weatherModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;

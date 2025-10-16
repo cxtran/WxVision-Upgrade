@@ -27,9 +27,9 @@
 #include "ScrollLine.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST, 
-                                      SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY, 
-                                      SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY, SCREEN_CLOCK};
+const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
+                                      SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY,
+                                      SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -464,6 +464,9 @@ static void completeStartupAfterWiFi(bool force)
     displayDate();
     requestScrollRebuild();
     serviceScrollRebuild();
+
+    currentScreen = SCREEN_CLOCK;
+    playScreenRevealEffect(currentScreen);
 
     delay(2000);
     setupButtons();
@@ -1120,36 +1123,49 @@ void loop()
         return;
     }
 
-    if (currentScreen == SCREEN_OWM && !anyModalOrInfoScreenActive)
+    if (currentScreen == SCREEN_OWM)
     {
-        // 1) Detect unit changes (C/F, mph/kph/kts/mps, inHg/hPa, inch/mm, 12h/24h)
-        notifyUnitsMaybeChanged();
-
-        // 2) Rebuild marquee once if needed (after unit/data changes)
-        serviceScrollRebuild();
-
-        // 3) Animate at fixed cadence independent of the 1s clock redraw
-        scrollWeatherTick();
-
-        if (reset_Time_and_Date_Display)
+        if (!isDataSourceOwm())
         {
-            reset_Time_and_Date_Display = false;
-            displayClock();
-            displayDate();
-            displayWeatherData();
-        }
-
-        static unsigned long prevMillis_ShowTimeDate = 0;
-        if (now - prevMillis_ShowTimeDate >= 1000)
-        {
-            reset_Time_and_Date_Display = true;
-            prevMillis_ShowTimeDate = now;
-            if (needsClear)
+            ScreenMode fallback = enforceAllowedScreen(currentScreen);
+            if (fallback != currentScreen)
             {
-                dma_display->fillScreen(0);
-                needsClear = false;
+                hideAllInfoScreens();
+                currentScreen = fallback;
+                needsClear = true;
             }
-            drawOWMScreen(); // <- no createScrollingText() call inside this anymore
+        }
+        else if (!anyModalOrInfoScreenActive)
+        {
+            // 1) Detect unit changes (C/F, mph/kph/kts/mps, inHg/hPa, inch/mm, 12h/24h)
+            notifyUnitsMaybeChanged();
+
+            // 2) Rebuild marquee once if needed (after unit/data changes)
+            serviceScrollRebuild();
+
+            // 3) Animate at fixed cadence independent of the 1s clock redraw
+            scrollWeatherTick();
+
+            if (reset_Time_and_Date_Display)
+            {
+                reset_Time_and_Date_Display = false;
+                displayClock();
+                displayDate();
+                displayWeatherData();
+            }
+
+            static unsigned long prevMillis_ShowTimeDate = 0;
+            if (now - prevMillis_ShowTimeDate >= 1000)
+            {
+                reset_Time_and_Date_Display = true;
+                prevMillis_ShowTimeDate = now;
+                if (needsClear)
+                {
+                    dma_display->fillScreen(0);
+                    needsClear = false;
+                }
+                drawOWMScreen(); // <- no createScrollingText() call inside this anymore
+            }
         }
     }
 

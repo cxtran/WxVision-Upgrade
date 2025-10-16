@@ -162,11 +162,216 @@ static uint16_t splashStatusBg = 0;
 static uint16_t splashShadow = 0;
 static uint16_t splashMinimumMs = 0;
 static unsigned long splashStartMs = 0;
+static uint16_t splashIdle = 0;
+static uint16_t splashHighlight = 0;
+static float splashPrevProgress = 0.0f;
+static uint8_t splashGradStartR = 0;
+static uint8_t splashGradStartG = 0;
+static uint8_t splashGradStartB = 0;
+static uint8_t splashGradStepR = 0;
+static uint8_t splashGradStepG = 0;
+static uint8_t splashGradStepB = 0;
 static const int SPLASH_BAR_X = 6;
 static const int SPLASH_BAR_Y = 25;
 static const int SPLASH_BAR_W = PANEL_RES_X - 12;
 static const int SPLASH_BAR_H = 5;
 static const int SPLASH_STATUS_BASELINE = SPLASH_BAR_Y - 2;
+
+int getTextWidth(const char *text);
+
+static uint16_t splashRowColor(int y)
+{
+    if (y < 0)
+        y = 0;
+    if (y >= PANEL_RES_Y)
+        y = PANEL_RES_Y - 1;
+
+    uint16_t r = splashGradStartR + y * splashGradStepR;
+    uint16_t g = splashGradStartG + y * splashGradStepG;
+    uint16_t b = splashGradStartB + y * splashGradStepB;
+    if (r > 255)
+        r = 255;
+    if (g > 255)
+        g = 255;
+    if (b > 255)
+        b = 255;
+    return dma_display->color565(r, g, b);
+}
+
+static void drawSplashBackdrop()
+{
+    for (int y = 0; y < PANEL_RES_Y; ++y)
+    {
+        dma_display->drawFastHLine(0, y, PANEL_RES_X, splashRowColor(y));
+    }
+
+    dma_display->drawFastHLine(0, 0, PANEL_RES_X, splashHighlight);
+}
+
+static void drawSplashBranding()
+{
+    // Halo behind the weather icon
+    dma_display->fillRect(4, 6, 20, 20, splashShadow);
+
+    dma_display->drawBitmap(7, 9, icon_clear, 16, 16, splashShadow);
+    dma_display->drawBitmap(6, 8, icon_clear, 16, 16, splashAccent);
+
+    dma_display->setTextWrap(false);
+    dma_display->setTextSize(1);
+
+    const char *titleMain = "Vision";
+    const char *titleAccent = "WX";
+    int titleWidth = getTextWidth("VisionWX");
+    int titleX = (PANEL_RES_X - titleWidth) / 2;
+    if (titleX < 2)
+        titleX = 2;
+    dma_display->setCursor(titleX, 12);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print(titleMain);
+    dma_display->setTextColor(splashAccent);
+    dma_display->print(titleAccent);
+
+    String tagline = "Weather Hub";
+    int tagWidth = getTextWidth(tagline.c_str());
+    int tagX = (PANEL_RES_X - tagWidth) / 2;
+    if (tagX < 2)
+        tagX = 2;
+    dma_display->setCursor(tagX, 20);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print(tagline);
+}
+
+static void renderSplashFrame()
+{
+    dma_display->drawRoundRect(SPLASH_BAR_X, SPLASH_BAR_Y, SPLASH_BAR_W, SPLASH_BAR_H, 2, myWHITE);
+    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, SPLASH_BAR_W - 2, SPLASH_BAR_H - 2, splashIdle);
+}
+
+static void renderSplashBadge(uint8_t step, uint8_t total)
+{
+    const int badgeX = PANEL_RES_X - 20;
+    const int badgeY = 2;
+    const int badgeW = 18;
+    const int badgeH = 10;
+
+    for (int y = badgeY; y < badgeY + badgeH; ++y)
+    {
+        dma_display->drawFastHLine(badgeX, y, badgeW, splashRowColor(y));
+    }
+
+    if (total <= 1)
+        return;
+
+    if (step > total)
+        step = total;
+
+    dma_display->drawRoundRect(badgeX, badgeY, badgeW, badgeH, 2, splashAccent);
+    dma_display->fillRect(badgeX + 1, badgeY + 1, badgeW - 2, badgeH - 2, splashShadow);
+
+    char buf[10];
+    snprintf(buf, sizeof(buf), "%u/%u", step, total);
+    int textWidth = getTextWidth(buf);
+    int cursorX = badgeX + (badgeW - textWidth) / 2;
+    if (cursorX < badgeX + 1)
+        cursorX = badgeX + 1;
+    dma_display->setCursor(cursorX, badgeY + badgeH - 2);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print(buf);
+}
+
+static void renderSplashBar(float progress, bool animate)
+{
+    if (!dma_display)
+        return;
+
+    if (progress < 0.0f)
+        progress = 0.0f;
+    if (progress > 1.0f)
+        progress = 1.0f;
+
+    if (progress < 0.0f)
+        progress = 0.0f;
+    if (progress > 1.0f)
+        progress = 1.0f;
+
+    const int barInnerX = SPLASH_BAR_X + 1;
+    const int barInnerY = SPLASH_BAR_Y + 1;
+    const int barInnerW = SPLASH_BAR_W - 2;
+    const int barInnerH = SPLASH_BAR_H - 2;
+
+    int prevPixels = static_cast<int>(barInnerW * splashPrevProgress + 0.5f);
+    if (prevPixels < 0)
+        prevPixels = 0;
+    if (prevPixels > barInnerW)
+        prevPixels = barInnerW;
+
+    int targetPixels = static_cast<int>(barInnerW * progress + 0.5f);
+    if (targetPixels < 0)
+        targetPixels = 0;
+    if (targetPixels > barInnerW)
+        targetPixels = barInnerW;
+
+    // If progress moved backwards (shouldn't happen) redraw everything.
+    if (targetPixels < prevPixels)
+    {
+        prevPixels = 0;
+        dma_display->fillRect(barInnerX, barInnerY, barInnerW, barInnerH, splashStatusBg);
+    }
+
+    // Ensure base fill exists before animating.
+    if (prevPixels == 0 && targetPixels >= 0)
+    {
+        dma_display->fillRect(barInnerX, barInnerY, barInnerW, barInnerH, splashStatusBg);
+    }
+
+    if (animate && targetPixels > prevPixels)
+    {
+        for (int x = prevPixels; x < targetPixels; ++x)
+        {
+            dma_display->drawFastVLine(barInnerX + x, barInnerY, barInnerH, splashAccent);
+            dma_display->drawPixel(barInnerX + x, barInnerY, splashHighlight);
+            delay(10);
+        }
+    }
+    else if (targetPixels > prevPixels)
+    {
+        dma_display->fillRect(barInnerX + prevPixels, barInnerY, targetPixels - prevPixels, barInnerH, splashAccent);
+        dma_display->drawFastHLine(barInnerX + prevPixels, barInnerY, targetPixels - prevPixels, splashHighlight);
+    }
+
+    if (targetPixels < barInnerW)
+    {
+        dma_display->fillRect(barInnerX + targetPixels, barInnerY, barInnerW - targetPixels, barInnerH, splashIdle);
+    }
+
+    splashPrevProgress = progress;
+}
+
+static void renderSplashStatusText(const String &rawStatus)
+{
+    if (!dma_display)
+        return;
+
+    String status = rawStatus;
+    status.trim();
+    if (status.isEmpty())
+        status = "Starting...";
+    if (status.length() > 18)
+        status.remove(18);
+
+    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 8, splashShadow);
+
+    int textWidth = getTextWidth(status.c_str());
+    int cursorX = (PANEL_RES_X - textWidth) / 2;
+    if (cursorX < 2)
+        cursorX = 2;
+
+    dma_display->setCursor(cursorX, SPLASH_STATUS_BASELINE);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(myWHITE);
+    dma_display->print(status);
+}
 
 void setPanelBrightness(uint8_t value)
 {
@@ -212,49 +417,44 @@ void splashBegin(uint16_t minimumMs)
     splashActive = true;
     splashMinimumMs = minimumMs;
     splashStartMs = millis();
-    splashAccent = dma_display->color565(255, 180, 40);
-    splashStatusBg = dma_display->color565(10, 35, 60);
-    splashShadow = dma_display->color565(5, 20, 35);
-
-    // Soft gradient background
-    for (int y = 0; y < PANEL_RES_Y; ++y)
+    if (theme == 1)
     {
-        uint8_t r = 3 + (y * 3);
-        uint8_t g = 18 + (y * 4);
-        uint8_t b = 38 + (y * 3);
-        uint16_t c = dma_display->color565(r, g, b);
-        dma_display->drawFastHLine(0, y, PANEL_RES_X, c);
-        delay(6);
+        // Monochrome theme palette
+        splashAccent = dma_display->color565(210, 210, 230);
+        splashStatusBg = dma_display->color565(40, 44, 68);
+        splashShadow = dma_display->color565(18, 20, 34);
+        splashIdle = dma_display->color565(26, 28, 44);
+        splashHighlight = dma_display->color565(255, 255, 255);
+        splashGradStartR = 14;
+        splashGradStartG = 14;
+        splashGradStartB = 18;
+        splashGradStepR = 2;
+        splashGradStepG = 2;
+        splashGradStepB = 3;
     }
+    else
+    {
+        // Color theme palette
+        splashAccent = dma_display->color565(90, 210, 255);
+        splashStatusBg = dma_display->color565(12, 40, 70);
+        splashShadow = dma_display->color565(8, 22, 38);
+        splashIdle = dma_display->color565(16, 32, 54);
+        splashHighlight = dma_display->color565(230, 250, 255);
+        splashGradStartR = 10;
+        splashGradStartG = 26;
+        splashGradStartB = 40;
+        splashGradStepR = 2;
+        splashGradStepG = 2;
+        splashGradStepB = 3;
+    }
+    splashPrevProgress = 0.0f;
 
-    // Weather glyph with subtle shadow
-    dma_display->drawBitmap(7, 9, icon_clear, 16, 16, splashShadow);
-    dma_display->drawBitmap(6, 8, icon_clear, 16, 16, splashAccent);
-
-    dma_display->setTextWrap(false);
-    dma_display->setTextSize(1);
-
-    // Title
-    dma_display->setCursor(26, 13);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print("Wx");
-    dma_display->setTextColor(splashAccent);
-    dma_display->print("Vision");
-
-    // Tagline
-    dma_display->setTextColor(myWHITE);
-    dma_display->setCursor(26, 20);
-    dma_display->print("Weather Hub");
-
-    // Baseline progress bar container
-    dma_display->drawRoundRect(SPLASH_BAR_X, SPLASH_BAR_Y, SPLASH_BAR_W, SPLASH_BAR_H, 2, myWHITE);
-    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, SPLASH_BAR_W - 2, SPLASH_BAR_H - 2, splashStatusBg);
-
-    // Initial status placeholder
-    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 7, splashStatusBg);
-    dma_display->setCursor(14, SPLASH_STATUS_BASELINE);
-    dma_display->setTextColor(myWHITE);
-    dma_display->print("Booting...");
+    drawSplashBackdrop();
+    drawSplashBranding();
+    renderSplashFrame();
+    renderSplashBar(0.0f, false);
+    renderSplashBadge(0, 0);
+    renderSplashStatusText("Starting...");
 }
 
 void splashUpdate(const char *status, uint8_t step, uint8_t total)
@@ -267,37 +467,23 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
     if (step > total)
         step = total;
 
-    // Update progress bar fill
-    int innerWidth = SPLASH_BAR_W - 2;
-    int filled = (innerWidth * step + total / 2) / total;
-    if (filled < 0)
-        filled = 0;
-    if (filled > innerWidth)
-        filled = innerWidth;
-
-    dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, innerWidth, SPLASH_BAR_H - 2, splashStatusBg);
-    if (filled > 0)
-    {
-        dma_display->fillRect(SPLASH_BAR_X + 1, SPLASH_BAR_Y + 1, filled, SPLASH_BAR_H - 2, splashAccent);
-    }
-
-    // Status text area
-    dma_display->fillRect(0, SPLASH_STATUS_BASELINE - 7, PANEL_RES_X, 7, splashStatusBg);
-    dma_display->setTextColor(myWHITE);
-    dma_display->setTextSize(1);
+    float target = static_cast<float>(step) / static_cast<float>(total);
+    if (target < 0.0f)
+        target = 0.0f;
+    if (target > 1.0f)
+        target = 1.0f;
 
     String text = status ? String(status) : String("");
-    if (text.length() > 16)
+    text.trim();
+    if (text.length() == 0)
     {
-        text = text.substring(0, 16);
+        text = "Working...";
     }
-    int textWidth = getTextWidth(text.c_str());
-    int cursorX = (PANEL_RES_X - textWidth) / 2;
-    if (cursorX < 0)
-        cursorX = 0;
-    dma_display->setCursor(cursorX, SPLASH_STATUS_BASELINE);
-    dma_display->print(text);
-    delay(140);
+
+    renderSplashBar(target, true);
+    renderSplashBadge(step, total);
+    renderSplashStatusText(text);
+    delay(25);
 }
 
 void splashEnd()
@@ -323,6 +509,7 @@ void splashEnd()
     setPanelBrightness(original);
     splashActive = false;
     splashMinimumMs = 0;
+    splashPrevProgress = 0.0f;
     dma_display->setTextColor(myWHITE);
     dma_display->setTextSize(1);
 }
