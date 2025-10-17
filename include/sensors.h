@@ -5,6 +5,14 @@
 #include <Adafruit_AHTX0.h>
 #include <Adafruit_BMP280.h>
 
+extern uint16_t SCD40_co2;
+extern float SCD40_temp;
+extern float SCD40_hum;
+extern float aht20_temp;
+extern float aht20_hum;
+extern float bmp280_temp;
+extern float bmp280_pressure;
+
 extern bool newAirQualityData;
 extern bool newAHT20_BMP280Data;
 

@@ -100,7 +100,6 @@ struct ForecastData {
 // ==============================
 extern TempestData tempest;
 extern ForecastData forecast;
-extern InfoScreen rapidWindScreen;
 extern InfoScreen currentCondScreen;
 extern InfoScreen hourlyScreen;
 extern CurrentConditions currentCond;
@@ -134,7 +133,6 @@ String getForecastField(const char* field);
 // ---- Display Screens ----
 void showUdpScreen();
 void showForecastScreen();
-void showRapidWindScreen();
 void showHourlyForecastScreen();
 void showCurrentConditionsScreen();
 void showWindDirectionScreen();

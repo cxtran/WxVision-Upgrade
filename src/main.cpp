@@ -5,6 +5,7 @@
 #include <ArduinoOTA.h>
 #include <Preferences.h>
 #include "display.h"
+#include "env_quality.h"
 #include "pins.h"
 #include "button.h"
 #include "utils.h"
@@ -28,7 +29,7 @@
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
-                                      SCREEN_RAPID_WIND, SCREEN_WIND_DIR, SCREEN_AIR_QUALITY,
+                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX, SCREEN_AIR_QUALITY,
                                       SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -40,7 +41,7 @@ extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainM
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
-InfoScreen rapidWindScreen("Rapid Wind", SCREEN_RAPID_WIND);
+InfoScreen envQualityScreen("Env Quality", SCREEN_ENV_INDEX);
 InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
 InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
@@ -120,11 +121,11 @@ void hideAllInfoScreens()
 {
     udpScreen.hide();
     forecastScreen.hide();
-    rapidWindScreen.hide();
+    envQualityScreen.hide();
     tempHumBaroScreen.hide();
     currentCondScreen.hide();
     hourlyScreen.hide();
-    airQualityScreen.hide(); // ??? add this
+    airQualityScreen.hide();
     // Add more InfoScreens here as needed
 }
 
@@ -169,11 +170,11 @@ static void renderScreenContents(ScreenMode mode)
     case SCREEN_UDP_FORECAST:
         forecastScreen.tick();
         break;
-    case SCREEN_RAPID_WIND:
-        rapidWindScreen.tick();
-        break;
     case SCREEN_WIND_DIR:
         showWindDirectionScreen();
+        break;
+    case SCREEN_ENV_INDEX:
+        envQualityScreen.tick();
         break;
     case SCREEN_AIR_QUALITY:
         airQualityScreen.tick();
@@ -303,11 +304,11 @@ void rotateScreen(int direction)
     case SCREEN_UDP_FORECAST:
         showForecastScreen();
         break;
-    case SCREEN_RAPID_WIND:
-        showRapidWindScreen();
-        break;
     case SCREEN_WIND_DIR:
         showWindDirectionScreen();
+        break;
+    case SCREEN_ENV_INDEX:
+        showEnvironmentalQualityScreen();
         break;
     case SCREEN_AIR_QUALITY:
         showAirQualityScreen();
@@ -556,6 +557,15 @@ void setup()
     }
 
     Serial.println("\nESP32 Weather Display");
+
+    // InfoScreen highlight preferences
+    udpScreen.setHighlightEnabled(true);
+    forecastScreen.setHighlightEnabled(true);
+    envQualityScreen.setHighlightEnabled(false);
+    airQualityScreen.setHighlightEnabled(true);
+    tempHumBaroScreen.setHighlightEnabled(true);
+    currentCondScreen.setHighlightEnabled(true);
+    hourlyScreen.setHighlightEnabled(true);
 
     // Ensure TCP/IP stack is initialised even if we stay offline
     WiFi.mode(WIFI_STA);
@@ -923,28 +933,6 @@ void loop()
         delay(40);
         return;
     }
-
-    if (rapidWindScreen.isActive())
-    {
-        if (newRapidWindData)
-        {
-            showRapidWindScreen();
-            newRapidWindData = false;
-        }
-        uint32_t code = getIRCodeNonBlocking();
-        if (code == IR_CANCEL)
-        {
-            hideAllInfoScreens();
-            showMainMenuModal();
-            playBuzzerTone(3000, 100);
-            return;
-        }
-        rapidWindScreen.tick();
-        rapidWindScreen.handleIR(code);
-        delay(40);
-        return;
-    }
-
     if (airQualityScreen.isActive())
     {
         if (newAirQualityData)
@@ -1038,9 +1026,9 @@ void loop()
         if (!udpScreen.isActive())
             showUdpScreen();
         break;
-    case SCREEN_RAPID_WIND:
-        if (!rapidWindScreen.isActive())
-            showRapidWindScreen();
+    case SCREEN_ENV_INDEX:
+        if (!envQualityScreen.isActive())
+            showEnvironmentalQualityScreen();
         break;
     case SCREEN_CURRENT:
         if (!currentCondScreen.isActive())
@@ -1065,7 +1053,7 @@ void loop()
         break;
     }
 
- // Screens not use InfoScreen class   
+// Screens not use InfoScreen class   
     if( currentScreen == SCREEN_CLOCK){
         // Handle clock screen updates
         static unsigned long lastClockUpdate = 0;
@@ -1074,6 +1062,28 @@ void loop()
             lastClockUpdate = now;
             drawClockScreen(); // Redraw clock screen
         }
+    }
+
+    if (envQualityScreen.isActive())
+    {
+        if (newAirQualityData || newAHT20_BMP280Data)
+        {
+            showEnvironmentalQualityScreen();
+            newAirQualityData = false;
+            newAHT20_BMP280Data = false;
+        }
+        uint32_t code = getIRCodeNonBlocking();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
+        envQualityScreen.tick();
+        envQualityScreen.handleIR(code);
+        delay(40);
+        return;
     }
 
     if (currentScreen == SCREEN_WIND_DIR)

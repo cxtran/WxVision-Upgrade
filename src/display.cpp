@@ -8,6 +8,7 @@
 // #include "fonts/tahomabd8pt7b.h"
 #include "fonts/verdanab8pt7b.h"
 #include "datetimesettings.h"
+#include "units.h"
 
 #include "tempest.h"
 #include "weather_countries.h"
@@ -54,7 +55,6 @@ bool screenIsAllowed(ScreenMode mode)
         return isDataSourceOwm();
     case SCREEN_UDP_DATA:
     case SCREEN_UDP_FORECAST:
-    case SCREEN_RAPID_WIND:
     case SCREEN_WIND_DIR:
     case SCREEN_CURRENT:
     case SCREEN_HOURLY:

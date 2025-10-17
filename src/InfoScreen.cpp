@@ -1,6 +1,7 @@
 #include "InfoScreen.h"
 #include "InfoModal.h"
 #include "display.h"
+#include "utils.h"
 
 extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
@@ -9,19 +10,61 @@ extern int scrollSpeed;
 extern int theme;
 
 
+static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
+{
+    uint8_t r = ((color >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((color >> 5) & 0x3F) * 255 / 63;
+    uint8_t b = (color & 0x1F) * 255 / 31;
+
+    auto clamp = [](uint8_t v, uint8_t increase) -> uint8_t {
+        uint16_t temp = static_cast<uint16_t>(v) + increase;
+        if (temp > 255)
+            temp = 255;
+        return static_cast<uint8_t>(temp);
+    };
+
+    r = clamp(r, boost);
+    g = clamp(g, boost);
+    b = clamp(b, boost);
+    return dma_display->color565(r, g, b);
+}
+
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
     : _title(title), _screenMode(mode), _lineCount(0), _active(false),
       _onExit(nullptr), scrollY(0), selIndex(0), lastSelIndex(-1),
-      firstScroll(true), scrollPaused(false), scrollPauseTime(0)
+      firstScroll(true), scrollPaused(false), scrollPauseTime(0),
+      _highlightEnabled(true), _lineOverlay(nullptr)
 {
+    for (int i = 0; i < INFOSCREEN_MAX_LINES; ++i)
+    {
+        _lineColors[i] = 0;
+        _lineColorUsed[i] = false;
+    }
     resetHScroll();
 }
 
 void InfoScreen::setTitle(const String& title) { _title = title; }
 
-void InfoScreen::setLines(const String lines[], int n, bool resetPosition) {
+void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const uint16_t colors[]) {
     _lineCount = (n > INFOSCREEN_MAX_LINES) ? INFOSCREEN_MAX_LINES : n;
-    for (int i = 0; i < _lineCount; ++i) _lines[i] = lines[i];
+    for (int i = 0; i < _lineCount; ++i) {
+        _lines[i] = lines[i];
+        if (colors)
+        {
+            _lineColors[i] = colors[i];
+            _lineColorUsed[i] = true;
+        }
+        else
+        {
+            _lineColors[i] = 0;
+            _lineColorUsed[i] = false;
+        }
+    }
+    for (int i = _lineCount; i < INFOSCREEN_MAX_LINES; ++i)
+    {
+        _lineColors[i] = 0;
+        _lineColorUsed[i] = false;
+    }
 
     if (resetPosition) {
         scrollY = 0;
@@ -29,6 +72,16 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition) {
         lastSelIndex = -1;
         resetHScroll();
     }
+}
+
+void InfoScreen::setHighlightEnabled(bool enabled)
+{
+    _highlightEnabled = enabled;
+}
+
+void InfoScreen::setLineOverlay(LineOverlayFn fn)
+{
+    _lineOverlay = fn;
 }
 
 
@@ -56,8 +109,8 @@ void InfoScreen::draw() {
     const bool monoTheme = (theme == 1);
     const uint16_t headerBg = monoTheme ? dma_display->color565(20,20,40) : INFOSCREEN_HEADERBG;
     const uint16_t headerFg = monoTheme ? dma_display->color565(60,60,120) : INFOSCREEN_HEADERFG;
-    const uint16_t lineColor = monoTheme ? dma_display->color565(40,40,90) : dma_display->color565(255,255,255);
-    const uint16_t selectedLineColor = monoTheme ? dma_display->color565(90,90,150) : dma_display->color565(255,255,0);
+    const uint16_t defaultLineColor = monoTheme ? dma_display->color565(60,60,120)
+                                                : dma_display->color565(230,230,230);
 
     // Header
     const int headerHeight = CHARH;
@@ -80,26 +133,107 @@ void InfoScreen::draw() {
 
         int lineW = getTextWidth(line.c_str());
         bool isSelected = (i == selIndex);
-        uint16_t color = isSelected ? selectedLineColor : lineColor;
+        bool highlightLine = _highlightEnabled && isSelected;
+        uint16_t baseColor = _lineColorUsed[idx] ? _lineColors[idx] : defaultLineColor;
+        uint16_t valueColor;
+        if (highlightLine)
+        {
+            if (_lineColorUsed[idx])
+            {
+                valueColor = brightenColor(baseColor);
+            }
+            else
+            {
+                valueColor = monoTheme ? dma_display->color565(120, 120, 200)
+                                       : dma_display->color565(255, 255, 0);
+            }
+        }
+        else
+        {
+            valueColor = baseColor;
+        }
+
+        const uint16_t defaultLabelColor = monoTheme ? dma_display->color565(70, 70, 110)
+                                                     : dma_display->color565(130, 150, 200);
+        uint16_t labelColor;
+        if (highlightLine)
+        {
+            labelColor = monoTheme ? dma_display->color565(140, 140, 220)
+                                   : dma_display->color565(255, 255, 180);
+        }
+        else
+        {
+            labelColor = defaultLabelColor;
+        }
 
         int yPos = headerHeight + i * CHARH;
 
-        if (lineW <= SCREEN_WIDTH) {
-            dma_display->setTextColor(color);
-            dma_display->setCursor(0, yPos);
-            dma_display->print(line);
-        } else if (isSelected) {
-            int cursorX = SCREEN_WIDTH - scrollOffsets[i];
-            if (cursorX + lineW > 0 && cursorX < SCREEN_WIDTH) {
-                dma_display->setTextColor(color);
-                dma_display->setCursor(cursorX, yPos);
+        int colonPos = line.indexOf(':');
+        if (colonPos >= 0)
+        {
+            String labelPart = line.substring(0, colonPos + 1);
+            String valuePart = line.substring(colonPos + 1);
+            int labelWidth = getTextWidth(labelPart.c_str());
+            int valueWidth = getTextWidth(valuePart.c_str());
+            int totalWidth = labelWidth + valueWidth;
+
+            if (totalWidth <= SCREEN_WIDTH)
+            {
+                dma_display->setTextColor(labelColor);
+                dma_display->setCursor(0, yPos);
+                dma_display->print(labelPart);
+                dma_display->setTextColor(valueColor);
+                dma_display->setCursor(labelWidth, yPos);
+                dma_display->print(valuePart);
+            }
+            else if (highlightLine)
+            {
+                int cursorX = SCREEN_WIDTH - scrollOffsets[i];
+                if (cursorX + totalWidth > 0 && cursorX < SCREEN_WIDTH)
+                {
+                    // Draw label segment
+                    dma_display->setTextColor(labelColor);
+                    dma_display->setCursor(cursorX, yPos);
+                    dma_display->print(labelPart);
+                    // Draw value segment
+                    dma_display->setTextColor(valueColor);
+                    dma_display->setCursor(cursorX + labelWidth, yPos);
+                    dma_display->print(valuePart);
+                }
+            }
+            else
+            {
+                dma_display->setTextColor(labelColor);
+                dma_display->setCursor(0, yPos);
+                dma_display->print(labelPart);
+                dma_display->setTextColor(valueColor);
+                dma_display->setCursor(labelWidth, yPos);
+                dma_display->print(valuePart);
+            }
+        }
+        else
+        {
+            if (lineW <= SCREEN_WIDTH) {
+                dma_display->setTextColor(valueColor);
+                dma_display->setCursor(0, yPos);
+                dma_display->print(line);
+            } else if (highlightLine) {
+                int cursorX = SCREEN_WIDTH - scrollOffsets[i];
+                if (cursorX + lineW > 0 && cursorX < SCREEN_WIDTH) {
+                    dma_display->setTextColor(valueColor);
+                    dma_display->setCursor(cursorX, yPos);
+                    dma_display->print(line);
+                }
+            } else {
+                // Too long & not selected: print entire line, let display handle overflow
+                dma_display->setTextColor(valueColor);
+                dma_display->setCursor(0, yPos);
                 dma_display->print(line);
             }
-        } else {
-            // Too long & not selected: print entire line, let display handle overflow
-            dma_display->setTextColor(color);
-            dma_display->setCursor(0, yPos);
-            dma_display->print(line);
+        }
+        if (_lineOverlay)
+        {
+            _lineOverlay(idx, yPos, highlightLine);
         }
     }
 }

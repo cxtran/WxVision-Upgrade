@@ -544,15 +544,6 @@ String getTempestField(const char* field) {
 }
 
 
-String getRapidWindField(const char* field) {
-    if (!strcmp(field, "speed"))   return isnan(tempest.windAvg) ? String("--") : fmtWind(tempest.windAvg, 1);
-    if (!strcmp(field, "dir"))     return isnan(tempest.windDir) ? String("--") : String(tempest.windDir, 0) + "°";
-    if (!strcmp(field, "epoch"))   return String(tempest.epoch);
-    if (!strcmp(field, "time"))    return formatEpochTime(tempest.epoch);
-    return "";
-}
-
-
 // --------- InfoScreen Display Functions ----------
 void showUdpScreen() {
     String lines[9];
@@ -662,19 +653,6 @@ void showHourlyForecastScreen() {
 
     hourlyScreen.setLines(lines, count, true);
     hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
-}
-
-void showRapidWindScreen() {
-    String lines[3];
-    lines[0] = "Speed: " + getRapidWindField("speed");
-    lines[1] = "Dir:   " + getRapidWindField("dir");
-    lines[2] = "Time:  " + getRapidWindField("time");
-    if (!rapidWindScreen.isActive()) {
-        rapidWindScreen.setLines(lines, 3, true);
-        rapidWindScreen.show([](){ currentScreen = homeScreenForDataSource(); });
-    } else {
-        rapidWindScreen.setLines(lines, 3, false);
-    }
 }
 
 void showWindDirectionScreen() {

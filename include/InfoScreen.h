@@ -30,11 +30,18 @@ public:
     void setScrollY(int val) { if (val < 0) val = 0;   scrollY = val; }
 
     int getSelIndex() const { return selIndex; }
-    void setLines(const String lines[], int n, bool resetPosition = false);
+    void setLines(const String lines[], int n, bool resetPosition = false, const uint16_t colors[] = nullptr);
+    void setHighlightEnabled(bool enabled);
+    using LineOverlayFn = void (*)(int lineIndex, int y, bool selected);
+    void setLineOverlay(LineOverlayFn fn);
 
 private:
     String _title;
     String _lines[INFOSCREEN_MAX_LINES];
+    uint16_t _lineColors[INFOSCREEN_MAX_LINES];
+    bool _lineColorUsed[INFOSCREEN_MAX_LINES];
+    bool _highlightEnabled;
+    LineOverlayFn _lineOverlay;
     int _lineCount;
     bool _active;
     void (*_onExit)();
