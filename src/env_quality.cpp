@@ -1,4 +1,5 @@
 #include <math.h>
+#include <algorithm>
 
 #include "env_quality.h"
 #include "display.h"
@@ -25,6 +26,8 @@ static bool s_iconBitmapValid = false;
 static EnvBand s_iconBitmapBand = EnvBand::Unknown;
 static uint16_t s_iconBitmapBackground = 0;
 static uint16_t s_iconBitmap[16 * 16];
+static float s_eqIndexValue = -1.0f;
+static float s_iconBitmapEqValue = -1.0f;
 
 static EnvBand s_detailsBandOverall = EnvBand::Unknown;
 static EnvBand s_detailsBandEQI = EnvBand::Unknown;
@@ -245,219 +248,94 @@ static void fillIconBackground(uint16_t color)
 static void renderStatusEmojiBitmap(EnvBand band)
 {
     const int size = 16;
-    const double center = (size - 1) * 0.5; // 7.5
-    const double radius = 7.35;
-    const double radiusSq = radius * radius;
-    const double outlineInner = radius - 1.1;
-    const double outlineInnerSq = outlineInner * outlineInner;
-    const double highlightOuter = radius - 2.5;
-    const double highlightInner = radius - 4.5;
-    const double highlightOuterSq = highlightOuter * highlightOuter;
-    const double highlightInnerSq = highlightInner * highlightInner;
-
-    s_iconBitmapBackground = (theme == 1) ? makeColor(5, 5, 15)
-                                          : makeColor(0, 0, 0);
+    s_iconBitmapBackground = makeColor(0, 0, 0);
     fillIconBackground(s_iconBitmapBackground);
 
     if (!dma_display)
     {
         s_iconBitmapValid = true;
         s_iconBitmapBand = band;
+        s_iconBitmapEqValue = s_eqIndexValue;
         return;
     }
 
-    bool isUnknown = (band == EnvBand::Unknown);
-    uint16_t faceColor = isUnknown ? makeColor(160, 160, 160) : colorForBand(band);
-    uint16_t featureColor = makeColor(0, 0, 0);
+    float eqValue = s_eqIndexValue;
+    if (eqValue < 0.0f)
+        eqValue = 0.0f;
+    if (eqValue > 100.0f)
+        eqValue = 100.0f;
+    const float eqNorm = eqValue / 100.0f;
 
-    for (int y = 0; y < size; ++y)
-    {
-        double dy = (y + 0.5) - center;
-        for (int x = 0; x < size; ++x)
-        {
-            double dx = (x + 0.5) - center;
-            double distSq = dx * dx + dy * dy;
-            if (distSq <= radiusSq)
-            {
-                setIconPixel(x, y, faceColor);
-            }
-        }
-    }
+    const int barX = 5;
+    const int barWidth = 6;
+    const int markerX = barX + barWidth;
+    const int barTop = 1;
+    const int barBottom = size - 2;
+    const int barHeight = barBottom - barTop + 1;
 
-    uint16_t highlightColor = adjustColor(faceColor, 35, 35, 35);
-    for (int y = 0; y < size; ++y)
-    {
-        double dy = (y + 0.5) - center;
-        for (int x = 0; x < size; ++x)
-        {
-            double dx = (x + 0.5) - center;
-            double distSq = dx * dx + dy * dy;
-            if (distSq <= highlightOuterSq && distSq >= highlightInnerSq && (dx + dy) < -2.5)
-            {
-                setIconPixel(x, y, highlightColor);
-            }
-        }
-    }
-
-    for (int y = 0; y < size; ++y)
-    {
-        double dy = (y + 0.5) - center;
-        for (int x = 0; x < size; ++x)
-        {
-            double dx = (x + 0.5) - center;
-            double distSq = dx * dx + dy * dy;
-            if (distSq <= radiusSq && distSq >= outlineInnerSq)
-            {
-                setIconPixel(x, y, featureColor);
-            }
-        }
-    }
-
-    auto drawClosedEye = [&](double offsetX) {
-        int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.5));
-        setIconPixel(eyeX - 1, eyeY, featureColor);
-        setIconPixel(eyeX, eyeY - 1, featureColor);
-        setIconPixel(eyeX + 1, eyeY, featureColor);
+    auto normalizedToPixels = [&](float norm) -> int {
+        if (norm <= 0.0f)
+            return 0;
+        if (norm > 1.0f)
+            norm = 1.0f;
+        float displayNorm = log10f(1.0f + 9.0f * norm) / log10f(10.0f);
+        int pix = static_cast<int>(roundf(displayNorm * barHeight));
+        if (pix < 0)
+            pix = 0;
+        if (pix > barHeight)
+            pix = barHeight;
+        return pix;
     };
 
-    auto drawFlatEye = [&](double offsetX) {
-        int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.0));
-        for (int dx = -2; dx <= 2; ++dx)
-        {
-            setIconPixel(eyeX + dx, eyeY, featureColor);
-        }
+    int filledPixels = normalizedToPixels(eqNorm);
+
+    struct Segment
+    {
+        float start;
+        float end;
+        EnvBand band;
+    };
+    const Segment segments[] = {
+        {0.0f, 0.25f, EnvBand::Critical},
+        {0.25f, 0.50f, EnvBand::Poor},
+        {0.50f, 0.75f, EnvBand::Moderate},
+        {0.75f, 1.0f, EnvBand::Good},
     };
 
-    auto drawOpenEye = [&](double offsetX) {
-        int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.0));
-        for (int dy = -1; dy <= 1; ++dy)
-        {
-            for (int dx = -1; dx <= 1; ++dx)
-            {
-                if (abs(dx) + abs(dy) <= 1)
-                    setIconPixel(eyeX + dx, eyeY + dy, featureColor);
-            }
-        }
-    };
+    for (const Segment &seg : segments)
+    {
+        if (filledPixels <= 0)
+            break;
 
-    auto drawDotEye = [&](double offsetX) {
-        int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.5));
-        setIconPixel(eyeX, eyeY, featureColor);
-    };
+        int segStart = normalizedToPixels(seg.start);
+        int segEnd = normalizedToPixels(seg.end);
+        int drawEnd = std::min(filledPixels, segEnd);
+        if (drawEnd <= segStart)
+            continue;
 
-    switch (band)
-    {
-    case EnvBand::Good:
-    {
-        drawClosedEye(-3.0);
-        drawClosedEye(3.0);
-        uint16_t blush = adjustColor(faceColor, 30, -15, -15);
-        setIconPixel(static_cast<int>(round(center - 4.0)), static_cast<int>(round(center + 1.8)), blush);
-        setIconPixel(static_cast<int>(round(center + 4.0)), static_cast<int>(round(center + 1.8)), blush);
-        for (int dx = -4; dx <= 4; ++dx)
+        uint16_t segColor = colorForBand(seg.band);
+        for (int pix = segStart; pix < drawEnd; ++pix)
         {
-            double mouthY = center + 2.6 - (dx * dx) / 12.0;
-            int px = static_cast<int>(round(center + dx));
-            int py = static_cast<int>(round(mouthY));
-            setIconPixel(px, py, featureColor);
-            if (abs(dx) <= 2)
-                setIconPixel(px, py + 1, featureColor);
+            int y = barBottom - pix;
+            for (int x = barX; x < barX + barWidth; ++x)
+                setIconPixel(x, y, segColor);
         }
-        break;
-    }
-    case EnvBand::Moderate:
-    {
-        drawFlatEye(-3.0);
-        drawFlatEye(3.0);
-        int mouthY = static_cast<int>(round(center + 2.8));
-        for (int dx = -4; dx <= 4; ++dx)
-        {
-            int px = static_cast<int>(round(center + dx));
-            setIconPixel(px, mouthY, featureColor);
-        }
-        break;
-    }
-    case EnvBand::Poor:
-    {
-        drawOpenEye(-2.8);
-        drawOpenEye(2.8);
-        for (int dx = -4; dx <= 4; ++dx)
-        {
-            double mouthY = center + 3.2 + (dx * dx) / 8.0;
-            int px = static_cast<int>(round(center + dx));
-            int py = static_cast<int>(round(mouthY));
-            setIconPixel(px, py, featureColor);
-            if (abs(dx) <= 2)
-                setIconPixel(px, py - 1, featureColor);
-        }
-        break;
-    }
-    case EnvBand::Critical:
-    {
-        uint16_t crossColor = makeColor(255, 255, 255);
-        for (int i = -5; i <= 5; ++i)
-        {
-            int px1 = static_cast<int>(round(center + i));
-            int py1 = static_cast<int>(round(center + i));
-            int px2 = static_cast<int>(round(center + i));
-            int py2 = static_cast<int>(round(center - i));
-            for (int w = -1; w <= 1; ++w)
-            {
-                setIconPixel(px1 + w, py1, crossColor);
-                setIconPixel(px2 + w, py2, crossColor);
-            }
-        }
-        break;
-    }
-    case EnvBand::Unknown:
-    {
-        drawDotEye(-2.0);
-        drawDotEye(2.0);
-        for (int dx = -2; dx <= 2; ++dx)
-        {
-            double topY = center - 3.5 + (dx * dx) / 6.0;
-            int px = static_cast<int>(round(center + dx));
-            int py = static_cast<int>(round(topY));
-            setIconPixel(px, py, featureColor);
-        }
-        for (int y = 0; y <= 2; ++y)
-        {
-            setIconPixel(static_cast<int>(round(center + 2)), static_cast<int>(round(center - 1 + y)), featureColor);
-        }
-        setIconPixel(static_cast<int>(round(center + 2)), static_cast<int>(round(center + 3)), featureColor);
-        setIconPixel(static_cast<int>(round(center + 2)), static_cast<int>(round(center + 5)), featureColor);
-        setIconPixel(static_cast<int>(round(center + 2)), static_cast<int>(round(center + 6)), featureColor);
-        break;
-    }
-    default:
-        drawFlatEye(-3.0);
-        drawFlatEye(3.0);
-        break;
     }
 
-    // Shift entire icon one pixel to the right within the buffer
-    for (int row = 0; row < size; ++row)
+    if (filledPixels > 0)
     {
-        int base = row * size;
-        for (int col = size - 1; col > 0; --col)
-        {
-            s_iconBitmap[base + col] = s_iconBitmap[base + col - 1];
-        }
-        s_iconBitmap[base] = s_iconBitmapBackground;
+        uint16_t indicatorColor = adjustColor(colorForBand(band), 40, 40, 40);
+        int yIndicator = barBottom - (filledPixels - 1);
+        setIconPixel(markerX, yIndicator, indicatorColor);
     }
 
     s_iconBitmapValid = true;
     s_iconBitmapBand = band;
+    s_iconBitmapEqValue = s_eqIndexValue;
 }
-
 static void ensureIconBitmap(EnvBand band)
 {
-    uint16_t background = (theme == 1) ? makeColor(5, 5, 15)
-                                       : makeColor(0, 0, 0);
+    uint16_t background = makeColor(0, 0, 0);
     if (!s_iconBitmapValid || band != s_iconBitmapBand || background != s_iconBitmapBackground)
     {
         renderStatusEmojiBitmap(band);
@@ -962,6 +840,7 @@ void showEnvironmentalQualityScreen()
                         : -1.0f;
     int eqIndexInt = (eqIndex >= 0.0f) ? static_cast<int>(eqIndex + 0.5f) : -1;
     EnvBand overallBand = (validCount > 0) ? bandFromIndex(eqIndex) : EnvBand::Unknown;
+    s_eqIndexValue = eqIndex;
 
     String lines[3];
     uint16_t colors[3];
@@ -1016,7 +895,17 @@ void showEnvironmentalQualityScreen()
     ++lineCount;
 
     s_lineBandCount = lineCount;
-    bool iconStatusChanged = (overallBand != previousOverall);
+    bool eqValueChanged = false;
+    if ((s_iconBitmapEqValue < 0.0f) != (s_eqIndexValue < 0.0f))
+    {
+        eqValueChanged = true;
+    }
+    else if (s_eqIndexValue >= 0.0f && s_iconBitmapEqValue >= 0.0f)
+    {
+        eqValueChanged = fabsf(s_eqIndexValue - s_iconBitmapEqValue) > 0.5f;
+    }
+
+    bool iconStatusChanged = (overallBand != previousOverall) || eqValueChanged;
     s_overallBand = overallBand;
     for (int i = lineCount; i < 3; ++i)
     {
@@ -1042,3 +931,7 @@ void showEnvironmentalQualityScreen()
         envQualityScreen.setSelectedLine(preferredLine);
     }
 }
+
+
+
+
