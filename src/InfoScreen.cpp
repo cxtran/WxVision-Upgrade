@@ -84,6 +84,56 @@ void InfoScreen::setLineOverlay(LineOverlayFn fn)
     _lineOverlay = fn;
 }
 
+void InfoScreen::setSelectedLine(int index)
+{
+    if (_lineCount <= 0)
+        return;
+
+    if (index < 0)
+        index = 0;
+    if (index >= _lineCount)
+        index = _lineCount - 1;
+
+    int currentSelectedGlobal = -1;
+    if (selIndex >= 0 && selIndex < INFOSCREEN_VISIBLE_ROWS)
+    {
+        int visibleLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
+        if (selIndex < visibleLines && visibleLines > 0)
+        {
+            currentSelectedGlobal = scrollY + selIndex;
+        }
+    }
+
+    if (currentSelectedGlobal == index)
+    {
+        return;
+    }
+
+    // Ensure selected line is within the current view window
+    if (index < scrollY)
+    {
+        scrollY = index;
+    }
+    else
+    {
+        int maxVisibleIndex = scrollY + INFOSCREEN_VISIBLE_ROWS - 1;
+        if (index > maxVisibleIndex)
+        {
+            scrollY = index - (INFOSCREEN_VISIBLE_ROWS - 1);
+            if (scrollY < 0)
+                scrollY = 0;
+        }
+    }
+
+    selIndex = index - scrollY;
+    if (selIndex < 0)
+        selIndex = 0;
+    if (selIndex >= INFOSCREEN_VISIBLE_ROWS)
+        selIndex = INFOSCREEN_VISIBLE_ROWS - 1;
+
+    lastSelIndex = -1; // force redraw/scroll reset on next tick
+}
+
 
 void InfoScreen::show(void (*onExit)()) {
     _active = true; _onExit = onExit;
@@ -129,7 +179,6 @@ void InfoScreen::draw() {
     for (int i = 0; i < pageLines; ++i) {
         int idx = scrollY + i;
         String line = _lines[idx];
-        if (line.length() > 40) line = line.substring(0, 40);
 
         int lineW = getTextWidth(line.c_str());
         bool isSelected = (i == selIndex);

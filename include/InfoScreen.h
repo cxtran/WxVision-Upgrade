@@ -34,6 +34,7 @@ public:
     void setHighlightEnabled(bool enabled);
     using LineOverlayFn = void (*)(int lineIndex, int y, bool selected);
     void setLineOverlay(LineOverlayFn fn);
+    void setSelectedLine(int index);
 
 private:
     String _title;
