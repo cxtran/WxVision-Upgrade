@@ -28,6 +28,11 @@ static uint16_t s_iconBitmapBackground = 0;
 static uint16_t s_iconBitmap[16 * 16];
 static float s_eqIndexValue = -1.0f;
 static float s_iconBitmapEqValue = -1.0f;
+static float s_co2Value = NAN;
+static EnvBand s_co2Band = EnvBand::Unknown;
+static bool s_iconBitmapCo2Valid = false;
+static float s_iconBitmapCo2Value = 0.0f;
+static EnvBand s_iconBitmapCo2Band = EnvBand::Unknown;
 
 static EnvBand s_detailsBandOverall = EnvBand::Unknown;
 static EnvBand s_detailsBandEQI = EnvBand::Unknown;
@@ -251,27 +256,33 @@ static void renderStatusEmojiBitmap(EnvBand band)
     s_iconBitmapBackground = makeColor(0, 0, 0);
     fillIconBackground(s_iconBitmapBackground);
 
+    bool co2Valid = !isnan(s_co2Value) && s_co2Value > 0.0f;
+
     if (!dma_display)
     {
         s_iconBitmapValid = true;
         s_iconBitmapBand = band;
         s_iconBitmapEqValue = s_eqIndexValue;
+        s_iconBitmapCo2Valid = co2Valid;
+        s_iconBitmapCo2Value = co2Valid ? s_co2Value : 0.0f;
+        s_iconBitmapCo2Band = s_co2Band;
         return;
     }
 
-    float eqValue = s_eqIndexValue;
-    if (eqValue < 0.0f)
-        eqValue = 0.0f;
-    if (eqValue > 100.0f)
-        eqValue = 100.0f;
-    const float eqNorm = eqValue / 100.0f;
+    const int barLeft = 1;
+    const int barRight = size - 2;
+    const int barWidth = barRight - barLeft + 1;
+    const int barHeight = 3;
+    const int topMargin = 2;
 
-    const int barX = 5;
-    const int barWidth = 6;
-    const int markerX = barX + barWidth;
-    const int barTop = 1;
-    const int barBottom = size - 2;
-    const int barHeight = barBottom - barTop + 1;
+    int eqBarTop = topMargin;
+    int co2BarTop = size - topMargin - barHeight;
+    if (co2BarTop <= eqBarTop + barHeight)
+        co2BarTop = eqBarTop + barHeight + 2;
+    if (co2BarTop > size - barHeight - 1)
+        co2BarTop = size - barHeight - 1;
+    if (co2BarTop < 0)
+        co2BarTop = 0;
 
     auto normalizedToPixels = [&](float norm) -> int {
         if (norm <= 0.0f)
@@ -279,15 +290,13 @@ static void renderStatusEmojiBitmap(EnvBand band)
         if (norm > 1.0f)
             norm = 1.0f;
         float displayNorm = log10f(1.0f + 9.0f * norm) / log10f(10.0f);
-        int pix = static_cast<int>(roundf(displayNorm * barHeight));
+        int pix = static_cast<int>(roundf(displayNorm * barWidth));
         if (pix < 0)
             pix = 0;
-        if (pix > barHeight)
-            pix = barHeight;
+        if (pix > barWidth)
+            pix = barWidth;
         return pix;
     };
-
-    int filledPixels = normalizedToPixels(eqNorm);
 
     struct Segment
     {
@@ -295,43 +304,127 @@ static void renderStatusEmojiBitmap(EnvBand band)
         float end;
         EnvBand band;
     };
-    const Segment segments[] = {
+    const Segment eqSegments[] = {
         {0.0f, 0.25f, EnvBand::Critical},
         {0.25f, 0.50f, EnvBand::Poor},
         {0.50f, 0.75f, EnvBand::Moderate},
         {0.75f, 1.0f, EnvBand::Good},
     };
 
-    for (const Segment &seg : segments)
-    {
-        if (filledPixels <= 0)
-            break;
+    const Segment co2Segments[] = {
+        {0.0f, 0.25f, EnvBand::Good},
+        {0.25f, 0.50f, EnvBand::Moderate},
+        {0.50f, 0.75f, EnvBand::Poor},
+        {0.75f, 1.0f, EnvBand::Critical},
+    };
 
-        int segStart = normalizedToPixels(seg.start);
-        int segEnd = normalizedToPixels(seg.end);
-        int drawEnd = std::min(filledPixels, segEnd);
-        if (drawEnd <= segStart)
-            continue;
+    auto drawValueBar = [&](float norm,
+                            EnvBand valueBand,
+                            int barTop,
+                            bool arrowUp,
+                            const Segment *segments,
+                            int segmentCount) {
+        if (norm < 0.0f)
+            return;
 
-        uint16_t segColor = colorForBand(seg.band);
-        for (int pix = segStart; pix < drawEnd; ++pix)
+        int barBottom = barTop + barHeight - 1;
+        if (barBottom >= size)
+            barBottom = size - 1;
+
+        uint16_t barBackground;
+        if (theme == 1)
         {
-            int y = barBottom - pix;
-            for (int x = barX; x < barX + barWidth; ++x)
-                setIconPixel(x, y, segColor);
+            barBackground = makeColor(45, 45, 95);
         }
-    }
+        else
+        {
+            barBackground = makeColor(48, 48, 48);
+        }
+        for (int x = 0; x < barWidth; ++x)
+        {
+            int drawX = barLeft + x;
+            for (int y = barTop; y <= barBottom; ++y)
+                setIconPixel(drawX, y, barBackground);
+        }
 
-    if (filledPixels > 0)
+        int filledPixels = normalizedToPixels(norm);
+        if (norm >= 0.0f && filledPixels == 0 && valueBand != EnvBand::Unknown)
+            filledPixels = 1;
+        if (filledPixels > barWidth)
+            filledPixels = barWidth;
+
+        for (int i = 0; i < segmentCount; ++i)
+        {
+            if (filledPixels <= 0)
+                break;
+
+            const Segment &seg = segments[i];
+            int segStart = normalizedToPixels(seg.start);
+            int segEnd = normalizedToPixels(seg.end);
+            int drawEnd = std::min(filledPixels, segEnd);
+            if (drawEnd <= segStart)
+                continue;
+
+            uint16_t segColor = colorForBand(seg.band);
+            for (int x = segStart; x < drawEnd; ++x)
+            {
+                int drawX = barLeft + x;
+                for (int y = barTop; y <= barBottom; ++y)
+                    setIconPixel(drawX, y, segColor);
+            }
+        }
+
+        if (filledPixels > 0)
+        {
+            int markerY = barTop + barHeight / 2;
+            EnvBand arrowBand = (valueBand == EnvBand::Unknown) ? band : valueBand;
+            uint16_t indicatorColor = adjustColor(colorForBand(arrowBand), 40, 40, 40);
+            int xIndicator = barLeft + (filledPixels - 1);
+
+            auto drawVerticalArrow = [&](const int offsets[4]) {
+                for (int i = 0; i < 4; ++i)
+                {
+                    int yPos = markerY + offsets[i];
+                    setIconPixel(xIndicator, yPos, indicatorColor);
+                }
+            };
+
+            if (arrowUp)
+            {
+                const int offsets[4] = {-1, 0, 1, 2};
+                drawVerticalArrow(offsets);
+            }
+            else
+            {
+                const int offsets[4] = {1, 0, -1, -2};
+                drawVerticalArrow(offsets);
+            }
+        }
+    };
+
+    float eqNorm = (s_eqIndexValue >= 0.0f) ? (std::min(s_eqIndexValue, 100.0f) / 100.0f) : -1.0f;
+    const int eqSegmentCount = static_cast<int>(sizeof(eqSegments) / sizeof(eqSegments[0]));
+    drawValueBar(eqNorm, band, eqBarTop, true, eqSegments, eqSegmentCount);
+
+    float co2Norm = -1.0f;
+    if (co2Valid)
     {
-        uint16_t indicatorColor = adjustColor(colorForBand(band), 40, 40, 40);
-        int yIndicator = barBottom - (filledPixels - 1);
-        setIconPixel(markerX, yIndicator, indicatorColor);
+        float norm = (s_co2Value - 400.0f) / 1600.0f;
+        if (norm < 0.0f)
+            norm = 0.0f;
+        if (norm > 1.0f)
+            norm = 1.0f;
+        co2Norm = norm;
     }
+    const int co2SegmentCount = static_cast<int>(sizeof(co2Segments) / sizeof(co2Segments[0]));
+    drawValueBar(co2Norm, s_co2Band, co2BarTop, false, co2Segments, co2SegmentCount);
 
     s_iconBitmapValid = true;
     s_iconBitmapBand = band;
     s_iconBitmapEqValue = s_eqIndexValue;
+    s_iconBitmapCo2Valid = co2Valid;
+    s_iconBitmapCo2Value = co2Valid ? s_co2Value : 0.0f;
+    s_iconBitmapCo2Band = s_co2Band;
 }
 static void ensureIconBitmap(EnvBand band)
 {
@@ -397,6 +490,93 @@ static String formatValueWithBand(const String &value, EnvBand band)
     return result;
 }
 
+static String formatValueWithLabel(const String &value, const char *label)
+{
+    if (value.length() == 0)
+        return value;
+    if (!label || label[0] == '\0')
+        return value;
+    String result = value;
+    if (result[result.length() - 1] != ' ')
+        result += " ";
+    result += label;
+    return result;
+}
+
+static const char *tempDescriptor(float tempC)
+{
+    if (isnan(tempC))
+        return nullptr;
+    if (tempC < 16.0f)
+        return "Very cold";
+    if (tempC < 18.0f)
+        return "Cold";
+    if (tempC < 20.0f)
+        return "Cool";
+    if (tempC <= 24.0f)
+        return "Comfortable";
+    if (tempC <= 26.0f)
+        return "Warm";
+    if (tempC <= 28.0f)
+        return "Hot";
+    return "Very hot";
+}
+
+static const char *humidityDescriptor(float humidity)
+{
+    if (isnan(humidity))
+        return nullptr;
+    if (humidity < 25.0f)
+        return "Very dry";
+    if (humidity < 30.0f)
+        return "Dry";
+    if (humidity < 35.0f)
+        return "Slightly dry";
+    if (humidity <= 55.0f)
+        return "Comfortable";
+    if (humidity <= 60.0f)
+        return "Humid";
+    if (humidity <= 70.0f)
+        return "Very humid";
+    return "Extremely humid";
+}
+
+static const char *co2Descriptor(float co2)
+{
+    if (isnan(co2) || co2 <= 0.0f)
+        return nullptr;
+    if (co2 <= 600.0f)
+        return "Fresh air";
+    if (co2 <= 800.0f)
+        return "Comfortable";
+    if (co2 <= 1000.0f)
+        return "Slightly elevated";
+    if (co2 <= 1200.0f)
+        return "Ventilate soon";
+    if (co2 <= 1600.0f)
+        return "Stale air";
+    if (co2 <= 2000.0f)
+        return "Poor ventilation";
+    return "Unsafe level";
+}
+
+static const char *baroDescriptor(float pressure)
+{
+    if (isnan(pressure) || pressure < 200.0f)
+        return nullptr;
+    if (pressure < 985.0f)
+        return "Low pressure";
+    if (pressure < 995.0f)
+        return "Slightly low";
+    if (pressure <= 1025.0f)
+        return "Normal";
+    if (pressure <= 1035.0f)
+        return "Slightly high";
+    if (pressure <= 1045.0f)
+        return "High pressure";
+    return "Extreme pressure";
+}
+
 static String buildDetailsValue(int eqIndexInt,
                                 EnvBand overallBand,
                                 float co2,
@@ -425,7 +605,10 @@ static String buildDetailsValue(int eqIndexInt,
             co2Rounded = 0;
         co2String = String(co2Rounded);
     }
-    appendDataSegment(dataSegment, "CO2", formatValueWithBand(co2String, co2Band));
+    const char *co2Label = co2Descriptor(co2);
+    String co2Formatted = co2Label ? formatValueWithLabel(co2String, co2Label)
+                                   : formatValueWithBand(co2String, co2Band);
+    appendDataSegment(dataSegment, "CO2", co2Formatted);
 
     String tempString;
     if (isnan(tempC))
@@ -439,7 +622,10 @@ static String buildDetailsValue(int eqIndexInt,
         tempString = String(tempRounded);
         tempString += (units.temp == TempUnit::F) ? "°F" : "°C";
     }
-    appendDataSegment(dataSegment, "Temp", formatValueWithBand(tempString, tempBand));
+    const char *tempLabel = tempDescriptor(tempC);
+    String tempFormatted = tempLabel ? formatValueWithLabel(tempString, tempLabel)
+                                     : formatValueWithBand(tempString, tempBand);
+    appendDataSegment(dataSegment, "Temp", tempFormatted);
 
     String humString;
     if (isnan(humidity))
@@ -456,7 +642,10 @@ static String buildDetailsValue(int eqIndexInt,
         humString = String(humRounded);
         humString += "%";
     }
-    appendDataSegment(dataSegment, "Humidity", formatValueWithBand(humString, humBand));
+    const char *humidityLabel = humidityDescriptor(humidity);
+    String humidityFormatted = humidityLabel ? formatValueWithLabel(humString, humidityLabel)
+                                             : formatValueWithBand(humString, humBand);
+    appendDataSegment(dataSegment, "Humidity", humidityFormatted);
 
     String pressString;
     if (isnan(pressure))
@@ -477,7 +666,10 @@ static String buildDetailsValue(int eqIndexInt,
             pressString += "hPa";
         }
     }
-    appendDataSegment(dataSegment, "Baro", formatValueWithBand(pressString, pressBand));
+    const char *baroLabel = baroDescriptor(pressure);
+    String baroFormatted = baroLabel ? formatValueWithLabel(pressString, baroLabel)
+                                     : formatValueWithBand(pressString, pressBand);
+    appendDataSegment(dataSegment, "Baro", baroFormatted);
 
     String adviceSegment;
 
@@ -582,7 +774,7 @@ static String buildDetailsValue(int eqIndexInt,
 
 static void updateDetailsDisplay(const String &value)
 {
-    String display = "Details - ";
+    String display = "Details > ";
     display += value;
     display += "   ";
 
@@ -822,6 +1014,9 @@ void showEnvironmentalQualityScreen()
     EnvBand humBand = bandFromHumidity(humidity);
     EnvBand pressBand = bandFromPressure(pressure);
 
+    s_co2Value = co2Raw;
+    s_co2Band = co2Band;
+
     EnvBand bands[4] = {co2Band, tempBand, humBand, pressBand};
     int totalScore = 0;
     int validCount = 0;
@@ -846,7 +1041,7 @@ void showEnvironmentalQualityScreen()
     uint16_t colors[3];
     int lineCount = 0;
 
-    String eqLine = "EQI: ";
+    String eqLine = "EQI ";
     if (eqIndexInt >= 0)
     {
         eqLine += String(eqIndexInt);
@@ -862,7 +1057,7 @@ void showEnvironmentalQualityScreen()
     s_lineBands[lineCount] = overallBand;
     ++lineCount;
 
-    String co2Line = "CO2: ";
+    String co2Line = "CO2 ";
     if (co2Band == EnvBand::Unknown)
     {
         co2Line += "--";
@@ -905,7 +1100,19 @@ void showEnvironmentalQualityScreen()
         eqValueChanged = fabsf(s_eqIndexValue - s_iconBitmapEqValue) > 0.5f;
     }
 
-    bool iconStatusChanged = (overallBand != previousOverall) || eqValueChanged;
+    bool co2Valid = !isnan(co2Raw) && co2Raw > 0.0f;
+    bool co2ValueChanged = false;
+    if (co2Valid != s_iconBitmapCo2Valid)
+    {
+        co2ValueChanged = true;
+    }
+    else if (co2Valid)
+    {
+        co2ValueChanged = fabsf(co2Raw - s_iconBitmapCo2Value) > 5.0f;
+    }
+    bool co2BandChanged = (co2Band != s_iconBitmapCo2Band);
+
+    bool iconStatusChanged = (overallBand != previousOverall) || eqValueChanged || co2ValueChanged || co2BandChanged;
     s_overallBand = overallBand;
     for (int i = lineCount; i < 3; ++i)
     {
