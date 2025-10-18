@@ -954,6 +954,13 @@ void scrollWeatherDetails()
             scrollOffset = 0;
         }
 
+        const uint16_t desiredColor =
+            (theme == 1) ? dma_display->color565(60, 60, 120) : myGREEN;
+        if (desiredColor != scrolling_Text_Color)
+        {
+            scrolling_Text_Color = desiredColor;
+        }
+
         dma_display->fillRect(0, 25, PANEL_RES_X, 7, myBLACK);
         dma_display->setCursor(-scrollOffset, 25);
         dma_display->setTextColor(scrolling_Text_Color);

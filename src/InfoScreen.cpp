@@ -169,7 +169,8 @@ void InfoScreen::draw() {
     dma_display->setCursor(1, 0);
     String t = _title; if (t.length() > 12) t = t.substring(0, 12);
     dma_display->print(t);
-    const uint16_t underlineColor = monoTheme ? dma_display->color565(30,30,70) : INFOMODAL_ULINE;
+    const uint16_t underlineColor = monoTheme ? dma_display->color565(18, 18, 40)
+                                              : dma_display->color565(12, 40, 80);
     dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, underlineColor);
 
     // Lines

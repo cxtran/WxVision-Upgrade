@@ -1,4 +1,4 @@
-﻿#include <math.h>
+#include <math.h>
 
 #include "env_quality.h"
 #include "display.h"
@@ -25,6 +25,40 @@ static bool s_iconBitmapValid = false;
 static EnvBand s_iconBitmapBand = EnvBand::Unknown;
 static uint16_t s_iconBitmapBackground = 0;
 static uint16_t s_iconBitmap[16 * 16];
+
+static EnvBand s_detailsBandOverall = EnvBand::Unknown;
+static EnvBand s_detailsBandEQI = EnvBand::Unknown;
+static EnvBand s_detailsBandCO2 = EnvBand::Unknown;
+static EnvBand s_detailsBandTemp = EnvBand::Unknown;
+static EnvBand s_detailsBandHumidity = EnvBand::Unknown;
+static EnvBand s_detailsBandBaro = EnvBand::Unknown;
+
+static void updateDetailsBands(EnvBand overall, EnvBand co2, EnvBand temp, EnvBand humidity, EnvBand pressure)
+{
+    s_detailsBandOverall = overall;
+    s_detailsBandEQI = overall;
+    s_detailsBandCO2 = co2;
+    s_detailsBandTemp = temp;
+    s_detailsBandHumidity = humidity;
+    s_detailsBandBaro = pressure;
+}
+
+static EnvBand bandForDetailsLabel(const String &label)
+{
+    if (label.equalsIgnoreCase("EQI"))
+        return s_detailsBandEQI;
+    if (label.equalsIgnoreCase("CO2"))
+        return s_detailsBandCO2;
+    if (label.equalsIgnoreCase("TEMP"))
+        return s_detailsBandTemp;
+    if (label.equalsIgnoreCase("HUMIDITY"))
+        return s_detailsBandHumidity;
+    if (label.equalsIgnoreCase("BARO"))
+        return s_detailsBandBaro;
+    if (label.equalsIgnoreCase("TIPS"))
+        return s_detailsBandOverall;
+    return EnvBand::Unknown;
+}
 
 static int scoreForBand(EnvBand band)
 {
@@ -236,7 +270,6 @@ static void renderStatusEmojiBitmap(EnvBand band)
     uint16_t faceColor = isUnknown ? makeColor(160, 160, 160) : colorForBand(band);
     uint16_t featureColor = makeColor(0, 0, 0);
 
-    // Fill face circle
     for (int y = 0; y < size; ++y)
     {
         double dy = (y + 0.5) - center;
@@ -251,7 +284,6 @@ static void renderStatusEmojiBitmap(EnvBand band)
         }
     }
 
-    // Subtle highlight
     uint16_t highlightColor = adjustColor(faceColor, 35, 35, 35);
     for (int y = 0; y < size; ++y)
     {
@@ -267,7 +299,6 @@ static void renderStatusEmojiBitmap(EnvBand band)
         }
     }
 
-    // Outline
     for (int y = 0; y < size; ++y)
     {
         double dy = (y + 0.5) - center;
@@ -282,7 +313,7 @@ static void renderStatusEmojiBitmap(EnvBand band)
         }
     }
 
-    auto drawHappyEye = [&](double offsetX) {
+    auto drawClosedEye = [&](double offsetX) {
         int eyeX = static_cast<int>(round(center + offsetX));
         int eyeY = static_cast<int>(round(center - 2.5));
         setIconPixel(eyeX - 1, eyeY, featureColor);
@@ -290,34 +321,26 @@ static void renderStatusEmojiBitmap(EnvBand band)
         setIconPixel(eyeX + 1, eyeY, featureColor);
     };
 
-    auto drawOpenEye = [&](double offsetX) {
+    auto drawFlatEye = [&](double offsetX) {
         int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.5));
-        for (int dy = 0; dy < 2; ++dy)
+        int eyeY = static_cast<int>(round(center - 2.0));
+        for (int dx = -2; dx <= 2; ++dx)
         {
-            for (int dx = 0; dx < 2; ++dx)
-            {
-                setIconPixel(eyeX + dx - 1, eyeY + dy, featureColor);
-            }
+            setIconPixel(eyeX + dx, eyeY, featureColor);
         }
     };
 
-    auto drawDroopyEye = [&](double offsetX) {
+    auto drawOpenEye = [&](double offsetX) {
         int eyeX = static_cast<int>(round(center + offsetX));
         int eyeY = static_cast<int>(round(center - 2.0));
-        setIconPixel(eyeX - 1, eyeY - 1, featureColor);
-        setIconPixel(eyeX, eyeY, featureColor);
-        setIconPixel(eyeX + 1, eyeY + 1, featureColor);
-    };
-
-    auto drawCrossEye = [&](double offsetX) {
-        int eyeX = static_cast<int>(round(center + offsetX));
-        int eyeY = static_cast<int>(round(center - 2.5));
-        setIconPixel(eyeX - 1, eyeY - 1, featureColor);
-        setIconPixel(eyeX + 1, eyeY - 1, featureColor);
-        setIconPixel(eyeX, eyeY, featureColor);
-        setIconPixel(eyeX - 1, eyeY + 1, featureColor);
-        setIconPixel(eyeX + 1, eyeY + 1, featureColor);
+        for (int dy = -1; dy <= 1; ++dy)
+        {
+            for (int dx = -1; dx <= 1; ++dx)
+            {
+                if (abs(dx) + abs(dy) <= 1)
+                    setIconPixel(eyeX + dx, eyeY + dy, featureColor);
+            }
+        }
     };
 
     auto drawDotEye = [&](double offsetX) {
@@ -330,107 +353,70 @@ static void renderStatusEmojiBitmap(EnvBand band)
     {
     case EnvBand::Good:
     {
-        drawHappyEye(-3.0);
-        drawHappyEye(3.0);
-
-        uint16_t blush = adjustColor(faceColor, 30, -20, -20);
-        setIconPixel(static_cast<int>(round(center - 4.0)), static_cast<int>(round(center + 1.5)), blush);
-        setIconPixel(static_cast<int>(round(center + 4.0)), static_cast<int>(round(center + 1.5)), blush);
-
+        drawClosedEye(-3.0);
+        drawClosedEye(3.0);
+        uint16_t blush = adjustColor(faceColor, 30, -15, -15);
+        setIconPixel(static_cast<int>(round(center - 4.0)), static_cast<int>(round(center + 1.8)), blush);
+        setIconPixel(static_cast<int>(round(center + 4.0)), static_cast<int>(round(center + 1.8)), blush);
         for (int dx = -4; dx <= 4; ++dx)
         {
             double mouthY = center + 2.6 - (dx * dx) / 12.0;
             int px = static_cast<int>(round(center + dx));
             int py = static_cast<int>(round(mouthY));
             setIconPixel(px, py, featureColor);
-            if (abs(dx) <= 1)
-            {
+            if (abs(dx) <= 2)
                 setIconPixel(px, py + 1, featureColor);
-            }
         }
         break;
     }
     case EnvBand::Moderate:
     {
-        drawOpenEye(-3.0);
-        drawOpenEye(3.0);
-
+        drawFlatEye(-3.0);
+        drawFlatEye(3.0);
+        int mouthY = static_cast<int>(round(center + 2.8));
         for (int dx = -4; dx <= 4; ++dx)
         {
             int px = static_cast<int>(round(center + dx));
-            int py = static_cast<int>(round(center + 2.7));
-            setIconPixel(px, py, featureColor);
+            setIconPixel(px, mouthY, featureColor);
         }
         break;
     }
     case EnvBand::Poor:
     {
-        drawDroopyEye(-3.0);
-        drawDroopyEye(3.0);
-
+        drawOpenEye(-2.8);
+        drawOpenEye(2.8);
         for (int dx = -4; dx <= 4; ++dx)
         {
-            double mouthY = center + 3.0 + (dx * dx) / 10.0;
+            double mouthY = center + 3.2 + (dx * dx) / 8.0;
             int px = static_cast<int>(round(center + dx));
             int py = static_cast<int>(round(mouthY));
             setIconPixel(px, py, featureColor);
-            if (abs(dx) <= 1)
-            {
+            if (abs(dx) <= 2)
                 setIconPixel(px, py - 1, featureColor);
-            }
         }
-
-        uint16_t dropColor = makeColor(90, 180, 255);
-        setIconPixel(static_cast<int>(round(center + 5.0)), static_cast<int>(round(center - 1.0)), dropColor);
-        setIconPixel(static_cast<int>(round(center + 4.0)), static_cast<int>(round(center)), dropColor);
-        setIconPixel(static_cast<int>(round(center + 5.0)), static_cast<int>(round(center)), dropColor);
         break;
     }
     case EnvBand::Critical:
     {
-        drawCrossEye(-3.0);
-        drawCrossEye(3.0);
-
-        for (int i = -3; i <= 3; ++i)
+        uint16_t crossColor = makeColor(255, 255, 255);
+        for (int i = -5; i <= 5; ++i)
         {
-            int pxL = static_cast<int>(round(center - 1.5 - i));
-            int pxR = static_cast<int>(round(center + 1.5 + i));
-            int py = static_cast<int>(round(center - 3 + i));
-            setIconPixel(pxL, py, featureColor);
-            setIconPixel(pxR, py, featureColor);
-        }
-        for (int y = static_cast<int>(round(center - 1)); y <= static_cast<int>(round(center + 4)); ++y)
-        {
-            setIconPixel(static_cast<int>(round(center - 0.8)), y, featureColor);
-            setIconPixel(static_cast<int>(round(center + 0.8)), y, featureColor);
-        }
-        setIconPixel(static_cast<int>(round(center)), static_cast<int>(round(center + 5)), featureColor);
-
-        for (int dx = -2; dx <= 2; ++dx)
-        {
-            for (int dy = 0; dy <= 3; ++dy)
+            int px1 = static_cast<int>(round(center + i));
+            int py1 = static_cast<int>(round(center + i));
+            int px2 = static_cast<int>(round(center + i));
+            int py2 = static_cast<int>(round(center - i));
+            for (int w = -1; w <= 1; ++w)
             {
-                setIconPixel(static_cast<int>(round(center + dx)), static_cast<int>(round(center + 2 + dy)), featureColor);
+                setIconPixel(px1 + w, py1, crossColor);
+                setIconPixel(px2 + w, py2, crossColor);
             }
         }
-        uint16_t mouthFill = makeColor(220, 70, 70);
-        for (int dx = -1; dx <= 1; ++dx)
-        {
-            for (int dy = 1; dy <= 2; ++dy)
-            {
-                setIconPixel(static_cast<int>(round(center + dx)), static_cast<int>(round(center + 2 + dy)), mouthFill);
-            }
-        }
-        uint16_t spark = makeColor(255, 220, 90);
-        setIconPixel(static_cast<int>(round(center)), static_cast<int>(round(center - 5.5)), spark);
-        setIconPixel(static_cast<int>(round(center)), static_cast<int>(round(center - 4.5)), spark);
         break;
     }
     case EnvBand::Unknown:
     {
         drawDotEye(-2.0);
         drawDotEye(2.0);
-
         for (int dx = -2; dx <= 2; ++dx)
         {
             double topY = center - 3.5 + (dx * dx) / 6.0;
@@ -448,9 +434,20 @@ static void renderStatusEmojiBitmap(EnvBand band)
         break;
     }
     default:
-        drawOpenEye(-3.0);
-        drawOpenEye(3.0);
+        drawFlatEye(-3.0);
+        drawFlatEye(3.0);
         break;
+    }
+
+    // Shift entire icon one pixel to the right within the buffer
+    for (int row = 0; row < size; ++row)
+    {
+        int base = row * size;
+        for (int col = size - 1; col > 0; --col)
+        {
+            s_iconBitmap[base + col] = s_iconBitmap[base + col - 1];
+        }
+        s_iconBitmap[base] = s_iconBitmapBackground;
     }
 
     s_iconBitmapValid = true;
@@ -492,8 +489,10 @@ static void appendDataSegment(String &target, const String &label, const String 
     if (value.length() == 0)
         return;
     if (target.length() > 0)
-        target += " | ";
+        target += " ¦ ";
     target += label;
+    if (!label.endsWith(":"))
+        target += ":";
     target += " ";
     target += value;
 }
@@ -504,7 +503,7 @@ static void appendAdvice(String &target, const String &text)
         return;
     if (target.length() > 0)
         target += "; ";
-    target += text;
+    target += text + ".";
 }
 
 static String formatValueWithBand(const String &value, EnvBand band)
@@ -560,7 +559,7 @@ static String buildDetailsValue(int eqIndexInt,
         double dispTempValue = dispTemp(tempC);
         int tempRounded = roundToInt(dispTempValue);
         tempString = String(tempRounded);
-        tempString += (units.temp == TempUnit::F) ? "F" : "C";
+        tempString += (units.temp == TempUnit::F) ? "°F" : "°C";
     }
     appendDataSegment(dataSegment, "Temp", formatValueWithBand(tempString, tempBand));
 
@@ -686,7 +685,7 @@ static String buildDetailsValue(int eqIndexInt,
     {
         if (result.length() > 0)
         {
-            result += " | Tips: ";
+            result += " ¦ Tips: ";
         }
         else
         {
@@ -705,7 +704,7 @@ static String buildDetailsValue(int eqIndexInt,
 
 static void updateDetailsDisplay(const String &value)
 {
-    String display = " ";
+    String display = "Details - ";
     display += value;
     display += "   ";
 
@@ -740,6 +739,113 @@ static void updateDetailsDisplay(const String &value)
     }
 }
 
+static void drawDetailsFormatted(int startX,
+                                 int y,
+                                 const String &text,
+                                 uint16_t prefixColor,
+                                 uint16_t labelColor,
+                                 uint16_t valueColor,
+                                 bool selected)
+{
+    int len = text.length();
+    if (len == 0 || !dma_display)
+        return;
+
+    const int screenWidth = InfoScreen::SCREEN_WIDTH;
+    int idx = 0;
+    int x = startX;
+
+    auto drawToken = [&](const String &token, uint16_t color) {
+        if (token.length() == 0)
+            return;
+        int tokenWidth = getTextWidth(token.c_str());
+        int tokenEnd = x + tokenWidth;
+        if (tokenEnd > 0 && x < screenWidth)
+        {
+            dma_display->setTextColor(color);
+            dma_display->setCursor(x, y);
+            dma_display->print(token);
+        }
+        x += tokenWidth;
+    };
+
+    EnvBand currentBand = EnvBand::Unknown;
+    bool inValueSegment = false;
+    const uint8_t labelBoost = selected ? 40 : 24;
+    const uint8_t valueBoost = selected ? 30 : 0;
+
+    while (idx < len)
+    {
+        char c = text[idx];
+        if (c == ' ')
+        {
+            uint16_t spaceColor;
+            if (inValueSegment && currentBand != EnvBand::Unknown)
+            {
+                spaceColor = colorForBand(currentBand);
+                if (valueBoost)
+                    spaceColor = boostColor(spaceColor, valueBoost);
+            }
+            else
+            {
+                spaceColor = prefixColor;
+            }
+            drawToken(" ", spaceColor);
+            idx++;
+            continue;
+        }
+        if (c == '|')
+        {
+            drawToken("|", prefixColor);
+            currentBand = EnvBand::Unknown;
+            inValueSegment = false;
+            idx++;
+            continue;
+        }
+
+        int wordStart = idx;
+        while (idx < len && text[idx] != ' ' && text[idx] != '|')
+            idx++;
+        String word = text.substring(wordStart, idx);
+        if (word.length() == 0)
+            continue;
+
+        int colonIndex = word.indexOf(':');
+        if (colonIndex >= 0)
+        {
+            String label = word.substring(0, colonIndex);
+            label.trim();
+            EnvBand labelBand = bandForDetailsLabel(label);
+            currentBand = labelBand;
+            inValueSegment = true;
+
+            uint16_t labelTokenColor;
+            if (labelBand != EnvBand::Unknown)
+            {
+                labelTokenColor = colorForBand(labelBand);
+                labelTokenColor = boostColor(labelTokenColor, labelBoost);
+            }
+            else
+            {
+                labelTokenColor = labelColor;
+            }
+            drawToken(word, labelTokenColor);
+            continue;
+        }
+
+        if (!inValueSegment || currentBand == EnvBand::Unknown)
+        {
+            drawToken(word, prefixColor);
+            continue;
+        }
+
+        uint16_t bandColor = colorForBand(currentBand);
+        if (valueBoost)
+            bandColor = boostColor(bandColor, valueBoost);
+        drawToken(word, bandColor);
+    }
+}
+
 static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
 {
     if (lineIndex < 0 || lineIndex >= s_lineBandCount)
@@ -771,11 +877,18 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
 
         dma_display->fillRect(0, y, InfoScreen::SCREEN_WIDTH, InfoScreen::CHARH, 0);
 
+        const bool monoTheme = (theme == 1);
         uint16_t valueColor = colorForBand(s_overallBand);
         if (selected)
         {
             valueColor = boostColor(valueColor, 30);
         }
+        const uint8_t labelBoost = selected ? 35 : 20;
+        uint16_t labelColor = boostColor(valueColor, labelBoost);
+
+        uint16_t prefixColor = monoTheme
+                                   ? dma_display->color565(150, 150, 210)
+                                   : dma_display->color565(235, 235, 250);
 
         const int areaWidth = InfoScreen::SCREEN_WIDTH;
         if (s_detailsDisplayWidth <= areaWidth)
@@ -788,9 +901,7 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
                 s_detailsScrollOffset = 0;
                 s_detailsLastScroll = millis();
             }
-            dma_display->setTextColor(valueColor);
-            dma_display->setCursor(0, y);
-            dma_display->print(s_detailsDisplayText);
+            drawDetailsFormatted(0, y, s_detailsDisplayText, prefixColor, labelColor, valueColor, selected);
             return;
         }
 
@@ -814,12 +925,8 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
         }
 
         int cursorX = -s_detailsScrollOffset;
-
-        dma_display->setTextColor(valueColor);
-        dma_display->setCursor(cursorX, y);
-        dma_display->print(s_detailsDisplayText);
-        dma_display->setCursor(cursorX + s_detailsDisplayWidth + gap, y);
-        dma_display->print(s_detailsDisplayText);
+        drawDetailsFormatted(cursorX, y, s_detailsDisplayText, prefixColor, labelColor, valueColor, selected);
+        drawDetailsFormatted(cursorX + s_detailsDisplayWidth + gap, y, s_detailsDisplayText, prefixColor, labelColor, valueColor, selected);
     }
 }
 
@@ -900,6 +1007,7 @@ void showEnvironmentalQualityScreen()
                                             humBand,
                                             pressure,
                                             pressBand);
+    updateDetailsBands(overallBand, co2Band, tempBand, humBand, pressBand);
     updateDetailsDisplay(detailsValue);
     String detailsLine = " ";
     lines[lineCount] = detailsLine;
