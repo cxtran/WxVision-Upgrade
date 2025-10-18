@@ -1,0 +1,23 @@
+*** Begin Patch
+*** Update File: src\display.cpp
+@@
+-    const int bannerX = 4;
+-    const int bannerY = 10;
+-    const int bannerW = PANEL_RES_X - 8;
+-    const int bannerH = 14;
++    const int bannerX = 4;
++    const int bannerY = 6;
++    const int bannerW = PANEL_RES_X - 8;
++    const int bannerH = 12;
+@@
+-    dma_display->setTextSize(1);
+-    const char *tagline = "Weather";
+-    dma_display->getTextBounds(tagline, 0, 0, &x1, &y1, &w, &h);
+-    int taglineX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
+-    int taglineY = bannerY + bannerH + 4 - y1;
++    dma_display->setTextSize(1);
++    const char *tagline = "Weather";
++    dma_display->getTextBounds(tagline, 0, 0, &x1, &y1, &w, &h);
++    int taglineX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
++    int taglineY = bannerY + bannerH + 1 - y1;
+*** End Patch

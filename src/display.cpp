@@ -263,63 +263,55 @@ static void drawSplashBranding(float intensity)
     if (intensity > 1.0f)
         intensity = 1.0f;
 
-    const uint16_t panelShade = scaleSplashColor(splashShadow, 0.35f + 0.25f * (1.0f - intensity));
-    const uint16_t borderColor = scaleSplashColor(splashHighlight, 0.45f + 0.55f * intensity);
-    dma_display->fillRect(6, 8, PANEL_RES_X - 12, 16, panelShade);
-    dma_display->drawRoundRect(5, 7, PANEL_RES_X - 10, 18, 4, borderColor);
+    const uint16_t frameColor = scaleSplashColor(splashHighlight, 0.7f * intensity + 0.3f);
+    const uint16_t fillColor = scaleSplashColor(splashShadow, 0.25f + 0.35f * intensity);
+    const uint16_t accentColor = scaleSplashColor(splashAccent, intensity);
+    const uint16_t textColor = scaleSplashColor(myWHITE, intensity);
 
-    const int innerX = 7;
-    const int innerW = PANEL_RES_X - 14;
-    for (int i = 0; i < 3; ++i)
-    {
-        float topBlend = (3 - i) / 3.0f;
-        float bottomBlend = (i + 1) / 3.0f;
-        uint16_t topColor = scaleSplashColor(splashHighlight, (0.35f + 0.35f * intensity) * topBlend);
-        uint16_t bottomColor = scaleSplashColor(splashShadow, 0.25f + 0.35f * bottomBlend);
-        dma_display->drawFastHLine(innerX, 8 + i, innerW, topColor);
-        dma_display->drawFastHLine(innerX, 8 + 15 - i, innerW, bottomColor);
-    }
+    const int bannerX = 4;
+    const int bannerY = 6;
+    const int bannerW = PANEL_RES_X - 8;
+    const int bannerH = 12;
+
+    dma_display->fillRect(bannerX, bannerY, bannerW, bannerH, fillColor);
+    dma_display->drawRect(bannerX - 1, bannerY - 1, bannerW + 2, bannerH + 2, frameColor);
+
+    dma_display->setTextWrap(false);
+    dma_display->setFont();
 
     const char *title = "WxVision";
-    dma_display->setTextWrap(false);
-    dma_display->setFont(&verdanab8pt7b);
     dma_display->setTextSize(1);
 
     int16_t x1, y1;
     uint16_t w, h;
     dma_display->getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-    const int targetTop = (PANEL_RES_Y - static_cast<int>(h)) / 2;
-    const int cursorX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
-    const int cursorY = targetTop - y1;
+    int titleX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
+    int titleY = bannerY + (bannerH - static_cast<int>(h)) / 2 - y1;
 
     uint16_t shadowColor = scaleSplashColor(splashShadow, 0.5f * intensity);
-    dma_display->setCursor(cursorX + 1, cursorY + 2);
+    dma_display->setCursor(titleX + 1, titleY + 1);
     dma_display->setTextColor(shadowColor);
     dma_display->print(title);
 
-    const uint16_t accentColor = scaleSplashColor(splashAccent, intensity);
-    const uint16_t bodyColor = scaleSplashColor(myWHITE, intensity);
-    dma_display->setCursor(cursorX, cursorY);
-    dma_display->setTextColor(accentColor);
-    dma_display->print("Wx");
-    dma_display->setTextColor(bodyColor);
-    dma_display->print("Vision");
+    dma_display->setCursor(titleX, titleY);
+    dma_display->setTextColor(textColor);
+    dma_display->print(title);
 
-    dma_display->setFont();
     dma_display->setTextSize(1);
+    const char *tagline = "Weather";
+    dma_display->getTextBounds(tagline, 0, 0, &x1, &y1, &w, &h);
+    int taglineX = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
+    int taglineTop = bannerY + bannerH + 2;
+    int taglineBaseline = taglineTop - y1;
 
-    if (intensity > 0.0f)
-    {
-        const uint16_t underlineColor = scaleSplashColor(splashAccent, 0.75f * intensity);
-        int underlineY = targetTop + static_cast<int>(h) + 1;
-        if (underlineY >= 0 && underlineY < PANEL_RES_Y)
-        {
-            const int underlineX = 12;
-            const int underlineW = PANEL_RES_X - 24;
-            if (underlineW > 0)
-                dma_display->drawFastHLine(underlineX, underlineY, underlineW, underlineColor);
-        }
-    }
+    dma_display->setCursor(taglineX + 1, taglineBaseline + 1);
+    dma_display->setTextColor(shadowColor);
+    dma_display->print(tagline);
+    dma_display->setCursor(taglineX, taglineBaseline);
+    dma_display->setTextColor(accentColor);
+    dma_display->print(tagline);
+
+    dma_display->setTextSize(1);
 }
 
 static void drawSplashScreen(float intensity)
@@ -413,8 +405,7 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
     (void)status;
     (void)step;
     (void)total;
-
-    // Static splash: no animation, no updates needed.
+    // Static splash – no animation required.
 }
 
 void splashEnd()
@@ -427,7 +418,6 @@ void splashEnd()
         delay(15);
     }
 
-    // Static splash: clear once without fade animation.
     dma_display->fillScreen(0);
     splashTextIntensity = 1.0f;
     splashActive = false;

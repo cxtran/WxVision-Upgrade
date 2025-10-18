@@ -534,6 +534,8 @@ void setup()
     setupDisplay();
     int clampedSplashSec = constrain(splashDurationSec, 1, 10);
     uint16_t splashMs = static_cast<uint16_t>(clampedSplashSec * 1000);
+    if (splashMs < 3000)
+        splashMs = 3000;
     splashBegin(splashMs);
     splashUpdate("Display On", 1, 6);
     Serial.println("Display setup done.");
