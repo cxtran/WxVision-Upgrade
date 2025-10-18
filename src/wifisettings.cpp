@@ -52,12 +52,13 @@ void connectToWiFi()
         return;
     }
 
-    // Show connecting status
+    const bool allowDisplay = (dma_display != nullptr) && !isSplashActive();
+
     if (!dma_display)
     {
-        Serial.println("⚠️  dma_display not initialized. Skipping display output.");
+        Serial.println("dma_display not initialized. Skipping display output.");
     }
-    else
+    else if (allowDisplay)
     {
         dma_display->clearScreen();
         dma_display->setCursor(0, 0);
@@ -67,6 +68,7 @@ void connectToWiFi()
         dma_display->setTextColor(myBLUE);
         dma_display->print("to WiFi...");
     }
+
     Serial.printf("[WiFi] Connecting to SSID: %s\n", wifiSSID.c_str());
 
     WiFi.mode(WIFI_STA);
@@ -85,21 +87,24 @@ void connectToWiFi()
         Serial.println("[WiFi] Connected!");
         Serial.print("[WiFi] IP Address: ");
         Serial.println(WiFi.localIP());
-        if (dma_display)
+        if (allowDisplay)
         {
+            String ssidStr = WiFi.SSID();
+            String ipStr = WiFi.localIP().toString();
+
             dma_display->clearScreen();
             dma_display->setCursor(0, 0);
             dma_display->setTextColor(myBLUE);
             dma_display->print("WiFi:");
-            dma_display->setCursor(0, 8); 
-            dma_display->setTextColor(myWHITE); 
-            dma_display->printf(" %s",WiFi.SSID());
+            dma_display->setCursor(0, 8);
+            dma_display->setTextColor(myWHITE);
+            dma_display->printf(" %s", ssidStr.c_str());
             dma_display->setCursor(0, 16);
             dma_display->setTextColor(myBLUE);
             dma_display->print("IP: ");
             dma_display->setCursor(0, 24);
             dma_display->setTextColor(myWHITE);
-            dma_display->printf(" %s", WiFi.localIP().toString());
+            dma_display->printf(" %s", ipStr.c_str());
             delay(5000);
             dma_display->clearScreen();
         }
@@ -114,14 +119,14 @@ void connectToWiFi()
     else
     {
         Serial.println("[WiFi] Connection FAILED!");
-        if (dma_display)
+        if (allowDisplay)
         {
             dma_display->clearScreen();
             dma_display->setCursor(0, 0);
             dma_display->setTextColor(myRED);
             dma_display->print("WiFi Failed!");
+            delay(2000);
         }
-        delay(2000);
         // Clear SSID so user can try again
         wifiSSID = "";
         // Show WiFi menu for retry (handled by onWiFiConnectFailed)
@@ -129,3 +134,5 @@ void connectToWiFi()
         return;
     }
 }
+
+

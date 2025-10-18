@@ -460,6 +460,9 @@ static void completeStartupAfterWiFi(bool force)
 
     reset_Time_and_Date_Display = true;
 
+    // All data ready; now fade out the splash before drawing the main UI.
+    splashEnd();
+
     displayWeatherData();
     displayClock();
     displayDate();
@@ -585,7 +588,6 @@ void setup()
         Serial.println("[WiFi] No credentials, starting offline mode.");
         initialSetupAwaitingWifi = false;
         splashUpdate("Offline", 6, 6);
-        splashEnd();
         completeStartupAfterWiFi(true);
         return;
     }
@@ -609,7 +611,6 @@ void setup()
     }
 
     splashUpdate("Startup", 6, 6);
-    splashEnd();
     completeStartupAfterWiFi(false);
 
     // Seed timers to stagger 5s jobs (spread ~1.5s apart)

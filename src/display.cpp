@@ -411,28 +411,10 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
         return;
 
     (void)status;
+    (void)step;
+    (void)total;
 
-    if (total == 0)
-        total = 1;
-    if (step > total)
-        step = total;
-
-    float progress = static_cast<float>(step) / static_cast<float>(total);
-    if (progress < 0.0f)
-        progress = 0.0f;
-    if (progress > 1.0f)
-        progress = 1.0f;
-
-    float targetIntensity = 1.0f - progress;
-    if (targetIntensity < 0.0f)
-        targetIntensity = 0.0f;
-
-    if ((targetIntensity + 0.01f) < splashTextIntensity || (targetIntensity - 0.01f) > splashTextIntensity)
-    {
-        splashTextIntensity = targetIntensity;
-        drawSplashScreen(splashTextIntensity);
-    }
-    delay(20);
+    // Static splash: no animation, no updates needed.
 }
 
 void splashEnd()
@@ -445,25 +427,18 @@ void splashEnd()
         delay(15);
     }
 
-    splashTextIntensity = 0.0f;
-    drawSplashScreen(splashTextIntensity);
-    delay(40);
-
-    uint8_t original = currentPanelBrightness;
-    if (original == 0)
-        original = map(brightness, 1, 100, 3, 255);
-
-    for (int level = original; level > 15; level -= 15)
-    {
-        setPanelBrightness(level);
-        delay(25);
-    }
+    // Static splash: clear once without fade animation.
     dma_display->fillScreen(0);
-    setPanelBrightness(original);
+    splashTextIntensity = 1.0f;
     splashActive = false;
     splashMinimumMs = 0;
     dma_display->setTextColor(myWHITE);
     dma_display->setTextSize(1);
+}
+
+bool isSplashActive()
+{
+    return splashActive;
 }
 
 int getTextWidth(const char *text)

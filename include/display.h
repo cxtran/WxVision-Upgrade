@@ -79,3 +79,4 @@ ScreenMode homeScreenForDataSource();
 void splashBegin(uint16_t minimumMs);
 void splashUpdate(const char* status, uint8_t step, uint8_t total);
 void splashEnd();
+bool isSplashActive();
