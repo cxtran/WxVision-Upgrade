@@ -285,12 +285,22 @@ static void renderStatusEmojiBitmap(EnvBand band)
     if (co2BarTop < 0)
         co2BarTop = 0;
 
-    auto normalizedToPixels = [&](float norm) -> int {
+    auto normalizedToPixels = [&](float norm, bool usePowerCurve, float curveExponent) -> int {
         if (norm <= 0.0f)
             return 0;
         if (norm > 1.0f)
             norm = 1.0f;
-        float displayNorm = log10f(1.0f + 9.0f * norm) / log10f(10.0f);
+        float displayNorm;
+        if (usePowerCurve)
+        {
+            if (curveExponent <= 0.0f)
+                curveExponent = 1.0f;
+            displayNorm = powf(norm, curveExponent);
+        }
+        else
+        {
+            displayNorm = log10f(1.0f + 9.0f * norm) / log10f(10.0f);
+        }
         int pix = static_cast<int>(roundf(displayNorm * barWidth));
         if (pix < 0)
             pix = 0;
@@ -324,7 +334,9 @@ static void renderStatusEmojiBitmap(EnvBand band)
                             int barTop,
                             bool arrowUp,
                             const Segment *segments,
-                            int segmentCount) {
+                            int segmentCount,
+                            bool usePowerCurve,
+                            float curveExponent) {
         if (norm < 0.0f)
             return;
 
@@ -348,7 +360,7 @@ static void renderStatusEmojiBitmap(EnvBand band)
                 setIconPixel(drawX, y, barBackground);
         }
 
-        int filledPixels = normalizedToPixels(norm);
+        int filledPixels = normalizedToPixels(norm, usePowerCurve, curveExponent);
         if (norm >= 0.0f && filledPixels == 0 && valueBand != EnvBand::Unknown)
             filledPixels = 1;
         if (filledPixels > barWidth)
@@ -360,8 +372,8 @@ static void renderStatusEmojiBitmap(EnvBand band)
                 break;
 
             const Segment &seg = segments[i];
-            int segStart = normalizedToPixels(seg.start);
-            int segEnd = normalizedToPixels(seg.end);
+            int segStart = normalizedToPixels(seg.start, usePowerCurve, curveExponent);
+            int segEnd = normalizedToPixels(seg.end, usePowerCurve, curveExponent);
             int drawEnd = std::min(filledPixels, segEnd);
             if (drawEnd <= segStart)
                 continue;
@@ -405,7 +417,8 @@ static void renderStatusEmojiBitmap(EnvBand band)
 
     float eqNorm = (s_eqIndexValue >= 0.0f) ? (std::min(s_eqIndexValue, 100.0f) / 100.0f) : -1.0f;
     const int eqSegmentCount = static_cast<int>(sizeof(eqSegments) / sizeof(eqSegments[0]));
-    drawValueBar(eqNorm, band, eqBarTop, true, eqSegments, eqSegmentCount);
+    const float eqCurveExponent = 1.35f;
+    drawValueBar(eqNorm, band, eqBarTop, true, eqSegments, eqSegmentCount, true, eqCurveExponent);
 
     float co2Norm = -1.0f;
     if (co2Valid)
@@ -418,7 +431,7 @@ static void renderStatusEmojiBitmap(EnvBand band)
         co2Norm = norm;
     }
     const int co2SegmentCount = static_cast<int>(sizeof(co2Segments) / sizeof(co2Segments[0]));
-    drawValueBar(co2Norm, s_co2Band, co2BarTop, false, co2Segments, co2SegmentCount);
+    drawValueBar(co2Norm, s_co2Band, co2BarTop, false, co2Segments, co2SegmentCount, false, 1.0f);
 
     s_iconBitmapValid = true;
     s_iconBitmapBand = band;
