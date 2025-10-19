@@ -250,7 +250,11 @@ static void drawSplashBackdrop()
         dma_display->drawFastHLine(0, y, PANEL_RES_X, splashRowColor(y));
     }
 
-    dma_display->drawFastHLine(0, 0, PANEL_RES_X, splashHighlight);
+    uint16_t borderColor = scaleSplashColor(splashAccent, 0.85f);
+    dma_display->drawFastHLine(0, 0, PANEL_RES_X, borderColor);
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, borderColor);
+    dma_display->drawFastVLine(0, 0, PANEL_RES_Y, borderColor);
+    dma_display->drawFastVLine(PANEL_RES_X - 1, 0, PANEL_RES_Y, borderColor);
 }
 
 static void drawSplashBranding(float intensity)
@@ -416,6 +420,15 @@ void splashEnd()
     while ((uint32_t)(millis() - splashStartMs) < splashMinimumMs)
     {
         delay(15);
+    }
+
+    const uint8_t fadeSteps = 12;
+    for (int step = fadeSteps; step >= 0; --step)
+    {
+        float intensity = static_cast<float>(step) / static_cast<float>(fadeSteps);
+        splashTextIntensity = intensity;
+        drawSplashScreen(intensity);
+        delay(25);
     }
 
     dma_display->fillScreen(0);

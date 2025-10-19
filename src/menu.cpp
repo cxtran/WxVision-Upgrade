@@ -14,6 +14,7 @@
 #include "ir_codes.h"
 #include "SPIFFS.h"
 #include "units.h"
+#include "sensors.h"
 #include "weather_countries.h"
 #include "tempest.h"
 #include <cstring>
@@ -138,7 +139,7 @@ const char *tempestMenu[] = {"WF Token", "WF Station ID", "< Back"};
 const int tempestCount = sizeof(tempestMenu) / sizeof(tempestMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Show Splash Screen", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
@@ -691,6 +692,23 @@ void showCalibrationModal()
     calibrationModal.show();
 }
 
+static void showSplashUntilButton()
+{
+    splashBegin(0);
+    getIRCodeNonBlocking(); // clear any pending input
+    while (true)
+    {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code != 0)
+        {
+            break;
+        }
+        delay(20);
+    }
+    splashEnd();
+    delay(120);
+}
+
 void showSystemModal()
 {
     if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN)
@@ -705,14 +723,15 @@ void showSystemModal()
         "Set Date & Time",
         "Unit Settings",
         "WiFi Signal Test",
+        "Show Splash Screen",
         "Quick Restore",
         "Reset Power",
         "Factory Reset",
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
-    systemModal.setLines(labels, types, 8);
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+    systemModal.setLines(labels, types, 9);
     systemModal.setCallback([](bool accepted, int btnIdx)
                             {
         int action = -1;
@@ -748,17 +767,21 @@ void showSystemModal()
                 return;
             case 4:
                 systemModal.hide();
-                quickRestore();
+                showSplashUntilButton();
                 break;
             case 5:
                 systemModal.hide();
-                resetPowerUsage();
+                quickRestore();
                 break;
             case 6:
                 systemModal.hide();
-                factoryReset();
+                resetPowerUsage();
                 break;
             case 7:
+                systemModal.hide();
+                factoryReset();
+                break;
+            case 8:
                 systemModal.hide();
                 ESP.restart();
                 return;
