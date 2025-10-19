@@ -470,7 +470,18 @@ function loadAll(){
     if (wfStationIdEl) wfStationIdEl.value = s.wfStationId || '';
 
     var tempOffsetEl = document.getElementById('tempOffset');
-    if (tempOffsetEl) tempOffsetEl.value = (typeof s.tempOffset !== 'undefined' ? s.tempOffset : 0);
+    var tempOffsetLabel = document.querySelector('label[for="tempOffset"]');
+    var tempUnit = (s.units && typeof s.units.temp !== 'undefined') ? s.units.temp : 0;
+    if (tempOffsetLabel) tempOffsetLabel.innerHTML = tempUnit === 1 ? 'Temp Offset (&deg;F)' : 'Temp Offset (&deg;C)';
+    if (tempOffsetEl) {
+      var displayOffset = (typeof s.tempOffset !== 'undefined') ? Number(s.tempOffset) : 0;
+      var minRange = tempUnit === 1 ? (-10 * 9 / 5) : -10;
+      var maxRange = tempUnit === 1 ? (10 * 9 / 5) : 10;
+      tempOffsetEl.step = '0.1';
+      tempOffsetEl.min = minRange.toFixed(1);
+      tempOffsetEl.max = maxRange.toFixed(1);
+      tempOffsetEl.value = isFinite(displayOffset) ? displayOffset.toFixed(1) : '0.0';
+    }
     var humOffsetEl = document.getElementById('humOffset');
     if (humOffsetEl) humOffsetEl.value = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
     var lightGainEl = document.getElementById('lightGain');
@@ -782,6 +793,7 @@ window.addEventListener('load', function(){
   if (!full) return;
   loadFullStatus();
 });
+
 
 
 

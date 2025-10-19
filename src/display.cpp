@@ -33,6 +33,7 @@ extern String str_Temp;
 extern String str_Humd;
 extern String str_Weather_Conditions_Des;
 extern const uint8_t *getWeatherIconFromCondition(String condition);
+extern int humOffset;
 /*
 const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_DATA,
@@ -164,7 +165,12 @@ static String formatIndoorHumidity()
 
     if (!isnan(humiditySource))
     {
-        int rounded = static_cast<int>(humiditySource + 0.5f);
+        float calibrated = humiditySource + static_cast<float>(humOffset);
+        if (calibrated < 0.0f)
+            calibrated = 0.0f;
+        if (calibrated > 100.0f)
+            calibrated = 100.0f;
+        int rounded = static_cast<int>(calibrated + 0.5f);
         if (rounded < 0)
             rounded = 0;
         if (rounded > 100)
@@ -1189,7 +1195,12 @@ void drawClockScreen()
     bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
     String indoorHumidityStr = formatIndoorHumidity();
     bool showIndoorHumidity = isDataSourceNone() && indoorHumidityStr != "--";
-    String localTempStr = fmtTemp(SCD40_temp, 0);        // Inside
+    float indoorTempC = NAN;
+    if (!isnan(SCD40_temp))
+        indoorTempC = SCD40_temp + tempOffset;
+    else if (!isnan(aht20_temp))
+        indoorTempC = aht20_temp + tempOffset;
+    String localTempStr = fmtTemp(indoorTempC, 0);        // Inside
 
     dma_display->fillRect(0, 0, 32, 7, myBLACK);
 

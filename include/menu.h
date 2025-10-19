@@ -104,7 +104,7 @@ extern int brightness;
 extern int scrollSpeed;
 extern int scrollLevel;
 extern String customMsg;
-extern int tempOffset;
+extern float tempOffset;
 extern int humOffset;
 extern int lightGain;
 

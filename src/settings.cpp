@@ -39,7 +39,7 @@ int owmCountryIndex = 0;
 String owmCountryCustom = "";
 
 // --- Calibration ---
-int tempOffset = 0;   // degrees
+float tempOffset = 0.0f;   // degrees C
 int humOffset = 0;    // %
 int lightGain = 100;  // %
 
@@ -89,7 +89,12 @@ void loadSettings() {
     wfStationId  = prefs.getString("wfStationId", "");
 
     // Calibration
-    tempOffset   = prefs.getInt("tempOffset", 0);
+    if (prefs.isKey("tempOffsetF")) {
+        tempOffset = prefs.getFloat("tempOffsetF", 0.0f);
+    } else {
+        tempOffset = static_cast<float>(prefs.getInt("tempOffset", 0));
+    }
+    tempOffset = constrain(tempOffset, -10.0f, 10.0f);
     humOffset    = prefs.getInt("humOffset", 0);
     lightGain    = prefs.getInt("lightGain", 100);
 
@@ -147,7 +152,10 @@ void saveWeatherSettings() {
 
 void saveCalibrationSettings() {
     prefs.begin("visionwx", false);
-    prefs.putInt("tempOffset", tempOffset);
+    prefs.putFloat("tempOffsetF", tempOffset);
+    if (prefs.isKey("tempOffset")) {
+        prefs.remove("tempOffset");
+    }
     prefs.putInt("humOffset", humOffset);
     prefs.putInt("lightGain", lightGain);
     prefs.end();
@@ -241,7 +249,8 @@ void adjustBrightness(int dir) {
 }
 
 void adjustTempOffset(int dir) {
-    tempOffset = constrain(tempOffset + dir, -10, 10);
+    float step = (units.temp == TempUnit::F) ? (5.0f / 9.0f * 0.1f) : 0.1f;
+    tempOffset = constrain(tempOffset + dir * step, -10.0f, 10.0f);
 }
 
 void adjustHumOffset(int dir) {

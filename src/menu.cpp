@@ -3,6 +3,7 @@
 #include "menu.h"
 #include "display.h"
 #include <vector>
+#include <math.h>
 #include <Preferences.h>
 #include "settings.h"
 #include "system.h"
@@ -90,7 +91,7 @@ extern String wfStationId;
 extern int humOffset;
 extern int owmCountryIndex;
 extern String owmCountryCustom;
-extern int tempOffset;
+extern float tempOffset;
 extern int lightGain;
 extern int dayFormat, dataSource, autoRotate, autoRotateInterval, manualScreen;
 extern UnitPrefs units;
@@ -100,6 +101,8 @@ extern String customMsg;
 extern int fmt24, dateFmt;
 extern void handleInitialSetupDecision(bool wantsWiFi);
 extern bool initialSetupAwaitingWifi;
+
+static int tempOffsetDisplayTenths = 0;
 /*
 void pushMenu(MenuLevel newMenu)
 {
@@ -673,10 +676,15 @@ void showCalibrationModal()
     currentMenuLevel = MENU_CALIBRATION;
     menuActive = true;
 
+    bool displayInF = (units.temp == TempUnit::F);
+    String tempLabel = displayInF ? "Temp Offset (F)" : "Temp Offset (C)";
+    float displayOffset = static_cast<float>(dispTempOffset(tempOffset));
+    tempOffsetDisplayTenths = static_cast<int>(lroundf(displayOffset * 10.0f));
+
     // Bind directly to globals
-    String labels[] = {"Temp Offset (C)", "Hum Offset (%)", "Light Gain (%)"};
+    String labels[] = {tempLabel, "Hum Offset (%)", "Light Gain (%)"};
     InfoFieldType types[] = {InfoNumber, InfoNumber, InfoNumber};
-    int* numberRefs[] = { &tempOffset, &humOffset, &lightGain };
+    int* numberRefs[] = { &tempOffsetDisplayTenths, &humOffset, &lightGain };
 
     calibrationModal.setLines(labels, types, 3);
     calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
@@ -1732,3 +1740,4 @@ void showWiFiSettingsModal()
 
     wifiSettingsModal.show();
 }
+

@@ -6,6 +6,7 @@
 #include <cstring>
 #include <vector>
 #include <ctype.h>
+#include <math.h>
 
 extern bool autoBrightness;
 extern int scrollLevel;
@@ -374,7 +375,14 @@ void InfoModal::draw()
                 }
                 else
                 {
-                    s += ": " + String(val);
+                    if (lines[idx].startsWith("Temp Offset"))
+                    {
+                        s += ": " + String(static_cast<float>(val) / 10.0f, 1);
+                    }
+                    else
+                    {
+                        s += ": " + String(val);
+                    }
                 }
                 //       Serial.printf("intRefs[%d] = %d\n", nidx, val);
             }
@@ -839,7 +847,16 @@ void InfoModal::handleIR(uint32_t code)
                 if (this == &calibrationModal )
                 {
                     // Clamp according to which field label this is
-                    if (lines[selIndex].startsWith("Temp Offset"))   *ptr = constrain(*ptr, -10, 10);
+                    if (lines[selIndex].startsWith("Temp Offset"))
+                    {
+                        int limit = (units.temp == TempUnit::F) ? 180 : 100;
+                        *ptr = constrain(*ptr, -limit, limit);
+                        float displayVal = static_cast<float>(*ptr) / 10.0f;
+                        float newOffsetC = static_cast<float>(tempOffsetToC(displayVal));
+                        tempOffset = constrain(newOffsetC, -10.0f, 10.0f);
+                        float normalizedDisplay = static_cast<float>(dispTempOffset(tempOffset));
+                        *ptr = static_cast<int>(lroundf(normalizedDisplay * 10.0f));
+                    }
                     else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, -20, 20);
                     else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, 1, 150);
 
@@ -853,7 +870,7 @@ void InfoModal::handleIR(uint32_t code)
                     // Hint the climate screen to refresh next tick
                     newAHT20_BMP280Data = true;
 
-                    Serial.printf("[Calibration autosave] temp=%d hum=%d gain=%d\n",
+                    Serial.printf("[Calibration autosave] temp=%.1f hum=%d gain=%d\n",
                                 tempOffset, humOffset, lightGain);
                 }
 

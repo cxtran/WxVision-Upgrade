@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include <stdlib.h>
 #include "esp_ota_ops.h"
 
 #include "settings.h"
@@ -26,7 +27,8 @@ extern String owmCity, owmApiKey, wfToken, wfStationId;
 extern int owmCountryIndex;
 extern String owmCountryCustom;
 extern String owmCountryCode;
-extern int tempOffset, humOffset, lightGain;
+extern float tempOffset;
+extern int humOffset, lightGain;
 extern void saveAllSettings();
 extern void loadSettings();
 extern String str_Weather_Conditions, str_Temp, str_Humd;
@@ -299,24 +301,36 @@ void setupWebServer() {
     doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
 
     if (!isnan(SCD40_temp)) {
-      doc["indoorTemp"] = fmtTemp(SCD40_temp, 1);
-      doc["indoorTempRaw"] = SCD40_temp;
+      float indoorCal = SCD40_temp + tempOffset;
+      doc["indoorTemp"] = fmtTemp(indoorCal, 1);
+      doc["indoorTempRaw"] = indoorCal;
+      doc["indoorTempSensor"] = SCD40_temp;
     }
     if (!isnan(SCD40_hum)) {
-      doc["indoorHumidity"] = String(static_cast<int>(SCD40_hum + 0.5f)) + "%";
-      doc["indoorHumidityRaw"] = SCD40_hum;
+      float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
+      if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
+      if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
+      doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
+      doc["indoorHumidityRaw"] = indoorHumCal;
+      doc["indoorHumiditySensor"] = SCD40_hum;
     }
     if (SCD40_co2 > 0) {
       doc["co2"] = SCD40_co2;
     }
 
     if (!isnan(aht20_temp)) {
-      doc["ahtTemp"] = fmtTemp(aht20_temp, 1);
-      doc["ahtTempRaw"] = aht20_temp;
+      float ahtCal = aht20_temp + tempOffset;
+      doc["ahtTemp"] = fmtTemp(ahtCal, 1);
+      doc["ahtTempRaw"] = ahtCal;
+      doc["ahtTempSensor"] = aht20_temp;
     }
     if (!isnan(aht20_hum)) {
-      doc["ahtHumidity"] = String(static_cast<int>(aht20_hum + 0.5f)) + "%";
-      doc["ahtHumidityRaw"] = aht20_hum;
+      float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
+      if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
+      if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
+      doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
+      doc["ahtHumidityRaw"] = ahtHumCal;
+      doc["ahtHumiditySensor"] = aht20_hum;
     }
     if (!isnan(bmp280_pressure)) {
       doc["pressure"] = fmtPress(bmp280_pressure, 1);
@@ -394,7 +408,7 @@ void setupWebServer() {
     doc["owmApiKey"]        = owmApiKey;
     doc["wfToken"]          = wfToken;
     doc["wfStationId"]      = wfStationId;
-    doc["tempOffset"]       = tempOffset;
+    doc["tempOffset"]       = dispTempOffset(tempOffset);
     doc["humOffset"]        = humOffset;
     doc["lightGain"]        = lightGain;
     doc["ntpServer"]        = ntpServerHost;
@@ -583,7 +597,16 @@ void setupWebServer() {
         // Calibration (robust)
         if (!doc["tempOffset"].isNull()) {
           JsonVariant v = doc["tempOffset"];
-          tempOffset = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          double incoming = 0.0;
+          if (v.is<double>() || v.is<float>()) {
+            incoming = v.as<double>();
+          } else if (v.is<int>() || v.is<long>() || v.is<long long>()) {
+            incoming = static_cast<double>(v.as<long long>());
+          } else if (v.is<const char*>()) {
+            incoming = atof(v.as<const char*>());
+          }
+          float offsetC = static_cast<float>(tempOffsetToC(incoming));
+          tempOffset = constrain(offsetC, -10.0f, 10.0f);
         }
         if (!doc["humOffset"].isNull()) {
           JsonVariant v = doc["humOffset"];
@@ -593,7 +616,7 @@ void setupWebServer() {
           JsonVariant v = doc["lightGain"];
           lightGain = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
         }
-        tempOffset = constrain(tempOffset, -10, 10);
+        tempOffset = constrain(tempOffset, -10.0f, 10.0f);
         humOffset  = constrain(humOffset, -20, 20);
         lightGain  = constrain(lightGain, 1, 150);
 
@@ -869,6 +892,8 @@ void setupWebServer() {
 
   server.begin();
 }
+
+
 
 
 

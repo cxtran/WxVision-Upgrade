@@ -51,7 +51,7 @@ extern String wfToken;
 extern String wfStationId;
 
 // --- Calibration ---
-extern int tempOffset;   // degrees
+extern float tempOffset;   // degrees C
 extern int humOffset;    // %
 extern int lightGain;    // %
 

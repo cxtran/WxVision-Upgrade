@@ -31,6 +31,14 @@ inline double mm_to_in(double r)    { return r * 0.0393700787; }
 inline double dispTemp(double c) {
   return (units.temp == TempUnit::F) ? c_to_f(c) : c;
 }
+
+inline double dispTempOffset(double cOffset) {
+  return (units.temp == TempUnit::F) ? (cOffset * 9.0 / 5.0) : cOffset;
+}
+
+inline double tempOffsetToC(double displayOffset) {
+  return (units.temp == TempUnit::F) ? (displayOffset * 5.0 / 9.0) : displayOffset;
+}
 inline double dispWind(double mps) {
   switch (units.wind) {
     case WindUnit::MPH: return mps_to_mph(mps);
