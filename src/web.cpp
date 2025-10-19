@@ -11,6 +11,8 @@
 #include "datetimesettings.h"
 #include "tempest.h"
 #include "weather_countries.h"
+#include "sensors.h"
+#include "ir_codes.h"
 
 // ---- externs ----
 extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
@@ -92,6 +94,42 @@ static void jsonToUnits(JsonVariantConst v)
     units.clock24h = obj["clock24h"].as<bool>();
 }
 
+static uint32_t irCodeForButton(String btn)
+{
+  btn.trim();
+  btn.toLowerCase();
+  if (btn.length() == 0)
+    return 0;
+
+  if (btn == "up")
+    return IR_UP;
+  if (btn == "down")
+    return IR_DOWN;
+  if (btn == "left")
+    return IR_LEFT;
+  if (btn == "right")
+    return IR_RIGHT;
+  if (btn == "select" || btn == "enter" || btn == "ok")
+    return IR_OK;
+  if (btn == "menu" || btn == "setup" || btn == "cancel")
+    return IR_MENU;
+  if (btn == "screen" || btn == "shutdown" || btn == "power")
+    return IR_SCREEN;
+
+  // allow raw hex codes prefixed with 0x or without
+  if (btn.startsWith("0x"))
+    btn.remove(0, 2);
+  if (btn.length() > 0)
+  {
+    char *endptr = nullptr;
+    uint32_t code = strtoul(btn.c_str(), &endptr, 16);
+    if (endptr && *endptr == '\0')
+      return code;
+  }
+
+  return 0;
+}
+
 // Always use RTC so web clock matches on-device display
 static long currentEpoch()
 {
@@ -144,6 +182,48 @@ void setupWebServer() {
     doc["conditions"] = str_Weather_Conditions;
     doc["time"]     = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
     String json; serializeJson(doc, json);
+    req->send(200, "application/json", json);
+  });
+
+  server.on("/ir", HTTP_GET, [](AsyncWebServerRequest *req) {
+    if (!req->hasParam("btn"))
+    {
+      JsonDocument doc;
+      doc["error"] = "missing btn";
+      String json;
+      serializeJson(doc, json);
+      req->send(400, "application/json", json);
+      return;
+    }
+
+    String btn = req->getParam("btn")->value();
+    uint32_t code = irCodeForButton(btn);
+    if (code == 0)
+    {
+      JsonDocument doc;
+      doc["error"] = "unknown button";
+      doc["btn"] = btn;
+      String json;
+      serializeJson(doc, json);
+      req->send(400, "application/json", json);
+      return;
+    }
+
+    if (!enqueueVirtualIRCode(code))
+    {
+      JsonDocument doc;
+      doc["error"] = "busy";
+      String json;
+      serializeJson(doc, json);
+      req->send(503, "application/json", json);
+      return;
+    }
+
+    JsonDocument doc;
+    doc["status"] = "queued";
+    doc["btn"] = btn;
+    String json;
+    serializeJson(doc, json);
     req->send(200, "application/json", json);
   });
 

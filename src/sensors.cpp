@@ -7,6 +7,8 @@
 #include "menu.h"
 #include <Wire.h>
 #include "units.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/portmacro.h>
 
 // Brightness Sensor
 #define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
@@ -31,6 +33,29 @@ decode_results results;
 SensirionI2cScd4x scd4x;
 Adafruit_AHTX0 aht20;
 Adafruit_BMP280 bmp280;
+
+namespace
+{
+  constexpr uint8_t kVirtualIrQueueSize = 8;
+  volatile uint32_t s_virtualIrQueue[kVirtualIrQueueSize] = {};
+  volatile uint8_t s_virtualIrHead = 0;
+  volatile uint8_t s_virtualIrTail = 0;
+  portMUX_TYPE s_virtualIrMux = portMUX_INITIALIZER_UNLOCKED;
+
+  bool popVirtualIR(uint32_t &out)
+  {
+    bool has = false;
+    portENTER_CRITICAL(&s_virtualIrMux);
+    if (s_virtualIrHead != s_virtualIrTail)
+    {
+      out = s_virtualIrQueue[s_virtualIrHead];
+      s_virtualIrHead = (s_virtualIrHead + 1) % kVirtualIrQueueSize;
+      has = true;
+    }
+    portEXIT_CRITICAL(&s_virtualIrMux);
+    return has;
+  }
+}
 
 void setupIRSensor()
 {
@@ -110,6 +135,10 @@ void setDisplayBrightnessFromLux(float lux)
 
 uint32_t getIRCodeNonBlocking()
 {
+  uint32_t queuedCode = 0;
+  if (popVirtualIR(queuedCode))
+    return queuedCode;
+
   static decode_results results;
   if (irrecv.decode(&results))
   {
@@ -118,6 +147,21 @@ uint32_t getIRCodeNonBlocking()
     return code;
   }
   return 0;
+}
+
+bool enqueueVirtualIRCode(uint32_t code)
+{
+  bool ok = false;
+  portENTER_CRITICAL(&s_virtualIrMux);
+  uint8_t nextTail = (s_virtualIrTail + 1) % kVirtualIrQueueSize;
+  if (nextTail != s_virtualIrHead)
+  {
+    s_virtualIrQueue[s_virtualIrTail] = code;
+    s_virtualIrTail = nextTail;
+    ok = true;
+  }
+  portEXIT_CRITICAL(&s_virtualIrMux);
+  return ok;
 }
 
 void setupSensors()

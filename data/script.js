@@ -10,6 +10,33 @@ function setMsg(id, text, ok) {
 }
 function pad2(n){ return (n<10?'0':'')+n; }
 
+function sendRemoteCommand(action){
+  if (!action) return;
+  fetch('/ir?btn=' + encodeURIComponent(action))
+    .then(function(r){
+      if (!r.ok) throw new Error('Failed');
+      return r.json().catch(function(){ return null; });
+    })
+    .then(function(){
+      setMsg('remoteMsg','Command sent.', true);
+    })
+    .catch(function(){
+      setMsg('remoteMsg','Command failed.', false);
+    });
+}
+
+function setupRemoteControls(){
+  var buttons = document.querySelectorAll('[data-remote]');
+  if (!buttons || buttons.length === 0) return;
+  Array.prototype.forEach.call(buttons, function(btn){
+    btn.addEventListener('click', function(ev){
+      ev.preventDefault();
+      var action = btn.getAttribute('data-remote');
+      sendRemoteCommand(action);
+    });
+  });
+}
+
 var tzList = [];
 var currentEpoch = 0;
 var tzOffset = 0;
@@ -567,5 +594,6 @@ window.addEventListener('load', function(){
     return;
   }
   loadIndexStatus();
+  setupRemoteControls();
   setInterval(loadIndexStatus, 5000); // refresh every 5s
 });

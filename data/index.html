@@ -20,17 +20,37 @@
   <section class="card">
     <h2>Status</h2>
     <div class="grid">
-      <div><b>WiFi:</b> <span id="st-ssid">—</span></div>
-      <div><b>IP:</b> <span id="st-ip">—</span></div>
-      <div><b>Temp:</b> <span id="st-temp">—</span></div>
-      <div><b>Humidity:</b> <span id="st-humd">—</span></div>
-      <div><b>Time:</b> <span id="st-time">—</span></div>
+      <div><b>WiFi:</b> <span id="st-ssid">--</span></div>
+      <div><b>IP:</b> <span id="st-ip">--</span></div>
+      <div><b>Temp:</b> <span id="st-temp">--</span></div>
+      <div><b>Humidity:</b> <span id="st-humd">--</span></div>
+      <div><b>Time:</b> <span id="st-time">--</span></div>
     </div>
     <div class="actions">
       <a class="btn" href="/status">Full Status</a>
       <a class="btn" href="/ota">OTA Update</a>
       <a class="btn warn" href="/reboot">Reboot</a>
     </div>
+  </section>
+
+  <section class="card">
+    <h2>Remote Control</h2>
+    <div class="remote-grid">
+      <span class="remote-spacer"></span>
+      <button type="button" class="btn remote-btn" data-remote="up">Up</button>
+      <span class="remote-spacer"></span>
+      <button type="button" class="btn remote-btn" data-remote="left">Left</button>
+      <button type="button" class="btn remote-btn primary" data-remote="select">Select</button>
+      <button type="button" class="btn remote-btn" data-remote="right">Right</button>
+      <span class="remote-spacer"></span>
+      <button type="button" class="btn remote-btn" data-remote="down">Down</button>
+      <span class="remote-spacer"></span>
+    </div>
+    <div class="remote-extra">
+      <button type="button" class="btn remote-btn" data-remote="menu">Menu</button>
+      <button type="button" class="btn remote-btn" data-remote="screen">Toggle Screen</button>
+    </div>
+    <div class="msg" id="remoteMsg"></div>
   </section>
 </main>
 </body>

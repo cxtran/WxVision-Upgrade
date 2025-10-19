@@ -32,6 +32,25 @@ textarea { min-height:72px; }
 .msg { font-size:13px; color:#9fb3c8; min-height:1.2em; }
 .msg.ok { color:var(--ok); }
 .msg.err { color:#ff7b7b; }
+.remote-grid {
+  display:grid;
+  grid-template-columns: repeat(3, minmax(70px, 1fr));
+  gap:10px;
+  justify-items:center;
+  margin-bottom:10px;
+}
+.remote-grid .remote-spacer {
+  visibility:hidden;
+}
+.remote-btn {
+  width:100%;
+  text-align:center;
+}
+.remote-extra {
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
 /* Make date/time picker icons visible on dark background */
 input[type="date"]::-webkit-calendar-picker-indicator,
 input[type="time"]::-webkit-calendar-picker-indicator {
