@@ -37,10 +37,17 @@ function setupRemoteControls(){
   });
 }
 
+function toDisplayText(value){
+  if (value === undefined || value === null || value === '') return '--';
+  return String(value);
+}
+
 function setText(id, value){
   var el = document.getElementById(id);
   if (!el) return;
-  el.textContent = (value === undefined || value === null || value === '') ? '--' : value;
+  var next = toDisplayText(value);
+  if (el.textContent === next) return;
+  el.textContent = next;
 }
 
 function formatTempValue(value){
@@ -129,6 +136,10 @@ function describePressure(value){
   return 'Very high';
 }
 
+var fullStatusPending = false;
+var fullStatusTimer = null;
+var FULL_STATUS_INTERVAL = 5000;
+
 function formatUptimeLocal(sec){
   sec = Number(sec);
   if (!isFinite(sec) || sec < 0) return '--';
@@ -194,6 +205,8 @@ function renderFullStatus(st){
 
 
 function loadFullStatus(){
+  if (fullStatusPending) return;
+  fullStatusPending = true;
   fetch('/status.json')
     .then(function(r){
       if (!r.ok) throw new Error('Request failed');
@@ -205,6 +218,11 @@ function loadFullStatus(){
     })
     .catch(function(){
       setMsg('fullStatusMsg','Unable to load status',false);
+    })
+    .finally(function(){
+      fullStatusPending = false;
+      if (fullStatusTimer) clearTimeout(fullStatusTimer);
+      fullStatusTimer = setTimeout(loadFullStatus, FULL_STATUS_INTERVAL);
     });
 }
 
@@ -763,7 +781,6 @@ window.addEventListener('load', function(){
   var full = document.getElementById('full-status');
   if (!full) return;
   loadFullStatus();
-  setInterval(loadFullStatus, 5000);
 });
 
 
