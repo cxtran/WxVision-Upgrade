@@ -11,8 +11,11 @@
 <header>
   <h1>WxVision</h1>
   <nav>
-    <a href="/">Home</a>
-    <a href="/config.html">Settings</a>
+    <a class="btn-link" href="/" aria-current="page">Home</a>
+    <a class="btn-link" href="/config.html">Settings</a>
+    <a class="btn-link" href="/status.html">Full Status</a>
+    <a class="btn-link" href="/ota">OTA Update</a>
+    <a class="btn-link warn" href="/reboot">Reboot</a>
   </nav>
 </header>
 
@@ -26,11 +29,7 @@
       <div><b>Humidity:</b> <span id="st-humd">--</span></div>
       <div><b>Time:</b> <span id="st-time">--</span></div>
     </div>
-    <div class="actions">
-      <a class="btn" href="/status">Full Status</a>
-      <a class="btn" href="/ota">OTA Update</a>
-      <a class="btn warn" href="/reboot">Reboot</a>
-    </div>
+    
   </section>
 
   <section class="card">
@@ -55,3 +54,6 @@
 </main>
 </body>
 </html>
+
+
+

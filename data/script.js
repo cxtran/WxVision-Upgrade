@@ -37,6 +37,177 @@ function setupRemoteControls(){
   });
 }
 
+function setText(id, value){
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.textContent = (value === undefined || value === null || value === '') ? '--' : value;
+}
+
+function formatTempValue(value){
+  if (value === undefined || value === null || value === '' || value === '--') return '--';
+  return String(value);
+}
+
+function formatHumidityValue(value){
+  if (value === undefined || value === null || value === '' || value === '--') return '--';
+  value = String(value);
+  if (value.indexOf('%') === -1) value += '%';
+  return value;
+}
+
+function formatBytes(value){
+  var num = Number(value);
+  if (!isFinite(num) || num < 0) return null;
+  var units = ['B','KB','MB','GB'];
+  var idx = 0;
+  while (num >= 1024 && idx < units.length - 1){
+    num /= 1024;
+    idx++;
+  }
+  var precision;
+  if (idx === 0 || num >= 100) {
+    precision = 0;
+  } else if (num >= 10) {
+    precision = 1;
+  } else {
+    precision = 2;
+  }
+  return num.toFixed(precision) + ' ' + units[idx];
+}
+
+function formatCapacity(total, free){
+  var totalStr = formatBytes(total);
+  var freeStr = formatBytes(free);
+  if (!totalStr || !freeStr) return null;
+  return freeStr + ' free / ' + totalStr;
+}
+
+function formatUsage(used, percent){
+  var usedStr = formatBytes(used);
+  if (!usedStr) return null;
+  var pct = Number(percent);
+  if (isFinite(pct)) {
+    return usedStr + ' (' + pct + '% used)';
+  }
+  return usedStr;
+}
+
+function describeTempC(value){
+  var temp = Number(value);
+  if (!isFinite(temp)) return null;
+  if (temp < 18) return 'Cool';
+  if (temp < 25) return 'Comfortable';
+  if (temp < 30) return 'Warm';
+  return 'Hot';
+}
+
+function describeHumidityPct(value){
+  var hum = Number(value);
+  if (!isFinite(hum)) return null;
+  if (hum < 30) return 'Dry';
+  if (hum <= 60) return 'Comfortable';
+  if (hum <= 70) return 'Humid';
+  return 'Very humid';
+}
+
+function describeCo2(ppm){
+  var value = Number(ppm);
+  if (!isFinite(value) || value <= 0) return null;
+  if (value <= 600) return 'Excellent';
+  if (value <= 1000) return 'Good';
+  if (value <= 1400) return 'Fair';
+  if (value <= 2000) return 'Poor';
+  return 'Very poor';
+}
+
+function describePressure(value){
+  var press = Number(value);
+  if (!isFinite(press)) return null;
+  if (press < 1000) return 'Low';
+  if (press <= 1020) return 'Normal';
+  if (press <= 1030) return 'High';
+  return 'Very high';
+}
+
+function formatUptimeLocal(sec){
+  sec = Number(sec);
+  if (!isFinite(sec) || sec < 0) return '--';
+  var days = Math.floor(sec / 86400);
+  sec = sec % 86400;
+  var hours = Math.floor(sec / 3600);
+  sec = sec % 3600;
+  var minutes = Math.floor(sec / 60);
+  var seconds = Math.floor(sec % 60);
+  var base = pad2(hours) + ':' + pad2(minutes) + ':' + pad2(seconds);
+  return days > 0 ? (days + ' d ' + base) : base;
+}
+
+function renderFullStatus(st){
+  setText("fs-wifi-status", st.wifiStatus || st.wifiSSID || "--");
+  setText("fs-ssid", st.wifiSSID || "--");
+  setText("fs-ip", st.ip || "--");
+  setText("fs-mac", st.mac || "--");
+  setText("fs-rssi", (typeof st.rssi === "number") ? st.rssi + " dBm" : "--");
+  setText("fs-datasource", st.dataSourceLabel || (st.dataSource !== undefined ? st.dataSource : "--"));
+  setText("fs-screen", st.screenLabel || (st.screen !== undefined ? st.screen : "--"));
+  setText("fs-uptime", st.uptime || formatUptimeLocal(st.uptimeSec));
+
+  var heapTotal = st.heapTotal !== undefined ? Number(st.heapTotal) : undefined;
+  var heapFree = st.heapFree !== undefined ? Number(st.heapFree) : (st.freeHeap !== undefined ? Number(st.freeHeap) : undefined);
+  var heapUsed = st.heapUsed !== undefined ? Number(st.heapUsed) : (isFinite(heapTotal) && isFinite(heapFree) ? heapTotal - heapFree : undefined);
+  var heapUsagePct = st.heapUsedPercent;
+  setText("fs-ram", formatCapacity(heapTotal, heapFree));
+  setText("fs-ram-usage", formatUsage(heapUsed, heapUsagePct));
+
+  var storageTotal = st.fsTotal !== undefined ? Number(st.fsTotal) : undefined;
+  var storageFree = st.fsFree !== undefined ? Number(st.fsFree) : (isFinite(storageTotal) && st.fsUsed !== undefined ? storageTotal - Number(st.fsUsed) : undefined);
+  var storageUsed = st.fsUsed !== undefined ? Number(st.fsUsed) : (isFinite(storageTotal) && isFinite(storageFree) ? storageTotal - storageFree : undefined);
+  var storageUsagePct = st.fsUsedPercent;
+  setText("fs-storage", formatCapacity(storageTotal, storageFree));
+  setText("fs-storage-usage", formatUsage(storageUsed, storageUsagePct));
+
+  var flashTotal = st.flashTotal !== undefined ? Number(st.flashTotal) : undefined;
+  var flashFree = st.flashFree !== undefined ? Number(st.flashFree) : (isFinite(flashTotal) && st.flashUsed !== undefined ? flashTotal - Number(st.flashUsed) : undefined);
+  var flashUsed = st.flashUsed !== undefined ? Number(st.flashUsed) : (isFinite(flashTotal) && isFinite(flashFree) ? flashTotal - flashFree : undefined);
+  var flashUsagePct = st.flashUsedPercent;
+  setText("fs-flash", formatCapacity(flashTotal, flashFree));
+  setText("fs-flash-usage", formatUsage(flashUsed, flashUsagePct));
+
+  setText("fs-out-temp", formatTempValue(st.temp));
+  var outHum = (window.DATA_SOURCE === 1) ? formatHumidityValue(st.humidity) : formatHumidityValue(st.humidity);
+  setText("fs-out-hum", outHum);
+  setText("fs-conditions", st.conditions || "--");
+  setText("fs-indoor-temp", st.indoorTemp || "--");
+  setText("fs-indoor-hum", formatHumidityValue(st.indoorHumidity));
+  setText("fs-co2", (st.co2 !== undefined) ? st.co2 + " ppm" : "--");
+  setText("fs-aht-temp", st.ahtTemp || "--");
+  setText("fs-aht-hum", formatHumidityValue(st.ahtHumidity));
+  setText("fs-pressure", st.pressure || "--");
+
+  setText("fs-indoor-temp-desc", describeTempC(st.indoorTempRaw));
+  setText("fs-indoor-hum-desc", describeHumidityPct(st.indoorHumidityRaw));
+  setText("fs-co2-desc", describeCo2(st.co2));
+  setText("fs-aht-temp-desc", describeTempC(st.ahtTempRaw));
+  setText("fs-aht-hum-desc", describeHumidityPct(st.ahtHumidityRaw));
+  setText("fs-pressure-desc", describePressure(st.pressureRaw));
+}
+
+
+function loadFullStatus(){
+  fetch('/status.json')
+    .then(function(r){
+      if (!r.ok) throw new Error('Request failed');
+      return r.json();
+    })
+    .then(function(st){
+      renderFullStatus(st);
+      setMsg('fullStatusMsg','',true);
+    })
+    .catch(function(){
+      setMsg('fullStatusMsg','Unable to load status',false);
+    });
+}
+
 var tzList = [];
 var currentEpoch = 0;
 var tzOffset = 0;
@@ -176,19 +347,9 @@ function loadIndexStatus(){
       el = document.getElementById('st-ip');
       if (el) el.innerText = st.ip || '--';
       el = document.getElementById('st-temp');
-      if (el) {
-        if (st.temp && st.temp !== '--') {
-          var tempText = st.temp;
-          if (st.tempUnit && tempText.indexOf(st.tempUnit) === -1) {
-            tempText += st.tempUnit;
-          }
-          el.innerText = tempText;
-        } else {
-          el.innerText = '--';
-        }
-      }
-      el = document.getElementById('st-humd');
-      if (el) el.innerText = st.humidity ? (st.humidity + '%') : '--';
+        if (el) el.innerText = formatTempValue(st.temp);
+        el = document.getElementById('st-humd');
+        if (el) el.innerText = formatHumidityValue(st.humidity);
       el = document.getElementById('st-time');
       if (el) el.innerText = st.time || '--';
     })
@@ -597,3 +758,14 @@ window.addEventListener('load', function(){
   setupRemoteControls();
   setInterval(loadIndexStatus, 5000); // refresh every 5s
 });
+
+window.addEventListener('load', function(){
+  var full = document.getElementById('full-status');
+  if (!full) return;
+  loadFullStatus();
+  setInterval(loadFullStatus, 5000);
+});
+
+
+
+

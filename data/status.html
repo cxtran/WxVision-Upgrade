@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WxVision Full Status</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="script.js"></script>
+</head>
+<body>
+<header>
+  <h1>WxVision</h1>
+  <nav>
+    <a class="btn-link" href="/">Home</a>
+    <a class="btn-link" href="/config.html">Settings</a>
+    <a class="btn-link" href="/status.html" aria-current="page">Full Status</a>
+    <a class="btn-link" href="/ota">OTA Update</a>
+    <a class="btn-link warn" href="/reboot">Reboot</a>
+  </nav>
+</header>
+
+<main class="container" id="full-status">
+  <section class="card">
+    <h2>Device</h2>
+    <div class="grid">
+      <div><b>WiFi</b><span id="fs-wifi-status">--</span></div>
+      <div><b>Network</b><span id="fs-ssid">--</span></div>
+      <div><b>IP Address</b><span id="fs-ip">--</span></div>
+      <div><b>MAC Address</b><span id="fs-mac">--</span></div>
+      <div><b>Signal</b><span id="fs-rssi">--</span></div>
+      <div><b>Data Source</b><span id="fs-datasource">--</span></div>
+      <div><b>Current Screen</b><span id="fs-screen">--</span></div>
+      <div><b>Uptime</b><span id="fs-uptime">--</span></div>
+      <div><b>RAM</b><span id="fs-ram">--</span></div>
+      <div><b>RAM Usage</b><span id="fs-ram-usage">--</span></div>
+      <div><b>Storage</b><span id="fs-storage">--</span></div>
+      <div><b>Storage Usage</b><span id="fs-storage-usage">--</span></div>
+      <div><b>Flash</b><span id="fs-flash">--</span></div>
+      <div><b>Flash Usage</b><span id="fs-flash-usage">--</span></div>
+    </div>
+    <div class="msg" id="fullStatusMsg"></div>
+  </section>
+
+  <section class="card">
+    <h2>Outdoor Weather</h2>
+    <div class="grid">
+      <div><b>Temperature</b><span id="fs-out-temp">--</span></div>
+      <div><b>Humidity</b><span id="fs-out-hum">--</span></div>
+      <div><b>Conditions</b><span id="fs-conditions">--</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Indoor Sensors</h2>
+    <div class="grid">
+      <div>
+        <b>Indoor Temp</b>
+        <span class="value-stack">
+          <span id="fs-indoor-temp">--</span>
+          <small id="fs-indoor-temp-desc">--</small>
+        </span>
+      </div>
+      <div>
+        <b>Indoor Humidity</b>
+        <span class="value-stack">
+          <span id="fs-indoor-hum">--</span>
+          <small id="fs-indoor-hum-desc">--</small>
+        </span>
+      </div>
+      <div>
+        <b>CO2</b>
+        <span class="value-stack">
+          <span id="fs-co2">--</span>
+          <small id="fs-co2-desc">--</small>
+        </span>
+      </div>
+      <div>
+        <b>AHT20 Temp</b>
+        <span class="value-stack">
+          <span id="fs-aht-temp">--</span>
+          <small id="fs-aht-temp-desc">--</small>
+        </span>
+      </div>
+      <div>
+        <b>AHT20 Humidity</b>
+        <span class="value-stack">
+          <span id="fs-aht-hum">--</span>
+          <small id="fs-aht-hum-desc">--</small>
+        </span>
+      </div>
+      <div>
+        <b>Pressure</b>
+        <span class="value-stack">
+          <span id="fs-pressure">--</span>
+          <small id="fs-pressure-desc">--</small>
+        </span>
+      </div>
+    </div>
+  </section>
+</main>
+</body>
+</html>
+
+
+
+
+

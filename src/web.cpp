@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <ArduinoJson.h>
 #include <time.h>
+#include "esp_ota_ops.h"
 
 #include "settings.h"
 #include "units.h"
@@ -94,6 +95,63 @@ static void jsonToUnits(JsonVariantConst v)
     units.clock24h = obj["clock24h"].as<bool>();
 }
 
+static String formatUptime(unsigned long seconds)
+{
+  unsigned long days = seconds / 86400UL;
+  seconds %= 86400UL;
+  unsigned int hours = seconds / 3600UL;
+  seconds %= 3600UL;
+  unsigned int minutes = seconds / 60UL;
+  unsigned int secs = seconds % 60UL;
+
+  char buffer[40];
+  if (days > 0)
+    snprintf(buffer, sizeof(buffer), "%lu d %02u:%02u:%02u", days, hours, minutes, secs);
+  else
+    snprintf(buffer, sizeof(buffer), "%02u:%02u:%02u", hours, minutes, secs);
+  return String(buffer);
+}
+
+static const char *dataSourceLabel(int value)
+{
+  switch (value)
+  {
+  case 0:
+    return "Open Weather Map";
+  case 1:
+    return "WeatherFlow Tempest";
+  case 2:
+    return "Offline";
+  default:
+    return "Unknown";
+  }
+}
+
+static const char *screenModeLabel(ScreenMode mode)
+{
+  switch (mode)
+  {
+  case SCREEN_CLOCK:
+    return "Clock";
+  case SCREEN_OWM:
+    return "Forecast (OWM)";
+  case SCREEN_UDP_DATA:
+    return "UDP Live Weather";
+  case SCREEN_UDP_FORECAST:
+    return "UDP Forecast";
+  case SCREEN_WIND_DIR:
+    return "Wind Direction";
+  case SCREEN_ENV_INDEX:
+    return "Air Quality";
+  case SCREEN_CURRENT:
+    return "Current Conditions";
+  case SCREEN_HOURLY:
+    return "Hourly Forecast";
+  default:
+    return "Info Screen";
+  }
+}
+
 static uint32_t irCodeForButton(String btn)
 {
   btn.trim();
@@ -173,15 +231,100 @@ void setupWebServer() {
   // ---------- JSON endpoints ----------
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     JsonDocument doc;
-    String dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
+      String dispTemp;
+    String humidityValue;
+    String conditionsValue = str_Weather_Conditions;
+
+    if (dataSource == 1) {
+      dispTemp = fmtTemp(currentCond.temp, 0);
+      humidityValue = (currentCond.humidity >= 0) ? String(currentCond.humidity) : "--";
+      if (!currentCond.cond.isEmpty()) conditionsValue = currentCond.cond;
+    } else {
+      dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
+      humidityValue = str_Humd;
+    }
+
     doc["wifiSSID"] = WiFi.SSID();
-    doc["ip"]       = WiFi.localIP().toString();
-    doc["temp"]     = dispTemp;
-    doc["tempUnit"] = (units.temp == TempUnit::F) ? "°F" : "°C";
-    doc["humidity"] = str_Humd;
-    doc["conditions"] = str_Weather_Conditions;
-    doc["time"]     = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
-    String json; serializeJson(doc, json);
+    doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
+    doc["ip"] = WiFi.localIP().toString();
+    doc["mac"] = WiFi.macAddress();
+    doc["rssi"] = WiFi.RSSI();
+
+    unsigned long uptimeSec = millis() / 1000UL;
+    doc["uptimeSec"] = uptimeSec;
+    doc["uptime"] = formatUptime(uptimeSec);
+
+    size_t heapTotal = 327680; // align with System Info modal
+    size_t heapFree = ESP.getFreeHeap();
+    if (heapFree > heapTotal) {
+      heapTotal = heapFree;
+    }
+    size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
+    doc["freeHeap"] = heapFree; // legacy field
+    doc["heapTotal"] = heapTotal;
+    doc["heapFree"] = heapFree;
+    doc["heapUsed"] = heapUsed;
+    doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
+
+    size_t fsTotal = SPIFFS.totalBytes();
+    size_t fsUsed = SPIFFS.usedBytes();
+    size_t fsFree = (fsTotal > fsUsed) ? (fsTotal - fsUsed) : 0;
+    doc["fsTotal"] = fsTotal;
+    doc["fsUsed"] = fsUsed;
+    doc["fsFree"] = fsFree;
+    doc["fsUsedPercent"] = (fsTotal > 0) ? static_cast<uint8_t>((fsUsed * 100 + fsTotal / 2) / fsTotal) : 0;
+
+    size_t sketchSize = ESP.getSketchSize();
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    size_t flashTotal = running ? running->size : 0;
+    size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+    if (flashTotal == 0) {
+      size_t sketchFree = ESP.getFreeSketchSpace();
+      flashTotal = sketchSize + sketchFree;
+      flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+    }
+    doc["flashTotal"] = flashTotal;
+    doc["flashUsed"] = sketchSize;
+    doc["flashFree"] = flashFree;
+    doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
+
+    doc["dataSource"] = dataSource;
+    doc["dataSourceLabel"] = dataSourceLabel(dataSource);
+    doc["screen"] = static_cast<uint8_t>(currentScreen);
+    doc["screenLabel"] = screenModeLabel(currentScreen);
+
+    doc["temp"] = dispTemp;
+    doc["humidity"] = (dataSource == 1 && currentCond.humidity >= 0) ? String(currentCond.humidity) : str_Humd;
+    doc["conditions"] = (dataSource == 1 && currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
+    doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
+
+    if (!isnan(SCD40_temp)) {
+      doc["indoorTemp"] = fmtTemp(SCD40_temp, 1);
+      doc["indoorTempRaw"] = SCD40_temp;
+    }
+    if (!isnan(SCD40_hum)) {
+      doc["indoorHumidity"] = String(static_cast<int>(SCD40_hum + 0.5f)) + "%";
+      doc["indoorHumidityRaw"] = SCD40_hum;
+    }
+    if (SCD40_co2 > 0) {
+      doc["co2"] = SCD40_co2;
+    }
+
+    if (!isnan(aht20_temp)) {
+      doc["ahtTemp"] = fmtTemp(aht20_temp, 1);
+      doc["ahtTempRaw"] = aht20_temp;
+    }
+    if (!isnan(aht20_hum)) {
+      doc["ahtHumidity"] = String(static_cast<int>(aht20_hum + 0.5f)) + "%";
+      doc["ahtHumidityRaw"] = aht20_hum;
+    }
+    if (!isnan(bmp280_pressure)) {
+      doc["pressure"] = fmtPress(bmp280_pressure, 1);
+      doc["pressureRaw"] = bmp280_pressure;
+    }
+
+    String json;
+    serializeJson(doc, json);
     req->send(200, "application/json", json);
   });
 
@@ -726,6 +869,20 @@ void setupWebServer() {
 
   server.begin();
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
