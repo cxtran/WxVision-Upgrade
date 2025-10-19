@@ -29,8 +29,8 @@
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
-                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX, SCREEN_AIR_QUALITY,
-                                      SCREEN_TEMP_HUM_BARO, SCREEN_CURRENT, SCREEN_HOURLY};
+                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX,
+                                      SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -41,9 +41,7 @@ extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainM
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
-InfoScreen envQualityScreen("Env Quality", SCREEN_ENV_INDEX);
-InfoScreen airQualityScreen("Air Quality", SCREEN_AIR_QUALITY);
-InfoScreen tempHumBaroScreen("Climate Data", SCREEN_TEMP_HUM_BARO);
+InfoScreen envQualityScreen("Air Quality", SCREEN_ENV_INDEX);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
 InfoScreen hourlyScreen("Next 24 HRS", SCREEN_HOURLY);
 
@@ -122,10 +120,8 @@ void hideAllInfoScreens()
     udpScreen.hide();
     forecastScreen.hide();
     envQualityScreen.hide();
-    tempHumBaroScreen.hide();
     currentCondScreen.hide();
     hourlyScreen.hide();
-    airQualityScreen.hide();
     // Add more InfoScreens here as needed
 }
 
@@ -175,12 +171,6 @@ static void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_ENV_INDEX:
         envQualityScreen.tick();
-        break;
-    case SCREEN_AIR_QUALITY:
-        airQualityScreen.tick();
-        break;
-    case SCREEN_TEMP_HUM_BARO:
-        tempHumBaroScreen.tick();
         break;
     case SCREEN_CURRENT:
         currentCondScreen.tick();
@@ -309,12 +299,6 @@ void rotateScreen(int direction)
         break;
     case SCREEN_ENV_INDEX:
         showEnvironmentalQualityScreen();
-        break;
-    case SCREEN_AIR_QUALITY:
-        showAirQualityScreen();
-        break;
-    case SCREEN_TEMP_HUM_BARO:
-        showTempHumBaroScreen();
         break;
     case SCREEN_CURRENT:
         showCurrentConditionsScreen();
@@ -567,8 +551,6 @@ void setup()
     udpScreen.setHighlightEnabled(true);
     forecastScreen.setHighlightEnabled(true);
     envQualityScreen.setHighlightEnabled(false);
-    airQualityScreen.setHighlightEnabled(true);
-    tempHumBaroScreen.setHighlightEnabled(true);
     currentCondScreen.setHighlightEnabled(true);
     hourlyScreen.setHighlightEnabled(true);
 
@@ -936,48 +918,6 @@ void loop()
         delay(40);
         return;
     }
-    if (airQualityScreen.isActive())
-    {
-        if (newAirQualityData)
-        {
-            showAirQualityScreen();
-            newAirQualityData = false;
-        }
-        uint32_t code = getIRCodeNonBlocking();
-        if (code == IR_CANCEL)
-        {
-            hideAllInfoScreens();
-            showMainMenuModal();
-            playBuzzerTone(3000, 100);
-            return;
-        }
-        airQualityScreen.tick();
-        airQualityScreen.handleIR(code);
-        delay(40);
-        return;
-    }
-
-    if (tempHumBaroScreen.isActive())
-    {
-        if (newAHT20_BMP280Data)
-        {
-            showTempHumBaroScreen();
-            newAHT20_BMP280Data = false;
-        }
-        uint32_t code = getIRCodeNonBlocking();
-        if (code == IR_CANCEL)
-        {
-            hideAllInfoScreens();
-            showMainMenuModal();
-            playBuzzerTone(3000, 100);
-            return;
-        }
-        tempHumBaroScreen.tick();
-        tempHumBaroScreen.handleIR(code);
-        delay(40);
-        return;
-    }
-
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
     uint32_t code = getIRCodeNonBlocking();
     if (code == IR_LEFT)
@@ -1014,8 +954,9 @@ void loop()
         inKeyboardMode ||
         udpScreen.isActive() ||
         forecastScreen.isActive() ||
-        airQualityScreen.isActive() ||
-        tempHumBaroScreen.isActive();
+        envQualityScreen.isActive() ||
+        currentCondScreen.isActive() ||
+        hourlyScreen.isActive();
 
 
     // --- 8. InfoScreen auto-activation (if not already active) ---
@@ -1041,15 +982,6 @@ void loop()
     case SCREEN_HOURLY:
         if (!hourlyScreen.isActive())
             showHourlyForecastScreen();
-        break;
-
-    case SCREEN_AIR_QUALITY:
-        if (!airQualityScreen.isActive())
-            showAirQualityScreen();
-        break;
-    case SCREEN_TEMP_HUM_BARO:
-        if (!tempHumBaroScreen.isActive())
-            showTempHumBaroScreen();
         break;
 
     default:

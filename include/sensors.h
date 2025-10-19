@@ -38,8 +38,6 @@ uint32_t getIRCodeNonBlocking();
 void setupSensors();
 // void setupSCD40(); 
 void readSCD40();
-void showAirQualityScreen();
-void showTempHumBaroScreen();
 //void setupAHT20();
 //void setupBMP280();
 void readAHT20();

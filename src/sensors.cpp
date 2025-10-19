@@ -6,7 +6,6 @@
 #include "display.h"
 #include "menu.h"
 #include <Wire.h>
-#include "InfoScreen.h"
 #include "units.h"
 
 // Brightness Sensor
@@ -14,8 +13,6 @@
 #define FIXED_RESISTOR 10000 // 10kΩ resistor (Ohms)
 
 // Light sensor gain (percentage)
-extern InfoScreen airQualityScreen;
-extern InfoScreen tempHumBaroScreen;
 
 // SCD40
 uint16_t SCD40_co2 = 0;
@@ -187,40 +184,4 @@ void readBMP280()
 
 bool newAirQualityData = false;
 bool newAHT20_BMP280Data = false;
-
-void showAirQualityScreen()
-{
-  String lines[3];
-  lines[0] = "Temp: " + fmtTemp(SCD40_temp, 2);     // uses C/F from settings
-  lines[1] = "Hum:  " + String(SCD40_hum, 2) + "%"; // humidity always %
-  lines[2] = "CO2:  " + String(SCD40_co2) + "ppm";  // CO2 stays ppm
-
-  if (!airQualityScreen.isActive())
-  {
-    airQualityScreen.setLines(lines, 3, true);
-    airQualityScreen.show([](){ currentScreen = homeScreenForDataSource(); });
-  }
-  else
-  {
-    airQualityScreen.setLines(lines, 3, false);
-  }
-}
-
-void showTempHumBaroScreen()
-{
-  String lines[3];
-  lines[0] = "Temp: " + fmtTemp(aht20_temp, 2);         // C/F per settings
-  lines[1] = "Hum:  " + String(aht20_hum, 2) + "%";     // %
-  lines[2] = "Baro: " + fmtPress(bmp280_pressure, 1);   // hPa/inHg per settings
-
-  if (!tempHumBaroScreen.isActive())
-  {
-    tempHumBaroScreen.setLines(lines, 3, true);
-    tempHumBaroScreen.show([](){ currentScreen = homeScreenForDataSource(); });
-  }
-  else
-  {
-    tempHumBaroScreen.setLines(lines, 3, false);
-  }
-}
 
