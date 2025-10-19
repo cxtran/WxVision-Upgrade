@@ -16,5 +16,5 @@ void selectWiFiNetwork(int delta);
 void confirmWiFiSelection();
 void cancelWiFiSelection();
 void connectToWiFi();
-void scanWiFiNetworks();
+int scanWiFiNetworks();
 

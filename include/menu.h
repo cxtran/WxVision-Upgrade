@@ -33,7 +33,7 @@ void showUnitSettingsModal();
 void showInitialSetupPrompt();
 void showWiFiSettingsModal();
 
-void scanWiFiNetworks();
+int scanWiFiNetworks();
 void handleScreenSwitch(int dir);
 
 void exitToHomeScreen();

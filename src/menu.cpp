@@ -808,40 +808,69 @@ void showSystemModal()
 
 // --- Helper functions (WiFi scan, drawMenu, drawWiFiMenu, etc.) ---
 
-void scanWiFiNetworks()
+static int performWiFiScan(uint8_t attempts = 3)
+{
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false); // keep radio awake for scanning
+
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        WiFi.disconnect(false, false); // stop any stale connection attempts
+    }
+
+    WiFi.scanDelete(); // clear any cached results before starting
+    delay(120);        // brief pause to let the radio settle
+
+    int networks = -1;
+    for (uint8_t tryIdx = 0; tryIdx < attempts; ++tryIdx)
+    {
+        networks = WiFi.scanNetworks(false, true); // blocking scan, include hidden
+        if (networks > 0)
+            break;
+        Serial.println("[WiFi] No networks found, retrying...");
+        delay(200);
+    }
+
+    if (networks < 0)
+        networks = 0;
+
+    return networks;
+}
+
+int scanWiFiNetworks()
 {
     wifiScanCount = 0;
     wifiSelecting = true;
 
-    WiFi.mode(WIFI_STA);
-    WiFi.setSleep(false); // ensure radio is awake
-    delay(200);           // give it a moment to power up
-
     Serial.println("[WiFi] Scanning networks...");
-
-    int n = WiFi.scanNetworks(false, true); // blocking, include hidden
-    if (n <= 0) {
-        Serial.println("[WiFi] No networks found, retrying...");
-        delay(500);
-        n = WiFi.scanNetworks(false, true);
-    }
+    int found = performWiFiScan();
 
     int j = 0;
-    for (int i = 0; i < n && j < 15; ++i)
+    for (int i = 0; i < found && j < 15; ++i)
     {
         String ssid = WiFi.SSID(i);
         ssid.trim();
-        if (ssid.isEmpty()) continue;
+        if (ssid.isEmpty())
+            continue;
         scannedSSIDs[j++] = ssid;
     }
 
+    int actualNetworks = j;
+    if (actualNetworks == 0)
+    {
+        scannedSSIDs[j++] = "(No networks)";
+    }
     scannedSSIDs[j++] = "< Back>";
+
     wifiScanCount = j;
-    wifiSelectIndex = 0;
+    wifiSelectIndex = (actualNetworks > 0) ? 0 : (wifiScanCount > 1 ? 1 : 0);
     wifiMenuScroll = 0;
     wifiSelectNeedsScan = false;
 
-    Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", wifiScanCount - 1);
+    Serial.printf("[scanWiFiNetworks] Found %d networks (+Back)\n", actualNetworks);
+
+    WiFi.scanDelete(); // free scan results now that we've copied what we need
+    return actualNetworks;
 }
 
 
@@ -1655,27 +1684,11 @@ void showWiFiSettingsModal()
             //    dma_display->setTextColor(dma_display->color565(255, 255, 255));
                 dma_display->setCursor(0, 28);
 
-                // Perform scan (blocking but reliable)
-                WiFi.mode(WIFI_STA);
-                delay(100);
-                int n = WiFi.scanNetworks();
-                Serial.printf("[WiFiSettings] Scan complete: %d networks\n", n);
+                int found = scanWiFiNetworks();
+                Serial.printf("[WiFiSettings] Scan complete: %d networks\n", found);
 
-                if (n > 0)
+                if (found > 0)
                 {
-                    wifiScanCount = 0;
-                    for (int i = 0; i < n && wifiScanCount < 15; ++i)
-                    {
-                        String ssid = WiFi.SSID(i);
-                        ssid.trim();
-                        if (ssid.length() == 0)
-                            continue;
-                        scannedSSIDs[wifiScanCount++] = ssid;
-                    }
-                    scannedSSIDs[wifiScanCount++] = "< Back";
-                    wifiSelectIndex = 0;
-                    wifiMenuScroll = 0;
-
                     // Go to WiFi select screen
                     wifiSelecting = true;
                     currentMenuLevel = MENU_WIFI_SELECT;
@@ -1685,6 +1698,11 @@ void showWiFiSettingsModal()
                 }
                 else
                 {
+                    wifiSelecting = false;
+                    wifiScanCount = 0;
+                    wifiSelectIndex = 0;
+                    wifiMenuScroll = 0;
+
                     // Show "No networks found" briefly
                     dma_display->fillScreen(0);
                     dma_display->setCursor(5, 10);
