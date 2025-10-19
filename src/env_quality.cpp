@@ -40,6 +40,7 @@ static EnvBand s_detailsBandCO2 = EnvBand::Unknown;
 static EnvBand s_detailsBandTemp = EnvBand::Unknown;
 static EnvBand s_detailsBandHumidity = EnvBand::Unknown;
 static EnvBand s_detailsBandBaro = EnvBand::Unknown;
+static String s_lineTexts[3];
 
 static void updateDetailsBands(EnvBand overall, EnvBand co2, EnvBand temp, EnvBand humidity, EnvBand pressure)
 {
@@ -889,16 +890,7 @@ static void drawDetailsFormatted(int startX,
             currentBand = labelBand;
             inValueSegment = true;
 
-            uint16_t labelTokenColor;
-            if (labelBand != EnvBand::Unknown)
-            {
-                labelTokenColor = colorForBand(labelBand);
-                labelTokenColor = boostColor(labelTokenColor, labelBoost);
-            }
-            else
-            {
-                labelTokenColor = labelColor;
-            }
+            uint16_t labelTokenColor = labelColor;
             drawToken(word, labelTokenColor);
             continue;
         }
@@ -921,6 +913,45 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
     if (lineIndex < 0 || lineIndex >= s_lineBandCount)
         return;
 
+    auto drawWhiteLabelPrefix = [&](int idx) {
+        if (!dma_display)
+            return;
+        if (idx < 0 || idx >= 3)
+            return;
+        const String &lineText = s_lineTexts[idx];
+        int length = lineText.length();
+        if (length == 0)
+            return;
+
+        int splitIndex = -1;
+        for (int i = 0; i < length; ++i)
+        {
+            char c = lineText[i];
+            if (c == ':' || c == ' ')
+            {
+                splitIndex = i + 1;
+                if (c == ' ')
+                {
+                    while (splitIndex < length && lineText[splitIndex] == ' ')
+                        ++splitIndex;
+                }
+                else
+                {
+                    while (splitIndex < length && lineText[splitIndex] == ' ')
+                        ++splitIndex;
+                }
+                break;
+            }
+        }
+        if (splitIndex <= 0)
+            return;
+
+        String labelPart = lineText.substring(0, splitIndex);
+        dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        dma_display->setCursor(0, y);
+        dma_display->print(labelPart);
+    };
+
     const int iconSize = 16;
     const int iconX = InfoScreen::SCREEN_WIDTH - iconSize;
     const uint16_t background = (theme == 1) ? dma_display->color565(5, 5, 15)
@@ -934,11 +965,13 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
             ensureIconBitmap(s_overallBand);
             dma_display->drawRGBBitmap(iconX, y, s_iconBitmap, iconSize, iconSize);
         }
+        drawWhiteLabelPrefix(lineIndex);
     }
     else if (lineIndex == 1)
     {
         ensureIconBitmap(s_overallBand);
         dma_display->drawRGBBitmap(iconX, y - InfoScreen::CHARH, s_iconBitmap, iconSize, iconSize);
+        drawWhiteLabelPrefix(lineIndex);
     }
     else if (lineIndex == 2)
     {
@@ -953,9 +986,7 @@ static void drawEnvQualityOverlay(int lineIndex, int y, bool selected)
         {
             valueColor = boostColor(valueColor, 30);
         }
-        const uint8_t labelBoost = selected ? 35 : 20;
-        uint16_t labelColor = boostColor(valueColor, labelBoost);
-
+        uint16_t labelColor = dma_display->color565(255, 255, 255);
         uint16_t prefixColor = monoTheme
                                    ? dma_display->color565(150, 150, 210)
                                    : dma_display->color565(235, 235, 250);
@@ -1055,6 +1086,7 @@ void showEnvironmentalQualityScreen()
     lines[lineCount] = eqLine;
     colors[lineCount] = colorForBand(overallBand);
     s_lineBands[lineCount] = overallBand;
+    s_lineTexts[lineCount] = eqLine;
     ++lineCount;
 
     String co2Line = "CO2 ";
@@ -1069,6 +1101,7 @@ void showEnvironmentalQualityScreen()
     lines[lineCount] = co2Line;
     colors[lineCount] = colorForBand(co2Band);
     s_lineBands[lineCount] = co2Band;
+    s_lineTexts[lineCount] = co2Line;
     ++lineCount;
 
     String detailsValue = buildDetailsValue(eqIndexInt,
@@ -1087,6 +1120,7 @@ void showEnvironmentalQualityScreen()
     lines[lineCount] = detailsLine;
     colors[lineCount] = colorForBand(overallBand);
     s_lineBands[lineCount] = overallBand;
+    s_lineTexts[lineCount] = detailsLine;
     ++lineCount;
 
     s_lineBandCount = lineCount;
@@ -1117,6 +1151,7 @@ void showEnvironmentalQualityScreen()
     for (int i = lineCount; i < 3; ++i)
     {
         s_lineBands[i] = EnvBand::Unknown;
+        s_lineTexts[i] = "";
     }
 
     envQualityScreen.setHighlightEnabled(true);
