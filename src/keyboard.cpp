@@ -1,4 +1,4 @@
-#include "keyboard.h"
+﻿#include "keyboard.h"
 #include "display.h"  // Your dma_display instance
 
 enum KbdMode { MODE_UPPER, MODE_LOWER, MODE_SYM };
@@ -26,6 +26,7 @@ const char* keyboardGridSym[] = {
 const int gridRows = 4;
 const int gridCols = 8;
 const int keyboardVisibleRows = 1;
+enum KeyboardButtonIndex { BTN_BS = 0, BTN_SPACE = 1, BTN_MODE = 2, BTN_OK = 3, BTN_CANCEL = 4, BTN_COUNT = 5 };
 
 char keyboardBuffer[64] = ""; // Max 63 chars + null
 bool inKeyboardMode = false;
@@ -39,7 +40,7 @@ volatile bool blinkState = true;
 static void (*keyboardDoneCallback)(const char*) = nullptr;
 // static const char* keyboardTitle = nullptr; // For customizable title
 
-// --- 🔧 Fixed title handling ---
+// --- Fixed title handling ---
 static char keyboardTitleBuf[64] = "Enter Text:";  // Safe persistent buffer
 static const char* keyboardTitle = keyboardTitleBuf;
 
@@ -54,10 +55,10 @@ const char** getActiveGrid() {
 }
 const char* getModeButtonLabel() {
     switch (kbdMode) {
-        case MODE_UPPER: return "abc";
-        case MODE_LOWER: return "123";
-        case MODE_SYM:   return "ABC";
-        default:         return "abc";
+        case MODE_UPPER: return "ab";
+        case MODE_LOWER: return "12";
+        case MODE_SYM:   return "AB";
+        default:         return "ab";
     }
 }
 void switchKeyboardMode() {
@@ -74,11 +75,11 @@ void tickKeyboard() {
     if (!inKeyboardMode) return;
 
     drawKeyboard();  // Redraws with cursor blink
-    readIRSensor();  // ✅ Ensures IR goes to keyboard
+    readIRSensor();  // Ensures IR goes to keyboard
 }
 
 
-// --- 🔧 Updated to copy title safely ---
+// --- Updated to copy title safely ---
 void startKeyboardEntry(const char* initialValue, void (*onDoneCallback)(const char* result), const char* title) {
     inKeyboardMode = true;
     kbEditLineActive = false;
@@ -110,9 +111,6 @@ void handleKeyboardIR(uint32_t code) {
     const char** keyboardGrid = getActiveGrid();
     if (!inKeyboardMode) return;
 
-    int lastRowLen = strlen(keyboardGrid[gridRows-1]);
-    int lastRowSPCol = lastRowLen;
-
     if (kbEditLineActive) {
         if (code == 0xFFFF50AF) { // LEFT
             if (kbEditCursor > 0) kbEditCursor--;
@@ -139,20 +137,24 @@ void handleKeyboardIR(uint32_t code) {
                 kbEditLineActive = true;
             } else if (kbCursorRow > 0) {
                 kbCursorRow--;
-                if (kbCursorRow == gridRows-1) {
-                    if (kbCursorCol > lastRowSPCol) kbCursorCol = lastRowSPCol;
-                } else if (kbCursorCol >= gridCols) {
-                    kbCursorCol = gridCols-1;
-                }
+                int rowLen = strlen(keyboardGrid[kbCursorRow]);
+                if (rowLen == 0)
+                    kbCursorCol = 0;
+                else if (kbCursorCol >= rowLen)
+                    kbCursorCol = rowLen - 1;
                 if (kbCursorRow < kbRowScroll) kbRowScroll = kbCursorRow;
             }
         } else if (code == 0xFFFF906F) { // DOWN
             if (kbCursorRow < gridRows) {
                 kbCursorRow++;
-                if (kbCursorRow == gridRows && kbCursorCol > 3) kbCursorCol = 3;
-                if (kbCursorRow > gridRows) {
-                    kbCursorRow = 0;
-                    kbRowScroll = 0;
+                if (kbCursorRow == gridRows) {
+                    if (kbCursorCol >= BTN_COUNT) kbCursorCol = BTN_COUNT - 1;
+                } else {
+                    int rowLen = strlen(keyboardGrid[kbCursorRow]);
+                    if (rowLen == 0)
+                        kbCursorCol = 0;
+                    else if (kbCursorCol >= rowLen)
+                        kbCursorCol = rowLen - 1;
                 }
                 if (kbCursorRow >= kbRowScroll + keyboardVisibleRows && kbCursorRow < gridRows) {
                     kbRowScroll = kbCursorRow - (keyboardVisibleRows-1);
@@ -160,39 +162,30 @@ void handleKeyboardIR(uint32_t code) {
             }
         } else if (code == 0xFFFF50AF) { // LEFT
             if (kbCursorRow == gridRows) {
-                kbCursorCol = (kbCursorCol == 0) ? 3 : kbCursorCol-1;
-            } else if (kbCursorRow == gridRows-1) {
-                if (kbCursorCol == 0)
-                    kbCursorCol = lastRowSPCol;
+                kbCursorCol = (kbCursorCol == 0) ? (BTN_COUNT - 1) : kbCursorCol - 1;
+            } else {
+                int rowLen = strlen(keyboardGrid[kbCursorRow]);
+                if (rowLen == 0)
+                    kbCursorCol = 0;
+                else if (kbCursorCol == 0 || kbCursorCol >= rowLen)
+                    kbCursorCol = rowLen - 1;
                 else
                     kbCursorCol--;
-            } else {
-                kbCursorCol = (kbCursorCol == 0) ? gridCols-1 : kbCursorCol-1;
             }
         } else if (code == 0xFFFFE01F) { // RIGHT
             if (kbCursorRow == gridRows) {
-                kbCursorCol = (kbCursorCol == 3) ? 0 : kbCursorCol+1;
-            } else if (kbCursorRow == gridRows-1) {
-                if (kbCursorCol == lastRowSPCol)
+                kbCursorCol = (kbCursorCol + 1) % BTN_COUNT;
+            } else {
+                int rowLen = strlen(keyboardGrid[kbCursorRow]);
+                if (rowLen == 0)
                     kbCursorCol = 0;
                 else
-                    kbCursorCol++;
-                if (kbCursorCol > lastRowSPCol) kbCursorCol = 0;
-            } else {
-                kbCursorCol = (kbCursorCol+1) % gridCols;
+                    kbCursorCol = (kbCursorCol + 1) % rowLen;
             }
         } else if (code == 0xFFFF48B7) { // OK
             if (kbCursorRow < gridRows) {
-                if (kbCursorRow == gridRows-1 && kbCursorCol == lastRowSPCol) {
-                    if (editLen < (int)sizeof(keyboardBuffer)-1) {
-                        for (int i = editLen; i > kbEditCursor; --i)
-                            keyboardBuffer[i] = keyboardBuffer[i-1];
-                        keyboardBuffer[kbEditCursor] = ' ';
-                        editLen++;
-                        kbEditCursor++;
-                        keyboardBuffer[editLen] = '\0';
-                    }
-                } else {
+                int rowLen = strlen(keyboardGrid[kbCursorRow]);
+                if (rowLen > 0 && kbCursorCol < rowLen) {
                     char ch = keyboardGrid[kbCursorRow][kbCursorCol];
                     if (ch && ch != ' ') {
                         if (editLen < (int)sizeof(keyboardBuffer)-1) {
@@ -206,8 +199,8 @@ void handleKeyboardIR(uint32_t code) {
                     }
                 }
             } else if (kbCursorRow == gridRows) {
-                // 0=BS, 1=OK, 2=MOD, 3=X
-                if (kbCursorCol == 0) { // BS
+                // Bottom button row: Back, Space, Mode, OK, Cancel
+                if (kbCursorCol == BTN_BS) { // Back
                     if (kbEditCursor > 0 && editLen > 0) {
                         for (int i = kbEditCursor-1; i < editLen-1; ++i)
                             keyboardBuffer[i] = keyboardBuffer[i+1];
@@ -215,14 +208,23 @@ void handleKeyboardIR(uint32_t code) {
                         kbEditCursor--;
                         keyboardBuffer[editLen] = '\0';
                     }
-                } else if (kbCursorCol == 1) { // OK
+                } else if (kbCursorCol == BTN_SPACE) { // SPACE
+                    if (editLen < (int)sizeof(keyboardBuffer)-1) {
+                        for (int i = editLen; i > kbEditCursor; --i)
+                            keyboardBuffer[i] = keyboardBuffer[i-1];
+                        keyboardBuffer[kbEditCursor] = ' ';
+                        editLen++;
+                        kbEditCursor++;
+                        keyboardBuffer[editLen] = '\0';
+                    }
+                } else if (kbCursorCol == BTN_MODE) { // MODE
+                    switchKeyboardMode();
+                    return;
+                } else if (kbCursorCol == BTN_OK) { // OK
                     inKeyboardMode = false;
                     if (keyboardDoneCallback) keyboardDoneCallback(keyboardBuffer);
                     return;
-                } else if (kbCursorCol == 2) { // MOD
-                    switchKeyboardMode();
-                    return;
-                } else if (kbCursorCol == 3) { // CANCEL "X"
+                } else if (kbCursorCol == BTN_CANCEL) { // CANCEL
                     inKeyboardMode = false;
                     if (keyboardDoneCallback) keyboardDoneCallback(nullptr);
                     return;
@@ -254,7 +256,7 @@ void drawKeyboard() {
     dma_display->drawFastHLine(0, titleHeight - 1, dma_display->width(), dma_display->color565(255, 255, 255));
 
     // --- Title Text ---
-    // 🔧 Use safe buffer instead of pointer
+    // Use safe buffer instead of pointer
     const char* title = keyboardTitleBuf;
     int textLen = strlen(title);
     int textX = (dma_display->width() - textLen * 6) / 2;
@@ -294,87 +296,101 @@ void drawKeyboard() {
     // --- Draw Keyboard Row (Line 2) ---
     int gridY = bufferY + 8;
     int row = kbRowScroll;
-    int lastRowLen = strlen(keyboardGrid[gridRows - 1]);
-    int lastRowSPCol = lastRowLen;
-    int colsThisRow = (row == gridRows - 1 && kbdMode != MODE_SYM) ? lastRowLen + 1 : strlen(keyboardGrid[row]);
+    int rowLen = strlen(keyboardGrid[row]);
 
-    for (int col = 0; col < colsThisRow; ++col) {
+    for (int col = 0; col < rowLen; ++col) {
         int x = col * charWidth;
         bool isSel = (!kbEditLineActive && row == kbCursorRow && col == kbCursorCol && kbCursorRow < gridRows);
 
-if (row == gridRows - 1 && col == lastRowSPCol && kbdMode != MODE_SYM) {
-    const char* spaceLabel = "Space";
-    int spW = 28;
-    int spH = 9;
-    int spX = x - 1 + 1;  // original x-1 + shift right by 1
-    int spY = gridY - 1;
-
-    if (isSel) {
-        dma_display->fillRect(spX, spY, spW, spH, dma_display->color565(0, 180, 180));
-        dma_display->drawRect(spX, spY, spW, spH, dma_display->color565(255, 255, 255));
-        dma_display->setTextColor(dma_display->color565(255, 255, 255));
-    } else {
-        dma_display->fillRect(spX, spY, spW, spH, dma_display->color565(20, 100, 100));
-        dma_display->drawRect(spX, spY, spW, spH, dma_display->color565(100, 200, 200));
-        dma_display->setTextColor(dma_display->color565(220, 255, 255));
-    }
-
-    // Shift label 2px from new left edge
-    int textX = spX + 2;
-    int textY = spY + 1;
-    dma_display->setCursor(textX, textY);
-    dma_display->print(spaceLabel);
-}
-
-
-        else if (col < (int)strlen(keyboardGrid[row])) {
-            if (isSel) {
-                dma_display->fillRect(x - 1, gridY - 1, 7, 9, dma_display->color565(0, 128, 255));
-                dma_display->setTextColor(dma_display->color565(255, 255, 255));
-            } else {
-                dma_display->setTextColor(dma_display->color565(180, 180, 180));
-            }
-            dma_display->setCursor(x, gridY);
-            dma_display->print(keyboardGrid[row][col]);
+        if (isSel) {
+            dma_display->fillRect(x - 1, gridY - 1, 7, 9, dma_display->color565(0, 128, 255));
+            dma_display->setTextColor(dma_display->color565(255, 255, 255));
+        } else {
+            dma_display->setTextColor(dma_display->color565(180, 180, 180));
         }
+        dma_display->setCursor(x, gridY);
+        dma_display->print(keyboardGrid[row][col]);
     }
 
-    // --- Draw BS, OK, MOD, X buttons (Line 3) ---
+    // --- Draw Back, Space, Mode, OK, Cancel buttons (Line 3) ---
     int btnY = gridY + 8;
     int screenW = 64;
-    int btnCount = 4;
-    int totalSpacing = (btnCount - 1) * 2;
-    int baseBtnW = (screenW - totalSpacing) / 4;
-    int btnWidths[4] = {baseBtnW, baseBtnW, baseBtnW + 5, baseBtnW - 3};
-    const char* btnLabels[4] = {"BS", "OK", getModeButtonLabel(), "X"};
+    const int btnCount = BTN_COUNT;
+    int btnWidths[BTN_COUNT] = {11, 10, 15, 13, 11};
+    const char* btnLabels[BTN_COUNT] = {nullptr, nullptr, getModeButtonLabel(), "OK", nullptr};
 
     int xpos = 0;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < btnCount; ++i) {
         bool highlight = (!kbEditLineActive && kbCursorRow == gridRows && kbCursorCol == i);
 
         uint16_t fill, border, textColor;
-        if (i == 3) {
+        if (i == BTN_CANCEL) {
             fill = highlight ? dma_display->color565(220, 40, 40) : dma_display->color565(120, 0, 0);
             border = dma_display->color565(255, 64, 64);
             textColor = dma_display->color565(255, 255, 255);
         } else {
             fill = highlight
-                ? (i == 2 ? dma_display->color565(180, 255, 0) : dma_display->color565(255, 180, 0))
+                ? (i == BTN_MODE ? dma_display->color565(180, 255, 0) : dma_display->color565(255, 180, 0))
                 : dma_display->color565(30, 40, 60);
             border = dma_display->color565(255, 255, 0);
             textColor = highlight ? dma_display->color565(0, 0, 0) : dma_display->color565(255, 255, 255);
         }
 
-        dma_display->fillRect(xpos, btnY, btnWidths[i], 9, fill);
-        dma_display->drawRect(xpos, btnY, btnWidths[i], 9, border);
+        const char* label = btnLabels[i];
+        int rawWidth = btnWidths[i];
+        int drawX = xpos;
+        int drawWidth = rawWidth;
 
-        int labelLen = strlen(btnLabels[i]);
-        int tx = xpos + (btnWidths[i] - 8 * labelLen) / 2;
-        if (i == 3) tx += 2;
-        dma_display->setTextColor(textColor);
-        dma_display->setCursor(tx > xpos ? tx : xpos + 1, btnY + 1);
-        dma_display->print(btnLabels[i]);
+        if (i == BTN_OK) {
+            drawWidth = rawWidth + 2;
+        } else if (i == BTN_CANCEL) {
+            drawX += 2;
+            drawWidth = max(3, rawWidth - 2);
+        }
 
-        xpos += btnWidths[i] + 2;
+        dma_display->fillRect(drawX, btnY, drawWidth, 9, fill);
+        dma_display->drawRect(drawX, btnY, drawWidth, 9, border);
+
+        if (i == BTN_BS) {
+            uint16_t symbol = textColor;
+            int midY = btnY + 4;
+            int right = drawX + drawWidth - 3;
+            int left = drawX;
+            dma_display->drawLine(right , midY, left + 2, midY, symbol);
+            dma_display->drawLine(left + 2, midY, left + 4, midY - 2, symbol);
+            dma_display->drawLine(left + 3, midY, left + 4, midY + 2, symbol);
+        } else if (i == BTN_SPACE) {
+            uint16_t symbol = textColor;
+            int left = drawX + 2;
+            int right = drawX + drawWidth - 3;
+            int top = btnY + 3;
+            int bottom = btnY + 6;
+            dma_display->drawFastHLine(left, bottom, right - left + 1, symbol);
+            dma_display->drawLine(left, top + 1, left, bottom, symbol);
+            dma_display->drawLine(right, top + 1, right, bottom, symbol);
+        } else if (i == BTN_CANCEL) {
+            uint16_t symbol = textColor;
+            int left = xpos + 4;
+            int right = xpos + rawWidth - 3;
+            int top = btnY + 2;
+            int bottom = btnY + 6;
+            dma_display->drawLine(left, top, right, bottom, symbol);
+            dma_display->drawLine(left, bottom, right, top, symbol);
+        } else if (label && *label) {
+            int labelLen = strlen(label);
+            int tx = drawX + (drawWidth - 8 * labelLen) / 2;
+            if (tx < drawX + 1) tx = drawX + 1;
+            if (i == BTN_MODE) tx += 1;
+            else if (i == BTN_OK) tx += 1;
+            dma_display->setTextColor(textColor);
+            dma_display->setCursor(tx, btnY + 1);
+            dma_display->print(label);
+        }
+
+        xpos += rawWidth + 1;
     }
 }
+
+
+
+
