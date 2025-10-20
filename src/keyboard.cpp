@@ -148,7 +148,7 @@ void handleKeyboardIR(uint32_t code) {
             if (kbCursorRow < gridRows) {
                 kbCursorRow++;
                 if (kbCursorRow == gridRows) {
-                    if (kbCursorCol >= BTN_COUNT) kbCursorCol = BTN_COUNT - 1;
+                    kbCursorCol = BTN_OK;
                 } else {
                     int rowLen = strlen(keyboardGrid[kbCursorRow]);
                     if (rowLen == 0)
@@ -282,7 +282,7 @@ void drawKeyboard() {
 
     for (int i = 0; i < visibleChars; ++i) {
         int idx = start + i;
-        int x = i * charWidth;
+        int x = 2 + i * charWidth;
         char c = (idx < editLen) ? keyboardBuffer[idx] : ' ';
         bool isCursor = (idx == kbEditCursor);
 
@@ -296,13 +296,20 @@ void drawKeyboard() {
         dma_display->print(isCursor && blinkState ? '_' : c);
     }
 
+    // Draw separator between buffer line and key line
+    const uint16_t separatorColor = dma_display->color565(20, 30, 80);
+    dma_display->drawFastHLine(0, bufferY + 7, dma_display->width(), separatorColor);
+
     // --- Draw Keyboard Row (Line 2) ---
+    const uint16_t keyRowBgColor = dma_display->color565(18, 18, 40);
+    dma_display->fillRect(0, bufferY + 8, dma_display->width(), 8, keyRowBgColor);
+
     int gridY = bufferY + 8;
     int row = kbRowScroll;
     int rowLen = strlen(keyboardGrid[row]);
 
     for (int col = 0; col < rowLen; ++col) {
-        int x = col * charWidth;
+        int x = 2 + col * charWidth;
         bool isSel = (!kbEditLineActive && row == kbCursorRow && col == kbCursorCol && kbCursorRow < gridRows);
 
         if (isSel) {
