@@ -17,10 +17,10 @@ const char* keyboardGridLower[] = {
     "yz"
 };
 const char* keyboardGridSym[] = {
-    "[]{};:,.",
-    "&*()-_=+",  
-    "89!@#$%^",    
-    "01234567"
+    "01234567",
+    "89!@#$%^", 
+    "&*()-_=+",
+    "[]{};:,."
 };
 
 const int gridRows = 4;
@@ -219,6 +219,9 @@ void handleKeyboardIR(uint32_t code) {
                     }
                 } else if (kbCursorCol == BTN_MODE) { // MODE
                     switchKeyboardMode();
+                    kbCursorRow = 0;
+                    kbCursorCol = 0;
+                    kbRowScroll = 0;
                     return;
                 } else if (kbCursorCol == BTN_OK) { // OK
                     inKeyboardMode = false;
