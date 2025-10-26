@@ -40,6 +40,7 @@ extern const int NTP_PRESET_COUNT;
 extern const int NTP_PRESET_CUSTOM;
 
 const char *ntpPresetHost(int index);
+void setNtpServerFromHostString(const String& host);
 
 bool syncTimeFromNTP();
 bool getLocalDateTime(DateTime &out);

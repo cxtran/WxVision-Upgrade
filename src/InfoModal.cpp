@@ -802,30 +802,21 @@ void InfoModal::handleIR(uint32_t code)
 
                 if (this == &dateModal)
                 {
-                    switch (selIndex)
-                    {
-                    case 0:
+                    const String &label = lines[selIndex];
+                    if (label == "Year")
                         *ptr = constrain(*ptr, 2000, 2099);
-                        break; // Year
-                    case 1:
+                    else if (label == "Month")
                         *ptr = constrain(*ptr, 1, 12);
-                        break; // Month
-                    case 2:
+                    else if (label == "Day")
                         *ptr = constrain(*ptr, 1, 31);
-                        break; // Day
-                    case 3:
+                    else if (label == "Hour")
                         *ptr = constrain(*ptr, 0, 23);
-                        break; // Hour
-                    case 4:
+                    else if (label == "Minute")
                         *ptr = constrain(*ptr, 0, 59);
-                        break; // Minute
-                    case 5:
+                    else if (label == "Second")
                         *ptr = constrain(*ptr, 0, 59);
-                        break; // Second
-                    case 6:
+                    else if (label == "Manual Offset (min)")
                         *ptr = constrain(*ptr, -720, 840);
-                        break; // TimeZone
-                    }
                 }
 
                 // Also handle Brightness live preview if on that field (by label!)

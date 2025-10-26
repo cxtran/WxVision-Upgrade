@@ -862,34 +862,7 @@ void setupWebServer() {
     if (req->hasParam("server"))
     {
       String host = req->getParam("server")->value();
-      host.trim();
-      if (host.length() == 0)
-      {
-        host = "pool.ntp.org";
-      }
-
-      // Try to match a known preset; otherwise treat as custom
-      bool matched = false;
-      for (int i = 0; i < NTP_PRESET_COUNT; ++i)
-      {
-        if (host.equalsIgnoreCase(ntpPresetHost(i)))
-        {
-          ntpServerPreset = i;
-          matched = true;
-          break;
-        }
-      }
-      if (!matched)
-      {
-        ntpServerPreset = NTP_PRESET_CUSTOM;
-        host.toCharArray(ntpServerHost, sizeof(ntpServerHost));
-      }
-      else
-      {
-        strncpy(ntpServerHost, ntpPresetHost(ntpServerPreset), sizeof(ntpServerHost) - 1);
-        ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
-      }
-
+      setNtpServerFromHostString(host);
       // Persist the latest choice so it survives reboot
       saveDateTimeSettings();
     }

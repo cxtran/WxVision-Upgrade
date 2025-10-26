@@ -479,6 +479,41 @@ const char *ntpPresetHost(int index)
     return "";
 }
 
+void setNtpServerFromHostString(const String& rawHost)
+{
+    String host = rawHost;
+    host.trim();
+    if (host.isEmpty())
+    {
+        host = "pool.ntp.org";
+    }
+
+    bool matched = false;
+    for (int i = 0; i < NTP_PRESET_COUNT; ++i)
+    {
+        if (host.equalsIgnoreCase(kNtpPresetHosts[i]))
+        {
+            ntpServerPreset = i;
+            matched = true;
+            break;
+        }
+    }
+
+    if (matched)
+    {
+        strncpy(ntpServerHost, kNtpPresetHosts[ntpServerPreset], sizeof(ntpServerHost) - 1);
+        ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+    }
+    else
+    {
+        ntpServerPreset = NTP_PRESET_CUSTOM;
+        host.toCharArray(ntpServerHost, sizeof(ntpServerHost));
+        ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+    }
+
+    refreshNtpHostCache();
+}
+
 bool getLocalDateTime(DateTime &out)
 {
     DateTime utc;
@@ -774,11 +809,21 @@ bool syncTimeFromNTP() {
 
         memset(&timeinfo, 0, sizeof(timeinfo));
         const int maxAttempts = 15;
+        time_t base = time(nullptr);
         for (int attempt = 0; attempt < maxAttempts; ++attempt)
         {
+            time_t candidate = time(nullptr);
+            bool timeChanged = (base <= 0 || candidate <= 0)
+                ? false
+                : (llabs((long long)candidate - (long long)base) > 30);
+
             if (getLocalTime(&timeinfo))
             {
-                return true;
+                if (timeChanged ||
+                    (timeinfo.tm_year + 1900 >= 2020 && (base <= 0 || candidate <= 0)))
+                {
+                    return true;
+                }
             }
             delay(200);
         }
@@ -862,6 +907,7 @@ bool syncTimeFromNTP() {
     }
 
     setSystemTimeFromDateTime(newUtc);
+    applySystemTimezone();
 
     Serial.printf("[NTP] Time set (local): %04d-%02d-%02d %02d:%02d:%02d\n",
                   localTime.year(), localTime.month(), localTime.day(),
@@ -874,8 +920,3 @@ bool syncTimeFromNTP() {
 
     return true;
 }
-
-
-
-
-

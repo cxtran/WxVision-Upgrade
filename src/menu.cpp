@@ -1356,39 +1356,46 @@ void showDateTimeModal()
             dma_display->setCursor(8, 12);
             dma_display->setTextColor(myWHITE);
             dma_display->print("Syncing NTP...");
-            ntpServerPreset = dtNtpPreset;
-
-            if (ntpServerPreset == NTP_PRESET_CUSTOM) {
-                String customHost = String(ntpServerBuf);
-                customHost.trim();
-                if (customHost.length() == 0) customHost = "pool.ntp.org";
-                customHost.toCharArray(ntpServerHost, sizeof(ntpServerHost));
-                customHost.toCharArray(ntpServerBuf, sizeof(ntpServerBuf));
+            String chosenHost;
+            if (dtNtpPreset == NTP_PRESET_CUSTOM) {
+                chosenHost = String(ntpServerBuf);
             } else {
-                const char *resolved = ntpPresetHost(ntpServerPreset);
-                strncpy(ntpServerHost, resolved, sizeof(ntpServerHost) - 1);
-                ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
-                strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
-                ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
+                const char *presetHost = ntpPresetHost(dtNtpPreset);
+                if (presetHost) chosenHost = String(presetHost);
             }
+            setNtpServerFromHostString(chosenHost);
+            dtNtpPreset = ntpServerPreset;
+            strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
+            ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
 
             bool ok = syncTimeFromNTP();
             dma_display->fillScreen(0);
             dma_display->setCursor(4, 12);
             dma_display->setTextColor(ok ? myGREEN : myRED);
             dma_display->print(ok ? "NTP sync OK" : "NTP sync failed");
+            if (ok)
+            {
+                getTimeFromRTC();
+                DateTime localNow;
+                if (!getLocalDateTime(localNow))
+                {
+                    localNow = DateTime(2000, 1, 1, 0, 0, 0);
+                }
+                dtYear = localNow.year();
+                dtMonth = localNow.month();
+                dtDay = localNow.day();
+                dtHour = localNow.hour();
+                dtMinute = localNow.minute();
+                dtSecond = localNow.second();
+                reset_Time_and_Date_Display = true;
+            }
             saveDateTimeSettings();
             pendingModalFn = showDateTimeModal;
             pendingModalTime = millis() + 1500;
             return;
         }
 
-        dtMonth = constrain(dtMonth, 1, 12);
-        dtDay = constrain(dtDay, 1, 31);
-        dtHour = constrain(dtHour, 0, 23);
-        dtMinute = constrain(dtMinute, 0, 59);
-        dtSecond = constrain(dtSecond, 0, 59);
-        dtYear = constrain(dtYear, 2000, 2099);
+        clampDateTimeFields(dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond);
         dtManualOffset = constrain(dtManualOffset, -720, 840);
 
         int tzCountInt = static_cast<int>(timezoneCount());
@@ -1423,32 +1430,29 @@ void showDateTimeModal()
 
         setSystemTimeFromDateTime(manualUtc);
         updateTimezoneOffsetWithUtc(manualUtc);
+        getTimeFromRTC();
 
         bool formatChanged = (fmt24 != dtFmt24);
         fmt24 = dtFmt24;
         units.clock24h = (fmt24 == 1);
         dateFmt = dtDateFmt;
-        ntpServerPreset = dtNtpPreset;
-
-        if (ntpServerPreset == NTP_PRESET_CUSTOM) {
-            String customHost = String(ntpServerBuf);
-            customHost.trim();
-            if (customHost.length() == 0) customHost = "pool.ntp.org";
-            customHost.toCharArray(ntpServerHost, sizeof(ntpServerHost));
-            customHost.toCharArray(ntpServerBuf, sizeof(ntpServerBuf));
+        String hostSelection;
+        if (dtNtpPreset == NTP_PRESET_CUSTOM) {
+            hostSelection = String(ntpServerBuf);
         } else {
-            const char *resolved = ntpPresetHost(ntpServerPreset);
-            strncpy(ntpServerHost, resolved, sizeof(ntpServerHost) - 1);
-            ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
-            strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
-            ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
+            const char *presetHost = ntpPresetHost(dtNtpPreset);
+            if (presetHost) hostSelection = String(presetHost);
         }
+        setNtpServerFromHostString(hostSelection);
+        dtNtpPreset = ntpServerPreset;
+        strncpy(ntpServerBuf, ntpServerHost, sizeof(ntpServerBuf) - 1);
+        ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
 
         saveDateTimeSettings();
         saveAllSettings();
 
+        reset_Time_and_Date_Display = true;
         if (formatChanged) {
-            reset_Time_and_Date_Display = true;
             dma_display->clearScreen();
             drawClockScreen();
             displayDate();
@@ -1774,4 +1778,3 @@ void showWiFiSettingsModal()
 
     wifiSettingsModal.show();
 }
-
