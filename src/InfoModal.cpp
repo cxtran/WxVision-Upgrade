@@ -7,6 +7,7 @@
 #include <vector>
 #include <ctype.h>
 #include <math.h>
+#include "system.h"
 
 extern bool autoBrightness;
 extern int scrollLevel;
@@ -834,7 +835,10 @@ void InfoModal::handleIR(uint32_t code)
                     if (!autoBrightness)
                     {
                         int hw = map(*ptr, 1, 100, 3, 255);
-                        setPanelBrightness(hw);
+                        if (!isScreenOff())
+                        {
+                            setPanelBrightness(hw);
+                        }
                         //           Serial.printf("[Live] Brightness: %d => HW %d\n", *ptr, hw);
                     }
                     else
@@ -907,7 +911,10 @@ void InfoModal::handleIR(uint32_t code)
                             {
                                 int b = constrain(*intRefs[bIdx], 1, 100);
                                 int hw = map(b, 1, 100, 3, 255);
-                                setPanelBrightness(hw);
+                                if (!isScreenOff())
+                                {
+                                    setPanelBrightness(hw);
+                                }
                                 //              Serial.printf("[Live] Auto OFF ??? Brightness: %d => HW %d\n", b, hw);
                             }
                         }

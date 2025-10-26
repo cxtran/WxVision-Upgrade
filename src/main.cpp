@@ -26,6 +26,7 @@
 #include "InfoScreen.h"
 #include "windmeter.h"
 #include "ScrollLine.h"
+#include "system.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
@@ -188,6 +189,8 @@ static void renderScreenContents(ScreenMode mode)
 
 static void playScreenRevealEffect(ScreenMode mode)
 {
+    if (isScreenOff())
+        return;
     if (!screenIsAllowed(mode))
         return;
 
@@ -664,7 +667,10 @@ void loop()
         else
         {
             int hwBrightness = map(brightness, 1, 100, 3, 255);
-            setPanelBrightness(hwBrightness);
+            if (!isScreenOff())
+            {
+                setPanelBrightness(hwBrightness);
+            }
             Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
     }

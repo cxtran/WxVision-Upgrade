@@ -41,8 +41,8 @@ struct TempestData {
     double windDir;
     double windSampleInt;
     double pressure;
-    double temperature;
-    double humidity;
+    double temperature = NAN;
+    double humidity = NAN;
     double illuminance;
     double uv;
     double solar;

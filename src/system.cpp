@@ -63,12 +63,14 @@ static uint8_t lastBrightness = 32; // Default or load from settings
 
 void setScreenOff(bool off) {
     if (off && !screenOff) {
-        lastBrightness = brightness;
+        uint8_t fallback = map(brightness, 1, 100, 3, 255);
+        lastBrightness = currentPanelBrightness > 0 ? currentPanelBrightness : fallback;
         setPanelBrightness(0);
         screenOff = true;
     } else if (!off && screenOff) {
-        setPanelBrightness(map(lastBrightness, 1, 100, 3, 255));
         screenOff = false;
+        uint8_t restore = lastBrightness > 0 ? lastBrightness : map(brightness, 1, 100, 3, 255);
+        setPanelBrightness(restore);
     }
 }
 bool isScreenOff() {

@@ -7,6 +7,7 @@
 #include "menu.h"
 #include <Wire.h>
 #include "units.h"
+#include "system.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 
@@ -101,6 +102,9 @@ float readBrightnessSensor()
 
 void setDisplayBrightnessFromLux(float lux)
 {
+  if (isScreenOff()) {
+    return;
+  }
   float gain = lightGain / 100.0;
   float calibratedLux = lux * gain;
 

@@ -12,6 +12,7 @@
 #include "display.h"
 #include "datetimesettings.h"
 #include "tempest.h"
+#include "system.h"
 #include "weather_countries.h"
 #include "sensors.h"
 #include "ir_codes.h"
@@ -292,8 +293,10 @@ void setupWebServer() {
 
     doc["dataSource"] = dataSource;
     doc["dataSourceLabel"] = dataSourceLabel(dataSource);
+    bool screenOff = isScreenOff();
+    doc["screenOff"] = screenOff;
     doc["screen"] = static_cast<uint8_t>(currentScreen);
-    doc["screenLabel"] = screenModeLabel(currentScreen);
+    doc["screenLabel"] = screenOff ? "Screen Off" : screenModeLabel(currentScreen);
 
     doc["temp"] = dispTemp;
     doc["humidity"] = (dataSource == 1 && currentCond.humidity >= 0) ? String(currentCond.humidity) : str_Humd;
@@ -379,6 +382,57 @@ void setupWebServer() {
     JsonDocument doc;
     doc["status"] = "queued";
     doc["btn"] = btn;
+    String json;
+    serializeJson(doc, json);
+    req->send(200, "application/json", json);
+  });
+
+  server.on("/screen", HTTP_GET, [](AsyncWebServerRequest *req) {
+    bool requestedOff = false;
+    bool requestedOn = false;
+    bool toggled = false;
+
+    if (req->hasParam("state"))
+    {
+      String state = req->getParam("state")->value();
+      state.trim();
+      state.toLowerCase();
+      if (state == "off" || state == "0" || state == "false")
+      {
+        requestedOff = true;
+      }
+      else if (state == "on" || state == "1" || state == "true")
+      {
+        requestedOn = true;
+      }
+    }
+    else if (req->hasParam("toggle"))
+    {
+      toggled = true;
+    }
+
+    bool before = isScreenOff();
+    if (requestedOn)
+    {
+      setScreenOff(false);
+    }
+    else if (requestedOff)
+    {
+      setScreenOff(true);
+    }
+    else if (toggled)
+    {
+      setScreenOff(!before);
+    }
+
+    bool after = isScreenOff();
+
+    JsonDocument doc;
+    doc["screenOff"] = after;
+    doc["state"] = after ? "off" : "on";
+    doc["changed"] = (before != after);
+    doc["brightness"] = currentPanelBrightness;
+
     String json;
     serializeJson(doc, json);
     req->send(200, "application/json", json);

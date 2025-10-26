@@ -12,6 +12,10 @@ function pad2(n){ return (n<10?'0':'')+n; }
 
 function sendRemoteCommand(action){
   if (!action) return;
+  if (action === 'screen') {
+    toggleScreenRemote();
+    return;
+  }
   fetch('/ir?btn=' + encodeURIComponent(action))
     .then(function(r){
       if (!r.ok) throw new Error('Failed');
@@ -22,6 +26,28 @@ function sendRemoteCommand(action){
     })
     .catch(function(){
       setMsg('remoteMsg','Command failed.', false);
+    });
+}
+
+function toggleScreenRemote(){
+  fetch('/screen?toggle=1')
+    .then(function(r){
+      if (!r.ok) throw new Error('Failed');
+      return r.json().catch(function(){ return null; });
+    })
+    .then(function(payload){
+      if (!payload || typeof payload !== 'object') throw new Error('Bad response');
+      var msg = (payload.state === 'off') ? 'Screen turned off.' : 'Screen turned on.';
+      setMsg('remoteMsg', msg, true);
+      if (typeof loadIndexStatus === 'function') {
+        loadIndexStatus();
+      }
+      if (typeof loadFullStatus === 'function') {
+        loadFullStatus();
+      }
+    })
+    .catch(function(){
+      setMsg('remoteMsg','Screen toggle failed.', false);
     });
 }
 
@@ -160,7 +186,8 @@ function renderFullStatus(st){
   setText("fs-mac", st.mac || "--");
   setText("fs-rssi", (typeof st.rssi === "number") ? st.rssi + " dBm" : "--");
   setText("fs-datasource", st.dataSourceLabel || (st.dataSource !== undefined ? st.dataSource : "--"));
-  setText("fs-screen", st.screenLabel || (st.screen !== undefined ? st.screen : "--"));
+  var screenLabel = st.screenOff ? "Screen Off" : (st.screenLabel || (st.screen !== undefined ? st.screen : "--"));
+  setText("fs-screen", screenLabel);
   setText("fs-uptime", st.uptime || formatUptimeLocal(st.uptimeSec));
 
   var heapTotal = st.heapTotal !== undefined ? Number(st.heapTotal) : undefined;
