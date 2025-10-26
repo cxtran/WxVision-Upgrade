@@ -133,7 +133,11 @@ void handleKeyboardIR(uint32_t code) {
         }
     } else {
         if (code == 0xFFFF30CF) { // UP
-            if (kbCursorRow == 0 && kbRowScroll == 0) {
+            if (kbCursorRow == gridRows) {
+                kbCursorRow = 0;
+                kbCursorCol = 0;
+                kbRowScroll = 0;
+            } else if (kbCursorRow == 0 && kbRowScroll == 0) {
                 kbEditLineActive = true;
             } else if (kbCursorRow > 0) {
                 kbCursorRow--;
@@ -219,9 +223,6 @@ void handleKeyboardIR(uint32_t code) {
                     }
                 } else if (kbCursorCol == BTN_MODE) { // MODE
                     switchKeyboardMode();
-                    kbCursorRow = 0;
-                    kbCursorCol = 0;
-                    kbRowScroll = 0;
                     return;
                 } else if (kbCursorCol == BTN_OK) { // OK
                     inKeyboardMode = false;
