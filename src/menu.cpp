@@ -146,16 +146,32 @@ const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Setting
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
+bool handleGlobalIRCode(uint32_t code)
+{
+    if (code == 0)
+        return false;
+
+    if (code == IR_SCREEN)
+    {
+        toggleScreenPower();
+        return true;
+    }
+    if (code == IR_THEME)
+    {
+        toggleTheme(+1);
+        reset_Time_and_Date_Display = true;
+        requestScrollRebuild();
+        return true;
+    }
+    return false;
+}
+
 void handleIR(uint32_t code)
 {
     Serial.printf("IR Code: 0x%X\n", code);
 
-    if (code == IR_SCREEN)
+    if (handleGlobalIRCode(code))
     {
-        if (isScreenOff())
-            setScreenOff(false);
-        else
-            setScreenOff(true);
         return;
     }
     if (isScreenOff())

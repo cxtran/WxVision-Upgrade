@@ -723,6 +723,15 @@ void loop()
 
     handleAutoRotate(now);
 
+    if (themeRefreshPending)
+    {
+        if (!isScreenOff())
+        {
+            playScreenRevealEffect(currentScreen);
+        }
+        themeRefreshPending = false;
+    }
+
     // --- 1. Keyboard always has focus if active ---
     if (inKeyboardMode)
     {

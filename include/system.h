@@ -8,4 +8,4 @@ void factoryReset();
 // ---- Screen On/Off RAM-only feature ----
 void setScreenOff(bool off);
 bool isScreenOff();
-
+void toggleScreenPower();

@@ -29,6 +29,7 @@ String customMsg = "";
 const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
 int splashDurationSec = 3;
+bool themeRefreshPending = false;
 
 // --- Weather ---
 String owmCity = "";
@@ -240,6 +241,7 @@ void toggleTheme(int dir) {
     theme = (theme + dir + 2) % 2;
     if (theme != previous) {
         saveDisplaySettings();
+        themeRefreshPending = true;
     }
 }
 

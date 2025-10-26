@@ -12,6 +12,7 @@ const uint32_t IR_OK      = 0xFFFF48B7;   // OK / Enter
 const uint32_t IR_CANCEL  = 0xFFFF08F7;   // Power/Menu (Exit)
 const uint32_t IR_MENU    = IR_CANCEL;    // Alias for clarity
 const uint32_t IR_SCREEN    = 0xFFFFF00F;  // Screen On/Off
+const uint32_t IR_THEME     = 0xFFFFB04F;  // Theme Toggle
 
 // Add other buttons as needed:
 const uint32_t IR_0       = 0xFFFF6897;

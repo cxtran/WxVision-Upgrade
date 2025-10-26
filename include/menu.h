@@ -7,6 +7,7 @@
 
 // --- Menu Core Functions ---
 void handleIR(uint32_t code);
+bool handleGlobalIRCode(uint32_t code);
 void connectToWiFi();
 void drawWiFiMenu();
 void onWiFiConnectFailed();

@@ -70,6 +70,7 @@ void readIRSensor()
   {
     handleIR(results.value);
     irrecv.resume(); // Receive the next value
+    PRINT_IR_CODE(results.value);
   }
 }
 
@@ -141,13 +142,21 @@ uint32_t getIRCodeNonBlocking()
 {
   uint32_t queuedCode = 0;
   if (popVirtualIR(queuedCode))
+  {
+    PRINT_IR_CODE(queuedCode);
+    if (handleGlobalIRCode(queuedCode))
+      return 0;
     return queuedCode;
+  }
 
   static decode_results results;
   if (irrecv.decode(&results))
   {
     uint32_t code = results.value;
     irrecv.resume();
+    PRINT_IR_CODE(code);
+    if (handleGlobalIRCode(code))
+      return 0;
     return code;
   }
   return 0;

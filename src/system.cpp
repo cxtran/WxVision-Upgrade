@@ -77,3 +77,7 @@ bool isScreenOff() {
     return screenOff;
 }
 
+void toggleScreenPower() {
+    setScreenOff(!isScreenOff());
+}
+

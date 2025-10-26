@@ -176,6 +176,8 @@ static uint32_t irCodeForButton(String btn)
     return IR_MENU;
   if (btn == "screen" || btn == "shutdown" || btn == "power")
     return IR_SCREEN;
+  if (btn == "theme" || btn == "color")
+    return IR_THEME;
 
   // allow raw hex codes prefixed with 0x or without
   if (btn.startsWith("0x"))
@@ -422,7 +424,7 @@ void setupWebServer() {
     }
     else if (toggled)
     {
-      setScreenOff(!before);
+      toggleScreenPower();
     }
 
     bool after = isScreenOff();
