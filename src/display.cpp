@@ -9,6 +9,7 @@
 #include "fonts/verdanab8pt7b.h"
 #include "datetimesettings.h"
 #include "units.h"
+#include "env_quality.h"
 
 #include "tempest.h"
 #include "weather_countries.h"
@@ -47,6 +48,154 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+
+static int envScoreForBand(EnvBand band)
+{
+    switch (band)
+    {
+    case EnvBand::Good:
+        return 3;
+    case EnvBand::Moderate:
+        return 2;
+    case EnvBand::Poor:
+        return 1;
+    case EnvBand::Critical:
+        return 0;
+    default:
+        return -1;
+    }
+}
+
+static EnvBand envBandFromIndex(float idx)
+{
+    if (idx < 0.0f)
+        return EnvBand::Unknown;
+    if (idx >= 75.0f)
+        return EnvBand::Good;
+    if (idx >= 50.0f)
+        return EnvBand::Moderate;
+    if (idx >= 25.0f)
+        return EnvBand::Poor;
+    return EnvBand::Critical;
+}
+
+static EnvBand envBandFromCo2(float co2)
+{
+    if (isnan(co2) || co2 <= 0.0f)
+        return EnvBand::Unknown;
+    if (co2 <= 800.0f)
+        return EnvBand::Good;
+    if (co2 <= 1200.0f)
+        return EnvBand::Moderate;
+    if (co2 <= 2000.0f)
+        return EnvBand::Poor;
+    return EnvBand::Critical;
+}
+
+static EnvBand envBandFromTemp(float tempC)
+{
+    if (isnan(tempC))
+        return EnvBand::Unknown;
+    if (tempC >= 20.0f && tempC <= 24.0f)
+        return EnvBand::Good;
+    if ((tempC >= 18.0f && tempC < 20.0f) || (tempC > 24.0f && tempC <= 26.0f))
+        return EnvBand::Moderate;
+    if ((tempC >= 16.0f && tempC < 18.0f) || (tempC > 26.0f && tempC <= 28.0f))
+        return EnvBand::Poor;
+    return EnvBand::Critical;
+}
+
+static EnvBand envBandFromHumidity(float humidity)
+{
+    if (isnan(humidity))
+        return EnvBand::Unknown;
+    if (humidity >= 35.0f && humidity <= 55.0f)
+        return EnvBand::Good;
+    if ((humidity >= 30.0f && humidity < 35.0f) || (humidity > 55.0f && humidity <= 60.0f))
+        return EnvBand::Moderate;
+    if ((humidity >= 25.0f && humidity < 30.0f) || (humidity > 60.0f && humidity <= 70.0f))
+        return EnvBand::Poor;
+    return EnvBand::Critical;
+}
+
+static EnvBand envBandFromPressure(float pressure)
+{
+    if (isnan(pressure) || pressure < 200.0f)
+        return EnvBand::Unknown;
+    if (pressure >= 995.0f && pressure <= 1025.0f)
+        return EnvBand::Good;
+    if ((pressure >= 985.0f && pressure < 995.0f) || (pressure > 1025.0f && pressure <= 1035.0f))
+        return EnvBand::Moderate;
+    if ((pressure >= 970.0f && pressure < 985.0f) || (pressure > 1035.0f && pressure <= 1045.0f))
+        return EnvBand::Poor;
+    return EnvBand::Critical;
+}
+
+static uint16_t envColorForBand(EnvBand band)
+{
+    const bool monoTheme = (theme == 1);
+    if (monoTheme)
+    {
+        switch (band)
+        {
+        case EnvBand::Good:
+            return dma_display->color565(120, 120, 220);
+        case EnvBand::Moderate:
+            return dma_display->color565(90, 90, 180);
+        case EnvBand::Poor:
+            return dma_display->color565(70, 70, 150);
+        case EnvBand::Critical:
+            return dma_display->color565(50, 50, 110);
+        default:
+            return dma_display->color565(80, 80, 140);
+        }
+    }
+
+    switch (band)
+    {
+    case EnvBand::Good:
+        return dma_display->color565(54, 196, 93);
+    case EnvBand::Moderate:
+        return dma_display->color565(241, 196, 15);
+    case EnvBand::Poor:
+        return dma_display->color565(230, 126, 34);
+    case EnvBand::Critical:
+        return dma_display->color565(231, 76, 60);
+    default:
+        return dma_display->color565(120, 120, 120);
+    }
+}
+
+static uint16_t scaleColor565(uint16_t color, float intensity)
+{
+    if (intensity <= 0.0f)
+        return 0;
+    if (intensity >= 1.0f)
+        return color;
+
+    uint8_t r = (color >> 11) & 0x1F;
+    uint8_t g = (color >> 5) & 0x3F;
+    uint8_t b = color & 0x1F;
+
+    int newR = static_cast<int>(r * intensity + 0.5f);
+    int newG = static_cast<int>(g * intensity + 0.5f);
+    int newB = static_cast<int>(b * intensity + 0.5f);
+
+    if (newR > 31)
+        newR = 31;
+    if (newG > 63)
+        newG = 63;
+    if (newB > 31)
+        newB = 31;
+    if (newR < 0)
+        newR = 0;
+    if (newG < 0)
+        newG = 0;
+    if (newB < 0)
+        newB = 0;
+
+    return static_cast<uint16_t>((newR << 11) | (newG << 5) | newB);
+}
 
 bool screenIsAllowed(ScreenMode mode)
 {
@@ -1250,6 +1399,64 @@ void drawClockScreen()
 
     dma_display->setCursor(localX, localY);
     dma_display->print(localTempStr);
+
+    // ---- Environmental status bars ----
+    const int dotRadius = 1;
+    const int dotDiameter = dotRadius * 2 + 1;
+    const int co2DotX = 2;
+    const int eqDotX = co2DotX;
+    const int eqDotY = 30;
+    const int co2DotY = eqDotY - (dotDiameter + 1);
+    const int clearTop = eqDotY - dotRadius;
+    const int clearHeight = (eqDotY + dotRadius) - clearTop + 1;
+    dma_display->fillRect(co2DotX - dotRadius - 1, clearTop, dotDiameter + 2, clearHeight, myBLACK);
+
+    float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
+    float humiditySource = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
+    if (!isnan(humiditySource))
+    {
+        humiditySource += static_cast<float>(humOffset);
+        if (humiditySource < 0.0f)
+            humiditySource = 0.0f;
+        else if (humiditySource > 100.0f)
+            humiditySource = 100.0f;
+    }
+    float pressure = (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f) ? bmp280_pressure : NAN;
+
+    EnvBand co2Band = envBandFromCo2(co2Raw);
+    EnvBand tempBand = envBandFromTemp(indoorTempC);
+    EnvBand humidityBand = envBandFromHumidity(humiditySource);
+    EnvBand pressureBand = envBandFromPressure(pressure);
+
+    EnvBand bands[] = {co2Band, tempBand, humidityBand, pressureBand};
+    int scoreSum = 0;
+    int validCount = 0;
+    for (EnvBand band : bands)
+    {
+        int score = envScoreForBand(band);
+        if (score >= 0)
+        {
+            scoreSum += score;
+            ++validCount;
+        }
+    }
+
+    float eqIndex = (validCount > 0) ? (static_cast<float>(scoreSum) / (validCount * 3.0f)) * 100.0f : -1.0f;
+    EnvBand eqBand = (validCount > 0) ? envBandFromIndex(eqIndex) : EnvBand::Unknown;
+
+    auto intensityForBand = [&](EnvBand band) -> float {
+        if (band == EnvBand::Critical)
+            return (second % 2 == 0) ? 1.0f : 0.35f;
+        if (band == EnvBand::Poor)
+            return ((second / 2) % 2 == 0) ? 1.0f : 0.6f;
+        return 1.0f;
+    };
+
+    uint16_t eqPulseColor = scaleColor565(envColorForBand(eqBand), intensityForBand(eqBand));
+    uint16_t co2PulseColor = scaleColor565(envColorForBand(co2Band), intensityForBand(co2Band));
+
+    dma_display->fillCircle(eqDotX, eqDotY, dotRadius, eqPulseColor);
+    dma_display->fillCircle(co2DotX, co2DotY, dotRadius, co2PulseColor);
 
     // ---- Seconds pulse ----
     uint16_t pulseColor = (second % 2 == 0)
