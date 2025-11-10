@@ -25,10 +25,21 @@ enum ScreenMode {
     SCREEN_UDP_DATA,
     SCREEN_WIND_DIR, 
     SCREEN_ENV_INDEX,
+    SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
     SCREEN_HOURLY,
     SCREEN_CLOCK,
     SCREEN_COUNT
+};
+
+enum class WeatherSceneKind {
+    Sunny,
+    Cloudy,
+    Rain,
+    Thunderstorm,
+    Snow,
+    ClearNight,
+    Unknown
 };
 
 extern ScreenMode currentScreen;
@@ -72,6 +83,10 @@ bool screenIsAllowed(ScreenMode mode);
 ScreenMode nextAllowedScreen(ScreenMode start, int direction);
 ScreenMode enforceAllowedScreen(ScreenMode desired);
 ScreenMode homeScreenForDataSource();
+
+void drawConditionSceneScreen();
+void drawWeatherConditionScene(WeatherSceneKind kind);
+void drawWeatherConditionScene(const String &condition);
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);

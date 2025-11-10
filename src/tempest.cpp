@@ -634,11 +634,27 @@ void showHourlyForecastScreen() {
         int hh = ti ? ti->tm_hour : 0;
         int mm = ti ? ti->tm_min  : 0;
 
-        if (hh < 10) line += '0';
-        line += String(hh);
-        line += ':';
-        if (mm < 10) line += '0';
-        line += String(mm);
+        char timeBuf[20];
+        if (units.clock24h)
+        {
+            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", hh, mm);
+        }
+        else
+        {
+            int hour12 = hh % 12;
+            if (hour12 == 0)
+                hour12 = 12;
+            const char *suffix = (hh >= 12) ? "PM" : "AM";
+            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d %s", hour12, mm, suffix);
+        }
+        String timeLabel(timeBuf);
+        int colonPos = timeLabel.indexOf(':');
+        if (colonPos >= 0 && colonPos + 1 < timeLabel.length())
+        {
+            timeLabel = timeLabel.substring(0, colonPos + 1) + " " + timeLabel.substring(colonPos + 1);
+        }
+        timeLabel += ":";
+        line = timeLabel;
 
         line += "  ";
         line += isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1);

@@ -146,6 +146,8 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Wind Direction";
   case SCREEN_ENV_INDEX:
     return "Air Quality";
+  case SCREEN_CONDITION_SCENE:
+    return "Weather Scene";
   case SCREEN_CURRENT:
     return "Current Conditions";
   case SCREEN_HOURLY:

@@ -30,9 +30,12 @@ void showWeatherSettingsModal();
 void showWfTempestModal();
 void showCalibrationModal();
 void showSystemModal();
+void showScenePreviewModal();
 void showUnitSettingsModal();
 void showInitialSetupPrompt();
 void showWiFiSettingsModal();
+bool isWeatherScenePreviewActive();
+void handleWeatherScenePreviewIR(uint32_t code);
 
 int scanWiFiNetworks();
 void handleScreenSwitch(int dir);
@@ -60,6 +63,7 @@ enum MenuLevel {
     MENU_TEMPEST,
     MENU_CALIBRATION,
     MENU_SYSTEM,
+    MENU_SCENE_PREVIEW,
     MENU_INITIAL_SETUP,
     MENU_SYSINFO,
     MENU_SYSDATETIME,
@@ -129,6 +133,7 @@ extern InfoModal weatherModal;
 extern InfoModal tempestModal;
 extern InfoModal calibrationModal;
 extern InfoModal systemModal;
+extern InfoModal scenePreviewModal;
 extern InfoModal setupPromptModal;
 extern InfoModal wifiSettingsModal;
 extern InfoModal unitSettingsModal;

@@ -30,7 +30,7 @@
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
-                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX,
+                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX, SCREEN_CONDITION_SCENE,
                                       SCREEN_CURRENT, SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -38,7 +38,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal wifiSettingsModal,sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, unitSettingsModal;
+extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
@@ -54,6 +54,8 @@ ScrollLine windInfo(64, 40);
 // Screen Clock
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
+extern bool isWeatherScenePreviewActive();
+extern void handleWeatherScenePreviewIR(uint32_t code);
 
 extern int wifiSelectIndex;
 extern unsigned long lastMenuActivity;
@@ -148,7 +150,9 @@ static bool isRotationBlocked()
            weatherModal.isActive() ||
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
-           systemModal.isActive();
+           systemModal.isActive() ||
+           scenePreviewModal.isActive() ||
+           isWeatherScenePreviewActive();
 }
 
 static void renderScreenContents(ScreenMode mode)
@@ -172,6 +176,9 @@ static void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_ENV_INDEX:
         envQualityScreen.tick();
+        break;
+    case SCREEN_CONDITION_SCENE:
+        drawConditionSceneScreen();
         break;
     case SCREEN_CURRENT:
         currentCondScreen.tick();
@@ -302,6 +309,9 @@ void rotateScreen(int direction)
         break;
     case SCREEN_ENV_INDEX:
         showEnvironmentalQualityScreen();
+        break;
+    case SCREEN_CONDITION_SCENE:
+        drawConditionSceneScreen();
         break;
     case SCREEN_CURRENT:
         showCurrentConditionsScreen();
@@ -716,6 +726,8 @@ void loop()
         !tempestModal.isActive() &&
         !calibrationModal.isActive() &&
         !systemModal.isActive() &&
+        !scenePreviewModal.isActive() &&
+        !isWeatherScenePreviewActive() &&
         !(wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT))
     {
         handleResetButton();
@@ -839,6 +851,22 @@ void loop()
     {
         systemModal.tick();
         systemModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (scenePreviewModal.isActive())
+    {
+        scenePreviewModal.tick();
+        scenePreviewModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+
+    if (isWeatherScenePreviewActive())
+    {
+        uint32_t code = getIRCodeNonBlocking();
+        if (code)
+            handleWeatherScenePreviewIR(code);
         delay(40);
         return;
     }
@@ -1011,6 +1039,24 @@ void loop()
         {
             lastClockUpdate = now;
             drawClockScreen(); // Redraw clock screen
+        }
+    }
+
+    if (currentScreen == SCREEN_CONDITION_SCENE)
+    {
+        static unsigned long lastConditionSceneUpdate = 0;
+        const unsigned long conditionSceneInterval = 5000;
+
+        bool shouldRedraw = needsClear || (now - lastConditionSceneUpdate) >= conditionSceneInterval;
+        if (shouldRedraw)
+        {
+            if (needsClear)
+            {
+                dma_display->fillScreen(0);
+                needsClear = false;
+            }
+            drawConditionSceneScreen();
+            lastConditionSceneUpdate = now;
         }
     }
 

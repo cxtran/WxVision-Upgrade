@@ -1,3 +1,5 @@
+#include <Arduino.h>
+#include <ctype.h>
 #include "display.h"
 #include "icons.h"
 #include "settings.h"
@@ -197,6 +199,660 @@ static uint16_t scaleColor565(uint16_t color, float intensity)
     return static_cast<uint16_t>((newR << 11) | (newG << 5) | newB);
 }
 
+static uint16_t lerpColor565(uint16_t a, uint16_t b, float t)
+{
+    if (t <= 0.0f)
+        return a;
+    if (t >= 1.0f)
+        return b;
+
+    int ar = (a >> 11) & 0x1F;
+    int ag = (a >> 5) & 0x3F;
+    int ab = a & 0x1F;
+
+    int br = (b >> 11) & 0x1F;
+    int bg = (b >> 5) & 0x3F;
+    int bb = b & 0x1F;
+
+    int nr = static_cast<int>(ar + (br - ar) * t + 0.5f);
+    int ng = static_cast<int>(ag + (bg - ag) * t + 0.5f);
+    int nb = static_cast<int>(ab + (bb - ab) * t + 0.5f);
+
+    nr = constrain(nr, 0, 31);
+    ng = constrain(ng, 0, 63);
+    nb = constrain(nb, 0, 31);
+
+    return static_cast<uint16_t>((nr << 11) | (ng << 5) | nb);
+}
+
+static void drawVerticalGradient(uint16_t topColor, uint16_t bottomColor)
+{
+    for (int y = 0; y < PANEL_RES_Y; ++y)
+    {
+        float t = (PANEL_RES_Y <= 1) ? 0.0f : static_cast<float>(y) / (PANEL_RES_Y - 1);
+        uint16_t color = lerpColor565(topColor, bottomColor, t);
+        dma_display->drawFastHLine(0, y, PANEL_RES_X, color);
+    }
+}
+
+static void drawGroundBand(uint16_t color, int height = 8)
+{
+    if (height <= 0)
+        return;
+    int y = PANEL_RES_Y - height;
+    if (y < 0)
+        y = 0;
+    dma_display->fillRect(0, y, PANEL_RES_X, height, color);
+}
+
+static void drawSkyGradient(const uint16_t *colors, int count)
+{
+    if (count <= 0)
+    {
+        dma_display->fillScreen(0);
+        return;
+    }
+    if (count == 1)
+    {
+        dma_display->fillScreen(colors[0]);
+        return;
+    }
+
+    const int totalRows = PANEL_RES_Y;
+    for (int y = 0; y < totalRows; ++y)
+    {
+        float globalT = (totalRows <= 1) ? 0.0f : static_cast<float>(y) / (totalRows - 1);
+        float scaled = globalT * (count - 1);
+        int idx = static_cast<int>(scaled);
+        if (idx >= count - 1)
+            idx = count - 2;
+        float localT = scaled - idx;
+        uint16_t rowColor = lerpColor565(colors[idx], colors[idx + 1], localT);
+        dma_display->drawFastHLine(0, y, PANEL_RES_X, rowColor);
+    }
+}
+
+static void drawGroundGradient(const uint16_t *colors, int count, int height)
+{
+    if (height <= 0 || colors == nullptr || count <= 0)
+        return;
+    if (height > PANEL_RES_Y)
+        height = PANEL_RES_Y;
+
+    int startY = PANEL_RES_Y - height;
+    for (int y = 0; y < height; ++y)
+    {
+        float globalT = (height <= 1) ? 0.0f : static_cast<float>(y) / (height - 1);
+        if (count == 1)
+        {
+            dma_display->drawFastHLine(0, startY + y, PANEL_RES_X, colors[0]);
+            continue;
+        }
+        float scaled = globalT * (count - 1);
+        int idx = static_cast<int>(scaled);
+        if (idx >= count - 1)
+            idx = count - 2;
+        float localT = scaled - idx;
+        uint16_t rowColor = lerpColor565(colors[idx], colors[idx + 1], localT);
+        dma_display->drawFastHLine(0, startY + y, PANEL_RES_X, rowColor);
+    }
+}
+
+static void drawSun(int centerX, int centerY, int radius, uint16_t baseColor)
+{
+    if (radius < 3)
+        radius = 3;
+    centerX = constrain(centerX, radius, PANEL_RES_X - 1 - radius);
+    centerY = constrain(centerY, radius, PANEL_RES_Y - 1 - radius);
+
+    dma_display->fillCircle(centerX, centerY, radius, baseColor);
+    dma_display->drawCircle(centerX, centerY, radius + 1, scaleColor565(baseColor, 0.7f));
+}
+
+static void drawCloud(int x, int y, uint16_t color, int radius)
+{
+    if (radius < 2)
+        radius = 2;
+
+    dma_display->fillCircle(x, y, radius, color);
+    dma_display->fillCircle(x - radius, y + 2, radius - 1, color);
+    dma_display->fillCircle(x + radius, y + 2, radius - 1, color);
+    dma_display->fillCircle(x - radius / 2, y + radius, radius - 2, color);
+    dma_display->fillCircle(x + radius / 2, y + radius, radius - 2, color);
+
+    int bodyWidth = radius * 2 + 6;
+    dma_display->fillRect(x - bodyWidth / 2, y + radius - 1, bodyWidth, radius + 2, color);
+}
+
+static void drawSnowflake(int x, int y, uint16_t color)
+{
+    if (x < 0 || x >= PANEL_RES_X || y < 0 || y >= PANEL_RES_Y)
+        return;
+
+    dma_display->drawPixel(x, y, color);
+    if (x > 0)
+        dma_display->drawPixel(x - 1, y, color);
+    if (x < PANEL_RES_X - 1)
+        dma_display->drawPixel(x + 1, y, color);
+    if (y > 0)
+        dma_display->drawPixel(x, y - 1, color);
+    if (y < PANEL_RES_Y - 1)
+        dma_display->drawPixel(x, y + 1, color);
+}
+
+static void drawStar(int x, int y, uint16_t color)
+{
+    if (x < 1 || x >= PANEL_RES_X - 1 || y < 1 || y >= PANEL_RES_Y - 1)
+        return;
+
+    dma_display->drawPixel(x, y, color);
+    dma_display->drawPixel(x - 1, y, color);
+    dma_display->drawPixel(x + 1, y, color);
+    dma_display->drawPixel(x, y - 1, color);
+    dma_display->drawPixel(x, y + 1, color);
+}
+
+static void drawCompactCloud(int cx, int cy, uint16_t color)
+{
+    uint16_t shade = scaleColor565(color, 0.85f);
+    dma_display->fillCircle(cx, cy, 4, color);
+    dma_display->fillCircle(cx - 4, cy + 1, 3, shade);
+    dma_display->fillCircle(cx + 4, cy + 1, 3, shade);
+    dma_display->fillCircle(cx - 2, cy + 3, 2, color);
+    dma_display->fillCircle(cx + 2, cy + 3, 2, color);
+}
+
+static void drawWeatherSceneSunny()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(15, 105, 185),
+        dma_display->color565(30, 140, 205),
+        dma_display->color565(55, 175, 220),
+        dma_display->color565(85, 205, 235)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t horizonGlow = dma_display->color565(255, 220, 120);
+    uint16_t fieldBase = dma_display->color565(215, 160, 55);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 10, PANEL_RES_X, 4, horizonGlow);
+    for (int x = 1; x < PANEL_RES_X; x += 5)
+    {
+        int blades = (x % 10 == 0) ? 5 : 3;
+        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
+    }
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(150, 90, 30));
+
+    uint16_t sunColor = dma_display->color565(255, 240, 90);
+    int sunX = 12;
+    int sunY = 11;
+    dma_display->fillCircle(sunX, sunY, 7, sunColor);
+    dma_display->fillCircle(sunX, sunY, 4, dma_display->color565(255, 255, 120));
+    dma_display->drawCircle(sunX, sunY, 7, scaleColor565(sunColor, 0.8f));
+
+}
+
+static void drawWeatherSceneCloudy()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(20, 110, 190),
+        dma_display->color565(35, 140, 205),
+        dma_display->color565(55, 170, 215),
+        dma_display->color565(85, 200, 225)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t horizonGlow = dma_display->color565(240, 210, 125);
+    uint16_t fieldBase = dma_display->color565(205, 150, 60);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    for (int x = 1; x < PANEL_RES_X; x += 5)
+    {
+        int blades = (x % 10 == 0) ? 5 : 3;
+        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
+    }
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(150, 90, 30));
+
+    uint16_t cloudLight = dma_display->color565(235, 240, 248);
+    uint16_t cloudMid = dma_display->color565(210, 218, 235);
+    uint16_t cloudDark = dma_display->color565(170, 180, 200);
+
+    drawCompactCloud(PANEL_RES_X / 5, 6, cloudLight);
+    drawCompactCloud(PANEL_RES_X / 3 + 2, 9, cloudMid);
+    drawCompactCloud(PANEL_RES_X / 2 + 4, 8, cloudDark);
+    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 4, 10, cloudMid);
+    drawCompactCloud(PANEL_RES_X / 2 - 10, 12, cloudLight);
+}
+
+static void drawWeatherSceneRain()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(20, 110, 190),
+        dma_display->color565(35, 140, 205),
+        dma_display->color565(55, 170, 215),
+        dma_display->color565(85, 200, 225)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
+    uint16_t fieldBase = dma_display->color565(180, 145, 60);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    for (int x = 2; x < PANEL_RES_X; x += 5)
+    {
+        int blades = (x % 10 == 0) ? 4 : 2;
+        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
+    }
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
+
+    uint16_t cloudLight = dma_display->color565(225, 235, 245);
+    uint16_t cloudMid = dma_display->color565(190, 200, 215);
+    uint16_t cloudDark = dma_display->color565(150, 160, 180);
+
+    struct Cloud
+    {
+        int x;
+        int y;
+        uint16_t color;
+    } clouds[] = {
+        {PANEL_RES_X / 4, 7, cloudLight},
+        {PANEL_RES_X / 3 + 4, 9, cloudMid},
+        {PANEL_RES_X / 2 + 6, 8, cloudDark},
+        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
+        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
+
+    for (const auto &cloud : clouds)
+        drawCompactCloud(cloud.x, cloud.y, cloud.color);
+
+    uint16_t rainColor = dma_display->color565(140, 230, 255);
+    uint16_t rainShadow = dma_display->color565(80, 160, 220);
+    for (const auto &cloud : clouds)
+    {
+        int baseX = cloud.x;
+        int top = cloud.y + 4;
+        for (int x = baseX - 4; x <= baseX + 4; x += 2)
+        {
+            int length = 11;
+            for (int i = 0; i < length; ++i)
+            {
+                int px = x - i / 4;
+                int py = top + i;
+                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
+                {
+                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
+                    dma_display->drawPixel(px, py, color);
+                }
+            }
+        }
+    }
+}
+
+static void drawWeatherSceneThunderstorm()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(20, 110, 190),
+        dma_display->color565(35, 140, 205),
+        dma_display->color565(55, 170, 215),
+        dma_display->color565(85, 200, 225)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
+    uint16_t fieldBase = dma_display->color565(180, 145, 60);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    for (int x = 2; x < PANEL_RES_X; x += 5)
+    {
+        int blades = (x % 10 == 0) ? 4 : 2;
+        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
+    }
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
+
+    uint16_t cloudLight = dma_display->color565(225, 235, 245);
+    uint16_t cloudMid = dma_display->color565(190, 200, 215);
+    uint16_t cloudDark = dma_display->color565(150, 160, 180);
+
+    struct Cloud
+    {
+        int x;
+        int y;
+        uint16_t color;
+    } clouds[] = {
+        {PANEL_RES_X / 4, 7, cloudLight},
+        {PANEL_RES_X / 3 + 4, 9, cloudMid},
+        {PANEL_RES_X / 2 + 6, 8, cloudDark},
+        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
+        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
+
+    for (const auto &cloud : clouds)
+        drawCompactCloud(cloud.x, cloud.y, cloud.color);
+
+    uint16_t rainColor = dma_display->color565(140, 230, 255);
+    uint16_t rainShadow = dma_display->color565(80, 160, 220);
+    for (const auto &cloud : clouds)
+    {
+        int baseX = cloud.x;
+        int top = cloud.y + 4;
+        for (int x = baseX - 4; x <= baseX + 4; x += 2)
+        {
+            int length = 11;
+            for (int i = 0; i < length; ++i)
+            {
+                int px = x - i / 4;
+                int py = top + i;
+                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
+                {
+                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
+                    dma_display->drawPixel(px, py, color);
+                }
+            }
+        }
+    }
+
+    auto drawBolt = [&](int tipX, int tipY, uint16_t color) {
+        int x = tipX;
+        int y = tipY;
+        for (int i = 0; i < 6; ++i)
+        {
+            int dx = ((i % 2) == 0) ? -1 : 1;
+            int dy = random(4, 5);
+            int nx = x + dx * 2;
+            int ny = y + dy;
+            if (ny >= PANEL_RES_Y - 6)
+                break;
+            dma_display->drawLine(x, y, nx, ny, color);
+            if (i == 2 || i == 4)
+            {
+                int branchDy = dy / 2;
+                int branchDx = (dx > 0) ? 2 : -2;
+                uint16_t branchColor = scaleColor565(color, 0.6f);
+                int branchX = x + branchDx;
+                int branchY = y + branchDy;
+                dma_display->drawLine(x, y, branchX, branchY, branchColor);
+            }
+            x = nx;
+            y = ny;
+        }
+    };
+
+    uint16_t boltColor = dma_display->color565(255, 240, 120);
+    drawBolt(clouds[0].x, clouds[0].y - 2, boltColor);
+}
+
+static void drawWeatherSceneSnow()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(20, 110, 190),
+        dma_display->color565(35, 140, 205),
+        dma_display->color565(55, 170, 215),
+        dma_display->color565(85, 200, 225)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
+    uint16_t fieldBase = dma_display->color565(180, 145, 60);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    for (int x = 2; x < PANEL_RES_X; x += 5)
+    {
+        int blades = (x % 10 == 0) ? 4 : 2;
+        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
+    }
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
+
+    uint16_t cloudLight = dma_display->color565(240, 245, 255);
+    uint16_t cloudMid = dma_display->color565(210, 220, 235);
+    uint16_t cloudDark = dma_display->color565(180, 190, 205);
+
+    struct SnowCloud
+    {
+        int x;
+        int y;
+        uint16_t color;
+    } snowClouds[] = {
+        {PANEL_RES_X / 4, 6, cloudLight},
+        {PANEL_RES_X / 3 + 4, 8, cloudMid},
+        {PANEL_RES_X / 2 + 6, 7, cloudDark},
+        {PANEL_RES_X - PANEL_RES_X / 4, 9, cloudMid},
+        {PANEL_RES_X / 2 - 12, 10, cloudLight}};
+
+    for (const auto &cloud : snowClouds)
+        drawCompactCloud(cloud.x, cloud.y, cloud.color);
+
+    uint16_t snowColor = dma_display->color565(240, 250, 255);
+    for (int i = 0; i < 32; ++i)
+    {
+        int x = random(0, PANEL_RES_X);
+        int y = random(8, PANEL_RES_Y - 4);
+        drawSnowflake(x, y, snowColor);
+    }
+}
+
+static void drawWeatherSceneClearNight()
+{
+    uint16_t skyColors[] = {
+        dma_display->color565(4, 6, 20),
+        dma_display->color565(8, 10, 30),
+        dma_display->color565(12, 16, 40),
+        dma_display->color565(16, 20, 50)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t fieldColor = dma_display->color565(200, 140, 40);
+    uint16_t grassColor = dma_display->color565(30, 70, 25);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldColor);
+    dma_display->fillRect(0, PANEL_RES_Y - 8, PANEL_RES_X, 2, grassColor);
+    for (int x = 2; x < PANEL_RES_X; x += 5)
+        dma_display->drawFastVLine(x, PANEL_RES_Y - 8, 2, scaleColor565(fieldColor, 1.1f));
+
+    uint16_t moonColor = dma_display->color565(255, 240, 90);
+    int moonX = PANEL_RES_X / 4;
+    int moonY = PANEL_RES_Y / 2 - 6;
+    dma_display->fillCircle(moonX, moonY, 7, moonColor);
+    dma_display->fillCircle(moonX, moonY, 4, dma_display->color565(255, 255, 120));
+    dma_display->drawCircle(moonX, moonY, 7, scaleColor565(moonColor, 0.8f));
+
+    uint16_t starColor = moonColor;
+    drawStar(4, 6, starColor);
+    drawStar(PANEL_RES_X - 6, 8, starColor);
+    drawStar(PANEL_RES_X / 2 + 8, 4, starColor);
+    drawStar(PANEL_RES_X / 3, 2, starColor);
+    drawStar(PANEL_RES_X / 2 + 12, 14, starColor);
+    drawStar(PANEL_RES_X / 2 - 12, 10, starColor);
+
+}
+
+struct WeatherSceneRenderer
+{
+    WeatherSceneKind kind;
+    void (*drawFn)();
+};
+
+static void drawWeatherSceneDefault()
+{
+    drawWeatherSceneSunny();
+}
+
+static const WeatherSceneRenderer WEATHER_SCENE_RENDERERS[] = {
+    {WeatherSceneKind::Sunny, drawWeatherSceneSunny},
+    {WeatherSceneKind::Cloudy, drawWeatherSceneCloudy},
+    {WeatherSceneKind::Rain, drawWeatherSceneRain},
+    {WeatherSceneKind::Thunderstorm, drawWeatherSceneThunderstorm},
+    {WeatherSceneKind::Snow, drawWeatherSceneSnow},
+    {WeatherSceneKind::ClearNight, drawWeatherSceneClearNight}
+};
+
+struct WeatherSceneAlias
+{
+    const char *key;
+    WeatherSceneKind kind;
+};
+
+static const WeatherSceneAlias WEATHER_SCENE_ALIASES[] = {
+    {"sunny", WeatherSceneKind::Sunny},
+    {"clear", WeatherSceneKind::Sunny},
+    {"clear day", WeatherSceneKind::Sunny},
+    {"clear sky", WeatherSceneKind::Sunny},
+    {"clean", WeatherSceneKind::Sunny},
+    {"clean day", WeatherSceneKind::Sunny},
+    {"fair", WeatherSceneKind::Sunny},
+    {"cloudy", WeatherSceneKind::Cloudy},
+    {"mostly cloudy", WeatherSceneKind::Cloudy},
+    {"partly cloudy", WeatherSceneKind::Cloudy},
+    {"overcast", WeatherSceneKind::Cloudy},
+    {"overcast clouds", WeatherSceneKind::Cloudy},
+    {"few clouds", WeatherSceneKind::Cloudy},
+    {"scattered clouds", WeatherSceneKind::Cloudy},
+    {"broken clouds", WeatherSceneKind::Cloudy},
+    {"mist", WeatherSceneKind::Cloudy},
+    {"fog", WeatherSceneKind::Cloudy},
+    {"haze", WeatherSceneKind::Cloudy},
+    {"smoke", WeatherSceneKind::Cloudy},
+    {"dust", WeatherSceneKind::Cloudy},
+    {"sand", WeatherSceneKind::Cloudy},
+    {"ash", WeatherSceneKind::Cloudy},
+    {"rain", WeatherSceneKind::Rain},
+    {"rainy", WeatherSceneKind::Rain},
+    {"showers", WeatherSceneKind::Rain},
+    {"shower rain", WeatherSceneKind::Rain},
+    {"light rain", WeatherSceneKind::Rain},
+    {"moderate rain", WeatherSceneKind::Rain},
+    {"heavy rain", WeatherSceneKind::Rain},
+    {"heavy intensity rain", WeatherSceneKind::Rain},
+    {"drizzle", WeatherSceneKind::Rain},
+    {"squalls", WeatherSceneKind::Rain},
+    {"thunderstorm", WeatherSceneKind::Thunderstorm},
+    {"thunderstorms", WeatherSceneKind::Thunderstorm},
+    {"storm", WeatherSceneKind::Thunderstorm},
+    {"tstorm", WeatherSceneKind::Thunderstorm},
+    {"tornado", WeatherSceneKind::Thunderstorm},
+    {"snow", WeatherSceneKind::Snow},
+    {"snowy", WeatherSceneKind::Snow},
+    {"light snow", WeatherSceneKind::Snow},
+    {"heavy snow", WeatherSceneKind::Snow},
+    {"snow shower", WeatherSceneKind::Snow},
+    {"flurries", WeatherSceneKind::Snow},
+    {"sleet", WeatherSceneKind::Snow},
+    {"clear night", WeatherSceneKind::ClearNight},
+    {"clean night", WeatherSceneKind::ClearNight},
+    {"night", WeatherSceneKind::ClearNight},
+    {"mostly clear night", WeatherSceneKind::ClearNight},
+    {nullptr, WeatherSceneKind::Unknown}
+};
+
+static String normalizeConditionKey(const String &condition)
+{
+    String key = condition;
+    key.trim();
+    key.toLowerCase();
+    key.replace('-', ' ');
+    key.replace('_', ' ');
+    while (key.indexOf("  ") >= 0)
+    {
+        key.replace("  ", " ");
+    }
+    return key;
+}
+
+static WeatherSceneKind resolveWeatherSceneKind(const String &condition)
+{
+    String normalized = normalizeConditionKey(condition);
+    if (normalized.length() == 0)
+        return WeatherSceneKind::Sunny;
+
+    for (int i = 0; WEATHER_SCENE_ALIASES[i].key != nullptr; ++i)
+    {
+        if (normalized.equals(WEATHER_SCENE_ALIASES[i].key))
+            return WEATHER_SCENE_ALIASES[i].kind;
+    }
+
+    if (normalized.indexOf("thunder") >= 0 || normalized.indexOf("storm") >= 0)
+        return WeatherSceneKind::Thunderstorm;
+    if (normalized.indexOf("rain") >= 0 || normalized.indexOf("shower") >= 0 || normalized.indexOf("drizzle") >= 0)
+        return WeatherSceneKind::Rain;
+    if (normalized.indexOf("snow") >= 0 || normalized.indexOf("sleet") >= 0 || normalized.indexOf("flurry") >= 0)
+        return WeatherSceneKind::Snow;
+    if (normalized.indexOf("night") >= 0)
+        return WeatherSceneKind::ClearNight;
+    if (normalized.indexOf("cloud") >= 0 || normalized.indexOf("overcast") >= 0 || normalized.indexOf("mist") >= 0)
+        return WeatherSceneKind::Cloudy;
+    return WeatherSceneKind::Sunny;
+}
+
+static uint16_t weatherSceneAccentColor(WeatherSceneKind kind)
+{
+    switch (kind)
+    {
+    case WeatherSceneKind::Sunny:
+        return dma_display->color565(235, 185, 60);
+    case WeatherSceneKind::Cloudy:
+        return dma_display->color565(190, 200, 220);
+    case WeatherSceneKind::Rain:
+        return dma_display->color565(120, 170, 210);
+    case WeatherSceneKind::Thunderstorm:
+        return dma_display->color565(220, 180, 50);
+    case WeatherSceneKind::Snow:
+        return dma_display->color565(210, 220, 235);
+    case WeatherSceneKind::ClearNight:
+        return dma_display->color565(160, 180, 220);
+    default:
+        return dma_display->color565(200, 200, 210);
+    }
+}
+
+static String formatConditionLabel(const String &condition)
+{
+    String label = condition;
+    label.trim();
+    if (label.length() == 0)
+        return String("No Data");
+
+    label.replace('_', ' ');
+    label.replace('-', ' ');
+    label.toLowerCase();
+
+    bool capitalizeNext = true;
+    for (int i = 0; i < label.length(); ++i)
+    {
+        char c = label.charAt(i);
+        unsigned char uc = static_cast<unsigned char>(c);
+        if (isalpha(uc))
+        {
+            if (capitalizeNext)
+                label.setCharAt(i, static_cast<char>(toupper(uc)));
+            capitalizeNext = false;
+        }
+        else if (isdigit(uc))
+        {
+            capitalizeNext = false;
+        }
+        else
+        {
+            capitalizeNext = true;
+        }
+    }
+    return label;
+}
+
+void drawWeatherConditionScene(WeatherSceneKind kind)
+{
+    for (const auto &renderer : WEATHER_SCENE_RENDERERS)
+    {
+        if (renderer.kind == kind)
+        {
+            renderer.drawFn();
+            return;
+        }
+    }
+    drawWeatherSceneDefault();
+}
+
+void drawWeatherConditionScene(const String &condition)
+{
+    WeatherSceneKind kind = resolveWeatherSceneKind(condition);
+    drawWeatherConditionScene(kind);
+}
+
 bool screenIsAllowed(ScreenMode mode)
 {
     switch (mode)
@@ -209,6 +865,8 @@ bool screenIsAllowed(ScreenMode mode)
     case SCREEN_CURRENT:
     case SCREEN_HOURLY:
         return isDataSourceWeatherFlow();
+    case SCREEN_CONDITION_SCENE:
+        return !isDataSourceNone();
     default:
         return true;
     }
@@ -1463,6 +2121,142 @@ void drawClockScreen()
                               ? dma_display->color565(0, 150, 0)
                               : dma_display->color565(0, 60, 0);
     dma_display->fillCircle(62, 30, 1, pulseColor);
+}
+
+void drawConditionSceneScreen()
+{
+    String condition;
+    bool hasData = true;
+
+    getTimeFromRTC();
+
+    if (isDataSourceWeatherFlow())
+    {
+        if (currentCond.cond.length() > 0)
+            condition = currentCond.cond;
+        else if (currentCond.icon.length() > 0)
+            condition = currentCond.icon;
+    }
+    else if (isDataSourceOwm())
+    {
+        if (str_Weather_Conditions_Des.length() > 0)
+            condition = str_Weather_Conditions_Des;
+        else if (str_Weather_Conditions.length() > 0)
+            condition = str_Weather_Conditions;
+        else if (str_Weather_Icon.length() > 0)
+            condition = str_Weather_Icon;
+    }
+    else
+    {
+        hasData = false;
+    }
+
+    if (condition.length() == 0)
+    {
+        hasData = false;
+        condition = isDataSourceNone() ? "No data" : "Unknown";
+    }
+
+    WeatherSceneKind sceneKind = resolveWeatherSceneKind(condition);
+    drawWeatherConditionScene(sceneKind);
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+
+    String label = formatConditionLabel(condition);
+    if (isDataSourceNone())
+        label = "No Data";
+    else if (!hasData)
+        label = "Waiting...";
+
+    auto drawTextWithShadow = [&](int x, int y, const String &text, uint16_t color) {
+        uint16_t shadow = scaleColor565(color, 0.25f);
+        dma_display->setTextColor(shadow);
+        dma_display->setCursor(x + 1, y + 1);
+        dma_display->print(text);
+        dma_display->setTextColor(color);
+        dma_display->setCursor(x, y);
+        dma_display->print(text);
+    };
+
+    uint16_t accent = weatherSceneAccentColor(sceneKind);
+
+    auto formattedTime = []() -> String {
+        char buf[10];
+        if (units.clock24h)
+        {
+            snprintf(buf, sizeof(buf), "%02d:%02d", t_hour, t_minute);
+            return String(buf);
+        }
+        int hour = t_hour;
+        const char *suffix = "AM";
+        if (hour >= 12)
+        {
+            suffix = "PM";
+            if (hour > 12)
+                hour -= 12;
+        }
+        else if (hour == 0)
+        {
+            hour = 12;
+        }
+        snprintf(buf, sizeof(buf), "%02d:%02d %s", hour, t_minute, suffix);
+        return String(buf);
+    };
+
+    String tempTag;
+    if (isDataSourceWeatherFlow())
+    {
+        if (!isnan(currentCond.temp))
+            tempTag = fmtTemp(currentCond.temp, 0);
+        else if (!isnan(tempest.temperature))
+            tempTag = fmtTemp(tempest.temperature, 0);
+    }
+    else if (isDataSourceOwm())
+    {
+        if (str_Temp.length() > 0)
+            tempTag = fmtTemp(atof(str_Temp.c_str()), 0);
+    }
+
+    if (tempTag.length() > 0)
+    {
+        int tempWidth = getTextWidth(tempTag.c_str());
+        int tempX = PANEL_RES_X - tempWidth - 3;
+        if (tempX < 2)
+            tempX = 2;
+        drawTextWithShadow(tempX, 6, tempTag, accent);
+    }
+
+    int labelWidth = getTextWidth(label.c_str());
+    int labelX = (PANEL_RES_X - labelWidth) / 2;
+    if (labelX < 2)
+        labelX = 2;
+    drawTextWithShadow(labelX, PANEL_RES_Y - 2, label, accent);
+
+    if (!hasData && !isDataSourceNone())
+    {
+        String hint = "Waiting for data";
+        int hintWidth = getTextWidth(hint.c_str());
+        int hintX = (PANEL_RES_X - hintWidth) / 2;
+        if (hintX < 2)
+            hintX = 2;
+        drawTextWithShadow(hintX, PANEL_RES_Y - 11, hint, accent);
+    }
+
+    String timeTag = formattedTime();
+    int timeWidth = getTextWidth(timeTag.c_str());
+    int timeX = PANEL_RES_X - timeWidth - 2;
+    int timeY = PANEL_RES_Y - 9;
+    if (timeX < 2)
+        timeX = 2;
+    int boxX = timeX - 2;
+    if (boxX < 0)
+        boxX = 0;
+    int boxWidth = timeWidth + 4;
+    if (boxX + boxWidth > PANEL_RES_X)
+        boxWidth = PANEL_RES_X - boxX;
+    dma_display->fillRect(boxX, timeY - 1, boxWidth, 8, myBLACK);
+    drawTextWithShadow(timeX, timeY, timeTag, dma_display->color565(255, 255, 200));
 }
 
 // Public helpers

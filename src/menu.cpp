@@ -53,6 +53,7 @@ InfoModal weatherModal("OW Map");
 InfoModal tempestModal("WF Tempest");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
+InfoModal scenePreviewModal("Preview Scr");
 InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
@@ -142,7 +143,7 @@ const char *tempestMenu[] = {"WF Token", "WF Station ID", "< Back"};
 const int tempestCount = sizeof(tempestMenu) / sizeof(tempestMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Show Splash Screen", "Quick Restore", "Reset Power", "Factory Reset", "Reboot", "< Back"};
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Preview Screens", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
@@ -733,6 +734,146 @@ static void showSplashUntilButton()
     delay(120);
 }
 
+struct WeatherScenePreviewOption
+{
+    const char *label;
+    WeatherSceneKind kind;
+};
+
+static const WeatherScenePreviewOption WEATHER_SCENE_PREVIEW_OPTIONS[] = {
+    {"Sunny", WeatherSceneKind::Sunny},
+    {"Cloudy", WeatherSceneKind::Cloudy},
+    {"Rain", WeatherSceneKind::Rain},
+    {"Thunderstorm", WeatherSceneKind::Thunderstorm},
+    {"Snow", WeatherSceneKind::Snow},
+    {"Clear Night", WeatherSceneKind::ClearNight}};
+
+static constexpr int WEATHER_SCENE_PREVIEW_COUNT =
+    sizeof(WEATHER_SCENE_PREVIEW_OPTIONS) / sizeof(WEATHER_SCENE_PREVIEW_OPTIONS[0]);
+
+static bool weatherScenePreviewActive = false;
+static int weatherScenePreviewIndex = 0;
+
+static int wrapPreviewIndex(int idx)
+{
+    if (WEATHER_SCENE_PREVIEW_COUNT == 0)
+        return 0;
+    int mod = idx % WEATHER_SCENE_PREVIEW_COUNT;
+    if (mod < 0)
+        mod += WEATHER_SCENE_PREVIEW_COUNT;
+    return mod;
+}
+
+static void renderWeatherScenePreview()
+{
+    if (WEATHER_SCENE_PREVIEW_COUNT == 0)
+        return;
+
+    weatherScenePreviewIndex = wrapPreviewIndex(weatherScenePreviewIndex);
+    const WeatherScenePreviewOption &opt = WEATHER_SCENE_PREVIEW_OPTIONS[weatherScenePreviewIndex];
+
+    dma_display->fillScreen(0);
+    drawWeatherConditionScene(opt.kind);
+}
+
+static void startWeatherScenePreview(int index)
+{
+    weatherScenePreviewIndex = wrapPreviewIndex(index);
+    weatherScenePreviewActive = true;
+    menuActive = false;
+    renderWeatherScenePreview();
+}
+
+static void cycleWeatherScenePreview(int delta)
+{
+    if (WEATHER_SCENE_PREVIEW_COUNT == 0)
+        return;
+    weatherScenePreviewIndex = wrapPreviewIndex(weatherScenePreviewIndex + delta);
+    renderWeatherScenePreview();
+}
+
+void showScenePreviewModal()
+{
+    weatherScenePreviewActive = false;
+
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_SCENE_PREVIEW)
+    {
+        pushMenu(currentMenuLevel);
+    }
+
+    currentMenuLevel = MENU_SCENE_PREVIEW;
+    menuActive = true;
+
+    constexpr int menuItemCount = WEATHER_SCENE_PREVIEW_COUNT + 1;
+    String labels[menuItemCount];
+    InfoFieldType types[menuItemCount];
+    for (int i = 0; i < WEATHER_SCENE_PREVIEW_COUNT; ++i)
+    {
+        labels[i] = WEATHER_SCENE_PREVIEW_OPTIONS[i].label;
+        types[i] = InfoButton;
+    }
+    labels[WEATHER_SCENE_PREVIEW_COUNT] = "Splash Screen";
+    types[WEATHER_SCENE_PREVIEW_COUNT] = InfoButton;
+
+    scenePreviewModal.setLines(labels, types, menuItemCount);
+    scenePreviewModal.setCallback([](bool accepted, int btnIdx)
+                                  {
+        if (!accepted)
+        {
+            scenePreviewModal.hide();
+            showSystemModal();
+            return;
+        }
+
+        int action = (btnIdx >= 0) ? btnIdx : scenePreviewModal.getSelIndex();
+        if (action < 0)
+            action = 0;
+
+        scenePreviewModal.hide();
+
+        if (action >= WEATHER_SCENE_PREVIEW_COUNT)
+        {
+            showSplashUntilButton();
+            pendingModalFn = showScenePreviewModal;
+            pendingModalTime = millis() + 200;
+            return;
+        }
+
+        startWeatherScenePreview(action); });
+    scenePreviewModal.resetState();
+    scenePreviewModal.show();
+}
+
+bool isWeatherScenePreviewActive()
+{
+    return weatherScenePreviewActive;
+}
+
+void handleWeatherScenePreviewIR(uint32_t code)
+{
+    if (!weatherScenePreviewActive)
+        return;
+
+    switch (code)
+    {
+    case IR_LEFT:
+    case IR_UP:
+        cycleWeatherScenePreview(-1);
+        break;
+    case IR_RIGHT:
+    case IR_DOWN:
+        cycleWeatherScenePreview(+1);
+        break;
+    case IR_OK:
+    case IR_CANCEL: // IR_MENU aliases IR_CANCEL
+        weatherScenePreviewActive = false;
+        showScenePreviewModal();
+        break;
+    default:
+        break;
+    }
+}
+
 void showSystemModal()
 {
     if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN)
@@ -747,14 +888,15 @@ void showSystemModal()
         "Set Date & Time",
         "Unit Settings",
         "WiFi Signal Test",
-        "Show Splash Screen",
+        "Preview Screens",
         "Quick Restore",
         "Reset Power",
         "Factory Reset",
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton, InfoButton};
     systemModal.setLines(labels, types, 9);
     systemModal.setCallback([](bool accepted, int btnIdx)
                             {
@@ -791,8 +933,8 @@ void showSystemModal()
                 return;
             case 4:
                 systemModal.hide();
-                showSplashUntilButton();
-                break;
+                showScenePreviewModal();
+                return;
             case 5:
                 systemModal.hide();
                 quickRestore();
