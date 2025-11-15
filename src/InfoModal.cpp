@@ -71,7 +71,17 @@ ModalPalette makePalette() {
     return p;
 }
 
+constexpr int kChooserArrowWidth = 6;
+
 ModalPalette currentPalette;
+
+static void drawForwardArrow(int x, int y, uint16_t color)
+{
+    // Mirror of drawBackArrow: triangle tip on the right
+    dma_display->drawLine(x + 4, y + 3, x + 2, y + 1, color);
+    dma_display->drawLine(x + 4, y + 3, x + 2, y + 5, color);
+    dma_display->drawLine(x, y + 3, x + 4, y + 3, color);
+}
 }
 
 
@@ -244,6 +254,21 @@ void InfoModal::setButtons(const String btns[], int count)
 
 void InfoModal::setCallback(const std::function<void(bool, int)> &cb) { callback = cb; }
 
+void InfoModal::setShowNumberArrows(bool enable)
+{
+    showNumberArrows = enable;
+}
+
+void InfoModal::setShowChooserArrows(bool enable)
+{
+    showChooserArrows = enable;
+}
+
+void InfoModal::setShowForwardArrow(bool enable)
+{
+    showForwardArrow = enable;
+}
+
 void InfoModal::show()
 {
     selIndex = 0;
@@ -359,7 +384,7 @@ void InfoModal::draw()
         // Determine if this line is selected
         // When atClose==true, no line is selected, so isSelected=false
         bool isSelected = (!atClose) && (selIndex == idx) && (!inButtonBar);
-        bool isEditing = isSelected;
+        bool isEditing = (inEdit && editIndex == idx);
 
         dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
         String s = lines[idx];
@@ -430,9 +455,39 @@ void InfoModal::draw()
         }
 
         int drawLineIndex = i + 1; // Lines start below header (row 0 is header)
+        bool arrowLine = (showChooserArrows && fieldTypes[idx] == InfoChooser) ||
+                         (showNumberArrows && fieldTypes[idx] == InfoNumber);
+        bool forwardIndicator = showForwardArrow && !arrowLine &&
+                                (fieldTypes[idx] == InfoLabel || fieldTypes[idx] == InfoButton);
+
+        int rowY = drawLineIndex * CHARH;
+        bool extendUp = (drawLineIndex > 1);
+        int rowHighlightY = extendUp ? rowY - 1 : rowY;
+        int rowHighlightH = extendUp ? (CHARH + 1) : CHARH;
+        if (rowHighlightY < 0)
+            rowHighlightY = 0;
+        int displayHeight = dma_display->height();
+        if (rowHighlightY + rowHighlightH > displayHeight)
+            rowHighlightH = displayHeight - rowHighlightY;
+        // Determine if the next visible row will extend into this one so we can avoid double painting
+        bool nextRowExtendsUp = false;
+        if (i + 1 < visibleRows)
+        {
+            int nextIdx = idx + 1;
+            if (nextIdx < dataCount)
+            {
+                bool nextSelected = (!atClose) && (selIndex == nextIdx) && (!inButtonBar);
+                int nextDrawLineIndex = (i + 1) + 1;
+                nextRowExtendsUp = nextSelected && (nextDrawLineIndex > 1);
+            }
+        }
 
         if (isSelected)
         {
+            // Fill the current row so the active line is visually highlighted
+            uint16_t rowBg = isEditing ? palette.buttonSelBg : palette.buttonBg;
+            dma_display->fillRect(0, rowHighlightY, SCREEN_WIDTH, rowHighlightH, rowBg);
+
             if (selIndex != lastSelIndex)
             {
                 scrollOffset = 0;
@@ -475,14 +530,50 @@ void InfoModal::draw()
 
             dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
             int cursorX = -scrollOffset;
-            dma_display->setCursor(cursorX, drawLineIndex * CHARH);
+            dma_display->setCursor(cursorX, rowY);
             dma_display->print(s + (isEditing ? " <" : ""));
+
+            if (arrowLine)
+            {
+                uint16_t arrowBg = palette.closeSelBg;
+                uint16_t arrowFg = palette.closeFg;
+                int arrowBoxW = kChooserArrowWidth + 1;
+                dma_display->fillRect(0, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
+                dma_display->fillRect(SCREEN_WIDTH - arrowBoxW, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
+                int arrowY = rowHighlightY + (rowHighlightH / 2) - 3;
+                if (arrowY < rowHighlightY)
+                    arrowY = rowHighlightY;
+                drawBackArrow(0, arrowY, arrowFg);
+                drawForwardArrow(SCREEN_WIDTH - kChooserArrowWidth + 1, arrowY, arrowFg);
+            }
+            else if (forwardIndicator)
+            {
+                uint16_t arrowBg = palette.closeSelBg;
+                uint16_t arrowFg = palette.lineEditing; // use highlight color that fits current theme
+                int arrowBoxW = kChooserArrowWidth + 1;
+                int arrowX = SCREEN_WIDTH - arrowBoxW;
+                dma_display->fillRect(arrowX, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
+                int arrowY = rowHighlightY + (rowHighlightH / 2) - 3;
+                if (arrowY < rowHighlightY)
+                    arrowY = rowHighlightY;
+                drawForwardArrow(arrowX + 1, arrowY, arrowFg);
+            }
         }
         else
         {
+            // Ensure previously highlighted rows are cleared when not selected
+            int clearY = rowY;
+            int clearH = CHARH;
+            if (nextRowExtendsUp && clearH > 0)
+            {
+                // Leave bottom pixel for the next row's extended highlight to avoid flicker
+                --clearH;
+            }
+            dma_display->fillRect(0, clearY, SCREEN_WIDTH, clearH, 0);
+
             String sub = s.substring(0, MAXCOLS);
             dma_display->setTextColor(palette.lineUnselected);
-            dma_display->setCursor(0, drawLineIndex * CHARH);
+            dma_display->setCursor(0, rowY);
             dma_display->print(sub);
         }
     }

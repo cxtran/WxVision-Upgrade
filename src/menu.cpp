@@ -425,6 +425,7 @@ void showMainMenuModal()
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
     mainMenuModal.setLines(items, types, 8);
+    mainMenuModal.setShowForwardArrow(true);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
                               {
@@ -705,6 +706,7 @@ void showCalibrationModal()
 
     calibrationModal.setLines(labels, types, 3);
     calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
+    calibrationModal.setShowNumberArrows(true);
 
     // No final ???OK??? save. We autosave on each change in handleIR().
     calibrationModal.setCallback([](bool, int) {
@@ -898,6 +900,7 @@ void showSystemModal()
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton};
     systemModal.setLines(labels, types, 9);
+    systemModal.setShowForwardArrow(true);
     systemModal.setCallback([](bool accepted, int btnIdx)
                             {
         int action = -1;
@@ -1486,6 +1489,7 @@ void showDateTimeModal()
     dateModal.setValueRefs(intRefs, 7, chooserRefs, 5,
                            chooserOptPtrs, chooserOptCounts,
                            textRefs, 1, textSizes);
+    dateModal.setShowNumberArrows(true);
 
     dateModal.setCallback([](bool accepted, int /*btnIdx*/)
     {
@@ -1817,6 +1821,7 @@ void showWiFiSettingsModal()
 
     wifiSettingsModal.setLines(labels, types, 3);
     wifiSettingsModal.setValueRefs(nullptr, 0, nullptr, 0, nullptr, nullptr, nullptr, 0, nullptr);
+    wifiSettingsModal.setShowForwardArrow(true);
 
     wifiSettingsModal.setCallback([](bool accepted, int) {
         int sel = wifiSettingsModal.getSelIndex();

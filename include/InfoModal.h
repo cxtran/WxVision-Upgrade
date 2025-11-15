@@ -50,6 +50,9 @@ public:
     void setTextRefs(char* textRefsIn[], int count);  // ✅ fixed: uses char* not const char*
     void setButtons(const String btns[], int btnCount);
     void setCallback(const std::function<void(bool, int)>& cb);
+    void setShowNumberArrows(bool enable);
+    void setShowChooserArrows(bool enable);
+    void setShowForwardArrow(bool enable);
     void show();
     void hide();
     bool isActive() const;
@@ -64,6 +67,9 @@ public:
     // Public for integration (but not normally needed)
     bool inButtonBar;
     int btnSel;
+    bool showNumberArrows = false;
+    bool showChooserArrows = true;
+    bool showForwardArrow = false;
 
     void resetState();
 private:
