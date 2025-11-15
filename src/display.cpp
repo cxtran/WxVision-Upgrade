@@ -1511,7 +1511,7 @@ void fetchWeatherFromOWM()
     if (jsonBuffer == "{}")
         return;
     JSONVar data = JSON.parse(jsonBuffer);
-    if (JSON.typeof(data) == "undefined")
+    if (JSON.typeof_(data) == "undefined")
     {
         Serial.println("Failed to parse weather JSON");
         return;
@@ -1531,10 +1531,10 @@ void fetchWeatherFromOWM()
         return raw;
     };
     auto readNumber = [&](JSONVar obj, const char *key) -> double {
-        if (JSON.typeof(obj) != "object")
+        if (JSON.typeof_(obj) != "object")
             return NAN;
         JSONVar v = obj[key];
-        if (JSON.typeof(v) == "undefined")
+        if (JSON.typeof_(v) == "undefined")
             return NAN;
         return double(v);
     };
@@ -2297,6 +2297,7 @@ void applyUnitPreferences()
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
 }
+
 
 
 

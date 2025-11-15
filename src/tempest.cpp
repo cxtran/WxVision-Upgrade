@@ -1,6 +1,9 @@
 #include "tempest.h"
 #include <HTTPClient.h>
 #include <Arduino_JSON.h>
+#ifdef typeof
+#undef typeof
+#endif
 #include <WiFi.h>
 #include <math.h>
 #include "ScrollLine.h"
@@ -45,7 +48,7 @@ bool newRapidWindData = false;
 // --------- Tempest UDP JSON Parsing ----------
 void updateTempestFromUDP(const char* jsonStr) {
     JSONVar doc = JSON.parse(jsonStr);
-    if (JSON.typeof(doc) == "undefined") return;
+    if (JSON.typeof_(doc) == "undefined") return;
     String type = (const char*)doc["type"];
     Serial.print("Received UDP type: "); Serial.println(type);
 
@@ -246,30 +249,30 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
     if (cur == nullptr) {
         String asArray = "[" + currentStr + "]";
         cur = JSON.parse(asArray);
-        if (cur != nullptr && JSON.typeof(cur) == "array" && cur.length() > 0) cur = cur[0];
+        if (cur != nullptr && JSON.typeof_(cur) == "array" && cur.length() > 0) cur = cur[0];
         else cur = nullptr;
     }
 
-    if (cur == nullptr || JSON.typeof(cur) != "object") {
+    if (cur == nullptr || JSON.typeof_(cur) != "object") {
         memset(&currentCond, 0, sizeof(CurrentConditions));
         Serial.println("[FORECAST] No valid current_conditions object");
         return;
     }
 
-    currentCond.temp         = (JSON.typeof(cur["air_temperature"]) == "number") ? (double)cur["air_temperature"] : NAN;
-    currentCond.feelsLike    = (JSON.typeof(cur["feels_like"]) == "number") ? (double)cur["feels_like"] : NAN;
-    currentCond.dewPoint     = (JSON.typeof(cur["dew_point"]) == "number") ? (double)cur["dew_point"] : NAN;
-    currentCond.humidity     = (JSON.typeof(cur["relative_humidity"]) == "number") ? (int)cur["relative_humidity"] : -1;
-    currentCond.pressure     = (JSON.typeof(cur["sea_level_pressure"]) == "number") ? (double)cur["sea_level_pressure"] : NAN;
-    currentCond.windAvg      = (JSON.typeof(cur["wind_avg"]) == "number") ? (double)cur["wind_avg"] : NAN;
-    currentCond.windGust     = (JSON.typeof(cur["wind_gust"]) == "number") ? (double)cur["wind_gust"] : NAN;
-    currentCond.windDir      = (JSON.typeof(cur["wind_direction"]) == "number") ? (double)cur["wind_direction"] : NAN;
-    currentCond.windCardinal = (JSON.typeof(cur["wind_direction_cardinal"]) == "string") ? (const char*)cur["wind_direction_cardinal"] : "";
-    currentCond.uv           = (JSON.typeof(cur["uv"]) == "number") ? (int)cur["uv"] : -1;
-    currentCond.precipProb   = (JSON.typeof(cur["precip_probability"]) == "number") ? (int)cur["precip_probability"] : -1;
-    currentCond.cond         = (JSON.typeof(cur["conditions"]) == "string") ? (const char*)cur["conditions"] : "";
-    currentCond.icon         = (JSON.typeof(cur["icon"]) == "string") ? (const char*)cur["icon"] : "";
-    currentCond.time         = (JSON.typeof(cur["time"]) == "number") ? (uint32_t)(double)cur["time"] : 0;
+    currentCond.temp         = (JSON.typeof_(cur["air_temperature"]) == "number") ? (double)cur["air_temperature"] : NAN;
+    currentCond.feelsLike    = (JSON.typeof_(cur["feels_like"]) == "number") ? (double)cur["feels_like"] : NAN;
+    currentCond.dewPoint     = (JSON.typeof_(cur["dew_point"]) == "number") ? (double)cur["dew_point"] : NAN;
+    currentCond.humidity     = (JSON.typeof_(cur["relative_humidity"]) == "number") ? (int)cur["relative_humidity"] : -1;
+    currentCond.pressure     = (JSON.typeof_(cur["sea_level_pressure"]) == "number") ? (double)cur["sea_level_pressure"] : NAN;
+    currentCond.windAvg      = (JSON.typeof_(cur["wind_avg"]) == "number") ? (double)cur["wind_avg"] : NAN;
+    currentCond.windGust     = (JSON.typeof_(cur["wind_gust"]) == "number") ? (double)cur["wind_gust"] : NAN;
+    currentCond.windDir      = (JSON.typeof_(cur["wind_direction"]) == "number") ? (double)cur["wind_direction"] : NAN;
+    currentCond.windCardinal = (JSON.typeof_(cur["wind_direction_cardinal"]) == "string") ? (const char*)cur["wind_direction_cardinal"] : "";
+    currentCond.uv           = (JSON.typeof_(cur["uv"]) == "number") ? (int)cur["uv"] : -1;
+    currentCond.precipProb   = (JSON.typeof_(cur["precip_probability"]) == "number") ? (int)cur["precip_probability"] : -1;
+    currentCond.cond         = (JSON.typeof_(cur["conditions"]) == "string") ? (const char*)cur["conditions"] : "";
+    currentCond.icon         = (JSON.typeof_(cur["icon"]) == "string") ? (const char*)cur["icon"] : "";
+    currentCond.time         = (JSON.typeof_(cur["time"]) == "number") ? (uint32_t)(double)cur["time"] : 0;
 
     Serial.println("[FORECAST] Current conditions updated");
 }
@@ -301,7 +304,7 @@ void updateDailyForecastFromJson(const String& jsonStr) {
     _sanitizeBools(dailyArrayStr);
 
     JSONVar daily = JSON.parse(dailyArrayStr);
-    if (JSON.typeof(daily) != "array") {
+    if (JSON.typeof_(daily) != "array") {
         Serial.println("[ERROR] Parsed daily forecast is not an array!");
         forecast.numDays = 0;
         return;
@@ -312,15 +315,15 @@ void updateDailyForecastFromJson(const String& jsonStr) {
     for (int i = 0; i < days; i++) {
         JSONVar d = daily[i];
         ForecastDay& f = forecast.days[i];
-        f.highTemp   = (JSON.typeof(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
-        f.lowTemp    = (JSON.typeof(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
-        f.rainChance = (JSON.typeof(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
-        f.conditions = (JSON.typeof(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
-        f.icon       = (JSON.typeof(d["icon"])       == "string") ? (const char*)d["icon"]       : "";
-        f.sunrise    = (JSON.typeof(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
-        f.sunset     = (JSON.typeof(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
-        f.dayNum     = (JSON.typeof(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
-        f.monthNum   = (JSON.typeof(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
+        f.highTemp   = (JSON.typeof_(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
+        f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
+        f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
+        f.conditions = (JSON.typeof_(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
+        f.icon       = (JSON.typeof_(d["icon"])       == "string") ? (const char*)d["icon"]       : "";
+        f.sunrise    = (JSON.typeof_(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
+        f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
+        f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
+        f.monthNum   = (JSON.typeof_(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
     }
     // was: Serial.printf("[FORECAST] Parsed %d daily entries\n", forecast.numDays);
     Serial.print("[FORECAST] Parsed ");
@@ -419,17 +422,17 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
         sanitizeBools(objStr);
 
         JSONVar h = JSON.parse(objStr);
-        if (JSON.typeof(h) != "object") {
+        if (JSON.typeof_(h) != "object") {
             Serial.println("[FORECAST] Skipping non-object hourly entry");
             continue;
         }
 
         ForecastHour& fh = forecast.hours[count];
-        fh.temp       = (JSON.typeof(h["air_temperature"])    == "number") ? (double)h["air_temperature"] : NAN;
-        fh.rainChance = (JSON.typeof(h["precip_probability"]) == "number") ? (int)h["precip_probability"] : -1;
-        fh.conditions = (JSON.typeof(h["conditions"])         == "string") ? String((const char*)h["conditions"]) : "";
-        fh.icon       = (JSON.typeof(h["icon"])               == "string") ? String((const char*)h["icon"])       : "";
-        fh.time       = (JSON.typeof(h["time"])               == "number") ? (uint32_t)(double)h["time"]          : 0;
+        fh.temp       = (JSON.typeof_(h["air_temperature"])    == "number") ? (double)h["air_temperature"] : NAN;
+        fh.rainChance = (JSON.typeof_(h["precip_probability"]) == "number") ? (int)h["precip_probability"] : -1;
+        fh.conditions = (JSON.typeof_(h["conditions"])         == "string") ? String((const char*)h["conditions"]) : "";
+        fh.icon       = (JSON.typeof_(h["icon"])               == "string") ? String((const char*)h["icon"])       : "";
+        fh.time       = (JSON.typeof_(h["time"])               == "number") ? (uint32_t)(double)h["time"]          : 0;
 
         count++;
     }
@@ -749,5 +752,6 @@ void showCurrentConditionsScreen() {
     currentCondScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 
 }
+
 
 

@@ -35,6 +35,7 @@ header nav a[aria-current="page"] { text-decoration:underline; }
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
 .card h2 { margin:0 0 12px; font-size:16px; color:#cfe8ff; }
 .row { display:grid; grid-template-columns: minmax(140px, max-content) 1fr; gap:10px 16px; align-items:center; margin:10px 0; }
+.row.top { align-items:flex-start; }
 .row.tight { grid-template-columns: minmax(120px, max-content) 1fr; }
 .inline { display:flex; align-items:center; gap:10px; }
 .inline.wrap { flex-wrap:wrap; }
@@ -55,6 +56,23 @@ textarea { min-height:72px; }
 .msg { font-size:13px; color:#9fb3c8; min-height:1.2em; }
 .msg.ok { color:var(--ok); }
 .msg.err { color:#ff7b7b; }
+.wifi-input { display:flex; gap:10px; align-items:center; }
+.wifi-input input { flex:1; }
+.wifi-scan { display:flex; flex-direction:column; gap:8px; width:100%; }
+.wifi-scan-header { display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.wifi-scan-status { font-size:13px; color:var(--muted); }
+.wifi-scan-status.ok { color:var(--ok); }
+.wifi-scan-status.err { color:#ff7b7b; }
+.wifi-scan-list { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:8px; }
+.wifi-scan-item { display:flex; justify-content:space-between; gap:12px; align-items:center; background:#0f1726; border:1px solid #1f2b42; border-radius:10px; padding:10px; }
+.wifi-scan-item.current { border-color:var(--accent); }
+.wifi-scan-info { display:flex; flex-direction:column; gap:4px; }
+.wifi-scan-info strong { font-size:14px; color:#fff; }
+.wifi-scan-info .meta { display:flex; gap:12px; font-size:12px; color:var(--muted); flex-wrap:wrap; }
+.wifi-scan-actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end; }
+.wifi-scan-empty { padding:10px; border:1px dashed #20304a; border-radius:10px; color:var(--muted); font-style:italic; }
+.btn.small { padding:6px 12px; font-size:13px; }
+.btn.ghost { background:transparent; color:var(--fg); }
 .remote-grid {
   display:grid;
   grid-template-columns: repeat(3, minmax(70px, 1fr));

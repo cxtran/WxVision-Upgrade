@@ -162,6 +162,149 @@ function describePressure(value){
   return 'Very high';
 }
 
+var wifiScanBusy = false;
+
+function wifiScanSetStatus(text, ok){
+  var el = document.getElementById('wifiScanStatus');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.remove('ok','err');
+  if (!text) return;
+  el.classList.add(ok ? 'ok' : 'err');
+}
+
+function formatWifiRssi(value){
+  var rssi = Number(value);
+  if (!isFinite(rssi)) return '--';
+  var quality;
+  if (rssi >= -55) quality = 'Excellent';
+  else if (rssi >= -65) quality = 'Good';
+  else if (rssi >= -75) quality = 'Fair';
+  else quality = 'Weak';
+  return rssi + ' dBm (' + quality + ')';
+}
+
+function applyWifiSelection(ssid){
+  if (!ssid) return;
+  var input = document.getElementById('wifiSSID');
+  if (input) {
+    input.value = ssid;
+    input.focus();
+  }
+  wifiScanSetStatus('SSID set to "' + ssid + '". Enter the password and save.', true);
+}
+
+function renderWifiScanResults(payload){
+  var list = document.getElementById('wifiScanList');
+  if (!list) return;
+  list.innerHTML = '';
+  var networks = (payload && Array.isArray(payload.networks)) ? payload.networks.slice() : [];
+  var seen = {};
+  var filtered = [];
+  networks.forEach(function(net, idx){
+    if (!net) return;
+    var ssid = (net.ssid || '').trim();
+    if (!ssid) return;
+    if (seen[ssid]) return;
+    seen[ssid] = true;
+    filtered.push(net);
+  });
+  filtered.sort(function(a, b){
+    var ar = Number(a && a.rssi);
+    var br = Number(b && b.rssi);
+    if (!isFinite(ar)) ar = -999;
+    if (!isFinite(br)) br = -999;
+    return br - ar;
+  });
+
+  if (filtered.length === 0) {
+    var empty = document.createElement('li');
+    empty.className = 'wifi-scan-empty';
+    empty.textContent = 'No WiFi networks found.';
+    list.appendChild(empty);
+    return;
+  }
+
+  filtered.forEach(function(net){
+    var li = document.createElement('li');
+    li.className = 'wifi-scan-item';
+    var info = document.createElement('div');
+    info.className = 'wifi-scan-info';
+    var title = document.createElement('strong');
+    title.textContent = net.ssid || '(hidden)';
+    info.appendChild(title);
+    var meta = document.createElement('div');
+    meta.className = 'meta';
+    if (net.security) {
+      var secSpan = document.createElement('span');
+      secSpan.textContent = net.security;
+      meta.appendChild(secSpan);
+    }
+    var rssiSpan = document.createElement('span');
+    rssiSpan.textContent = formatWifiRssi(net.rssi);
+    meta.appendChild(rssiSpan);
+    info.appendChild(meta);
+
+    var actions = document.createElement('div');
+    actions.className = 'wifi-scan-actions';
+    if (payload && payload.connected && payload.connectedSSID && net.ssid &&
+        payload.connectedSSID === net.ssid) {
+      li.classList.add('current');
+      var badge = document.createElement('span');
+      badge.className = 'tag';
+      badge.textContent = 'Connected';
+      actions.appendChild(badge);
+    }
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn small';
+    btn.textContent = 'Use';
+    btn.addEventListener('click', function(){
+      applyWifiSelection(net.ssid);
+    });
+    actions.appendChild(btn);
+
+    li.appendChild(info);
+    li.appendChild(actions);
+    list.appendChild(li);
+  });
+}
+
+function startWifiScan(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  if (wifiScanBusy) return;
+  var btn = document.getElementById('wifiScanBtn');
+  wifiScanBusy = true;
+  if (btn) btn.disabled = true;
+  wifiScanSetStatus('Scanning for WiFi...', true);
+  fetch('/wifi/scan?ts=' + Date.now(), { cache: 'no-store' })
+    .then(function(r){
+      if (!r.ok) throw new Error('Scan failed');
+      return r.json();
+    })
+    .then(function(data){
+      renderWifiScanResults(data);
+      var count = (data && typeof data.count === 'number') ? data.count : 0;
+      wifiScanSetStatus(count > 0 ? ('Found ' + count + ' network' + (count === 1 ? '' : 's') + '.') : 'No WiFi networks detected.', count > 0);
+    })
+    .catch(function(err){
+      console.warn('WiFi scan failed', err);
+      wifiScanSetStatus('WiFi scan failed. Ensure the radio is enabled.', false);
+    })
+    .finally(function(){
+      wifiScanBusy = false;
+      if (btn) btn.disabled = false;
+    });
+}
+
+function initWifiScanUI(){
+  var btn = document.getElementById('wifiScanBtn');
+  if (!btn) return;
+  btn.addEventListener('click', startWifiScan);
+}
+
 var fullStatusPending = false;
 var fullStatusTimer = null;
 var FULL_STATUS_INTERVAL = 5000;
@@ -800,6 +943,7 @@ window.addEventListener('load', function(){
     var countrySelectEl = document.getElementById('owmCountryIndex');
     if (countrySelectEl) countrySelectEl.addEventListener('change', applyCountryCustomAvailability);
     applyDataSourceVisibility();
+    initWifiScanUI();
   } else {
     loadIndexStatus();
   }

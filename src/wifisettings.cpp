@@ -35,6 +35,105 @@ extern String wfToken;
 extern String wfStationId;
 extern int humOffset;
 
+static bool apModeActive = false;
+static IPAddress apIp(0, 0, 0, 0);
+static String apSsid;
+
+bool startAccessPoint(const char *ssidOverride, const char *passOverride)
+{
+    String ssid = (ssidOverride && ssidOverride[0] != '\0') ? ssidOverride : WIFI_AP_NAME;
+    ssid.trim();
+    if (ssid.isEmpty())
+    {
+        ssid = "VisionWX";
+    }
+
+    String pass = (passOverride && passOverride[0] != '\0') ? passOverride : WIFI_AP_PASS;
+    pass.trim();
+
+    if (apModeActive)
+    {
+        return true;
+    }
+
+    Serial.printf("[WiFi][AP] Starting SoftAP \"%s\"\n", ssid.c_str());
+
+    WiFi.softAPdisconnect(true);
+    WiFi.enableAP(false);
+
+    wifi_mode_t mode = WiFi.getMode();
+    if (mode != WIFI_AP && mode != WIFI_AP_STA)
+    {
+        WiFi.mode(WIFI_AP_STA);
+    }
+    else
+    {
+        WiFi.enableAP(true);
+    }
+
+    IPAddress local(WIFI_AP_IP);
+    IPAddress gateway(WIFI_AP_GATEWAY);
+    IPAddress subnet(WIFI_AP_SUBNET);
+
+    if (!WiFi.softAPConfig(local, gateway, subnet))
+    {
+        Serial.println("[WiFi][AP] Failed to configure SoftAP network settings.");
+        return false;
+    }
+
+    const char *passPtr = nullptr;
+    if (pass.length() >= 8)
+    {
+        passPtr = pass.c_str();
+    }
+    else if (pass.length() > 0)
+    {
+        Serial.println("[WiFi][AP] Password too short (<8 chars); AP will be open.");
+    }
+
+    bool started = WiFi.softAP(ssid.c_str(), passPtr, WIFI_AP_CHANNEL, 0, WIFI_AP_MAX_CLIENTS);
+    if (!started)
+    {
+        Serial.println("[WiFi][AP] Failed to start SoftAP.");
+        return false;
+    }
+
+    apModeActive = true;
+    apSsid = ssid;
+    apIp = WiFi.softAPIP();
+
+    Serial.printf("[WiFi][AP] SoftAP ready at %s (clients connect to SSID \"%s\").\n",
+                  apIp.toString().c_str(), ssid.c_str());
+    return true;
+}
+
+void stopAccessPoint()
+{
+    if (!apModeActive)
+        return;
+
+    Serial.println("[WiFi][AP] Stopping SoftAP.");
+    WiFi.softAPdisconnect(true);
+    WiFi.enableAP(false);
+    apModeActive = false;
+    apSsid = "";
+    apIp = IPAddress(0, 0, 0, 0);
+}
+
+bool isAccessPointActive()
+{
+    return apModeActive;
+}
+
+IPAddress getAccessPointIP()
+{
+    return apIp;
+}
+
+String getAccessPointSSID()
+{
+    return apSsid;
+}
 
 void connectToWiFi()
 {
@@ -69,6 +168,8 @@ void connectToWiFi()
         dma_display->print("to WiFi...");
     }
 
+    stopAccessPoint();
+
     Serial.printf("[WiFi] Connecting to SSID: %s\n", wifiSSID.c_str());
 
     WiFi.mode(WIFI_STA);
@@ -87,6 +188,7 @@ void connectToWiFi()
         Serial.println("[WiFi] Connected!");
         Serial.print("[WiFi] IP Address: ");
         Serial.println(WiFi.localIP());
+        stopAccessPoint();
         if (allowDisplay)
         {
             String ssidStr = WiFi.SSID();
@@ -129,6 +231,7 @@ void connectToWiFi()
         }
         // Clear SSID so user can try again
         wifiSSID = "";
+        startAccessPoint();
         // Show WiFi menu for retry (handled by onWiFiConnectFailed)
         onWiFiConnectFailed(); // Should update scannedSSIDs and show WiFi Select menu
         return;

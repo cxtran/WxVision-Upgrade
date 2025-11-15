@@ -26,11 +26,25 @@
     <h2>Device</h2>
     <div class="row">
       <label for="wifiSSID">WiFi SSID</label>
-      <input id="wifiSSID" type="text" placeholder="Your WiFi name">
+      <div class="wifi-input">
+        <input id="wifiSSID" type="text" placeholder="Your WiFi name">
+        <button class="btn ghost" type="button" id="wifiScanBtn">Scan</button>
+      </div>
     </div>
     <div class="row">
       <label for="wifiPass">WiFi Password</label>
       <input id="wifiPass" type="password" placeholder="••••••••">
+    </div>
+    <div class="row top">
+      <label>Nearby Networks</label>
+      <div class="wifi-scan">
+        <div class="wifi-scan-header">
+          <span id="wifiScanStatus" class="wifi-scan-status">Tap Scan to find WiFi networks.</span>
+        </div>
+        <ul id="wifiScanList" class="wifi-scan-list">
+          <li class="wifi-scan-empty">No scan yet.</li>
+        </ul>
+      </div>
     </div>
     <div class="grid2">
       <div class="row">

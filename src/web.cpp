@@ -16,6 +16,7 @@
 #include "weather_countries.h"
 #include "sensors.h"
 #include "ir_codes.h"
+#include "wifisettings.h"
 
 // ---- externs ----
 extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
@@ -49,6 +50,7 @@ extern const int scrollDelays[10];
 extern bool reset_Time_and_Date_Display;
 
 AsyncWebServer server(80);
+static bool webServerRunning = false;
 
 // --- UnitPrefs helpers ---
 static void unitsToJson(JsonObject obj)
@@ -195,6 +197,33 @@ static uint32_t irCodeForButton(String btn)
   return 0;
 }
 
+static const char *wifiAuthLabel(wifi_auth_mode_t mode)
+{
+  switch (mode)
+  {
+  case WIFI_AUTH_OPEN:
+    return "Open";
+  case WIFI_AUTH_WEP:
+    return "WEP";
+  case WIFI_AUTH_WPA_PSK:
+    return "WPA";
+  case WIFI_AUTH_WPA2_PSK:
+    return "WPA2";
+  case WIFI_AUTH_WPA_WPA2_PSK:
+    return "WPA/WPA2";
+  case WIFI_AUTH_WPA2_ENTERPRISE:
+    return "WPA2-Enterprise";
+  case WIFI_AUTH_WPA3_PSK:
+    return "WPA3";
+  case WIFI_AUTH_WPA2_WPA3_PSK:
+    return "WPA2/WPA3";
+  case WIFI_AUTH_WAPI_PSK:
+    return "WAPI";
+  default:
+    return "Unknown";
+  }
+}
+
 // Always use RTC so web clock matches on-device display
 static long currentEpoch()
 {
@@ -217,6 +246,9 @@ static long currentEpoch()
   return (long)utcNow.unixtime();
 }
 void setupWebServer() {
+  if (webServerRunning) {
+    return;
+  }
   if (!SPIFFS.begin(true)) {
     Serial.println("SPIFFS Mount Failed!");
     return;
@@ -342,6 +374,89 @@ void setupWebServer() {
     if (!isnan(bmp280_pressure)) {
       doc["pressure"] = fmtPress(bmp280_pressure, 1);
       doc["pressureRaw"] = bmp280_pressure;
+    }
+
+    String json;
+    serializeJson(doc, json);
+    req->send(200, "application/json", json);
+  });
+
+  server.on("/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req) {
+    bool includeHidden = false;
+    if (req->hasParam("hidden"))
+    {
+      String hiddenParam = req->getParam("hidden")->value();
+      includeHidden = hiddenParam.toInt() != 0;
+    }
+
+    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    bool apActive = isAccessPointActive();
+    wifi_mode_t prevMode = WiFi.getMode();
+    bool restoreMode = false;
+
+    if (prevMode == WIFI_OFF)
+    {
+      WiFi.mode(apActive ? WIFI_AP_STA : WIFI_STA);
+      restoreMode = true;
+    }
+    else if (prevMode == WIFI_AP && !wifiConnected)
+    {
+      WiFi.mode(WIFI_AP_STA);
+      restoreMode = true;
+    }
+
+    if (!wifiConnected)
+    {
+      WiFi.disconnect(false, false);
+    }
+
+    WiFi.scanDelete();
+    delay(120);
+    int found = WiFi.scanNetworks(false, includeHidden);
+    if (found < 0)
+      found = 0;
+
+    JsonDocument doc;
+    JsonArray arr = doc.createNestedArray("networks");
+    const int MAX_NETWORKS = 25;
+    int emitted = 0;
+    for (int i = 0; i < found && emitted < MAX_NETWORKS; ++i)
+    {
+      String ssid = WiFi.SSID(i);
+      ssid.trim();
+      if (ssid.isEmpty())
+        continue;
+
+      JsonObject net = arr.add<JsonObject>();
+      net["ssid"] = ssid;
+      net["bssid"] = WiFi.BSSIDstr(i);
+      net["channel"] = WiFi.channel(i);
+      net["rssi"] = WiFi.RSSI(i);
+      wifi_auth_mode_t auth = WiFi.encryptionType(i);
+      net["auth"] = static_cast<uint8_t>(auth);
+      net["security"] = wifiAuthLabel(auth);
+      net["secure"] = (auth != WIFI_AUTH_OPEN);
+      emitted++;
+    }
+    doc["count"] = emitted;
+    doc["connected"] = wifiConnected;
+    if (wifiConnected)
+    {
+      doc["connectedSSID"] = WiFi.SSID();
+      doc["ip"] = WiFi.localIP().toString();
+    }
+    doc["apActive"] = apActive;
+    if (apActive)
+    {
+      doc["apSSID"] = getAccessPointSSID();
+      doc["apIP"] = getAccessPointIP().toString();
+    }
+    doc["timestamp"] = millis();
+
+    WiFi.scanDelete();
+    if (restoreMode)
+    {
+      WiFi.mode(prevMode);
     }
 
     String json;
@@ -922,6 +1037,8 @@ void setupWebServer() {
   });
 
   server.begin();
+  webServerRunning = true;
+  Serial.println("[Web] Async server started.");
 }
 
 

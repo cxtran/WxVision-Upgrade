@@ -1,5 +1,8 @@
 #pragma once
 #include <Arduino_JSON.h>
+#ifdef typeof
+#undef typeof
+#endif
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include "Font5x7Uts.h"
 #include "pins.h"

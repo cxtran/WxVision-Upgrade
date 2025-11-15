@@ -15,10 +15,21 @@
 #define DAYLIGHT_OFFSET_SEC 3600     // 1 hour DST (set to 0 if not used)
 
 //==========================
-// WiFiManager Settings
+// WiFi / AP Settings
 //==========================
-#define WIFI_AP_NAME "VisionWX-Setup"   // Name of the setup portal SSID
+#define WIFI_AP_NAME "VisionWX-Setup"   // SoftAP SSID when no WiFi is configured
+#define WIFI_AP_PASS "VisionWX123"      // SoftAP password (min 8 chars)
+#define WIFI_AP_CHANNEL 6               // SoftAP channel to broadcast on
+#define WIFI_AP_MAX_CLIENTS 4           // Limit concurrent AP clients
+#define WIFI_AP_IP 10,10,10,1           // SoftAP IP address
+#define WIFI_AP_GATEWAY 10,10,10,1      // SoftAP gateway
+#define WIFI_AP_SUBNET 255,255,255,0    // SoftAP subnet mask
 #define WIFI_RETRY_TIMEOUT 20000        // Timeout for WiFi retry (ms)
+
+//==========================
+// Networking Helpers
+//==========================
+#define MDNS_BASE_HOSTNAME "wxvision"   // Base hostname (suffix appended automatically)
 
 //==========================
 // Weather Settings

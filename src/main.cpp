@@ -1,4 +1,7 @@
 #include <Arduino_JSON.h>
+#ifdef typeof
+#undef typeof
+#endif
 #include "time.h"
 #include "RTClib.h"
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
@@ -17,7 +20,10 @@
 #include <AsyncTCP.h>
 #include <Update.h>
 #include <WiFi.h>
+#include <ESPmDNS.h>
 #include "settings.h"
+#include "config.h"
+#include "wifisettings.h"
 #include "web.h"
 #include "buzzer.h"
 #include "menu.h"
@@ -81,6 +87,12 @@ static bool startupCompleted = false;
 bool initialSetupAwaitingWifi = false;
 static bool udpListening = false;
 
+static String deviceHostname;
+static bool otaInitialized = false;
+static bool mdnsRunning = false;
+static bool lastWifiState = false;
+static bool lastApState = false;
+
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
 
@@ -134,6 +146,80 @@ static void ensureCurrentScreenAllowed();
 static void applyDataSourcePolicies(bool wifiConnected);
 
 static unsigned long lastAutoRotateMillis = 0;
+
+static String buildDefaultHostname()
+{
+    String base = MDNS_BASE_HOSTNAME;
+    base.trim();
+    if (base.isEmpty())
+    {
+        base = "visionwx";
+    }
+    base.toLowerCase();
+
+    base.replace(" ", "-");
+    return base;
+}
+
+static void ensureHostname()
+{
+    if (deviceHostname.length() == 0)
+    {
+        deviceHostname = buildDefaultHostname();
+    }
+}
+
+static void stopMdnsService()
+{
+    if (!mdnsRunning)
+        return;
+
+    MDNS.end();
+    mdnsRunning = false;
+    Serial.println("[mDNS] responder stopped.");
+}
+
+static void startMdnsService(bool wifiConnected)
+{
+    ensureHostname();
+
+    if (mdnsRunning)
+    {
+        MDNS.end();
+        mdnsRunning = false;
+    }
+
+    if (!MDNS.begin(deviceHostname.c_str()))
+    {
+        Serial.println("[mDNS] Failed to start responder.");
+        return;
+    }
+
+    MDNS.addService("http", "tcp", 80);
+    IPAddress ip = wifiConnected ? WiFi.localIP() : getAccessPointIP();
+    Serial.printf("[mDNS] http://%s.local (%s)\n", deviceHostname.c_str(), ip.toString().c_str());
+    mdnsRunning = true;
+}
+
+static void refreshNetworkServices(bool wifiConnected)
+{
+    ensureHostname();
+
+    if (!otaInitialized)
+    {
+        ArduinoOTA.setHostname(deviceHostname.c_str());
+        ArduinoOTA.begin();
+        otaInitialized = true;
+        Serial.printf("[OTA] Ready (%s.local)\n", deviceHostname.c_str());
+    }
+
+    setupWebServer();
+    startMdnsService(wifiConnected);
+
+    IPAddress ip = wifiConnected ? WiFi.localIP() : getAccessPointIP();
+    Serial.printf("[Web] Control panel: http://%s.local  (direct IP http://%s)\n",
+                  deviceHostname.c_str(), ip.toString().c_str());
+}
 
 static bool isRotationBlocked()
 {
@@ -395,9 +481,7 @@ static void completeStartupAfterWiFi(bool force)
     {
         WiFi.setSleep(false);
         Serial.println("WiFi done.");
-        ArduinoOTA.setHostname("ESP32-Weather");
-        ArduinoOTA.begin();
-        setupWebServer();
+        refreshNetworkServices(true);
         Serial.println("Displaying Time...");
         if (!syncTimeFromNTP())
         {
@@ -517,6 +601,7 @@ void handleInitialSetupDecision(bool wantsWiFi)
     menuActive = false;
     markSetupComplete(true);
     initialSetupAwaitingWifi = false;
+    startAccessPoint();
     completeStartupAfterWiFi(true);
 }
 
@@ -526,6 +611,8 @@ void setup()
     delay(100);
 
     Serial.printf("Flash size: %u bytes\n", ESP.getFlashChipSize());
+    deviceHostname = buildDefaultHostname();
+    Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
     loadSettings();
     delay(500);
     setupDisplay();
@@ -584,6 +671,7 @@ void setup()
     {
         Serial.println("[WiFi] No credentials, starting offline mode.");
         initialSetupAwaitingWifi = false;
+        startAccessPoint();
         splashUpdate("Offline", 6, 6);
         completeStartupAfterWiFi(true);
         return;
@@ -625,6 +713,14 @@ void loop()
     const unsigned long blinkInterval = 500;
 
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    bool apActive = isAccessPointActive();
+
+    if (wifiConnected && apActive)
+    {
+        stopAccessPoint();
+        apActive = isAccessPointActive();
+    }
+
     if ((initialSetupAwaitingWifi || !startupCompleted) && wifiConnected)
     {
         completeStartupAfterWiFi(initialSetupAwaitingWifi);
@@ -633,6 +729,39 @@ void loop()
     {
         udp.stop();
         udpListening = false;
+    }
+
+    static unsigned long wifiDownSince = 0;
+    if (!wifiConnected)
+    {
+        if (wifiDownSince == 0)
+            wifiDownSince = now;
+
+        if (!apActive && !wifiSelecting && (now - wifiDownSince) >= WIFI_RETRY_TIMEOUT)
+        {
+            if (startAccessPoint())
+            {
+                apActive = true;
+            }
+        }
+    }
+    else
+    {
+        wifiDownSince = 0;
+    }
+
+    if (wifiConnected != lastWifiState || apActive != lastApState)
+    {
+        if (wifiConnected || apActive)
+        {
+            refreshNetworkServices(wifiConnected);
+        }
+        else
+        {
+            stopMdnsService();
+        }
+        lastWifiState = wifiConnected;
+        lastApState = apActive;
     }
 
     applyDataSourcePolicies(wifiConnected);
@@ -654,7 +783,7 @@ void loop()
     }
 
     // --- Main background tasks ---
-    if (wifiConnected)
+    if (wifiConnected || apActive)
     {
         ArduinoOTA.handle();
     }
