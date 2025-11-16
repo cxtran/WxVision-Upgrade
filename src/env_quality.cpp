@@ -788,8 +788,8 @@ static String buildDetailsValue(int eqIndexInt,
 
 static void updateDetailsDisplay(const String &value)
 {
-    String display = "Details > ";
-    display += value;
+    String display = value;
+ //   display += value;
     display += "   ";
 
     auto setDisplay = [&](const String &text, bool resetOffset) {
