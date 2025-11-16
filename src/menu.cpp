@@ -76,6 +76,7 @@ int wifiMenuScroll = 0;
 const int wifiVisibleLines = 3;
 
 bool wifiSelecting = false;
+static bool wifiSelectReturnToSettings = false;
 std::vector<String> foundSSIDs;
 int selectedWifiIdx = 0;
 String scannedSSIDs[16];
@@ -249,6 +250,7 @@ void handleIR(uint32_t code)
     {
         if (wifiScanCount == 0)
         {
+            wifiSelectReturnToSettings = false;
             currentMenuLevel = MENU_DEVICE;
             drawMenu();
             return;
@@ -268,11 +270,23 @@ void handleIR(uint32_t code)
             if (wifiSelectIndex == wifiScanCount - 1)
             { // <Back>
                 wifiSelecting = false;
-                currentMenuLevel = MENU_MAIN; // Return to MAIN menu instead of DEVICE menu
-                menuActive = true;
-                currentMenuIndex = 0;
-                menuScroll = 0;
-                showMainMenuModal(); // Show main menu modal
+                bool returnToWifiSettings = wifiSelectReturnToSettings;
+                wifiSelectReturnToSettings = false;
+                if (returnToWifiSettings)
+                {
+                    currentMenuLevel = MENU_NONE;
+                    menuActive = true;
+                    menuScroll = 0;
+                    showWiFiSettingsModal();
+                }
+                else
+                {
+                    currentMenuLevel = MENU_MAIN; // Return to MAIN menu instead of DEVICE menu
+                    menuActive = true;
+                    currentMenuIndex = 0;
+                    menuScroll = 0;
+                    showMainMenuModal(); // Show main menu modal
+                }
                 playBuzzerTone(900, 80);
                 return;
             }
@@ -289,10 +303,21 @@ void handleIR(uint32_t code)
             drawMenu();
             startKeyboardEntry(wifiPass.c_str(), [](const char *result)
                                {
-                if (result) {
+                if (result && *result) {
                     wifiPass = String(result);
                     saveDeviceSettings();
                     connectToWiFi();
+                    wifiSelectReturnToSettings = false;
+                } else {
+                    wifiSelecting = false;
+                    if (wifiSelectReturnToSettings) {
+                        wifiSelectReturnToSettings = false;
+                        currentMenuLevel = MENU_NONE;
+                        menuActive = true;
+                        menuScroll = 0;
+                        showWiFiSettingsModal();
+                        return;
+                    }
                 }
                 drawMenu(); },"Enter Pwd:");
             playBuzzerTone(2200, 120);
@@ -302,6 +327,8 @@ void handleIR(uint32_t code)
         {
             bool onboardingCancel = initialSetupAwaitingWifi;
             wifiSelecting = false;
+            bool returnToWifiSettings = wifiSelectReturnToSettings;
+            wifiSelectReturnToSettings = false;
             if (onboardingCancel)
             {
                 menuActive = false;
@@ -311,11 +338,21 @@ void handleIR(uint32_t code)
             }
             else
             {
-                currentMenuLevel = MENU_MAIN; // Return to MAIN menu here as well
-                menuActive = true;
-                currentMenuIndex = 0;
-                menuScroll = 0;
-                showMainMenuModal(); // Show main menu modal on cancel
+                if (returnToWifiSettings)
+                {
+                    currentMenuLevel = MENU_NONE;
+                    menuActive = true;
+                    menuScroll = 0;
+                    showWiFiSettingsModal();
+                }
+                else
+                {
+                    currentMenuLevel = MENU_MAIN; // Return to MAIN menu here as well
+                    menuActive = true;
+                    currentMenuIndex = 0;
+                    menuScroll = 0;
+                    showMainMenuModal(); // Show main menu modal on cancel
+                }
             }
             playBuzzerTone(700, 80);
         }
@@ -1884,6 +1921,7 @@ void showWiFiSettingsModal()
                     currentMenuLevel = MENU_WIFI_SELECT;
                     menuActive = true;
                     menuScroll = 0;
+                    wifiSelectReturnToSettings = true;
                     drawWiFiMenu();
                 }
                 else

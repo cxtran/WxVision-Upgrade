@@ -1007,9 +1007,17 @@ void loop()
         uint32_t code = getIRCodeNonBlocking();
         if (code)
             handleIR(code); // Route IR to menu.cpp WiFi handler
-        drawWiFiMenu();     // Draw scanned WiFi list
-        delay(80);          // Slight delay for smoother response
-        return;             // Skip rest of loop while selecting WiFi
+
+        // If WiFi selection exited (e.g. keyboard opened), skip drawing list again.
+        if (!wifiSelecting || currentMenuLevel != MENU_WIFI_SELECT || inKeyboardMode)
+        {
+            delay(10);
+            return;
+        }
+
+        drawWiFiMenu(); // Draw scanned WiFi list
+        delay(80);      // Slight delay for smoother response
+        return;         // Skip rest of loop while selecting WiFi
     }
 
     // --- 4. Pending modal delayed calls ---
