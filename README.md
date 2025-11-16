@@ -1,0 +1,36 @@
+# VisionWX
+
+VisionWX is a fully custom ESP32 firmware that drives a 64×32 RGB LED panel to render a rich weather and device-dashboard experience. The project integrates sensor readings, remote control input, Wi‑Fi management, and an on-device configuration UI that uses modal dialogs rendered directly on the panel.
+
+## Features
+
+- **Weather & Sensor Display** – Shows live weather data, environmental sensor readings (CO₂, temperature, humidity, pressure) and device status information using animated scenes tailored for day and night themes.
+- **On-Device Menu System** – Navigate settings such as Wi‑Fi credentials, units, calibration, system info, and display preferences via IR remote control. Menus use the shared `InfoModal` component to handle chooser, number, text, and button fields.
+- **Auto Theme Scheduling** – Configure day/night theme switching manually or via a schedule with adjustable start times. Theme switches can also be triggered instantly using the IR `Theme` button.
+- **Wi‑Fi & OTA Friendly** – Manage multiple Wi‑Fi networks, perform scans, and expose a web UI (`data/config.html`) for configuring every device parameter through REST endpoints defined in `src/web.cpp`.
+- **Sensor Integration** – Reads SCD40, AHT20, BMP280, and other sensors (see `src/sensors.cpp`) for accurate environmental monitoring, adjusting display brightness automatically when desired.
+- **Extensible Rendering** – The display pipeline (e.g., `src/display.cpp`, `src/InfoScreen.cpp`) uses custom drawing utilities to render gradients, icons, scrolling text, and button bars optimized for small RGB matrices.
+
+## Project Layout
+
+- `src/` – Main firmware sources (display rendering, menu system, sensor drivers, networking, etc.).
+- `include/` – Shared headers for configuration, IR codes, settings, and utilities.
+- `data/` – SPIFFS assets such as the configuration web page (`config.html`) and accompanying scripts.
+- `lib/` / `.pio/` – PlatformIO-managed dependencies (Adafruit GFX, IRremoteESP8266, AsyncWebServer, etc.).
+- `platformio.ini` – PlatformIO environment definitions.
+
+## Getting Started
+
+1. Install [PlatformIO](https://platformio.org/) and clone this repository.
+2. Connect an ESP32 driving a compatible RGB LED matrix (default is 64×32) plus the supported sensors.
+3. Configure your build environment if needed (see `platformio.ini`).
+4. Run `pio run --target uploadfs` to flash SPIFFS assets, then `pio run --target upload` to flash the firmware.
+5. After boot, use the configured IR remote or the web UI (browse to the device’s IP) to set up Wi‑Fi and preferences.
+
+## Contributing
+
+Issues and pull requests are welcome. Please format code using the existing style (clang-format/PlatformIO defaults), avoid committing auto-generated files, and ensure features are testable via the on-device UI or web interface.
+
+## License
+
+VisionWX is released under the MIT License. See `LICENSE` (add one if missing) for details.
