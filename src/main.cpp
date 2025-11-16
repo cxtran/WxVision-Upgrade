@@ -863,6 +863,7 @@ void loop()
     }
 
     handleAutoRotate(now);
+    tickAutoThemeSchedule();
 
     if (themeRefreshPending)
     {

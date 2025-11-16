@@ -351,6 +351,16 @@ static String formatUtcOffsetMinutes(int minutes)
     return String(buf);
 }
 
+static String formatScheduleTime(int minutes)
+{
+    int normalized = normalizeThemeScheduleMinutes(minutes);
+    int hours = normalized / 60;
+    int mins = normalized % 60;
+    char buf[8];
+    snprintf(buf, sizeof(buf), "%02d:%02d", hours, mins);
+    return String(buf);
+}
+
 void InfoModal::draw()
 {
     currentPalette = makePalette();
@@ -398,6 +408,10 @@ void InfoModal::draw()
                 if (lines[idx] == "TimeZone")
                 {
                     s += ": " + formatUtcOffsetMinutes(val);
+                }
+                else if (lines[idx] == "Day Theme Start" || lines[idx] == "Night Theme Start")
+                {
+                    s += ": " + formatScheduleTime(val);
                 }
                 else
                 {
@@ -455,10 +469,22 @@ void InfoModal::draw()
         }
 
         int drawLineIndex = i + 1; // Lines start below header (row 0 is header)
+        bool scheduleNumber = (fieldTypes[idx] == InfoNumber) &&
+                              (lines[idx] == "Day Theme Start" || lines[idx] == "Night Theme Start");
+        bool brightnessLine = (fieldTypes[idx] == InfoNumber) && (lines[idx] == "Brightness");
         bool arrowLine = (showChooserArrows && fieldTypes[idx] == InfoChooser) ||
-                         (showNumberArrows && fieldTypes[idx] == InfoNumber);
+                         (showNumberArrows && fieldTypes[idx] == InfoNumber) || scheduleNumber || brightnessLine;
         bool forwardIndicator = showForwardArrow && !arrowLine &&
                                 (fieldTypes[idx] == InfoLabel || fieldTypes[idx] == InfoButton);
+        const int arrowBoxW = kChooserArrowWidth + 1;
+        int reservedWidth = 0;
+        if (arrowLine)
+            reservedWidth = arrowBoxW * 2;
+        else if (forwardIndicator)
+            reservedWidth = arrowBoxW;
+        int availableWidth = SCREEN_WIDTH - reservedWidth;
+        if (availableWidth <= 0)
+            availableWidth = SCREEN_WIDTH;
 
         int rowY = drawLineIndex * CHARH;
         bool extendUp = (drawLineIndex > 1);
@@ -497,35 +523,39 @@ void InfoModal::draw()
                 scrollPauseTime = 0;
             }
             int textW = getTextWidth(s.c_str());
-            if (textW > SCREEN_WIDTH)
+            bool needsScroll = textW > availableWidth;
+            if (needsScroll && !scrollPaused)
             {
-                if (!scrollPaused)
+                if (millis() - lastScrollTime > scrollSpeed)
                 {
-                    if (millis() - lastScrollTime > scrollSpeed)
+                    lastScrollTime = millis();
+                    scrollOffset++;
+                    if (textW > SCREEN_WIDTH)
                     {
-                        lastScrollTime = millis();
-                        scrollOffset++;
                         if (scrollOffset > (textW - SCREEN_WIDTH))
                             firstScroll = false;
                         if (!firstScroll && scrollOffset > textW)
                             scrollOffset = -SCREEN_WIDTH;
                     }
-                }
-                else
-                {
-                    if (scrollPauseTime && (millis() - scrollPauseTime > 1000)) // Pause time when edit
+                    else if (scrollOffset > availableWidth)
                     {
-                        scrollPaused = false;
-                        scrollPauseTime = 0;
+                        scrollOffset = 0;
+                        firstScroll = true;
                     }
+                }
+            }
+            else if (scrollPaused)
+            {
+                if (scrollPauseTime && (millis() - scrollPauseTime > 1000)) // Pause time when edit
+                {
+                    scrollPaused = false;
+                    scrollPauseTime = 0;
                 }
             }
             else
             {
                 scrollOffset = 0;
                 firstScroll = true;
-                scrollPaused = false;
-                scrollPauseTime = 0;
             }
 
             dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
@@ -537,7 +567,6 @@ void InfoModal::draw()
             {
                 uint16_t arrowBg = palette.closeSelBg;
                 uint16_t arrowFg = palette.closeFg;
-                int arrowBoxW = kChooserArrowWidth + 1;
                 dma_display->fillRect(0, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
                 dma_display->fillRect(SCREEN_WIDTH - arrowBoxW, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
                 int arrowY = rowHighlightY + (rowHighlightH / 2) - 3;
@@ -550,7 +579,6 @@ void InfoModal::draw()
             {
                 uint16_t arrowBg = palette.closeSelBg;
                 uint16_t arrowFg = palette.lineEditing; // use highlight color that fits current theme
-                int arrowBoxW = kChooserArrowWidth + 1;
                 int arrowX = SCREEN_WIDTH - arrowBoxW;
                 dma_display->fillRect(arrowX, rowHighlightY, arrowBoxW, rowHighlightH, arrowBg);
                 int arrowY = rowHighlightY + (rowHighlightH / 2) - 3;
@@ -867,7 +895,12 @@ void InfoModal::handleIR(uint32_t code)
             if (nidx >= 0 && intRefs[nidx])
             {
                 int *ptr = intRefs[nidx];
+                const String &label = lines[selIndex];
                 int step = 1;
+                if (label == "Day Theme Start" || label == "Night Theme Start")
+                {
+                    step = 5;
+                }
                 if (this == &dateModal && selIndex == 6)
                 {
                     step = 15;
@@ -893,7 +926,6 @@ void InfoModal::handleIR(uint32_t code)
 
                 if (this == &dateModal)
                 {
-                    const String &label = lines[selIndex];
                     if (label == "Year")
                         *ptr = constrain(*ptr, 2000, 2099);
                     else if (label == "Month")
@@ -908,6 +940,10 @@ void InfoModal::handleIR(uint32_t code)
                         *ptr = constrain(*ptr, 0, 59);
                     else if (label == "Manual Offset (min)")
                         *ptr = constrain(*ptr, -720, 840);
+                }
+                else if (label == "Day Theme Start" || label == "Night Theme Start")
+                {
+                    *ptr = normalizeThemeScheduleMinutes(*ptr);
                 }
 
                 // Also handle Brightness live preview if on that field (by label!)
@@ -1069,6 +1105,15 @@ void InfoModal::handleIR(uint32_t code)
         {
             // Left/Right already handle value change; disable OK for chooser lines
             // So do nothing here on OK for chooser.
+        }
+        else if (fieldTypes[selIndex] == InfoNumber)
+        {
+            const String &label = lines[selIndex];
+            if (label == "Day Theme Start" || label == "Night Theme Start")
+            {
+                // Ignore OK press on scheduled theme rows to prevent accidental exit
+                return;
+            }
         }
         else if (btnCount == 0 && callback)
         {

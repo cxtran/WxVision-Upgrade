@@ -138,6 +138,9 @@ void setDisplayBrightnessFromLux(float lux)
                 lux, calibratedLux, lightGain, sensitivity, brightness);
 }
 
+static uint32_t s_lastIrCode = 0;
+static unsigned long s_lastIrTimestamp = 0;
+
 uint32_t getIRCodeNonBlocking()
 {
   uint32_t queuedCode = 0;
@@ -146,6 +149,8 @@ uint32_t getIRCodeNonBlocking()
     PRINT_IR_CODE(queuedCode);
     if (handleGlobalIRCode(queuedCode))
       return 0;
+    s_lastIrCode = queuedCode;
+    s_lastIrTimestamp = millis();
     return queuedCode;
   }
 
@@ -153,12 +158,31 @@ uint32_t getIRCodeNonBlocking()
   if (irrecv.decode(&results))
   {
     uint32_t code = results.value;
+    if (results.repeat)
+    {
+      code = s_lastIrCode;
+    }
+    else
+    {
+      s_lastIrCode = code;
+    }
+    s_lastIrTimestamp = millis();
     irrecv.resume();
-    PRINT_IR_CODE(code);
-    if (handleGlobalIRCode(code))
-      return 0;
+    if (code != 0)
+    {
+      PRINT_IR_CODE(code);
+      if (handleGlobalIRCode(code))
+        return 0;
+    }
     return code;
   }
+
+  // Clear last code if we've been idle for a while to avoid stale repeats.
+  if (s_lastIrCode != 0 && millis() - s_lastIrTimestamp > 500)
+  {
+    s_lastIrCode = 0;
+  }
+
   return 0;
 }
 

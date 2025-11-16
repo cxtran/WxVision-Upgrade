@@ -34,7 +34,11 @@ extern bool setupComplete;       // true once onboarding finished
 extern bool initialSetupRequired; // true when device needs first-time setup
 
 // --- Display ---
-extern int theme;            // 0 = Color, 1 = Monochrome
+extern int theme;            // 0 = Day, 1 = Night
+extern bool autoThemeSchedule;
+extern int dayThemeStartMinutes;
+extern int nightThemeStartMinutes;
+int normalizeThemeScheduleMinutes(int value);
 extern int brightness;       // 1 - 100
 extern int scrollSpeed;      // derived from level
 extern String customMsg;
@@ -83,4 +87,7 @@ void adjustScrollSpeed(int dir);
 void adjustTempOffset(int dir);
 void adjustHumOffset(int dir);
 void adjustLightGain(int dir);
+
+void tickAutoThemeSchedule();
+void forceAutoThemeSchedule();
 

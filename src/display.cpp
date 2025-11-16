@@ -1186,7 +1186,7 @@ void splashBegin(uint16_t minimumMs)
     splashStartMs = millis();
     if (theme == 1)
     {
-        // Monochrome theme palette
+        // Night theme palette
         splashAccent = dma_display->color565(210, 210, 230);
         splashShadow = dma_display->color565(18, 20, 34);
         splashHighlight = dma_display->color565(255, 255, 255);
@@ -1199,7 +1199,7 @@ void splashBegin(uint16_t minimumMs)
     }
     else
     {
-        // Color theme palette
+        // Day theme palette
         splashAccent = dma_display->color565(90, 210, 255);
         splashShadow = dma_display->color565(8, 22, 38);
         splashHighlight = dma_display->color565(230, 250, 255);
@@ -1940,7 +1940,7 @@ void drawClockScreen()
         uint16_t ampmColor, bgColor;
 
         if (theme == 1) {
-            // Mono theme: both AM/PM are dim gray-blue
+            // Night theme: both AM/PM are dim gray-blue
             ampmColor = dma_display->color565(100, 100, 140);
             bgColor   = dma_display->color565(20, 20, 40);
         }

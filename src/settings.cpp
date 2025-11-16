@@ -21,7 +21,10 @@ bool setupComplete = false;
 bool initialSetupRequired = false;
 
 // --- Display ---
-int theme = 0;            // 0 = Color, 1 = Mono
+int theme = 0;            // 0 = Day, 1 = Night
+bool autoThemeSchedule = false;
+int dayThemeStartMinutes = 6 * 60;
+int nightThemeStartMinutes = 20 * 60;
 int brightness = 10;      // 1???100
 int scrollSpeed = 150;    // derived from scrollLevel
 int scrollLevel = 7;      // 0 (slow) to 9 (fast)
@@ -30,6 +33,44 @@ const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
 int splashDurationSec = 3;
 bool themeRefreshPending = false;
+
+static constexpr int MINUTES_PER_DAY = 24 * 60;
+int normalizeThemeScheduleMinutes(int value)
+{
+    if (value < 0)
+    {
+        value %= MINUTES_PER_DAY;
+        if (value < 0)
+            value += MINUTES_PER_DAY;
+    }
+    else if (value >= MINUTES_PER_DAY)
+    {
+        value %= MINUTES_PER_DAY;
+    }
+    return value;
+}
+
+static int determineScheduledTheme(int currentMinutes)
+{
+    int dayStart = normalizeThemeScheduleMinutes(dayThemeStartMinutes);
+    int nightStart = normalizeThemeScheduleMinutes(nightThemeStartMinutes);
+
+    if (dayStart == nightStart)
+    {
+        // Same time -> treat as always Day.
+        return 0;
+    }
+
+    if (dayStart < nightStart)
+    {
+        return (currentMinutes >= dayStart && currentMinutes < nightStart) ? 0 : 1;
+    }
+    // Day period wraps past midnight
+    return (currentMinutes >= dayStart || currentMinutes < nightStart) ? 0 : 1;
+}
+
+static unsigned long s_lastAutoThemeCheck = 0;
+static int s_lastAppliedScheduledTheme = -1;
 
 // --- Weather ---
 String owmCity = "";
@@ -72,6 +113,9 @@ void loadSettings() {
     // Display
     theme        = prefs.getInt("theme", 0);
     theme        = constrain(theme, 0, 1);
+    autoThemeSchedule = prefs.getBool("autoThemeSched", false);
+    dayThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("dayThemeStart", 6 * 60));
+    nightThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("nightThemeStart", 20 * 60));
     brightness   = prefs.getInt("brightness", 10);
     scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
@@ -125,6 +169,9 @@ void saveDisplaySettings() {
     Preferences prefs;
     if (prefs.begin("visionwx", false)) {
         prefs.putInt("theme", theme);
+        prefs.putBool("autoThemeSched", autoThemeSchedule);
+        prefs.putInt("dayThemeStart", normalizeThemeScheduleMinutes(dayThemeStartMinutes));
+        prefs.putInt("nightThemeStart", normalizeThemeScheduleMinutes(nightThemeStartMinutes));
         prefs.putBool("autoBrightness", autoBrightness);
         prefs.putInt("brightness", brightness);
         prefs.putInt("scrollLevel", scrollLevel);  // persist level only
@@ -132,8 +179,8 @@ void saveDisplaySettings() {
         splashDurationSec = constrain(splashDurationSec, 1, 10);
         prefs.putInt("splashDur", splashDurationSec);
         prefs.end();
-        Serial.printf("[Prefs] Saved: theme=%d, auto=%d, bright=%d, scrollLevel=%d\n",
-            theme, autoBrightness, brightness, scrollLevel);
+        Serial.printf("[Prefs] Saved: theme=%d, schedule=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d\n",
+            theme, autoThemeSchedule, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel);
     } else {
         Serial.println("[Prefs] Failed to open namespace 'display'");
     }
@@ -271,4 +318,42 @@ void adjustScrollSpeed(int dir) {
     if (scrollLevel < 0) scrollLevel = 0;
     if (scrollLevel > 9) scrollLevel = 9;
     scrollSpeed = scrollDelays[scrollLevel];
+}
+
+void tickAutoThemeSchedule()
+{
+    if (!autoThemeSchedule)
+    {
+        s_lastAppliedScheduledTheme = -1;
+        return;
+    }
+
+    unsigned long nowMs = millis();
+    if (s_lastAppliedScheduledTheme != -1 && (nowMs - s_lastAutoThemeCheck) < 15000)
+    {
+        return;
+    }
+    s_lastAutoThemeCheck = nowMs;
+
+    DateTime localNow;
+    if (!getLocalDateTime(localNow))
+    {
+        return;
+    }
+    int minutes = normalizeThemeScheduleMinutes(localNow.hour() * 60 + localNow.minute());
+    int desiredTheme = determineScheduledTheme(minutes);
+    if (desiredTheme != theme)
+    {
+        theme = desiredTheme;
+        themeRefreshPending = true;
+        saveDisplaySettings();
+    }
+    s_lastAppliedScheduledTheme = desiredTheme;
+}
+
+void forceAutoThemeSchedule()
+{
+    s_lastAutoThemeCheck = 0;
+    s_lastAppliedScheduledTheme = -1;
+    tickAutoThemeSchedule();
 }

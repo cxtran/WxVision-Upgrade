@@ -159,6 +159,11 @@ bool handleGlobalIRCode(uint32_t code)
     }
     if (code == IR_THEME)
     {
+        if (autoThemeSchedule)
+        {
+            autoThemeSchedule = false;
+            saveDisplaySettings();
+        }
         toggleTheme(+1);
         reset_Time_and_Date_Display = true;
         requestScrollRebuild();
@@ -465,6 +470,12 @@ void showDisplaySettingsModal()
     currentMenuLevel = MENU_DISPLAY;
     menuActive = true;
 
+    static int autoThemeModeTemp;
+    autoThemeModeTemp = autoThemeSchedule ? 1 : 0;
+    static int dayThemeStartTemp;
+    static int nightThemeStartTemp;
+    dayThemeStartTemp = dayThemeStartMinutes;
+    nightThemeStartTemp = nightThemeStartMinutes;
     static int autoBrightnessInt;
     autoBrightnessInt = autoBrightness ? 1 : 0;
     static int brightnessTemp = brightness;
@@ -502,16 +513,17 @@ void showDisplaySettingsModal()
         }
     }
 
-    String labels[] = {"Theme", "Auto Brightness", "Brightness", "Scroll Speed", "Auto Rotate", "Rotate Interval", "Custom Msg"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoChooser, InfoChooser, InfoChooser, InfoText};
-    int *chooserRefs[] = {&theme, &autoBrightnessInt, &scrollLevelTemp, &autoRotateTemp, &rotateIntervalIndex};
-    static const char *themeOpts[] = {"Color", "Mono"};
+    String labels[] = {"Theme", "Theme Mode", "Day Theme Start", "Night Theme Start", "Auto Brightness", "Brightness", "Scroll Speed", "Auto Rotate", "Rotate Interval", "Custom Msg"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoNumber, InfoChooser, InfoNumber, InfoChooser, InfoChooser, InfoChooser, InfoText};
+    int *chooserRefs[] = {&theme, &autoThemeModeTemp, &autoBrightnessInt, &scrollLevelTemp, &autoRotateTemp, &rotateIntervalIndex};
+    static const char *themeOpts[] = {"Day", "Night"};
+    static const char *themeModeOpts[] = {"Manual", "Scheduled"};
     static const char *autoOpts[] = {"Off", "On"};
     static const char *speedOpts[] = {"1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
     static const char *autoRotateOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {themeOpts, autoOpts, speedOpts, autoRotateOpt, rotateIntervalOpt};
-    int chooserCounts[] = {2, 2, 10, 2, rotateIntervalCount};
-    int *numberRefs[] = {&brightnessTemp};
+    const char *const *chooserOpts[] = {themeOpts, themeModeOpts, autoOpts, speedOpts, autoRotateOpt, rotateIntervalOpt};
+    int chooserCounts[] = {2, 2, 2, 10, 2, rotateIntervalCount};
+    int *numberRefs[] = {&dayThemeStartTemp, &nightThemeStartTemp, &brightnessTemp};
 
     static char customMsgBuf[64];
     strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
@@ -520,23 +532,34 @@ void showDisplaySettingsModal()
     int textSizes[] = {sizeof(customMsgBuf)};
 
     displayModal.setLines(labels, types, 7);
-    displayModal.setValueRefs(numberRefs, 1, chooserRefs, 5, chooserOpts, chooserCounts, textRefs, 1, textSizes);
+    displayModal.setValueRefs(numberRefs, 3, chooserRefs, 6, chooserOpts, chooserCounts, textRefs, 1, textSizes);
 
-    displayModal.setCallback([](bool accepted, int)
+    displayModal.setCallback([](bool /*accepted*/, int)
     {
-        if (accepted)
+        brightness = constrain(brightnessTemp, 1, 100);
+        autoBrightness = (autoBrightnessInt > 0);
+        scrollLevel = constrain(scrollLevelTemp, 0, 9);
+        scrollSpeed = scrollDelays[scrollLevel];
+        setAutoRotateEnabled(autoRotateTemp > 0, true);
+        setAutoRotateInterval(rotateIntervalValues[rotateIntervalIndex], true);
+        customMsg = String(customMsgBuf);
+        bool prevAutoTheme = autoThemeSchedule;
+        int prevDayStart = dayThemeStartMinutes;
+        int prevNightStart = nightThemeStartMinutes;
+        autoThemeSchedule = (autoThemeModeTemp > 0);
+        dayThemeStartMinutes = normalizeThemeScheduleMinutes(dayThemeStartTemp);
+        nightThemeStartMinutes = normalizeThemeScheduleMinutes(nightThemeStartTemp);
+        bool scheduleChanged = (prevAutoTheme != autoThemeSchedule) ||
+                               (prevDayStart != dayThemeStartMinutes) ||
+                               (prevNightStart != nightThemeStartMinutes);
+        saveDisplaySettings();
+        if (scheduleChanged && autoThemeSchedule)
         {
-            brightness = constrain(brightnessTemp, 1, 100);
-            autoBrightness = (autoBrightnessInt > 0);
-            scrollLevel = constrain(scrollLevelTemp, 0, 9);
-            scrollSpeed = scrollDelays[scrollLevel];
-            setAutoRotateEnabled(autoRotateTemp > 0, true);
-            setAutoRotateInterval(rotateIntervalValues[rotateIntervalIndex], true);
-            customMsg = String(customMsgBuf);
-            saveDisplaySettings();
-            Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds\n",
-                          brightness, scrollLevel + 1, scrollSpeed, autoBrightness, autoRotate, autoRotateInterval);
+            forceAutoThemeSchedule();
         }
+        Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds dayStart=%d nightStart=%d autoTheme=%d\n",
+                      brightness, scrollLevel + 1, scrollSpeed, autoBrightness, autoRotate, autoRotateInterval,
+                      dayThemeStartMinutes, nightThemeStartMinutes, autoThemeSchedule);
         displayModal.hide();
         currentMenuLevel = MENU_MAIN;
         currentMenuIndex = 0;

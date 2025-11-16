@@ -10,6 +10,28 @@ function setMsg(id, text, ok) {
 }
 function pad2(n){ return (n<10?'0':'')+n; }
 
+function minutesToTimeString(mins){
+  var value = Number(mins);
+  if (!isFinite(value)) value = 0;
+  value = ((value % 1440) + 1440) % 1440;
+  var h = Math.floor(value / 60);
+  var m = value % 60;
+  return pad2(h) + ':' + pad2(m);
+}
+
+function timeStringToMinutes(str, fallback){
+  if (fallback === undefined) fallback = 0;
+  if (typeof str !== 'string') str = '';
+  var parts = str.split(':');
+  var h = parseInt(parts[0], 10);
+  var m = parseInt(parts[1], 10);
+  if (!isFinite(h)) h = Math.floor(fallback / 60);
+  if (!isFinite(m)) m = fallback % 60;
+  h = Math.min(23, Math.max(0, h));
+  m = Math.min(59, Math.max(0, m));
+  return h * 60 + m;
+}
+
 function sendRemoteCommand(action){
   if (!action) return;
   if (action === 'screen') {
@@ -503,6 +525,20 @@ function applyAutoBrightnessUI(){
   b.title = (ab === 1) ? 'Disabled when Auto Brightness is ON' : '';
 }
 
+function applyAutoThemeUI(){
+  var modeEl = document.getElementById('autoThemeSchedule');
+  var dayEl = document.getElementById('dayThemeStart');
+  var nightEl = document.getElementById('nightThemeStart');
+  if (!modeEl) return;
+  var scheduled = (+modeEl.value === 1);
+  var inputs = [dayEl, nightEl];
+  inputs.forEach(function(input){
+    if (!input) return;
+    input.disabled = !scheduled;
+    input.title = scheduled ? '' : 'Enable Theme Mode = Scheduled to edit times';
+  });
+}
+
 function applyAutoDstAvailability(){
   var tzSel = document.getElementById('tzSelect');
   var autoDstEl = document.getElementById('autoDst');
@@ -607,6 +643,12 @@ function loadAll(){
 
     var themeEl = document.getElementById('theme');
     if (themeEl) themeEl.value = (typeof s.theme !== 'undefined' ? s.theme : 0);
+    var autoThemeEl = document.getElementById('autoThemeSchedule');
+    if (autoThemeEl) autoThemeEl.value = (s.autoThemeSchedule ? 1 : 0);
+    var dayThemeEl = document.getElementById('dayThemeStart');
+    if (dayThemeEl) dayThemeEl.value = minutesToTimeString((typeof s.dayThemeStart !== 'undefined') ? s.dayThemeStart : 360);
+    var nightThemeEl = document.getElementById('nightThemeStart');
+    if (nightThemeEl) nightThemeEl.value = minutesToTimeString((typeof s.nightThemeStart !== 'undefined') ? s.nightThemeStart : 1200);
     var brightnessEl = document.getElementById('brightness');
     if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
     var autoBrightnessEl = document.getElementById('autoBrightness');
@@ -618,6 +660,7 @@ function loadAll(){
     var customMsgEl = document.getElementById('customMsg');
     if (customMsgEl) customMsgEl.value = (typeof s.customMsg !== 'undefined' ? s.customMsg : '');
     applyAutoBrightnessUI();
+    applyAutoThemeUI();
 
     var owmCityEl = document.getElementById('owmCity');
     if (owmCityEl) owmCityEl.value = s.owmCity || '';
@@ -703,6 +746,12 @@ function readSettingsForm() {
   function byId(id) {
     return document.getElementById(id);
   }
+  function getTimeMinutes(id, fallback){
+    var el = byId(id);
+    var value = el ? el.value : '';
+    if (!value && el && el.getAttribute('value')) value = el.getAttribute('value');
+    return timeStringToMinutes(value, fallback);
+  }
 
   var autoRotateIntervalEl = byId('autoRotateInterval');
   var autoRotateInterval = parseInt(autoRotateIntervalEl && autoRotateIntervalEl.value, 10);
@@ -739,6 +788,9 @@ function readSettingsForm() {
     autoRotateInterval: autoRotateInterval,
     manualScreen:+(byId('manualScreen')?.value ?? 0),
     theme:       +(byId('theme')?.value ?? 0),
+    autoThemeSchedule: +(byId('autoThemeSchedule')?.value ?? 0),
+    dayThemeStart: getTimeMinutes('dayThemeStart', 360),
+    nightThemeStart: getTimeMinutes('nightThemeStart', 1200),
     brightness:  +(byId('brightness')?.value ?? 10),
     autoBrightness: +(byId('autoBrightness')?.value ?? 0),
     splashDuration: splashDuration,
@@ -823,7 +875,7 @@ async function saveDisplaySettings(event){
     event.preventDefault();
   }
   const payload = pickSettings(readSettingsForm(), [
-    'theme','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
+    'theme','autoThemeSchedule','dayThemeStart','nightThemeStart','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
   ]);
   await submitSettings(payload, 'saveDisplayMsg');
 }
@@ -930,6 +982,8 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', saveCalibrationSettings);
     var autoBrightnessEl = document.getElementById('autoBrightness');
     if (autoBrightnessEl) autoBrightnessEl.addEventListener('change', applyAutoBrightnessUI);
+    var autoThemeModeEl = document.getElementById('autoThemeSchedule');
+    if (autoThemeModeEl) autoThemeModeEl.addEventListener('change', applyAutoThemeUI);
     var dataSourceEl = document.getElementById('dataSource');
     if (dataSourceEl) dataSourceEl.addEventListener('change', applyDataSourceVisibility);
     btn = document.getElementById('btnSaveTime');
