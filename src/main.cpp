@@ -994,7 +994,7 @@ void loop()
 
     if (isWeatherScenePreviewActive())
     {
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code)
             handleWeatherScenePreviewIR(code);
         delay(40);
@@ -1038,7 +1038,7 @@ void loop()
             showUdpScreen();
             newTempestData = false;
         }
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code == IR_CANCEL)
         {
             hideAllInfoScreens();
@@ -1054,7 +1054,7 @@ void loop()
 
     if (forecastScreen.isActive())
     {
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code == IR_CANCEL)
         {
             hideAllInfoScreens();
@@ -1070,7 +1070,7 @@ void loop()
 
     if (currentCondScreen.isActive())
     {
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code == IR_CANCEL)
         {
             hideAllInfoScreens();
@@ -1086,7 +1086,7 @@ void loop()
 
     if (hourlyScreen.isActive())
     {
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code == IR_CANCEL)
         {
             hideAllInfoScreens();
@@ -1100,7 +1100,7 @@ void loop()
         return;
     }
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
-    uint32_t code = getIRCodeNonBlocking();
+    uint32_t code = getIRCodeDebounced();
     if (code == IR_LEFT)
     {
         rotateScreen(-1);
@@ -1242,7 +1242,7 @@ void loop()
             lastFrameUpdate = now;
         }
         // IR input handling for this screen
-        uint32_t code = getIRCodeNonBlocking();
+        uint32_t code = getIRCodeDebounced();
         if (code)
         {
             if (code == IR_LEFT)

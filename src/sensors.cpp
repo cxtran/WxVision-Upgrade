@@ -186,6 +186,29 @@ uint32_t getIRCodeNonBlocking()
   return 0;
 }
 
+uint32_t getIRCodeDebounced(uint16_t debounceMs)
+{
+  static uint32_t lastCode = 0;
+  static unsigned long lastTime = 0;
+
+  uint32_t code = getIRCodeNonBlocking();
+  if (code == 0)
+  {
+    return 0;
+  }
+
+  unsigned long now = millis();
+  if (code == lastCode && (now - lastTime) < debounceMs)
+  {
+    // Ignore rapid repeats of the same key for navigation-style input.
+    return 0;
+  }
+
+  lastCode = code;
+  lastTime = now;
+  return code;
+}
+
 bool enqueueVirtualIRCode(uint32_t code)
 {
   bool ok = false;

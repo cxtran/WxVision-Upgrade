@@ -33,6 +33,10 @@ float readBrightnessSensor();
 void setDisplayBrightnessFromLux(float lux);
 
 uint32_t getIRCodeNonBlocking();
+// Debounced IR read: suppresses rapid repeats of the same code.
+// Used for general navigation so that only value adjustments (which call
+// getIRCodeNonBlocking directly) remain highly responsive.
+uint32_t getIRCodeDebounced(uint16_t debounceMs = 200);
 bool enqueueVirtualIRCode(uint32_t code);
 
 
