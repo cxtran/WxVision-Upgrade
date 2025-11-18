@@ -10,6 +10,12 @@ VisionWX is a fully custom ESP32 firmware that drives a 64×32 RGB LED panel to 
 - **Wi‑Fi & OTA Friendly** – Manage multiple Wi‑Fi networks, perform scans, and expose a web UI (`data/config.html`) for configuring every device parameter through REST endpoints defined in `src/web.cpp`.
 - **Sensor Integration** – Reads SCD40, AHT20, BMP280, and other sensors (see `src/sensors.cpp`) for accurate environmental monitoring, adjusting display brightness automatically when desired.
 - **Extensible Rendering** – The display pipeline (e.g., `src/display.cpp`, `src/InfoScreen.cpp`) uses custom drawing utilities to render gradients, icons, scrolling text, and button bars optimized for small RGB matrices.
+- **Lunar Date Screen** – Dedicated screen that shows Vietnamese lunar information with:
+  - Line 1: daily Can Chi name (e.g. `Quy Mao`).
+  - Line 2: solar term (e.g. `Lap Dong`), derived from the current Gregorian date.
+  - Line 3: a combined marquee with compact Vietnamese date, English year name, and local time, for example:  
+    `Ngay 28/10 Nam At Ty ¦ The year of Wood Snake ¦ Gio Hoi  / 11:24 PM`.  
+    The 12/24‑hour format and marquee speed both respect the global settings configured in the main UI.
 
 ## Project Layout
 
@@ -34,3 +40,4 @@ Issues and pull requests are welcome. Please format code using the existing styl
 ## License
 
 VisionWX is released under the MIT License. See `LICENSE` (add one if missing) for details.
+
