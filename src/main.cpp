@@ -1196,6 +1196,7 @@ void loop()
             drawConditionSceneScreen();
             lastConditionSceneUpdate = now;
         }
+        tickConditionSceneMarquee();
     }
 
     if (envQualityScreen.isActive())

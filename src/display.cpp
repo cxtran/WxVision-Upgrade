@@ -21,6 +21,7 @@ extern float SCD40_temp;
 extern float SCD40_hum;
 extern float aht20_hum;
 extern int scrollLevel;
+extern int scrollSpeed;
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
@@ -1416,6 +1417,15 @@ uint16_t text_Length_In_Pixel = 0;
 bool set_up_Scrolling_Text_Length = true;
 bool start_Scroll_Text = false;
 
+// Condition scene marquee state
+static String conditionSceneMarqueeBase = "";
+static String conditionSceneMarqueeText = "";
+static int conditionSceneMarqueeWidth = 0;
+static int conditionSceneMarqueeOffset = 0;
+static uint16_t conditionSceneMarqueeColor = 0;
+static unsigned long conditionSceneMarqueeLastTick = 0;
+static constexpr int kConditionMarqueeGap = 12;
+
 void getTimeFromRTC()
 {
     DateTime now;
@@ -1757,6 +1767,79 @@ void scrollWeatherDetails()
         dma_display->setTextColor(scrolling_Text_Color);
         dma_display->print(scrolling_Text);
     }
+}
+
+static String formatConditionSceneTimeTag()
+{
+    char buf[12];
+    if (units.clock24h)
+    {
+        snprintf(buf, sizeof(buf), "%02d:%02d", t_hour, t_minute);
+        return String(buf);
+    }
+
+    int hour = t_hour;
+    const char *suffix = "AM";
+    if (hour >= 12)
+    {
+        suffix = "PM";
+        if (hour > 12)
+            hour -= 12;
+    }
+    else if (hour == 0)
+    {
+        hour = 12;
+    }
+    snprintf(buf, sizeof(buf), "%02d:%02d %s", hour, t_minute, suffix);
+    return String(buf);
+}
+
+static void renderConditionSceneMarquee(bool force)
+{
+    if (conditionSceneMarqueeText.length() == 0)
+        return;
+
+    const unsigned long intervalMs = (scrollSpeed > 0) ? static_cast<unsigned long>(scrollSpeed) : 60ul;
+    unsigned long now = millis();
+    if (!force && (now - conditionSceneMarqueeLastTick) < intervalMs)
+        return;
+    conditionSceneMarqueeLastTick = now;
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+
+    const int marqueeY = PANEL_RES_Y - 7;
+    const int marqueeHeight = 8;
+    dma_display->fillRect(0, marqueeY - 1, PANEL_RES_X, marqueeHeight + 1, myBLACK);
+    dma_display->setTextColor(conditionSceneMarqueeColor);
+
+    if (conditionSceneMarqueeWidth <= PANEL_RES_X)
+    {
+        conditionSceneMarqueeOffset = 0;
+        int startX = (PANEL_RES_X - conditionSceneMarqueeWidth) / 2;
+        if (startX < 0)
+            startX = 0;
+        dma_display->setCursor(startX, marqueeY);
+        dma_display->print(conditionSceneMarqueeText);
+        return;
+    }
+
+    const int totalWidth = conditionSceneMarqueeWidth + kConditionMarqueeGap;
+    int startX = -conditionSceneMarqueeOffset;
+    while (startX > -conditionSceneMarqueeWidth)
+    {
+        startX -= totalWidth;
+    }
+    for (; startX < PANEL_RES_X; startX += totalWidth)
+    {
+        if (startX + conditionSceneMarqueeWidth > 0)
+        {
+            dma_display->setCursor(startX, marqueeY);
+            dma_display->print(conditionSceneMarqueeText);
+        }
+    }
+
+    conditionSceneMarqueeOffset = (conditionSceneMarqueeOffset + 1) % totalWidth;
 }
 
 void drawSunIcon(int x, int y, uint16_t color)
@@ -2181,29 +2264,6 @@ void drawConditionSceneScreen()
 
     uint16_t accent = weatherSceneAccentColor(sceneKind);
 
-    auto formattedTime = []() -> String {
-        char buf[10];
-        if (units.clock24h)
-        {
-            snprintf(buf, sizeof(buf), "%02d:%02d", t_hour, t_minute);
-            return String(buf);
-        }
-        int hour = t_hour;
-        const char *suffix = "AM";
-        if (hour >= 12)
-        {
-            suffix = "PM";
-            if (hour > 12)
-                hour -= 12;
-        }
-        else if (hour == 0)
-        {
-            hour = 12;
-        }
-        snprintf(buf, sizeof(buf), "%02d:%02d %s", hour, t_minute, suffix);
-        return String(buf);
-    };
-
     String tempTag;
     if (isDataSourceWeatherFlow())
     {
@@ -2227,36 +2287,40 @@ void drawConditionSceneScreen()
         drawTextWithShadow(tempX, 6, tempTag, accent);
     }
 
-    int labelWidth = getTextWidth(label.c_str());
-    int labelX = (PANEL_RES_X - labelWidth) / 2;
-    if (labelX < 2)
-        labelX = 2;
-    drawTextWithShadow(labelX, PANEL_RES_Y - 2, label, accent);
+    conditionSceneMarqueeBase = label;
+    conditionSceneMarqueeColor = accent;
+    String timeTag = formatConditionSceneTimeTag();
+    conditionSceneMarqueeText = conditionSceneMarqueeBase;
+    if (conditionSceneMarqueeText.length() > 0 && timeTag.length() > 0)
+        conditionSceneMarqueeText += " ¦ ";
+    conditionSceneMarqueeText += timeTag;
+    conditionSceneMarqueeWidth = getTextWidth(conditionSceneMarqueeText.c_str());
+    conditionSceneMarqueeOffset = 0;
+    renderConditionSceneMarquee(true);
+}
 
-    if (!hasData && !isDataSourceNone())
+void tickConditionSceneMarquee()
+{
+    if (currentScreen != SCREEN_CONDITION_SCENE)
+        return;
+
+    if (conditionSceneMarqueeBase.length() == 0)
+        return;
+
+    String combined = conditionSceneMarqueeBase;
+    String timeTag = formatConditionSceneTimeTag();
+    if (combined.length() > 0 && timeTag.length() > 0)
+        combined += " ¦ ";
+    combined += timeTag;
+
+    if (combined != conditionSceneMarqueeText)
     {
-        String hint = "Waiting for data";
-        int hintWidth = getTextWidth(hint.c_str());
-        int hintX = (PANEL_RES_X - hintWidth) / 2;
-        if (hintX < 2)
-            hintX = 2;
-        drawTextWithShadow(hintX, PANEL_RES_Y - 11, hint, accent);
+        conditionSceneMarqueeText = combined;
+        conditionSceneMarqueeWidth = getTextWidth(conditionSceneMarqueeText.c_str());
+        conditionSceneMarqueeOffset = 0;
     }
 
-    String timeTag = formattedTime();
-    int timeWidth = getTextWidth(timeTag.c_str());
-    int timeX = PANEL_RES_X - timeWidth - 2;
-    int timeY = PANEL_RES_Y - 9;
-    if (timeX < 2)
-        timeX = 2;
-    int boxX = timeX - 2;
-    if (boxX < 0)
-        boxX = 0;
-    int boxWidth = timeWidth + 4;
-    if (boxX + boxWidth > PANEL_RES_X)
-        boxWidth = PANEL_RES_X - boxX;
-    dma_display->fillRect(boxX, timeY - 1, boxWidth, 8, myBLACK);
-    drawTextWithShadow(timeX, timeY, timeTag, dma_display->color565(255, 255, 200));
+    renderConditionSceneMarquee(false);
 }
 
 // Public helpers

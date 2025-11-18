@@ -90,6 +90,7 @@ ScreenMode homeScreenForDataSource();
 void drawConditionSceneScreen();
 void drawWeatherConditionScene(WeatherSceneKind kind);
 void drawWeatherConditionScene(const String &condition);
+void tickConditionSceneMarquee();
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);
