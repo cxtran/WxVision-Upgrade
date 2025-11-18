@@ -15,6 +15,8 @@
 
 #include "tempest.h"
 #include "weather_countries.h"
+#include "InfoModal.h"
+#include <math.h>
 
 extern float aht20_temp;
 extern float SCD40_temp;
@@ -38,6 +40,11 @@ extern String str_Humd;
 extern String str_Weather_Conditions_Des;
 extern const uint8_t *getWeatherIconFromCondition(String condition);
 extern int humOffset;
+extern byte t_hour;
+extern byte t_minute;
+extern byte d_day;
+extern byte d_month;
+extern int d_year;
 /*
 const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_DATA,
@@ -51,6 +58,445 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+
+// ---------- Vietnamese lunar calendar helpers ----------
+struct LunarDate
+{
+    int day;
+    int month;
+    int year;
+    bool leap;
+};
+
+static long jdFromDate(int dd, int mm, int yy)
+{
+    int a = (14 - mm) / 12;
+    int y = yy + 4800 - a;
+    int m = mm + 12 * a - 3;
+    long jd = dd + (153 * m + 2) / 5 + 365L * y + y / 4 - y / 100 + y / 400 - 32045;
+    return jd;
+}
+
+static double jdToDate(long jd, int &dd, int &mm, int &yy)
+{
+    long a = jd + 32044;
+    long b = (4 * a + 3) / 146097;
+    long c = a - (146097 * b) / 4;
+    long d = (4 * c + 3) / 1461;
+    long e = c - (1461 * d) / 4;
+    long m = (5 * e + 2) / 153;
+
+    dd = (int)(e - (153 * m + 2) / 5 + 1);
+    mm = (int)(m + 3 - 12 * (m / 10));
+    yy = (int)(100 * b + d - 4800 + m / 10);
+    return 0.0;
+}
+
+static double getNewMoonDay(int k, int timeZoneHours)
+{
+    double T = k / 1236.85;
+    double T2 = T * T;
+    double T3 = T2 * T;
+    double dr = M_PI / 180.0;
+    double Jd1 = 2415020.75933 + 29.53058868 * k
+                 + 0.0001178 * T2
+                 - 0.000000155 * T3;
+    Jd1 += 0.00033 * sin((166.56 + 132.87 * T - 0.009173 * T2) * dr);
+
+    double M = 359.2242 + 29.10535608 * k - 0.0000333 * T2 - 0.00000347 * T3;
+    double Mpr = 306.0253 + 385.81691806 * k + 0.0107306 * T2 + 0.00001236 * T3;
+    double F = 21.2964 + 390.67050646 * k - 0.0016528 * T2 - 0.00000239 * T3;
+
+    double C1 = (0.1734 - 0.000393 * T) * sin(M * dr)
+                + 0.0021 * sin(2 * M * dr)
+                - 0.4068 * sin(Mpr * dr)
+                + 0.0161 * sin(2 * Mpr * dr)
+                - 0.0004 * sin(3 * Mpr * dr)
+                + 0.0104 * sin(2 * F * dr)
+                - 0.0051 * sin((M + Mpr) * dr)
+                - 0.0074 * sin((M - Mpr) * dr)
+                + 0.0004 * sin((2 * F + M) * dr)
+                - 0.0004 * sin((2 * F - M) * dr)
+                - 0.0006 * sin((2 * F + Mpr) * dr)
+                + 0.0010 * sin((2 * F - Mpr) * dr)
+                + 0.0005 * sin((2 * Mpr + M) * dr);
+
+    double deltaT;
+    if (T < -11)
+    {
+        deltaT = 0.001 + 0.000839 * T + 0.0002261 * T2
+                 - 0.00000845 * T3 - 0.000000081 * T * T3;
+    }
+    else
+    {
+        deltaT = -0.000278 + 0.000265 * T + 0.000262 * T2;
+    }
+
+    double JdNew = Jd1 + C1 - deltaT;
+    return JdNew + 0.5 + timeZoneHours / 24.0;
+}
+
+static double getSunLongitude(double jdn)
+{
+    double T = (jdn - 2451545.0) / 36525.0;
+    double T2 = T * T;
+    double dr = M_PI / 180.0;
+    double M = 357.52910 + 35999.05030 * T - 0.0001559 * T2 - 0.00000048 * T * T2;
+    double L0 = 280.46645 + 36000.76983 * T + 0.0003032 * T2;
+
+    double DL = (1.914600 - 0.004817 * T - 0.000014 * T2) * sin(dr * M)
+                + (0.019993 - 0.000101 * T) * sin(2 * dr * M)
+                + 0.000290 * sin(3 * dr * M);
+
+    double L = L0 + DL;
+    L *= dr;
+    L -= 2 * M_PI * floor(L / (2 * M_PI));
+    return L;
+}
+
+static long getLunarMonth11(int yy, int timeZoneHours)
+{
+    long off = jdFromDate(31, 12, yy) - 2415021;
+    int k = (int)(off / 29.530588853);
+    double nm = getNewMoonDay(k, timeZoneHours);
+    double sunLong = getSunLongitude(nm);
+    if (sunLong > 3 * M_PI / 2)
+    {
+        nm = getNewMoonDay(k - 1, timeZoneHours);
+    }
+    return (long)nm;
+}
+
+static int getLeapMonthOffset(double a11, int timeZoneHours)
+{
+    int k = (int)((a11 - 2415021.076998695) / 29.530588853 + 0.5);
+    int last = 0;
+    int i = 1;
+    double arc = getSunLongitude(getNewMoonDay(k + i, timeZoneHours));
+    double lastArc;
+    do
+    {
+        last = i;
+        lastArc = arc;
+        i++;
+        arc = getSunLongitude(getNewMoonDay(k + i, timeZoneHours));
+    } while (arc != lastArc && i < 14);
+    return last - 1;
+}
+
+static LunarDate convertSolar2Lunar(int dd, int mm, int yy, int timeZoneMinutes)
+{
+    int timeZoneHours = timeZoneMinutes / 60;
+    long dayNumber = jdFromDate(dd, mm, yy);
+    long k = (long)((dayNumber - 2415021.076998695) / 29.530588853);
+    double monthStart = getNewMoonDay((int)(k + 1), timeZoneHours);
+    if (monthStart > dayNumber + 0.5)
+    {
+        monthStart = getNewMoonDay((int)k, timeZoneHours);
+    }
+
+    long a11 = getLunarMonth11(yy, timeZoneHours);
+    long b11 = a11;
+    int lunarYear;
+    if (a11 >= monthStart)
+    {
+        lunarYear = yy;
+        a11 = getLunarMonth11(yy - 1, timeZoneHours);
+    }
+    else
+    {
+        lunarYear = yy + 1;
+        b11 = getLunarMonth11(yy + 1, timeZoneHours);
+    }
+
+    int lunarDay = (int)(dayNumber - (long)monthStart + 1);
+    int diff = (int)(((long)monthStart - a11) / 29);
+    int lunarMonth = diff + 11;
+    bool lunarLeap = false;
+
+    if (b11 - a11 > 365)
+    {
+        int leapMonthDiff = getLeapMonthOffset(a11, timeZoneHours);
+        if (diff >= leapMonthDiff)
+        {
+            lunarMonth = diff + 10;
+            if (diff == leapMonthDiff)
+            {
+                lunarLeap = true;
+            }
+        }
+    }
+
+    if (lunarMonth > 12)
+    {
+        lunarMonth -= 12;
+    }
+    if (lunarMonth >= 11 && diff < 4)
+    {
+        lunarYear--;
+    }
+
+    LunarDate ld;
+    ld.day = lunarDay;
+    ld.month = lunarMonth;
+    ld.year = lunarYear;
+    ld.leap = lunarLeap;
+    return ld;
+}
+
+static void buildLunarYearNames(int lunarYear,
+                                String &stemBranchVi,
+                                String &zodiacVi,
+                                String &yearEn,
+                                String &animalVi,
+                                String &animalEn)
+{
+    const char *stemsVi[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
+    const char *branchesVi[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+    const char *animalsVi[12] = {"Chuot", "Trau", "Ho", "Meo", "Rong", "Ran", "Ngua", "De", "Khi", "Ga", "Cho", "Heo"};
+    const char *animalsEn[12] = {"Rat", "Ox", "Tiger", "Cat", "Dragon", "Snake", "Horse", "Goat", "Monkey", "Rooster", "Dog", "Pig"};
+
+    const char *elementsEn[5] = {"Wood", "Fire", "Earth", "Metal", "Water"};
+
+    int stemIndex = (lunarYear + 6) % 10;
+    int branchIndex = (lunarYear + 8) % 12;
+
+    stemBranchVi = String(stemsVi[stemIndex]) + " " + branchesVi[branchIndex];
+    zodiacVi = String("Nam con ") + animalsVi[branchIndex];
+    animalVi = String(animalsVi[branchIndex]);
+
+    int elementIndex = stemIndex / 2;
+    yearEn = String(elementsEn[elementIndex]) + " " + animalsEn[branchIndex];
+    animalEn = String(animalsEn[branchIndex]);
+}
+
+static String buildOrdinal(int day)
+{
+    int mod10 = day % 10;
+    int mod100 = day % 100;
+    if (mod10 == 1 && mod100 != 11)
+        return String("st");
+    if (mod10 == 2 && mod100 != 12)
+        return String("nd");
+    if (mod10 == 3 && mod100 != 13)
+        return String("rd");
+    return String("th");
+}
+
+// Forward declaration so we reuse the global 12/24h formatter
+static String formatConditionSceneTimeTag();
+
+static String formatLunarHourTag()
+{
+    // Map local hour (0–23) to Vietnamese lunar hour name
+    static const char *names[12] = {
+        "Gio Ty",  "Gio Suu",  "Gio Dan",  "Gio Mao",
+        "Gio Thin","Gio Ty",   "Gio Ngo",  "Gio Mui",
+        "Gio Than","Gio Dau",  "Gio Tuat", "Gio Hoi"};
+
+    int hour = t_hour;
+    if (hour < 0 || hour > 23)
+        hour = 0;
+
+    int idx;
+    if (hour == 23)
+        idx = 0;
+    else
+        idx = (hour + 1) / 2;
+    idx %= 12;
+
+    return String(names[idx]);
+}
+
+static String formatLunarClockTag()
+{
+    // Use the same 12/24h formatting as the rest of the app
+    return formatConditionSceneTimeTag();
+}
+
+static String formatSolarTermTag()
+{
+    int m = d_month;
+    int d = d_day;
+
+    switch (m)
+    {
+    case 1:
+        return (d <= 15) ? String("Tieu Han") : String("Dai Han");
+    case 2:
+        return (d <= 15) ? String("Lap Xuan") : String("Vu Thuy");
+    case 3:
+        return (d <= 15) ? String("Kinh Thap") : String("Xuan Phan");
+    case 4:
+        return (d <= 15) ? String("Thanh Minh") : String("Coc Vu");
+    case 5:
+        return (d <= 15) ? String("Lap Ha") : String("Tieu Man");
+    case 6:
+        return (d <= 15) ? String("Mang Chung") : String("Ha Chi");
+    case 7:
+        return (d <= 15) ? String("Tieu Thu") : String("Dai Thu");
+    case 8:
+        return (d <= 15) ? String("Lap Thu") : String("Xu Thu");
+    case 9:
+        return (d <= 15) ? String("Bach Lo") : String("Thu Phan");
+    case 10:
+        return (d <= 15) ? String("Han Lo") : String("Suong Giang");
+    case 11:
+        return (d <= 15) ? String("Lap Dong") : String("Tieu Tuyet");
+    case 12:
+        return (d <= 15) ? String("Dai Tuyet") : String("Dong Chi");
+    default:
+        return String("");
+    }
+}
+
+static String formatLunarDayName(int dd, int mm, int yy)
+{
+    long jd = jdFromDate(dd, mm, yy);
+
+    static const char *stemsVi[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
+    static const char *branchesVi[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+
+    int stemIndex = (int)((jd + 9) % 10);
+    int branchIndex = (int)((jd + 1) % 12);
+    if (stemIndex < 0)
+        stemIndex += 10;
+    if (branchIndex < 0)
+        branchIndex += 12;
+
+    return String(stemsVi[stemIndex]) + " " + branchesVi[branchIndex];
+}
+
+// Lunar marquee state (merged screen)
+static String lunarLines[3];
+static uint16_t lunarWidths[3] = {0, 0, 0};
+static int lunarOffsets[3] = {0, 0, 0};
+static unsigned long lastLunarTick = 0;
+static bool lunarInitialized = false;
+
+static void renderLunarLines(const String lines[3], const uint16_t widths[3], const int offsets[3])
+{
+    dma_display->fillScreen(0);
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+
+    uint16_t headerBg, headerFg, underlineColor, bodyColor;
+    uint16_t lineColors[3];
+    if (theme == 1)
+    {
+        headerBg = dma_display->color565(20, 20, 40);
+        headerFg = dma_display->color565(60, 60, 120);
+        underlineColor = dma_display->color565(30, 30, 70);
+        bodyColor = dma_display->color565(90, 90, 150);
+        lineColors[0] = dma_display->color565(150, 150, 220); // day name highlight
+        lineColors[1] = dma_display->color565(110, 110, 190); // solar term
+        lineColors[2] = dma_display->color565(200, 200, 255); // marquee detail
+    }
+    else
+    {
+        headerBg = INFOMODAL_HEADERBG;
+        headerFg = INFOMODAL_GREEN;
+        underlineColor = INFOMODAL_ULINE;
+        bodyColor = INFOMODAL_UNSEL;
+        lineColors[0] = INFOMODAL_SEL;      // bright for day name
+        lineColors[1] = bodyColor;          // standard for solar term
+        lineColors[2] = INFOMODAL_EDIT;     // accent for marquee detail
+    }
+
+    // --- Header bar ---
+    const int headerHeight = 8;
+    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
+
+    dma_display->setTextColor(headerFg);
+    const char *title = "Lunar Date";
+    int16_t tx1, ty1;
+    uint16_t tw, th;
+    dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
+    int titleX = (PANEL_RES_X - (int)tw) / 2;
+    if (titleX < 0)
+        titleX = 0;
+    dma_display->setCursor(titleX, 0);
+    dma_display->print(title);
+
+    // Header underline
+    dma_display->drawFastHLine(0, headerHeight - 1, PANEL_RES_X, underlineColor);
+
+    // --- Lines below title ---
+    for (int i = 0; i < 3; ++i)
+    {
+        int y = headerHeight + 8 * (i + 1) - 8; // 8,16,24
+        int w = widths[i];
+        if (w <= 0)
+            continue;
+
+        int baseX;
+        if (i < 2)
+        {
+            // Line 1 + 2: static centered
+            baseX = (PANEL_RES_X - w) / 2;
+            if (baseX < 0)
+                baseX = 0;
+        }
+        else
+        {
+            // Line 3: marquee
+            baseX = PANEL_RES_X - offsets[2];
+        }
+
+        dma_display->setTextColor(lineColors[i]);
+        dma_display->setCursor(baseX, y);
+        dma_display->print(lines[i]);
+    }
+}
+
+static void buildLunarLinesMerged()
+{
+    getTimeFromRTC();
+    int dd = d_day;
+    int mm = d_month;
+    int yy = d_year;
+
+    int tzMinutes = tzStandardOffset;
+    LunarDate ld = convertSolar2Lunar(dd, mm, yy, tzMinutes);
+
+    String stemBranchVi, zodiacVi, yearEn, animalVi, animalEn;
+    buildLunarYearNames(ld.year, stemBranchVi, zodiacVi, yearEn, animalVi, animalEn);
+
+    // Header Line 1: date name (Can Chi for the day)
+    lunarLines[0] = formatLunarDayName(dd, mm, yy);
+
+    // Header Line 2: Lap Dong (solar term, updated by date)
+    lunarLines[1] = formatSolarTermTag();
+
+    // Detail pieces for combined marquee line
+    // e.g. "Ngay 28/10 Nam At Ty"
+    String viDetail = String("Ngay ") + ld.day + "/" + ld.month +
+                      " Nam " + stemBranchVi;
+
+    // English year line: "The year of Wood Snake"
+    String enDetail = String("The year of ") + yearEn;
+
+    // Hour detail: e.g. "Gio Hoi  / 11:24 PM"
+    String lunarHour = formatLunarHourTag();
+    String clockTag = formatLunarClockTag();
+    String hourDetail = lunarHour + "  / " + clockTag;
+
+    // Line 3: combined marquee
+    // Ngay 28/10 Nam At Ty ¦ The year of Wood Snake ¦ Gio Hoi  / 11:24 PM
+    lunarLines[2] = viDetail + " \xC2\xA6  " + enDetail + "  \xC2\xA6  " + hourDetail;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        lunarWidths[i] = getTextWidth(lunarLines[i].c_str());
+        if (lunarWidths[i] <= 0)
+            lunarWidths[i] = 1;
+    }
+    for (int i = 0; i < 3; ++i)
+        lunarOffsets[i] = 0;
+    lastLunarTick = millis();
+    lunarInitialized = true;
+}
 
 static int envScoreForBand(EnvBand band)
 {
@@ -1354,6 +1800,16 @@ void drawSettingsScreen()
     // Draw options, etc.
 }
 
+void drawLunarScreenVi()
+{
+    if (!lunarInitialized)
+        buildLunarLinesMerged();
+    for (int i = 0; i < 3; ++i)
+        lunarOffsets[i] = 0;
+    lastLunarTick = millis();
+    renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
+}
+
 // OWS Weather /////////////////////////////////////////////////////////////////////////////////////////
 
 // === WiFi & API Config ===
@@ -1471,6 +1927,43 @@ void getTimeFromRTC()
     sprintf(chr_d_day, "%02d", d_day);
     sprintf(chr_d_month, "%02d", d_month);
     sprintf(chr_d_year, "%04d", d_year);
+}
+
+void tickLunarMarquee()
+{
+    if (!dma_display)
+        return;
+
+    unsigned long nowMs = millis();
+
+    if (currentScreen == SCREEN_LUNAR_VI)
+    {
+        if (!lunarInitialized)
+            buildLunarLinesMerged();
+
+        // Match global marquee speed (scrollSpeed from settings), fallback to 60 ms
+        unsigned long intervalMs = (scrollSpeed > 0)
+                                       ? static_cast<unsigned long>(scrollSpeed)
+                                       : 60ul;
+
+        if (nowMs - lastLunarTick >= intervalMs)
+        {
+            lastLunarTick = nowMs;
+
+            int i = 2; // only line 3 scrolls
+            int w = lunarWidths[i];
+            if (w > 0)
+            {
+                lunarOffsets[i]++;
+
+                int baseX = PANEL_RES_X - lunarOffsets[i];
+                if (baseX + w < 0)
+                    lunarOffsets[i] = 0;
+            }
+
+            renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
+        }
+    }
 }
 
 void fetchWeatherFromOWM()

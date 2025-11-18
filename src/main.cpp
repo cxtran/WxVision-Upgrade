@@ -35,9 +35,17 @@
 #include "system.h"
 
 // --- Screen rotation: add or remove as needed ---
-const ScreenMode InfoScreenModes[] = {SCREEN_CLOCK, SCREEN_OWM, SCREEN_UDP_DATA, SCREEN_UDP_FORECAST,
-                                      SCREEN_WIND_DIR, SCREEN_ENV_INDEX, SCREEN_CONDITION_SCENE,
-                                      SCREEN_CURRENT, SCREEN_HOURLY};
+const ScreenMode InfoScreenModes[] = {
+    SCREEN_CLOCK,
+    SCREEN_LUNAR_VI,
+    SCREEN_OWM,
+    SCREEN_UDP_DATA,
+    SCREEN_UDP_FORECAST,
+    SCREEN_WIND_DIR,
+    SCREEN_ENV_INDEX,
+    SCREEN_CONDITION_SCENE,
+    SCREEN_CURRENT,
+    SCREEN_HOURLY};
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
 // --- Global system state ---
@@ -274,6 +282,9 @@ static void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_CLOCK:
         drawClockScreen();
+        break;
+    case SCREEN_LUNAR_VI:
+        drawLunarScreenVi();
         break;
     default:
         break;
@@ -1178,6 +1189,23 @@ void loop()
             lastClockUpdate = now;
             drawClockScreen(); // Redraw clock screen
         }
+    }
+
+    if (currentScreen == SCREEN_LUNAR_VI)
+    {
+        static unsigned long lastLunarRedraw = 0;
+        if (needsClear)
+        {
+            dma_display->fillScreen(0);
+            needsClear = false;
+            lastLunarRedraw = 0;
+        }
+        if (now - lastLunarRedraw >= 60000)
+        {
+            lastLunarRedraw = now;
+            drawLunarScreenVi();
+        }
+        tickLunarMarquee();
     }
 
     if (currentScreen == SCREEN_CONDITION_SCENE)
