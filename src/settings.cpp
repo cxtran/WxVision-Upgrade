@@ -16,6 +16,12 @@ int autoRotateInterval = 15; // seconds between screen rotations
 int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
 String wifiSSID = "";
 String wifiPass = "";
+bool alarmEnabled = false;
+int alarmHour = 7;
+int alarmMinute = 0;
+AlarmRepeatMode alarmRepeatMode = ALARM_REPEAT_NONE;
+int alarmWeeklyDay = 1;
+bool alarmOneShotPending = false;
 
 bool setupComplete = false;
 bool initialSetupRequired = false;
@@ -104,6 +110,14 @@ void loadSettings() {
     autoRotateInterval = prefs.getInt("autoRotInt", 15);
     autoRotateInterval = constrain(autoRotateInterval, 5, 300);
     manualScreen = prefs.getInt("manualScreen", 0);
+    alarmEnabled = prefs.getBool("alarmEnabled", false);
+    alarmHour = constrain(prefs.getInt("alarmHour", 7), 0, 23);
+    alarmMinute = constrain(prefs.getInt("alarmMinute", 0), 0, 59);
+    alarmRepeatMode = static_cast<AlarmRepeatMode>(prefs.getUChar("alarmRepeat", ALARM_REPEAT_NONE));
+    if (alarmRepeatMode > ALARM_REPEAT_WEEKEND)
+        alarmRepeatMode = ALARM_REPEAT_NONE;
+    alarmWeeklyDay = constrain(prefs.getInt("alarmWeekDay", 1), 0, 6);
+    alarmOneShotPending = prefs.getBool("alarmOneShot", false);
 
     bool setupFlagExists = prefs.isKey("setupReady");
     setupComplete = setupFlagExists ? prefs.getBool("setupReady", false)
@@ -209,11 +223,23 @@ void saveCalibrationSettings() {
     prefs.end();
 }
 
+void saveAlarmSettings() {
+    prefs.begin("visionwx", false);
+    prefs.putBool("alarmEnabled", alarmEnabled);
+    prefs.putInt("alarmHour", constrain(alarmHour, 0, 23));
+    prefs.putInt("alarmMinute", constrain(alarmMinute, 0, 59));
+    prefs.putUChar("alarmRepeat", static_cast<uint8_t>(alarmRepeatMode));
+    prefs.putInt("alarmWeekDay", constrain(alarmWeeklyDay, 0, 6));
+    prefs.putBool("alarmOneShot", alarmOneShotPending);
+    prefs.end();
+}
+
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
     saveWeatherSettings();
     saveCalibrationSettings();
+    saveAlarmSettings();
     saveDateTimeSettings();
     // Persist unit preferences too
     saveUnits();

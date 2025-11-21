@@ -18,6 +18,7 @@
 #include "sensors.h"
 #include "weather_countries.h"
 #include "tempest.h"
+#include "alarm.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -57,6 +58,7 @@ InfoModal scenePreviewModal("Preview Scr");
 InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
+InfoModal alarmModal("Alarm");
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -462,11 +464,11 @@ void showMainMenuModal()
     menuActive = true;
 
     String items[] = {
-        "Device Settings", "WiFi Settings", "Display Settings",
+        "Device Settings", "WiFi Settings", "Display Settings", "Alarm Settings",
         "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 8);
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 9);
     mainMenuModal.setShowForwardArrow(true);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
@@ -482,11 +484,12 @@ void showMainMenuModal()
             case 0: showDeviceSettingsModal(); return;
             case 1: showWiFiSettingsModal(); return;
             case 2: showDisplaySettingsModal(); return;
-            case 3: showWeatherSettingsModal(); return;
-            case 4: showWfTempestModal(); return;
-            case 5: showCalibrationModal(); return;
-            case 6: showSystemModal(); return;
-            case 7: // Exit Menu
+            case 3: showAlarmSettingsModal(); return;
+            case 4: showWeatherSettingsModal(); return;
+            case 5: showWfTempestModal(); return;
+            case 6: showCalibrationModal(); return;
+            case 7: showSystemModal(); return;
+            case 8: // Exit Menu
                 mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
                 exitToHomeScreen();
                 return;
@@ -603,6 +606,135 @@ void showDisplaySettingsModal()
         menuScroll = 0;
     });
     displayModal.show();
+}
+
+void showAlarmSettingsModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_ALARM;
+    menuActive = true;
+
+    static int alarmEnabledTemp = 0;
+    static int alarmHourTemp = 0;
+    static int alarmMinuteTemp = 0;
+    static int alarmRepeatTemp = 0;
+    static int alarmWeeklyDayTemp = 0;
+    static int alarmAmPmTemp = 0;
+
+    alarmEnabledTemp = alarmEnabled ? 1 : 0;
+    alarmAmPmTemp = 0;
+    alarmHourTemp = alarmHour;
+    alarmMinuteTemp = alarmMinute;
+    alarmRepeatTemp = static_cast<int>(alarmRepeatMode);
+    alarmWeeklyDayTemp = alarmWeeklyDay;
+    bool use12h = !units.clock24h;
+    if (use12h)
+    {
+        alarmAmPmTemp = (alarmHour >= 12) ? 1 : 0;
+        int hour12 = alarmHour % 12;
+        if (hour12 == 0)
+            hour12 = 12;
+        alarmHourTemp = hour12;
+    }
+
+    String labels[6];
+    InfoFieldType types[6];
+    int lineCount = 0;
+
+    int *numberRefs[2];
+    int numberCount = 0;
+    int *chooserRefs[4];
+    const char *const *chooserOpts[4];
+    int chooserCounts[4];
+    int chooserCount = 0;
+
+    auto addNumberLine = [&](const String &label, int *ref) {
+        labels[lineCount] = label;
+        types[lineCount++] = InfoNumber;
+        numberRefs[numberCount++] = ref;
+    };
+    auto addChooserLine = [&](const String &label, int *ref, const char *const *opts, int count) {
+        labels[lineCount] = label;
+        types[lineCount++] = InfoChooser;
+        chooserRefs[chooserCount] = ref;
+        chooserOpts[chooserCount] = opts;
+        chooserCounts[chooserCount] = count;
+        ++chooserCount;
+    };
+
+    static const char *enableOpts[] = {"Off", "On"};
+    static const char *repeatOpts[] = {"No Repeat", "Daily", "Weekly", "Weekdays", "Weekend"};
+    static const char *dowOpts[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    static const char *ampmOpts[] = {"AM", "PM"};
+
+    addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
+    if (use12h)
+    {
+        addChooserLine("AM/PM", &alarmAmPmTemp, ampmOpts, 2);
+    }
+    addNumberLine(use12h ? "Hour (1-12)" : "Hour (0-23)", &alarmHourTemp);
+    addNumberLine("Minute (0-59)", &alarmMinuteTemp);
+    addChooserLine("Repeat Mode", &alarmRepeatTemp, repeatOpts, 5);
+    addChooserLine("Weekly Day", &alarmWeeklyDayTemp, dowOpts, 7);
+
+    alarmModal.setLines(labels, types, lineCount);
+    alarmModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    alarmModal.setShowNumberArrows(true);
+    alarmModal.setShowChooserArrows(true);
+
+    alarmModal.setCallback([](bool accepted, int) {
+        if (!accepted)
+        {
+            alarmModal.hide();
+            showMainMenuModal();
+            return;
+        }
+
+        alarmHourTemp = constrain(alarmHourTemp, 0, 23);
+        alarmMinuteTemp = constrain(alarmMinuteTemp, 0, 59);
+        alarmWeeklyDayTemp = constrain(alarmWeeklyDayTemp, 0, 6);
+        alarmEnabled = (alarmEnabledTemp > 0);
+        int repeatIdx = constrain(alarmRepeatTemp, static_cast<int>(ALARM_REPEAT_NONE), static_cast<int>(ALARM_REPEAT_WEEKEND));
+        alarmRepeatMode = static_cast<AlarmRepeatMode>(repeatIdx);
+        bool use12h = !units.clock24h;
+        if (use12h)
+        {
+            alarmHourTemp = constrain(alarmHourTemp, 1, 12);
+            int hourCore = alarmHourTemp % 12;
+            if (alarmAmPmTemp > 0)
+            {
+                hourCore += 12;
+            }
+            else if (hourCore == 0)
+            {
+                hourCore = 0;
+            }
+            alarmHour = hourCore;
+        }
+        else
+        {
+            alarmHour = constrain(alarmHourTemp, 0, 23);
+        }
+        alarmMinute = constrain(alarmMinuteTemp, 0, 59);
+        alarmWeeklyDay = constrain(alarmWeeklyDayTemp, 0, 6);
+
+        refreshAlarmArming();
+        saveAlarmSettings();
+        notifyAlarmSettingsChanged();
+
+        Serial.printf("[Alarm] Saved enabled=%d time=%02d:%02d repeat=%d weekday=%d\n",
+                      alarmEnabled, alarmHour, alarmMinute, alarmRepeatMode, alarmWeeklyDay);
+
+        alarmModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+
+    alarmModal.show();
 }
 
 void showWeatherSettingsModal()

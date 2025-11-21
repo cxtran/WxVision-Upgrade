@@ -749,8 +749,9 @@ void clampDateTimeFields(int& year, int& month, int& day, int& hour, int& min, i
     if (year > 2099) year = 2099;
     if (month < 1) month = 1;
     if (month > 12) month = 12;
+    int maxDay = daysInMonth(year, month);
     if (day < 1) day = 1;
-    if (day > 31) day = 31;
+    if (day > maxDay) day = maxDay;
     if (hour < 0) hour = 0;
     if (hour > 23) hour = 23;
     if (min < 0) min = 0;

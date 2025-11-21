@@ -508,6 +508,8 @@ void InfoModal::draw()
             }
         }
 
+        bool isAlarmAmPmLine = (this == &alarmModal && lines[idx] == "AM/PM");
+
         if (isSelected)
         {
             // Fill the current row so the active line is visually highlighted
@@ -523,7 +525,7 @@ void InfoModal::draw()
                 scrollPauseTime = 0;
             }
             int textW = getTextWidth(s.c_str());
-            bool needsScroll = textW > availableWidth;
+            bool needsScroll = isAlarmAmPmLine || textW > availableWidth;
             if (needsScroll && !scrollPaused)
             {
                 if (millis() - lastScrollTime > scrollSpeed)
@@ -559,7 +561,7 @@ void InfoModal::draw()
             }
 
             dma_display->setTextColor(isEditing ? palette.lineEditing : palette.lineSelected);
-            int cursorX = -scrollOffset;
+            int cursorX = (arrowLine ? arrowBoxW : 0) - scrollOffset;
             dma_display->setCursor(cursorX, rowY);
             dma_display->print(s + (isEditing ? " <" : ""));
 
@@ -759,6 +761,9 @@ void InfoModal::handleIR(uint32_t code)
                 case MENU_DISPLAY:
                     showDisplaySettingsModal();
                     break;
+                case MENU_ALARM:
+                    showAlarmSettingsModal();
+                    break;
                 case MENU_WEATHER:
                     showWeatherSettingsModal();
                     break;
@@ -940,6 +945,18 @@ void InfoModal::handleIR(uint32_t code)
                         *ptr = constrain(*ptr, 0, 59);
                     else if (label == "Manual Offset (min)")
                         *ptr = constrain(*ptr, -720, 840);
+                }
+                else if (this == &alarmModal)
+                {
+                    if (label.startsWith("Hour"))
+                    {
+                        if (units.clock24h)
+                            *ptr = constrain(*ptr, 0, 23);
+                        else
+                            *ptr = constrain(*ptr, 1, 12);
+                    }
+                    else if (label.startsWith("Minute"))
+                        *ptr = constrain(*ptr, 0, 59);
                 }
                 else if (label == "Day Theme Start" || label == "Night Theme Start")
                 {

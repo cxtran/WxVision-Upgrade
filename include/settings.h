@@ -9,6 +9,14 @@ extern RTC_DS3231 rtc;
 
 extern const int scrollDelays[10];
 
+enum AlarmRepeatMode : uint8_t {
+    ALARM_REPEAT_NONE = 0,
+    ALARM_REPEAT_DAILY = 1,
+    ALARM_REPEAT_WEEKLY = 2,
+    ALARM_REPEAT_WEEKDAY = 3,
+    ALARM_REPEAT_WEEKEND = 4
+};
+
 // --- Date/Time/Timezone Settings ---
 extern int dstAuto; // 0 = off, 1 = auto
 extern int timeZoneOffsetMinutes; // Time Zone offset in minutes, e.g. 420 for UTC+7
@@ -29,6 +37,12 @@ extern int autoRotateInterval;  // seconds between auto rotations
 extern int manualScreen;     // 0=Main,1=Weather,2=Forecast,3=Calib
 extern String wifiSSID;
 extern String wifiPass;
+extern bool alarmEnabled;
+extern int alarmHour;
+extern int alarmMinute;
+extern AlarmRepeatMode alarmRepeatMode;
+extern int alarmWeeklyDay;
+extern bool alarmOneShotPending;
 
 extern bool setupComplete;       // true once onboarding finished
 extern bool initialSetupRequired; // true when device needs first-time setup
@@ -66,6 +80,7 @@ void saveDisplaySettings();
 void saveCalibrationSettings();
 void saveAllSettings();
 void saveWeatherSettings();
+void saveAlarmSettings();
 
 // --- UI helpers ---
 void toggleDayFormat(int dir);

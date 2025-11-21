@@ -26,6 +26,7 @@ void showWiFiSignalTest();
 void showMainMenuModal();
 void showDeviceSettingsModal();
 void showDisplaySettingsModal();
+void showAlarmSettingsModal();
 void showWeatherSettingsModal();
 void showWfTempestModal();
 void showCalibrationModal();
@@ -59,6 +60,7 @@ enum MenuLevel {
     MENU_DEVICE,
     MENU_WIFISETTINGS,
     MENU_DISPLAY,
+    MENU_ALARM,
     MENU_WEATHER,
     MENU_TEMPEST,
     MENU_CALIBRATION,
@@ -137,6 +139,7 @@ extern InfoModal scenePreviewModal;
 extern InfoModal setupPromptModal;
 extern InfoModal wifiSettingsModal;
 extern InfoModal unitSettingsModal;
+extern InfoModal alarmModal;
 
 // --- Helper for modal "reopen after delay" ---
 extern void (*pendingModalFn)();

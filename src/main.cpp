@@ -22,11 +22,13 @@
 #include <WiFi.h>
 #include <ESPmDNS.h>
 #include "settings.h"
+#include "datetimesettings.h"
 #include "config.h"
 #include "wifisettings.h"
 #include "web.h"
 #include "buzzer.h"
 #include "menu.h"
+#include "alarm.h"
 #include "keyboard.h"
 #include "tempest.h"
 #include "InfoScreen.h"
@@ -52,7 +54,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal;
+extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal, alarmModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
@@ -625,6 +627,7 @@ void setup()
     deviceHostname = buildDefaultHostname();
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
     loadSettings();
+    initAlarmModule();
     delay(500);
     setupDisplay();
     int clampedSplashSec = constrain(splashDurationSec, 1, 10);
@@ -722,6 +725,25 @@ void loop()
     static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500;
+
+    DateTime alarmNow;
+    bool haveAlarmTime = false;
+    if (rtcReady)
+    {
+        DateTime utcNow = rtc.now();
+        int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utcNow);
+        alarmNow = utcToLocal(utcNow, offsetMinutes);
+        updateTimezoneOffsetWithUtc(utcNow);
+        haveAlarmTime = true;
+    }
+    else if (getLocalDateTime(alarmNow))
+    {
+        haveAlarmTime = true;
+    }
+    if (haveAlarmTime)
+    {
+        tickAlarmState(alarmNow);
+    }
 
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
     bool apActive = isAccessPointActive();
@@ -862,6 +884,7 @@ void loop()
         !deviceModal.isActive() &&
         !wifiSettingsModal.isActive() &&
         !displayModal.isActive() &&
+        !alarmModal.isActive() &&
         !weatherModal.isActive() &&
         !tempestModal.isActive() &&
         !calibrationModal.isActive() &&
@@ -992,6 +1015,13 @@ void loop()
     {
         systemModal.tick();
         systemModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (alarmModal.isActive())
+    {
+        alarmModal.tick();
+        alarmModal.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
@@ -1142,6 +1172,7 @@ void loop()
         weatherModal.isActive() ||
         tempestModal.isActive() ||
         calibrationModal.isActive() ||
+        alarmModal.isActive() ||
         systemModal.isActive() ||
         inKeyboardMode ||
         udpScreen.isActive() ||
@@ -1184,7 +1215,8 @@ void loop()
     if( currentScreen == SCREEN_CLOCK){
         // Handle clock screen updates
         static unsigned long lastClockUpdate = 0;
-        if (now - lastClockUpdate >= 1000) // Update every second
+        unsigned long interval = isAlarmCurrentlyActive() ? 400 : 1000;
+        if (now - lastClockUpdate >= interval) // Update display
         {
             lastClockUpdate = now;
             drawClockScreen(); // Redraw clock screen

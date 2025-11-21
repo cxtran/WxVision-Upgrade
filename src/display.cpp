@@ -12,6 +12,7 @@
 #include "datetimesettings.h"
 #include "units.h"
 #include "env_quality.h"
+#include "alarm.h"
 
 #include "tempest.h"
 #include "weather_countries.h"
@@ -2408,6 +2409,15 @@ void drawWiFiIcon(int x, int y, uint16_t color)
     dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, color); // support bar
 }
 
+void drawAlarmIcon(int x, int y, uint16_t color)
+{
+    dma_display->drawLine(x + 1, y, x + 3, y, color);          // top of bell
+    dma_display->drawLine(x, y + 1, x + 4, y + 1, color);      // shoulders
+    dma_display->drawLine(x, y + 2, x + 4, y + 2, color);      // body
+    dma_display->drawLine(x + 1, y + 3, x + 3, y + 3, color);  // taper
+    dma_display->drawPixel(x + 2, y + 4, color);               // clapper
+}
+
 void drawClockScreen()
 {
 
@@ -2425,6 +2435,7 @@ void drawClockScreen()
     {
         now = DateTime(2000, 1, 1, 0, 0, 0);
     }
+    tickAlarmState(now);
     int hour = now.hour(), minute = now.minute(), second = now.second();
 
     // 12h/24h handling
@@ -2443,6 +2454,8 @@ void drawClockScreen()
 
     char timeStr[6]; // "HH:MM"
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+    bool alarmActive = isAlarmCurrentlyActive();
+    bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
 
     const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     char dateStr[14];
@@ -2454,6 +2467,8 @@ void drawClockScreen()
     dma_display->setTextSize(1);
     uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
                                       : dma_display->color565(255, 255, 80);
+    if (alarmActive)
+        timeColor = dma_display->color565(255, 80, 80);
     dma_display->setTextColor(timeColor);
 
     int timeW = getTextWidth(timeStr);
@@ -2478,68 +2493,53 @@ void drawClockScreen()
     int boxY = (32 - timeH) / 2;
 
 
-    dma_display->setCursor(boxX, boxY + timeH - 1);
-    dma_display->print(timeStr);
-
-    // --- draw AM/PM inline
-    if (!units.clock24h)
+    if (showTimeDigits)
     {
-        String ampmStr = isPM ? "PM" : "AM";
-        dma_display->setFont(&Font5x7Uts);
-        dma_display->setTextSize(1);
-        
+        dma_display->setCursor(boxX, boxY + timeH - 1);
+        dma_display->print(timeStr);
 
+        // --- draw AM/PM inline
+        if (!units.clock24h)
+        {
+            String ampmStr = isPM ? "PM" : "AM";
+            dma_display->setFont(&Font5x7Uts);
+            dma_display->setTextSize(1);
 
-        /*
-        uint16_t ampmColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                          : dma_display->color565(255, 255, 200);
-        dma_display->setTextColor(ampmColor);
-*/
-        int16_t x1, y1;
-        uint16_t w, h;
-        dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-        int digitH = h;
-        dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-        int ampmW = w;
-        int ampmH = h;
-        int ampmX = 64 - ampmW - 1;
-        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-        ampmY -= 1;
-        //       if (!isPM) ampmY -= 6;
-        //       ampmY -= 1;
-/*
-        uint16_t bgColor = (theme == 1) ? dma_display->color565(20, 20, 40)
-                                        : dma_display->color565(40, 40, 40);
-        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
-*/
+            int16_t x1, y1;
+            uint16_t w, h;
+            dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+            int digitH = h;
+            dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+            int ampmW = w;
+            int ampmH = h;
+            int ampmX = 64 - ampmW - 1;
+            int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+            ampmY -= 1;
 
-        uint16_t ampmColor, bgColor;
+            uint16_t ampmColor, bgColor;
 
-        if (theme == 1) {
-            // Night theme: both AM/PM are dim gray-blue
-            ampmColor = dma_display->color565(100, 100, 140);
-            bgColor   = dma_display->color565(20, 20, 40);
-        }
-        else {
-            if (isPM) {
-                // Evening / night → warm amber on darker background
-                ampmColor = dma_display->color565(255, 170, 60);   // warm orange-gold text
-                bgColor   = dma_display->color565(50, 30, 0);      // dusk background
-            } else {
-                // Morning / day → cool blue on soft gray background
-                ampmColor = dma_display->color565(100, 200, 255);  // light sky-blue text
-                bgColor   = dma_display->color565(10, 30, 50);     // early-morning gray-blue
+            if (theme == 1) {
+                ampmColor = dma_display->color565(100, 100, 140);
+                bgColor   = dma_display->color565(20, 20, 40);
             }
+            else {
+                if (isPM) {
+                    ampmColor = dma_display->color565(255, 170, 60);
+                    bgColor   = dma_display->color565(50, 30, 0);
+                } else {
+                    ampmColor = dma_display->color565(100, 200, 255);
+                    bgColor   = dma_display->color565(10, 30, 50);
+                }
+            }
+
+            dma_display->setTextColor(ampmColor);
+            dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
+
+            dma_display->setCursor(ampmX, ampmY);
+            dma_display->print(ampmStr);
         }
-
-        dma_display->setTextColor(ampmColor);
-        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
-
-
-        dma_display->setCursor(ampmX, ampmY);
-        dma_display->print(ampmStr);
     }
-    // ---- Draw Wi-Fi icon if connected ----
+    // ---- Draw Wi-Fi icon if connected ---- if connected ----
     if (WiFi.status() == WL_CONNECTED)
     {
         // Position the Wi-Fi icon just above AM/PM
@@ -2555,6 +2555,14 @@ void drawClockScreen()
                                  ? dma_display->color565(90, 90, 120)    // dim gray for mono
                                  : dma_display->color565(100, 255, 120); // soft green for color
         drawWiFiIcon(wifiX, wifiY, wifiColor);
+    }
+    if (alarmEnabled || alarmActive)
+    {
+        uint16_t alarmColor = alarmActive
+                                  ? dma_display->color565(255, 80, 80)
+                                  : ((theme == 1) ? dma_display->color565(120, 120, 180)
+                                                  : dma_display->color565(255, 255, 120));
+        drawAlarmIcon(52, 14, alarmColor);
     }
     // ---- DATE ----
     dma_display->setFont(&Font5x7Uts);
@@ -2854,6 +2862,7 @@ void applyUnitPreferences()
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
 }
+
 
 
 
