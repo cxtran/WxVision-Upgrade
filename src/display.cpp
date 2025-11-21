@@ -1802,8 +1802,8 @@ void drawSettingsScreen()
 
 void drawLunarScreenVi()
 {
-    if (!lunarInitialized)
-        buildLunarLinesMerged();
+    // Always rebuild so lunar time/date stay in sync with current clock
+    buildLunarLinesMerged();
     for (int i = 0; i < 3; ++i)
         lunarOffsets[i] = 0;
     lastLunarTick = millis();
