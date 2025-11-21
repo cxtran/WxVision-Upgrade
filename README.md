@@ -7,9 +7,10 @@ VisionWX is a fully custom ESP32 firmware that drives a 64×32 RGB LED panel to 
 - **Weather & Sensor Display** – Shows live weather data, environmental sensor readings (CO₂, temperature, humidity, pressure) and device status information using animated scenes tailored for day and night themes.
 - **On-Device Menu System** – Navigate settings such as Wi‑Fi credentials, units, calibration, system info, and display preferences via IR remote control. Menus use the shared `InfoModal` component to handle chooser, number, text, and button fields.
 - **Auto Theme Scheduling** – Configure day/night theme switching manually or via a schedule with adjustable start times. Theme switches can also be triggered instantly using the IR `Theme` button.
-- **Wi‑Fi & OTA Friendly** – Manage multiple Wi‑Fi networks, perform scans, and expose a web UI (`data/config.html`) for configuring every device parameter through REST endpoints defined in `src/web.cpp`.
+- **Wi-Fi & OTA Friendly** – Manage multiple Wi-Fi networks, perform scans, and expose a web UI (`data/config.html`) for configuring every device parameter through REST endpoints defined in `src/web.cpp`.
 - **Sensor Integration** – Reads SCD40, AHT20, BMP280, and other sensors (see `src/sensors.cpp`) for accurate environmental monitoring, adjusting display brightness automatically when desired.
 - **Extensible Rendering** – The display pipeline (e.g., `src/display.cpp`, `src/InfoScreen.cpp`) uses custom drawing utilities to render gradients, icons, scrolling text, and button bars optimized for small RGB matrices.
+- **Alarm Clock** – Built-in alarm can be toggled on/off, set to repeat (daily, weekly, weekdays, weekend, or one-shot), and edited from the main menu. Settings persist across reboots, support both 12 h and 24 h formats (with AM/PM marquee feedback in 12 h mode), and trigger a flashing clock indication when active.
 - **Lunar Date Screen** – Dedicated screen that shows Vietnamese lunar information with:
   - Line 1: daily Can Chi name (e.g. `Quy Mao`).
   - Line 2: solar term (e.g. `Lap Dong`), derived from the current Gregorian date.
@@ -40,4 +41,3 @@ Issues and pull requests are welcome. Please format code using the existing styl
 ## License
 
 VisionWX is released under the MIT License. See `LICENSE` (add one if missing) for details.
-
