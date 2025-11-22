@@ -19,6 +19,7 @@
 #include "weather_countries.h"
 #include "tempest.h"
 #include "alarm.h"
+#include "noaa.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -59,6 +60,10 @@ InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
 InfoModal alarmModal("Alarm");
+InfoModal noaaModal("NOAA Alerts");
+
+int alarmSlotSelection = 0;
+int alarmSlotShown = 0;
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -465,10 +470,11 @@ void showMainMenuModal()
 
     String items[] = {
         "Device Settings", "WiFi Settings", "Display Settings", "Alarm Settings",
-        "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
+        "NOAA Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 9);
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 10);
     mainMenuModal.setShowForwardArrow(true);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
@@ -485,11 +491,12 @@ void showMainMenuModal()
             case 1: showWiFiSettingsModal(); return;
             case 2: showDisplaySettingsModal(); return;
             case 3: showAlarmSettingsModal(); return;
-            case 4: showWeatherSettingsModal(); return;
-            case 5: showWfTempestModal(); return;
-            case 6: showCalibrationModal(); return;
-            case 7: showSystemModal(); return;
-            case 8: // Exit Menu
+            case 4: showNoaaSettingsModal(); return;
+            case 5: showWeatherSettingsModal(); return;
+            case 6: showWfTempestModal(); return;
+            case 7: showCalibrationModal(); return;
+            case 8: showSystemModal(); return;
+            case 9: // Exit Menu
                 mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
                 exitToHomeScreen();
                 return;
@@ -617,6 +624,8 @@ void showAlarmSettingsModal()
     currentMenuLevel = MENU_ALARM;
     menuActive = true;
 
+    alarmSlotSelection = constrain(alarmSlotSelection, 0, 2);
+    alarmSlotShown = alarmSlotSelection;
     static int alarmEnabledTemp = 0;
     static int alarmHourTemp = 0;
     static int alarmMinuteTemp = 0;
@@ -624,31 +633,31 @@ void showAlarmSettingsModal()
     static int alarmWeeklyDayTemp = 0;
     static int alarmAmPmTemp = 0;
 
-    alarmEnabledTemp = alarmEnabled ? 1 : 0;
+    alarmEnabledTemp = alarmEnabled[alarmSlotSelection] ? 1 : 0;
     alarmAmPmTemp = 0;
-    alarmHourTemp = alarmHour;
-    alarmMinuteTemp = alarmMinute;
-    alarmRepeatTemp = static_cast<int>(alarmRepeatMode);
-    alarmWeeklyDayTemp = alarmWeeklyDay;
+    alarmHourTemp = alarmHour[alarmSlotSelection];
+    alarmMinuteTemp = alarmMinute[alarmSlotSelection];
+    alarmRepeatTemp = static_cast<int>(alarmRepeatMode[alarmSlotSelection]);
+    alarmWeeklyDayTemp = alarmWeeklyDay[alarmSlotSelection];
     bool use12h = !units.clock24h;
     if (use12h)
     {
-        alarmAmPmTemp = (alarmHour >= 12) ? 1 : 0;
-        int hour12 = alarmHour % 12;
+        alarmAmPmTemp = (alarmHour[alarmSlotSelection] >= 12) ? 1 : 0;
+        int hour12 = alarmHour[alarmSlotSelection] % 12;
         if (hour12 == 0)
             hour12 = 12;
         alarmHourTemp = hour12;
     }
 
-    String labels[6];
-    InfoFieldType types[6];
+    String labels[7];
+    InfoFieldType types[7];
     int lineCount = 0;
 
     int *numberRefs[2];
     int numberCount = 0;
-    int *chooserRefs[4];
-    const char *const *chooserOpts[4];
-    int chooserCounts[4];
+    int *chooserRefs[5];
+    const char *const *chooserOpts[5];
+    int chooserCounts[5];
     int chooserCount = 0;
 
     auto addNumberLine = [&](const String &label, int *ref) {
@@ -666,10 +675,12 @@ void showAlarmSettingsModal()
     };
 
     static const char *enableOpts[] = {"Off", "On"};
+    static const char *alarmSlotOpts[] = {"1", "2", "3"};
     static const char *repeatOpts[] = {"No Repeat", "Daily", "Weekly", "Weekdays", "Weekend"};
     static const char *dowOpts[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char *ampmOpts[] = {"AM", "PM"};
 
+    addChooserLine("Select Alarm", &alarmSlotSelection, alarmSlotOpts, 3);
     addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
     if (use12h)
     {
@@ -685,20 +696,23 @@ void showAlarmSettingsModal()
     alarmModal.setShowNumberArrows(true);
     alarmModal.setShowChooserArrows(true);
 
-    alarmModal.setCallback([](bool accepted, int) {
-        if (!accepted)
+    alarmModal.setCallback([](bool /*accepted*/, int) {
+        alarmSlotSelection = constrain(alarmSlotSelection, 0, 2);
+        if (alarmSlotSelection != alarmSlotShown)
         {
+            alarmSlotShown = alarmSlotSelection;
             alarmModal.hide();
-            showMainMenuModal();
+            pendingModalFn = showAlarmSettingsModal;
+            pendingModalTime = millis() + 10;
             return;
         }
-
+        int slot = alarmSlotSelection;
         alarmHourTemp = constrain(alarmHourTemp, 0, 23);
         alarmMinuteTemp = constrain(alarmMinuteTemp, 0, 59);
         alarmWeeklyDayTemp = constrain(alarmWeeklyDayTemp, 0, 6);
-        alarmEnabled = (alarmEnabledTemp > 0);
+        alarmEnabled[slot] = (alarmEnabledTemp > 0);
         int repeatIdx = constrain(alarmRepeatTemp, static_cast<int>(ALARM_REPEAT_NONE), static_cast<int>(ALARM_REPEAT_WEEKEND));
-        alarmRepeatMode = static_cast<AlarmRepeatMode>(repeatIdx);
+        alarmRepeatMode[slot] = static_cast<AlarmRepeatMode>(repeatIdx);
         bool use12h = !units.clock24h;
         if (use12h)
         {
@@ -712,21 +726,21 @@ void showAlarmSettingsModal()
             {
                 hourCore = 0;
             }
-            alarmHour = hourCore;
+            alarmHour[slot] = hourCore;
         }
         else
         {
-            alarmHour = constrain(alarmHourTemp, 0, 23);
+            alarmHour[slot] = constrain(alarmHourTemp, 0, 23);
         }
-        alarmMinute = constrain(alarmMinuteTemp, 0, 59);
-        alarmWeeklyDay = constrain(alarmWeeklyDayTemp, 0, 6);
+        alarmMinute[slot] = constrain(alarmMinuteTemp, 0, 59);
+        alarmWeeklyDay[slot] = constrain(alarmWeeklyDayTemp, 0, 6);
 
         refreshAlarmArming();
         saveAlarmSettings();
         notifyAlarmSettingsChanged();
 
         Serial.printf("[Alarm] Saved enabled=%d time=%02d:%02d repeat=%d weekday=%d\n",
-                      alarmEnabled, alarmHour, alarmMinute, alarmRepeatMode, alarmWeeklyDay);
+                      alarmEnabled[slot], alarmHour[slot], alarmMinute[slot], alarmRepeatMode[slot], alarmWeeklyDay[slot]);
 
         alarmModal.hide();
         currentMenuLevel = MENU_MAIN;
@@ -735,6 +749,61 @@ void showAlarmSettingsModal()
     });
 
     alarmModal.show();
+}
+
+void showNoaaSettingsModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_NOAA;
+    menuActive = true;
+
+    static int noaaEnabledTemp = 0;
+    static char latBuf[16];
+    static char lonBuf[16];
+
+    noaaEnabledTemp = noaaAlertsEnabled ? 1 : 0;
+    snprintf(latBuf, sizeof(latBuf), "%.4f", noaaLatitude);
+    snprintf(lonBuf, sizeof(lonBuf), "%.4f", noaaLongitude);
+
+    String labels[] = {"Alerts", "Latitude", "Longitude"};
+    InfoFieldType types[] = {InfoChooser, InfoText, InfoText};
+    int *chooserRefs[] = {&noaaEnabledTemp};
+    static const char *alertsOpts[] = {"Off", "On"};
+    const char *const *chooserOpts[] = {alertsOpts};
+    int chooserCounts[] = {2};
+    char *textRefs[] = {latBuf, lonBuf};
+    int textSizes[] = {static_cast<int>(sizeof(latBuf)), static_cast<int>(sizeof(lonBuf))};
+
+    noaaModal.setLines(labels, types, 3);
+    noaaModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, textRefs, 2, textSizes);
+
+    noaaModal.setCallback([](bool /*accepted*/, int) {
+        noaaAlertsEnabled = (noaaEnabledTemp > 0);
+        String latStr = String(latBuf);
+        String lonStr = String(lonBuf);
+        latStr.trim();
+        lonStr.trim();
+        float lat = latStr.toFloat();
+        float lon = lonStr.toFloat();
+        noaaLatitude = constrain(lat, -90.0f, 90.0f);
+        noaaLongitude = constrain(lon, -180.0f, 180.0f);
+
+        saveNoaaSettings();
+        notifyNoaaSettingsChanged();
+
+        Serial.printf("[NOAA] enabled=%d lat=%.4f lon=%.4f\n",
+                      noaaAlertsEnabled, noaaLatitude, noaaLongitude);
+
+        noaaModal.hide();
+        currentMenuLevel = MENU_MAIN;
+        currentMenuIndex = 0;
+        menuScroll = 0;
+    });
+
+    noaaModal.show();
 }
 
 void showWeatherSettingsModal()

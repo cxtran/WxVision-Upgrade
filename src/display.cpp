@@ -1315,6 +1315,8 @@ bool screenIsAllowed(ScreenMode mode)
         return isDataSourceWeatherFlow();
     case SCREEN_CONDITION_SCENE:
         return !isDataSourceNone();
+    case SCREEN_NOAA_ALERT:
+        return noaaAlertsEnabled;
     default:
         return true;
     }
@@ -2411,11 +2413,19 @@ void drawWiFiIcon(int x, int y, uint16_t color)
 
 void drawAlarmIcon(int x, int y, uint16_t color)
 {
-    dma_display->drawLine(x + 1, y, x + 3, y, color);          // top of bell
-    dma_display->drawLine(x, y + 1, x + 4, y + 1, color);      // shoulders
-    dma_display->drawLine(x, y + 2, x + 4, y + 2, color);      // body
-    dma_display->drawLine(x + 1, y + 3, x + 3, y + 3, color);  // taper
-    dma_display->drawPixel(x + 2, y + 4, color);               // clapper
+    // Draw 6x6 bell per provided pattern:
+    // Row 0: ..XX..
+    // Row 1: .XXXX.
+    // Row 2: .XXXX.
+    // Row 3: .XXXX.
+    // Row 4: XXXXXX
+    // Row 5: ..XX..
+    dma_display->drawLine(x + 2, y + 0, x + 3, y + 0, color);
+    dma_display->drawLine(x + 1, y + 1, x + 4, y + 1, color);
+    dma_display->drawLine(x + 1, y + 2, x + 4, y + 2, color);
+    dma_display->drawLine(x + 1, y + 3, x + 4, y + 3, color);
+    dma_display->drawLine(x + 0, y + 4, x + 5, y + 4, color);
+    dma_display->drawLine(x + 2, y + 5, x + 3, y + 5, color);
 }
 
 void drawClockScreen()
@@ -2556,13 +2566,13 @@ void drawClockScreen()
                                  : dma_display->color565(100, 255, 120); // soft green for color
         drawWiFiIcon(wifiX, wifiY, wifiColor);
     }
-    if (alarmEnabled || alarmActive)
+    if (isAnyAlarmEnabled() || alarmActive)
     {
         uint16_t alarmColor = alarmActive
                                   ? dma_display->color565(255, 80, 80)
                                   : ((theme == 1) ? dma_display->color565(120, 120, 180)
                                                   : dma_display->color565(255, 255, 120));
-        drawAlarmIcon(52, 14, alarmColor);
+        drawAlarmIcon(51, 8, alarmColor);
     }
     // ---- DATE ----
     dma_display->setFont(&Font5x7Uts);

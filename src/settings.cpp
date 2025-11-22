@@ -16,12 +16,15 @@ int autoRotateInterval = 15; // seconds between screen rotations
 int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
 String wifiSSID = "";
 String wifiPass = "";
-bool alarmEnabled = false;
-int alarmHour = 7;
-int alarmMinute = 0;
-AlarmRepeatMode alarmRepeatMode = ALARM_REPEAT_NONE;
-int alarmWeeklyDay = 1;
-bool alarmOneShotPending = false;
+bool alarmEnabled[3] = {false, false, false};
+int alarmHour[3] = {7, 7, 7};
+int alarmMinute[3] = {0, 0, 0};
+AlarmRepeatMode alarmRepeatMode[3] = {ALARM_REPEAT_NONE, ALARM_REPEAT_NONE, ALARM_REPEAT_NONE};
+int alarmWeeklyDay[3] = {1, 1, 1};
+bool alarmOneShotPending[3] = {false, false, false};
+bool noaaAlertsEnabled = false;
+float noaaLatitude = 0.0f;
+float noaaLongitude = 0.0f;
 
 bool setupComplete = false;
 bool initialSetupRequired = false;
@@ -110,14 +113,21 @@ void loadSettings() {
     autoRotateInterval = prefs.getInt("autoRotInt", 15);
     autoRotateInterval = constrain(autoRotateInterval, 5, 300);
     manualScreen = prefs.getInt("manualScreen", 0);
-    alarmEnabled = prefs.getBool("alarmEnabled", false);
-    alarmHour = constrain(prefs.getInt("alarmHour", 7), 0, 23);
-    alarmMinute = constrain(prefs.getInt("alarmMinute", 0), 0, 59);
-    alarmRepeatMode = static_cast<AlarmRepeatMode>(prefs.getUChar("alarmRepeat", ALARM_REPEAT_NONE));
-    if (alarmRepeatMode > ALARM_REPEAT_WEEKEND)
-        alarmRepeatMode = ALARM_REPEAT_NONE;
-    alarmWeeklyDay = constrain(prefs.getInt("alarmWeekDay", 1), 0, 6);
-    alarmOneShotPending = prefs.getBool("alarmOneShot", false);
+    noaaAlertsEnabled = prefs.getBool("noaaEnabled", false);
+    noaaLatitude = prefs.getFloat("noaaLat", 0.0f);
+    noaaLongitude = prefs.getFloat("noaaLon", 0.0f);
+    for (int i = 0; i < 3; ++i)
+    {
+        String idx = String(i);
+        alarmEnabled[i] = prefs.getBool(("alarmEnabled" + idx).c_str(), false);
+        alarmHour[i] = constrain(prefs.getInt(("alarmHour" + idx).c_str(), 7), 0, 23);
+        alarmMinute[i] = constrain(prefs.getInt(("alarmMinute" + idx).c_str(), 0), 0, 59);
+        alarmRepeatMode[i] = static_cast<AlarmRepeatMode>(prefs.getUChar(("alarmRepeat" + idx).c_str(), ALARM_REPEAT_NONE));
+        if (alarmRepeatMode[i] > ALARM_REPEAT_WEEKEND)
+            alarmRepeatMode[i] = ALARM_REPEAT_NONE;
+        alarmWeeklyDay[i] = constrain(prefs.getInt(("alarmWeekDay" + idx).c_str(), 1), 0, 6);
+        alarmOneShotPending[i] = prefs.getBool(("alarmOneShot" + idx).c_str(), false);
+    }
 
     bool setupFlagExists = prefs.isKey("setupReady");
     setupComplete = setupFlagExists ? prefs.getBool("setupReady", false)
@@ -225,12 +235,23 @@ void saveCalibrationSettings() {
 
 void saveAlarmSettings() {
     prefs.begin("visionwx", false);
-    prefs.putBool("alarmEnabled", alarmEnabled);
-    prefs.putInt("alarmHour", constrain(alarmHour, 0, 23));
-    prefs.putInt("alarmMinute", constrain(alarmMinute, 0, 59));
-    prefs.putUChar("alarmRepeat", static_cast<uint8_t>(alarmRepeatMode));
-    prefs.putInt("alarmWeekDay", constrain(alarmWeeklyDay, 0, 6));
-    prefs.putBool("alarmOneShot", alarmOneShotPending);
+    for (int i = 0; i < 3; ++i)
+    {
+        prefs.putBool(("alarmEnabled" + String(i)).c_str(), alarmEnabled[i]);
+        prefs.putInt(("alarmHour" + String(i)).c_str(), constrain(alarmHour[i], 0, 23));
+        prefs.putInt(("alarmMinute" + String(i)).c_str(), constrain(alarmMinute[i], 0, 59));
+        prefs.putUChar(("alarmRepeat" + String(i)).c_str(), static_cast<uint8_t>(alarmRepeatMode[i]));
+        prefs.putInt(("alarmWeekDay" + String(i)).c_str(), constrain(alarmWeeklyDay[i], 0, 6));
+        prefs.putBool(("alarmOneShot" + String(i)).c_str(), alarmOneShotPending[i]);
+    }
+    prefs.end();
+}
+
+void saveNoaaSettings() {
+    prefs.begin("visionwx", false);
+    prefs.putBool("noaaEnabled", noaaAlertsEnabled);
+    prefs.putFloat("noaaLat", noaaLatitude);
+    prefs.putFloat("noaaLon", noaaLongitude);
     prefs.end();
 }
 
@@ -240,6 +261,7 @@ void saveAllSettings() {
     saveWeatherSettings();
     saveCalibrationSettings();
     saveAlarmSettings();
+    saveNoaaSettings();
     saveDateTimeSettings();
     // Persist unit preferences too
     saveUnits();

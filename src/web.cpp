@@ -35,6 +35,14 @@ extern void saveAllSettings();
 extern void loadSettings();
 extern String str_Weather_Conditions, str_Temp, str_Humd;
 extern char chr_t_hour[3], chr_t_minute[3], chr_t_second[3];
+extern bool alarmEnabled[3];
+extern int alarmHour[3];
+extern int alarmMinute[3];
+extern AlarmRepeatMode alarmRepeatMode[3];
+extern int alarmWeeklyDay[3];
+extern bool noaaAlertsEnabled;
+extern float noaaLatitude;
+extern float noaaLongitude;
 
 // Date/Time bits
 extern RTC_DS3231 rtc;
@@ -589,6 +597,20 @@ void setupWebServer() {
     doc["lightGain"]        = lightGain;
     doc["ntpServer"]        = ntpServerHost;
     doc["ntpPreset"]        = ntpServerPreset;
+    JsonArray alarms = doc.createNestedArray("alarms");
+    for (int i = 0; i < 3; ++i)
+    {
+      JsonObject a = alarms.add<JsonObject>();
+      a["enabled"] = alarmEnabled[i];
+      a["hour"] = alarmHour[i];
+      a["minute"] = alarmMinute[i];
+      a["repeat"] = static_cast<uint8_t>(alarmRepeatMode[i]);
+      a["weekDay"] = alarmWeeklyDay[i];
+    }
+    JsonObject noaa = doc.createNestedObject("noaa");
+    noaa["enabled"] = noaaAlertsEnabled;
+    noaa["lat"] = noaaLatitude;
+    noaa["lon"] = noaaLongitude;
     String json; serializeJson(doc, json);
     req->send(200, "application/json", json);
   });
@@ -812,6 +834,38 @@ void setupWebServer() {
         tempOffset = constrain(tempOffset, -10.0f, 10.0f);
         humOffset  = constrain(humOffset, -20, 20);
         lightGain  = constrain(lightGain, 1, 150);
+
+        // Alarms
+        if (!doc["alarms"].isNull() && doc["alarms"].is<JsonArray>())
+        {
+          JsonArray arr = doc["alarms"].as<JsonArray>();
+          int idx = 0;
+          for (JsonObject a : arr)
+          {
+            if (idx >= 3) break;
+            if (!a["enabled"].isNull()) alarmEnabled[idx] = a["enabled"].as<bool>();
+            if (!a["hour"].isNull()) alarmHour[idx] = constrain(a["hour"].as<int>(), 0, 23);
+            if (!a["minute"].isNull()) alarmMinute[idx] = constrain(a["minute"].as<int>(), 0, 59);
+            if (!a["repeat"].isNull())
+            {
+              int r = a["repeat"].as<int>();
+              if (r < ALARM_REPEAT_NONE) r = ALARM_REPEAT_NONE;
+              if (r > ALARM_REPEAT_WEEKEND) r = ALARM_REPEAT_NONE;
+              alarmRepeatMode[idx] = static_cast<AlarmRepeatMode>(r);
+            }
+            if (!a["weekDay"].isNull()) alarmWeeklyDay[idx] = constrain(a["weekDay"].as<int>(), 0, 6);
+            idx++;
+          }
+        }
+
+        // NOAA
+        if (!doc["noaa"].isNull() && doc["noaa"].is<JsonObject>())
+        {
+          JsonObject noaa = doc["noaa"].as<JsonObject>();
+          if (!noaa["enabled"].isNull()) noaaAlertsEnabled = noaa["enabled"].as<bool>();
+          if (!noaa["lat"].isNull()) noaaLatitude = noaa["lat"].as<float>();
+          if (!noaa["lon"].isNull()) noaaLongitude = noaa["lon"].as<float>();
+        }
 
         saveDateTimeSettings();
         saveAllSettings();

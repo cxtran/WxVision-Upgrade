@@ -19,6 +19,88 @@ function minutesToTimeString(mins){
   return pad2(h) + ':' + pad2(m);
 }
 
+var alarmClockIs24 = true;
+
+function clamp(value, min, max){
+  var v = Number(value);
+  if (!isFinite(v)) v = min;
+  if (v < min) v = min;
+  if (v > max) v = max;
+  return v;
+}
+
+function isClock24Selected(){
+  var el = document.getElementById('uClock');
+  var val = parseInt(el && el.value, 10);
+  if (!isFinite(val)) val = 1;
+  return val === 1;
+}
+
+function setAlarmHourInputs(idx, hour24, targetClock24h){
+  var hourEl = document.getElementById('alarm' + idx + 'Hour');
+  var periodEl = document.getElementById('alarm' + idx + 'Period');
+
+  var showPeriod = !targetClock24h;
+  if (periodEl) periodEl.style.display = showPeriod ? '' : 'none';
+
+  if (!hourEl) return;
+
+  if (targetClock24h){
+    var h24 = clamp(hour24, 0, 23);
+    hourEl.min = 0;
+    hourEl.max = 23;
+    hourEl.placeholder = 'Hour (0-23)';
+    hourEl.value = h24;
+    return;
+  }
+
+  var h = ((hour24 % 24) + 24) % 24;
+  var period = (h >= 12) ? 'pm' : 'am';
+  var h12 = h % 12;
+  if (h12 === 0) h12 = 12;
+  hourEl.min = 1;
+  hourEl.max = 12;
+  hourEl.placeholder = 'Hour (1-12)';
+  hourEl.value = h12;
+  if (periodEl) periodEl.value = period;
+}
+
+function readAlarmHourFromInputs(idx, sourceClock24h){
+  var hourEl = document.getElementById('alarm' + idx + 'Hour');
+  var raw = parseInt(hourEl && hourEl.value, 10);
+  if (!isFinite(raw)) raw = sourceClock24h ? 0 : 12;
+
+  if (sourceClock24h){
+    var h24 = clamp(raw, 0, 23);
+    if (hourEl) hourEl.value = h24;
+    return h24;
+  }
+
+  var periodEl = document.getElementById('alarm' + idx + 'Period');
+  var period = (periodEl && periodEl.value === 'pm') ? 'pm' : 'am';
+  var h12 = clamp(raw, 1, 12);
+  if (hourEl) hourEl.value = h12;
+  if (period === 'pm' && h12 !== 12) return h12 + 12;
+  if (period === 'am' && h12 === 12) return 0;
+  return h12 % 12;
+}
+
+function readAlarmMinute(idx){
+  var minuteEl = document.getElementById('alarm' + idx + 'Minute');
+  var raw = parseInt(minuteEl && minuteEl.value, 10);
+  var minute = clamp(raw, 0, 59);
+  if (minuteEl) minuteEl.value = minute;
+  return minute;
+}
+
+function applyAlarmHourFormat(targetClock24h){
+  [1,2,3].forEach(function(idx){
+    var hour24 = readAlarmHourFromInputs(idx, alarmClockIs24);
+    setAlarmHourInputs(idx, hour24, targetClock24h);
+  });
+  alarmClockIs24 = targetClock24h;
+}
+
 function timeStringToMinutes(str, fallback){
   if (fallback === undefined) fallback = 0;
   if (typeof str !== 'string') str = '';
@@ -639,6 +721,8 @@ function loadAll(){
       if (uPrecipEl) uPrecipEl.value = (typeof s.units.precip !== 'undefined' ? s.units.precip : 0);
       var uClockEl = document.getElementById('uClock');
       if (uClockEl) uClockEl.value = (s.units.clock24h ? 1 : 0);
+      alarmClockIs24 = !!s.units.clock24h;
+      applyAlarmHourFormat(alarmClockIs24);
     }
 
     var themeEl = document.getElementById('theme');
@@ -699,6 +783,35 @@ function loadAll(){
     if (humOffsetEl) humOffsetEl.value = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
     var lightGainEl = document.getElementById('lightGain');
     if (lightGainEl) lightGainEl.value = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
+
+    // Alarms
+    if (Array.isArray(s.alarms))
+    {
+      s.alarms.forEach(function(a, idx){
+        if (!a) return;
+        var i = idx + 1;
+        var en = document.getElementById('alarm'+i+'Enabled');
+        if (en) en.value = a.enabled ? '1' : '0';
+        var hh = document.getElementById('alarm'+i+'Hour');
+        var hourVal = (typeof a.hour === 'number') ? a.hour : 0;
+        setAlarmHourInputs(i, hourVal, alarmClockIs24);
+        var mm = document.getElementById('alarm'+i+'Minute');
+        if (mm) mm.value = (typeof a.minute === 'number') ? a.minute : 0;
+        var rep = document.getElementById('alarm'+i+'Repeat');
+        if (rep) rep.value = (typeof a.repeat === 'number') ? a.repeat : 0;
+        var wd = document.getElementById('alarm'+i+'Weekday');
+        if (wd) wd.value = (typeof a.weekDay === 'number') ? a.weekDay : 0;
+      });
+    }
+    // NOAA
+    if (s.noaa) {
+      var nEn = document.getElementById('noaaEnabled');
+      if (nEn) nEn.value = s.noaa.enabled ? '1' : '0';
+      var nLat = document.getElementById('noaaLat');
+      if (nLat) nLat.value = (typeof s.noaa.lat === 'number') ? s.noaa.lat : 0;
+      var nLon = document.getElementById('noaaLon');
+      if (nLon) nLon.value = (typeof s.noaa.lon === 'number') ? s.noaa.lon : 0;
+    }
 
     currentEpoch = t.epoch || Math.floor(Date.now()/1000);
     tzOffset = (typeof t.tzOffset !== 'undefined' ? t.tzOffset : 0);
@@ -804,7 +917,22 @@ function readSettingsForm() {
     wfStationId:      (byId('wfStationId')?.value || '').trim(),
     tempOffset:  +(byId('tempOffset')?.value ?? 0),
     humOffset:   +(byId('humOffset')?.value ?? 0),
-    lightGain:   +(byId('lightGain')?.value ?? 100)
+    lightGain:   +(byId('lightGain')?.value ?? 100),
+    alarms: [0,1,2].map(function(i){
+      var idx = i + 1;
+      return {
+        enabled: +(byId('alarm'+idx+'Enabled')?.value ?? 0) === 1,
+        hour: readAlarmHourFromInputs(idx, alarmClockIs24),
+        minute: readAlarmMinute(idx),
+        repeat: +(byId('alarm'+idx+'Repeat')?.value ?? 0),
+        weekDay: +(byId('alarm'+idx+'Weekday')?.value ?? 0)
+      };
+    }),
+    noaa: {
+      enabled: +(byId('noaaEnabled')?.value ?? 0) === 1,
+      lat: parseFloat(byId('noaaLat')?.value ?? 0) || 0,
+      lon: parseFloat(byId('noaaLon')?.value ?? 0) || 0
+    }
   };
 }
 
@@ -906,6 +1034,22 @@ async function saveCalibrationSettings(event){
   await submitSettings(payload, 'saveCalibrationMsg');
 }
 
+async function saveAlarmSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['alarms']);
+  await submitSettings(payload, 'saveAlarmsMsg');
+}
+
+async function saveNoaaSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['noaa']);
+  await submitSettings(payload, 'saveNoaaMsg');
+}
+
 function parseManualToEpoch() {
   var d = document.getElementById('manualDate').value;
   var t = document.getElementById('manualTime').value;
@@ -980,6 +1124,14 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', saveTempestSettings);
     btn = document.getElementById('btnSaveCalibration');
     if (btn) btn.addEventListener('click', saveCalibrationSettings);
+    btn = document.getElementById('btnSaveAlarms');
+    if (btn) btn.addEventListener('click', saveAlarmSettingsWeb);
+    btn = document.getElementById('btnSaveNoaa');
+    if (btn) btn.addEventListener('click', saveNoaaSettingsWeb);
+    var clockFormatEl = document.getElementById('uClock');
+    if (clockFormatEl) clockFormatEl.addEventListener('change', function(){
+      applyAlarmHourFormat(isClock24Selected());
+    });
     var autoBrightnessEl = document.getElementById('autoBrightness');
     if (autoBrightnessEl) autoBrightnessEl.addEventListener('change', applyAutoBrightnessUI);
     var autoThemeModeEl = document.getElementById('autoThemeSchedule');

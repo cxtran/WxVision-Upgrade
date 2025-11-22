@@ -272,6 +272,142 @@
     </div>
   </section>
 
+  <!-- Alarms -->
+  <section class="card" id="card-alarms">
+    <h2>Alarms</h2>
+    <div class="alarm-grid">
+      <div class="alarm-card">
+        <div class="alarm-line">
+          <div class="alarm-title">Alarm 1</div>
+          <label class="alarm-inline-label" for="alarm1Enabled">On/Off</label>
+          <select id="alarm1Enabled">
+            <option value="0">Off</option>
+            <option value="1">On</option>
+          </select>
+          <label class="alarm-inline-label">Time</label>
+          <span class="alarm-time-group">
+            <input id="alarm1Hour" type="number" min="0" max="23" placeholder="Hour" class="alarm-hour">
+            <span class="alarm-time-sep">:</span>
+            <input id="alarm1Minute" type="number" min="0" max="59" placeholder="Minute" class="alarm-minute">
+            <select id="alarm1Period" class="alarm-period-select">
+              <option value="am">AM</option>
+              <option value="pm">PM</option>
+            </select>
+          </span>
+          <label class="alarm-inline-label" for="alarm1Repeat">Repeat</label>
+          <select id="alarm1Repeat">
+            <option value="0">No Repeat</option>
+            <option value="1">Daily</option>
+            <option value="2">Weekly</option>
+            <option value="3">Weekdays</option>
+            <option value="4">Weekend</option>
+          </select>
+          <label class="alarm-inline-label" for="alarm1Weekday">Day</label>
+          <select id="alarm1Weekday">
+            <option value="0">Sun</option><option value="1">Mon</option><option value="2">Tue</option>
+            <option value="3">Wed</option><option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option>
+          </select>
+        </div>
+      </div>
+      <div class="alarm-card">
+        <div class="alarm-line">
+          <div class="alarm-title">Alarm 2</div>
+          <label class="alarm-inline-label" for="alarm2Enabled">On/Off</label>
+          <select id="alarm2Enabled">
+            <option value="0">Off</option>
+            <option value="1">On</option>
+          </select>
+          <label class="alarm-inline-label">Time</label>
+          <span class="alarm-time-group">
+            <input id="alarm2Hour" type="number" min="0" max="23" placeholder="Hour" class="alarm-hour">
+            <span class="alarm-time-sep">:</span>
+            <input id="alarm2Minute" type="number" min="0" max="59" placeholder="Minute" class="alarm-minute">
+            <select id="alarm2Period" class="alarm-period-select">
+              <option value="am">AM</option>
+              <option value="pm">PM</option>
+            </select>
+          </span>
+          <label class="alarm-inline-label" for="alarm2Repeat">Repeat</label>
+          <select id="alarm2Repeat">
+            <option value="0">No Repeat</option>
+            <option value="1">Daily</option>
+            <option value="2">Weekly</option>
+            <option value="3">Weekdays</option>
+            <option value="4">Weekend</option>
+          </select>
+          <label class="alarm-inline-label" for="alarm2Weekday">Day</label>
+          <select id="alarm2Weekday">
+            <option value="0">Sun</option><option value="1">Mon</option><option value="2">Tue</option>
+            <option value="3">Wed</option><option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option>
+          </select>
+        </div>
+      </div>
+      <div class="alarm-card">
+        <div class="alarm-line">
+          <div class="alarm-title">Alarm 3</div>
+          <label class="alarm-inline-label" for="alarm3Enabled">On/Off</label>
+          <select id="alarm3Enabled">
+            <option value="0">Off</option>
+            <option value="1">On</option>
+          </select>
+          <label class="alarm-inline-label">Time</label>
+          <span class="alarm-time-group">
+            <input id="alarm3Hour" type="number" min="0" max="23" placeholder="Hour" class="alarm-hour">
+            <span class="alarm-time-sep">:</span>
+            <input id="alarm3Minute" type="number" min="0" max="59" placeholder="Minute" class="alarm-minute">
+            <select id="alarm3Period" class="alarm-period-select">
+              <option value="am">AM</option>
+              <option value="pm">PM</option>
+            </select>
+          </span>
+          <label class="alarm-inline-label" for="alarm3Repeat">Repeat</label>
+          <select id="alarm3Repeat">
+            <option value="0">No Repeat</option>
+            <option value="1">Daily</option>
+            <option value="2">Weekly</option>
+            <option value="3">Weekdays</option>
+            <option value="4">Weekend</option>
+          </select>
+          <label class="alarm-inline-label" for="alarm3Weekday">Day</label>
+          <select id="alarm3Weekday">
+            <option value="0">Sun</option><option value="1">Mon</option><option value="2">Tue</option>
+            <option value="3">Wed</option><option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option>
+          </select>
+        </div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveAlarms">Save Alarms</button>
+      <span class="msg" id="saveAlarmsMsg"></span>
+    </div>
+  </section>
+
+  <!-- NOAA Alerts -->
+  <section class="card" id="card-noaa">
+    <h2>NOAA Alerts</h2>
+    <div class="grid2">
+      <div class="row">
+        <label for="noaaEnabled">NOAA Alerts</label>
+        <select id="noaaEnabled">
+          <option value="0">Off</option>
+          <option value="1">On</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="noaaLat">Latitude</label>
+        <input id="noaaLat" type="number" step="0.0001" min="-90" max="90" placeholder="e.g. 37.7749">
+      </div>
+      <div class="row">
+        <label for="noaaLon">Longitude</label>
+        <input id="noaaLon" type="number" step="0.0001" min="-180" max="180" placeholder="-122.4194">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveNoaa">Save NOAA</button>
+      <span class="msg" id="saveNoaaMsg"></span>
+    </div>
+  </section>
+
   <!-- Date & Time -->
   <section class="card" id="card-time">
     <h2>Date & Time</h2>

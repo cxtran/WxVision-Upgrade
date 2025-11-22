@@ -33,6 +33,7 @@ enum ScreenMode {
     SCREEN_HOURLY,
     SCREEN_CLOCK,
     SCREEN_LUNAR_VI,
+    SCREEN_NOAA_ALERT,
     SCREEN_COUNT
 };
 

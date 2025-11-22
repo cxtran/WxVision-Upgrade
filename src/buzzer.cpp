@@ -17,3 +17,7 @@ void playBuzzerTone(int frequency, int duration) {
     delay(duration);                           // Wait
     ledcWriteTone(BUZZER_CHANNEL, 0);          // Stop tone
 }
+
+void stopBuzzer() {
+    ledcWriteTone(BUZZER_CHANNEL, 0);
+}

@@ -2,6 +2,7 @@
 #include "display.h"
 #include "menu.h"
 #include "settings.h"
+#include "alarm.h"
 #include "keyboard.h"
 #include <cstring>
 #include <vector>
@@ -763,6 +764,9 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_ALARM:
                     showAlarmSettingsModal();
+                    break;
+                case MENU_NOAA:
+                    showNoaaSettingsModal();
                     break;
                 case MENU_WEATHER:
                     showWeatherSettingsModal();

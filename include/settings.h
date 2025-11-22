@@ -37,12 +37,15 @@ extern int autoRotateInterval;  // seconds between auto rotations
 extern int manualScreen;     // 0=Main,1=Weather,2=Forecast,3=Calib
 extern String wifiSSID;
 extern String wifiPass;
-extern bool alarmEnabled;
-extern int alarmHour;
-extern int alarmMinute;
-extern AlarmRepeatMode alarmRepeatMode;
-extern int alarmWeeklyDay;
-extern bool alarmOneShotPending;
+extern bool alarmEnabled[3];
+extern int alarmHour[3];
+extern int alarmMinute[3];
+extern AlarmRepeatMode alarmRepeatMode[3];
+extern int alarmWeeklyDay[3];
+extern bool alarmOneShotPending[3];
+extern bool noaaAlertsEnabled;
+extern float noaaLatitude;
+extern float noaaLongitude;
 
 extern bool setupComplete;       // true once onboarding finished
 extern bool initialSetupRequired; // true when device needs first-time setup
@@ -81,6 +84,7 @@ void saveCalibrationSettings();
 void saveAllSettings();
 void saveWeatherSettings();
 void saveAlarmSettings();
+void saveNoaaSettings();
 
 // --- UI helpers ---
 void toggleDayFormat(int dir);

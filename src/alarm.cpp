@@ -1,26 +1,29 @@
 #include "alarm.h"
 #include "settings.h"
+#include "buzzer.h"
 
 static bool s_alarmActive = false;
 static bool s_alarmFlashVisible = true;
 static unsigned long s_lastFlashToggleMs = 0;
 static uint32_t s_lastTriggerMinuteKey = 0;
+static uint32_t s_silencedMinuteKey = 0;
+static int s_activeSlot = -1;
 
 static constexpr unsigned long kAlarmFlashIntervalMs = 400;
 
-static bool doesAlarmApplyToday(int dayOfWeek)
+static bool doesAlarmApplyToday(int slot, int dayOfWeek)
 {
-    if (!alarmEnabled)
+    if (!alarmEnabled[slot])
         return false;
 
-    switch (alarmRepeatMode)
+    switch (alarmRepeatMode[slot])
     {
     case ALARM_REPEAT_NONE:
-        return alarmOneShotPending;
+        return alarmOneShotPending[slot];
     case ALARM_REPEAT_DAILY:
         return true;
     case ALARM_REPEAT_WEEKLY:
-        return dayOfWeek == alarmWeeklyDay;
+        return dayOfWeek == alarmWeeklyDay[slot];
     case ALARM_REPEAT_WEEKDAY:
         return dayOfWeek >= 1 && dayOfWeek <= 5;
     case ALARM_REPEAT_WEEKEND:
@@ -32,20 +35,16 @@ static bool doesAlarmApplyToday(int dayOfWeek)
 
 void refreshAlarmArming()
 {
-    if (alarmRepeatMode == ALARM_REPEAT_NONE)
+    for (int i = 0; i < 3; ++i)
     {
-        if (alarmEnabled)
+        if (alarmRepeatMode[i] == ALARM_REPEAT_NONE)
         {
-            alarmOneShotPending = true;
+            alarmOneShotPending[i] = alarmEnabled[i];
         }
         else
         {
-            alarmOneShotPending = false;
+            alarmOneShotPending[i] = false;
         }
-    }
-    else
-    {
-        alarmOneShotPending = false;
     }
 }
 
@@ -55,6 +54,7 @@ static void resetRuntimeAlarm()
     s_alarmFlashVisible = true;
     s_lastFlashToggleMs = millis();
     s_lastTriggerMinuteKey = 0;
+    s_silencedMinuteKey = 0;
 }
 
 void initAlarmModule()
@@ -72,32 +72,50 @@ void notifyAlarmSettingsChanged()
 void tickAlarmState(const DateTime &now)
 {
     uint32_t currentMinuteKey = now.unixtime() / 60;
-    bool dayMatch = doesAlarmApplyToday(now.dayOfTheWeek());
-    bool timeMatch = dayMatch && now.hour() == alarmHour && now.minute() == alarmMinute;
-
-    bool shouldBeActive = false;
-    if (timeMatch)
+    if (s_silencedMinuteKey && currentMinuteKey != s_silencedMinuteKey)
     {
-        if (currentMinuteKey != s_lastTriggerMinuteKey)
-        {
-            s_lastTriggerMinuteKey = currentMinuteKey;
-            shouldBeActive = true;
-            s_alarmFlashVisible = false;
-            s_lastFlashToggleMs = millis();
+        s_silencedMinuteKey = 0;
+    }
+    s_activeSlot = -1;
+    bool shouldBeActive = false;
+    int triggeredSlot = -1;
 
-            if (alarmRepeatMode == ALARM_REPEAT_NONE)
-            {
-                alarmOneShotPending = false;
-                alarmEnabled = false;
-                saveAlarmSettings();
-            }
-        }
-        else
+    for (int i = 0; i < 3; ++i)
+    {
+        if (!alarmEnabled[i])
+            continue;
+        bool dayMatch = doesAlarmApplyToday(i, now.dayOfTheWeek());
+        if (!dayMatch)
+            continue;
+        bool timeMatch = (now.hour() == alarmHour[i]) && (now.minute() == alarmMinute[i]);
+        if (!timeMatch)
+            continue;
+
+        if (s_silencedMinuteKey == currentMinuteKey)
         {
-            shouldBeActive = true;
+            continue;
+        }
+
+        shouldBeActive = true;
+        triggeredSlot = i;
+        break;
+    }
+
+    if (shouldBeActive && s_lastTriggerMinuteKey != currentMinuteKey)
+    {
+        s_lastTriggerMinuteKey = currentMinuteKey;
+        s_activeSlot = triggeredSlot;
+        s_alarmFlashVisible = false;
+        s_lastFlashToggleMs = millis();
+
+        if (triggeredSlot >= 0 && alarmRepeatMode[triggeredSlot] == ALARM_REPEAT_NONE)
+        {
+            alarmOneShotPending[triggeredSlot] = false;
+            alarmEnabled[triggeredSlot] = false;
+            saveAlarmSettings();
         }
     }
-    else if (s_lastTriggerMinuteKey != 0 && currentMinuteKey == s_lastTriggerMinuteKey)
+    else if (!shouldBeActive && s_lastTriggerMinuteKey == currentMinuteKey)
     {
         shouldBeActive = true;
     }
@@ -128,4 +146,34 @@ bool isAlarmCurrentlyActive()
 bool isAlarmFlashVisible()
 {
     return s_alarmFlashVisible;
+}
+
+bool isAnyAlarmEnabled()
+{
+    for (int i = 0; i < 3; ++i)
+    {
+        if (alarmEnabled[i])
+            return true;
+    }
+    return false;
+}
+
+void cancelActiveAlarm()
+{
+    DateTime nowUtc = rtc.now();
+    int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(nowUtc);
+    DateTime localNow = utcToLocal(nowUtc, offsetMinutes);
+    uint32_t currentMinuteKey = localNow.unixtime() / 60;
+
+    s_silencedMinuteKey = currentMinuteKey;
+    s_lastTriggerMinuteKey = currentMinuteKey;
+    s_alarmActive = false;
+    s_alarmFlashVisible = true;
+    s_lastFlashToggleMs = millis();
+    stopAlarmBuzzer();
+}
+
+void stopAlarmBuzzer()
+{
+    stopBuzzer();
 }

@@ -29,6 +29,7 @@
 #include "buzzer.h"
 #include "menu.h"
 #include "alarm.h"
+#include "noaa.h"
 #include "keyboard.h"
 #include "tempest.h"
 #include "InfoScreen.h"
@@ -45,6 +46,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_FORECAST,
     SCREEN_WIND_DIR,
     SCREEN_ENV_INDEX,
+    SCREEN_NOAA_ALERT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
     SCREEN_HOURLY};
@@ -61,6 +63,7 @@ InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
 InfoScreen envQualityScreen("Air Quality", SCREEN_ENV_INDEX);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
 InfoScreen hourlyScreen("Next 24 HRS", SCREEN_HOURLY);
+InfoScreen noaaAlertScreen("NOAA Alert", SCREEN_NOAA_ALERT);
 
 // Screen Wind Info
 WindMeter windMeter;
@@ -72,6 +75,8 @@ extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
 extern bool isWeatherScenePreviewActive();
 extern void handleWeatherScenePreviewIR(uint32_t code);
+extern int alarmSlotSelection;
+extern int alarmSlotShown;
 
 extern int wifiSelectIndex;
 extern unsigned long lastMenuActivity;
@@ -147,6 +152,7 @@ void hideAllInfoScreens()
     envQualityScreen.hide();
     currentCondScreen.hide();
     hourlyScreen.hide();
+    noaaAlertScreen.hide();
     // Add more InfoScreens here as needed
 }
 
@@ -630,6 +636,7 @@ void setup()
     initAlarmModule();
     delay(500);
     setupDisplay();
+    initNoaaAlerts();
     int clampedSplashSec = constrain(splashDurationSec, 1, 10);
     uint16_t splashMs = static_cast<uint16_t>(clampedSplashSec * 1000);
     if (splashMs < 3000)
@@ -667,6 +674,7 @@ void setup()
     envQualityScreen.setHighlightEnabled(false);
     currentCondScreen.setHighlightEnabled(true);
     hourlyScreen.setHighlightEnabled(true);
+    noaaAlertScreen.setHighlightEnabled(true);
 
     // Ensure TCP/IP stack is initialised even if we stay offline
     WiFi.mode(WIFI_STA);
@@ -898,6 +906,7 @@ void loop()
 
     handleAutoRotate(now);
     tickAutoThemeSchedule();
+    tickNoaaAlerts(now);
 
     if (themeRefreshPending)
     {
@@ -1022,6 +1031,18 @@ void loop()
     {
         alarmModal.tick();
         alarmModal.handleIR(getIRCodeNonBlocking());
+        if (alarmSlotSelection != alarmSlotShown)
+        {
+            alarmModal.hide();
+            showAlarmSettingsModal();
+        }
+        delay(40);
+        return;
+    }
+    if (noaaModal.isActive())
+    {
+        noaaModal.tick();
+        noaaModal.handleIR(getIRCodeNonBlocking());
         delay(40);
         return;
     }
@@ -1173,13 +1194,15 @@ void loop()
         tempestModal.isActive() ||
         calibrationModal.isActive() ||
         alarmModal.isActive() ||
+        noaaModal.isActive() ||
         systemModal.isActive() ||
         inKeyboardMode ||
         udpScreen.isActive() ||
         forecastScreen.isActive() ||
         envQualityScreen.isActive() ||
         currentCondScreen.isActive() ||
-        hourlyScreen.isActive();
+        hourlyScreen.isActive() ||
+        noaaAlertScreen.isActive();
 
 
     // --- 8. InfoScreen auto-activation (if not already active) ---
@@ -1196,6 +1219,10 @@ void loop()
     case SCREEN_ENV_INDEX:
         if (!envQualityScreen.isActive())
             showEnvironmentalQualityScreen();
+        break;
+    case SCREEN_NOAA_ALERT:
+        if (!noaaAlertScreen.isActive())
+            showNoaaAlertScreen();
         break;
     case SCREEN_CURRENT:
         if (!currentCondScreen.isActive())
@@ -1277,6 +1304,22 @@ void loop()
         }
         envQualityScreen.tick();
         envQualityScreen.handleIR(code);
+        delay(40);
+        return;
+    }
+
+    if (noaaAlertScreen.isActive())
+    {
+        uint32_t code = getIRCodeDebounced();
+        if (code == IR_CANCEL)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
+        noaaAlertScreen.tick();
+        noaaAlertScreen.handleIR(code);
         delay(40);
         return;
     }

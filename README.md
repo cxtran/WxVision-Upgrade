@@ -11,6 +11,7 @@ VisionWX is a fully custom ESP32 firmware that drives a 64×32 RGB LED panel to 
 - **Sensor Integration** – Reads SCD40, AHT20, BMP280, and other sensors (see `src/sensors.cpp`) for accurate environmental monitoring, adjusting display brightness automatically when desired.
 - **Extensible Rendering** – The display pipeline (e.g., `src/display.cpp`, `src/InfoScreen.cpp`) uses custom drawing utilities to render gradients, icons, scrolling text, and button bars optimized for small RGB matrices.
 - **Alarm Clock** – Built-in alarm can be toggled on/off, set to repeat (daily, weekly, weekdays, weekend, or one-shot), and edited from the main menu. Settings persist across reboots, support both 12 h and 24 h formats (with AM/PM marquee feedback in 12 h mode), and trigger a flashing clock indication when active.
+- **NOAA Alerts** – Optional screen that queries the U.S. National Weather Service API using your configured latitude/longitude to display the latest alert event, severity, and a scrolling description/instruction string. A dedicated menu lets you enable the feature and store coordinates, with data preserved across restarts.
 - **Lunar Date Screen** – Dedicated screen that shows Vietnamese lunar information with:
   - Line 1: daily Can Chi name (e.g. `Quy Mao`).
   - Line 2: solar term (e.g. `Lap Dong`), derived from the current Gregorian date.

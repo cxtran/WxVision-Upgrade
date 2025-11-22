@@ -4,7 +4,9 @@
 #include <pins.h>
 #include "sensors.h"
 #include "display.h"
+#include "alarm.h"
 #include "menu.h"
+#include "ir_codes.h"
 #include <Wire.h>
 #include "units.h"
 #include "system.h"
@@ -64,10 +66,19 @@ void setupIRSensor()
   Serial.println("VS1838B IR receiver test. Press buttons on your remote...");
 }
 
+// Forward declaration for use in readIRSensor
+static inline bool isAlarmCancelCode(uint32_t code);
+
 void readIRSensor()
 {
   if (irrecv.decode(&results))
   {
+    if (isAlarmCurrentlyActive() && isAlarmCancelCode(results.value))
+    {
+        cancelActiveAlarm();
+        irrecv.resume();
+        return; // Swallow input while alarm is sounding
+    }
     handleIR(results.value);
     irrecv.resume(); // Receive the next value
     PRINT_IR_CODE(results.value);
@@ -140,6 +151,8 @@ void setDisplayBrightnessFromLux(float lux)
 
 static uint32_t s_lastIrCode = 0;
 static unsigned long s_lastIrTimestamp = 0;
+// While alarm is firing, any IR key cancels/snoozes it.
+static inline bool isAlarmCancelCode(uint32_t /*code*/) { return true; }
 
 uint32_t getIRCodeNonBlocking()
 {
@@ -147,6 +160,12 @@ uint32_t getIRCodeNonBlocking()
   if (popVirtualIR(queuedCode))
   {
     PRINT_IR_CODE(queuedCode);
+    if (isAlarmCurrentlyActive() && isAlarmCancelCode(queuedCode))
+    {
+        cancelActiveAlarm();
+        s_lastIrCode = 0;
+        return 0; // Swallow input while alarm is snoozed
+    }
     if (handleGlobalIRCode(queuedCode))
       return 0;
     s_lastIrCode = queuedCode;
@@ -171,6 +190,12 @@ uint32_t getIRCodeNonBlocking()
     if (code != 0)
     {
       PRINT_IR_CODE(code);
+      if (isAlarmCurrentlyActive() && isAlarmCancelCode(code))
+      {
+          cancelActiveAlarm();
+          s_lastIrCode = 0;
+          return 0; // Consume the input; don't perform any action beyond snooze
+      }
       if (handleGlobalIRCode(code))
         return 0;
     }
