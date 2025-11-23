@@ -577,9 +577,13 @@ void setupWebServer() {
     doc["autoRotateInterval"] = autoRotateInterval;
     doc["manualScreen"]     = manualScreen;
     doc["theme"]            = theme;
-    doc["autoThemeSchedule"]= autoThemeSchedule;
+    bool isAmbientMode = autoThemeAmbient;
+    bool isScheduledMode = (!isAmbientMode && autoThemeSchedule);
+    doc["autoThemeSchedule"]= isScheduledMode; // legacy field
+    doc["autoThemeMode"]    = isAmbientMode ? 2 : (isScheduledMode ? 1 : 0);
     doc["dayThemeStart"]    = dayThemeStartMinutes;
     doc["nightThemeStart"]  = nightThemeStartMinutes;
+    doc["themeLightThreshold"] = autoThemeLightThreshold;
     doc["brightness"]       = brightness;
     doc["autoBrightness"]   = autoBrightness;
     doc["scrollSpeed"]      = scrollSpeed;
@@ -674,6 +678,14 @@ void setupWebServer() {
         if (!doc["theme"].isNull()) {
           theme = doc["theme"] | theme;
         }
+        int incomingAutoThemeMode = -1;
+        if (!doc["autoThemeMode"].isNull()) {
+          incomingAutoThemeMode = doc["autoThemeMode"].as<int>();
+          if (incomingAutoThemeMode < 0) incomingAutoThemeMode = 0;
+          if (incomingAutoThemeMode > 2) incomingAutoThemeMode = 2;
+          autoThemeSchedule = (incomingAutoThemeMode == 1);
+          autoThemeAmbient = (incomingAutoThemeMode == 2);
+        }
         if (!doc["autoThemeSchedule"].isNull()) {
           JsonVariant v = doc["autoThemeSchedule"];
           bool value = false;
@@ -683,13 +695,24 @@ void setupWebServer() {
             const char *s = v.as<const char*>();
             value = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0 || strcasecmp(s, "on")==0);
           }
-          autoThemeSchedule = value;
+          if (incomingAutoThemeMode < 0) {
+            autoThemeSchedule = value;
+            autoThemeAmbient = false;
+          }
+        }
+        // Enforce mutually-exclusive modes
+        if (autoThemeAmbient) {
+          autoThemeSchedule = false;
         }
         if (!doc["dayThemeStart"].isNull()) {
           dayThemeStartMinutes = normalizeThemeScheduleMinutes(doc["dayThemeStart"].as<int>());
         }
         if (!doc["nightThemeStart"].isNull()) {
           nightThemeStartMinutes = normalizeThemeScheduleMinutes(doc["nightThemeStart"].as<int>());
+        }
+        if (!doc["themeLightThreshold"].isNull()) {
+          int thr = doc["themeLightThreshold"].as<int>();
+          autoThemeLightThreshold = constrain(thr, 1, 5000);
         }
         if (!doc["brightness"].isNull()) {
           brightness = constrain((int)(doc["brightness"] | brightness), 1, 100);
@@ -870,6 +893,11 @@ void setupWebServer() {
         saveDateTimeSettings();
         saveAllSettings();
         forceAutoThemeSchedule();
+        if (autoThemeAmbient)
+        {
+          float lux = readBrightnessSensor();
+          tickAutoThemeAmbient(lux);
+        }
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
 

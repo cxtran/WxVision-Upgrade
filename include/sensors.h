@@ -29,6 +29,8 @@ void setupBrightnessSensor();
 //void readBrightnessSensor();
 
 float readBrightnessSensor();
+float getCalibratedLux(float rawLux);
+float getLastCalibratedLux();
 
 void setDisplayBrightnessFromLux(float lux);
 

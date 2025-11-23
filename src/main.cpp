@@ -7,6 +7,7 @@
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
 #include <ArduinoOTA.h>
 #include <Preferences.h>
+#include <math.h>
 #include "display.h"
 #include "env_quality.h"
 #include "pins.h"
@@ -853,6 +854,12 @@ void loop()
             }
             Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
+        float calibratedLux = getLastCalibratedLux();
+        if (isnan(calibratedLux) || calibratedLux <= 0.0f)
+        {
+            calibratedLux = getCalibratedLux(lux);
+        }
+        tickAutoThemeAmbient(calibratedLux);
     }
 
     /*

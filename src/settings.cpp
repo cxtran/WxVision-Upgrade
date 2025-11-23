@@ -32,6 +32,8 @@ bool initialSetupRequired = false;
 // --- Display ---
 int theme = 0;            // 0 = Day, 1 = Night
 bool autoThemeSchedule = false;
+bool autoThemeAmbient = false;
+int autoThemeLightThreshold = 20;
 int dayThemeStartMinutes = 6 * 60;
 int nightThemeStartMinutes = 20 * 60;
 int brightness = 10;      // 1???100
@@ -80,6 +82,8 @@ static int determineScheduledTheme(int currentMinutes)
 
 static unsigned long s_lastAutoThemeCheck = 0;
 static int s_lastAppliedScheduledTheme = -1;
+static unsigned long s_lastAmbientThemeCheck = 0;
+static int s_lastAppliedAmbientTheme = -1;
 
 // --- Weather ---
 String owmCity = "";
@@ -137,7 +141,12 @@ void loadSettings() {
     // Display
     theme        = prefs.getInt("theme", 0);
     theme        = constrain(theme, 0, 1);
-    autoThemeSchedule = prefs.getBool("autoThemeSched", false);
+    int storedAutoThemeMode = prefs.getInt("autoThemeMode", -1);
+    bool legacyAutoTheme = prefs.getBool("autoThemeSched", false);
+    autoThemeSchedule = (storedAutoThemeMode == 1) || (storedAutoThemeMode < 0 && legacyAutoTheme);
+    autoThemeAmbient = (storedAutoThemeMode == 2);
+    autoThemeLightThreshold = prefs.getInt("autoThemeLux", 20);
+    autoThemeLightThreshold = constrain(autoThemeLightThreshold, 1, 5000);
     dayThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("dayThemeStart", 6 * 60));
     nightThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("nightThemeStart", 20 * 60));
     brightness   = prefs.getInt("brightness", 10);
@@ -193,7 +202,10 @@ void saveDisplaySettings() {
     Preferences prefs;
     if (prefs.begin("visionwx", false)) {
         prefs.putInt("theme", theme);
+        int autoThemeMode = autoThemeAmbient ? 2 : (autoThemeSchedule ? 1 : 0);
+        prefs.putInt("autoThemeMode", autoThemeMode);
         prefs.putBool("autoThemeSched", autoThemeSchedule);
+        prefs.putInt("autoThemeLux", autoThemeLightThreshold);
         prefs.putInt("dayThemeStart", normalizeThemeScheduleMinutes(dayThemeStartMinutes));
         prefs.putInt("nightThemeStart", normalizeThemeScheduleMinutes(nightThemeStartMinutes));
         prefs.putBool("autoBrightness", autoBrightness);
@@ -203,8 +215,8 @@ void saveDisplaySettings() {
         splashDurationSec = constrain(splashDurationSec, 1, 10);
         prefs.putInt("splashDur", splashDurationSec);
         prefs.end();
-        Serial.printf("[Prefs] Saved: theme=%d, schedule=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d\n",
-            theme, autoThemeSchedule, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel);
+        Serial.printf("[Prefs] Saved: theme=%d, autoThemeMode=%d, luxThr=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d\n",
+            theme, autoThemeMode, autoThemeLightThreshold, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel);
     } else {
         Serial.println("[Prefs] Failed to open namespace 'display'");
     }
@@ -397,6 +409,31 @@ void tickAutoThemeSchedule()
         saveDisplaySettings();
     }
     s_lastAppliedScheduledTheme = desiredTheme;
+}
+
+void tickAutoThemeAmbient(float lux)
+{
+    if (!autoThemeAmbient)
+    {
+        s_lastAppliedAmbientTheme = -1;
+        return;
+    }
+
+    unsigned long nowMs = millis();
+    if (s_lastAppliedAmbientTheme != -1 && (nowMs - s_lastAmbientThemeCheck) < 5000)
+    {
+        return;
+    }
+    s_lastAmbientThemeCheck = nowMs;
+
+    int desiredTheme = (lux < autoThemeLightThreshold) ? 1 : 0;
+    if (desiredTheme != theme)
+    {
+        theme = desiredTheme;
+        themeRefreshPending = true;
+        saveDisplaySettings();
+    }
+    s_lastAppliedAmbientTheme = desiredTheme;
 }
 
 void forceAutoThemeSchedule()

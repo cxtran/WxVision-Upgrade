@@ -611,14 +611,22 @@ function applyAutoThemeUI(){
   var modeEl = document.getElementById('autoThemeSchedule');
   var dayEl = document.getElementById('dayThemeStart');
   var nightEl = document.getElementById('nightThemeStart');
+  var luxEl = document.getElementById('themeLightThreshold');
   if (!modeEl) return;
-  var scheduled = (+modeEl.value === 1);
+  var modeVal = parseInt(modeEl.value, 10);
+  if (!isFinite(modeVal)) modeVal = 0;
+  var scheduled = (modeVal === 1);
+  var ambient = (modeVal === 2);
   var inputs = [dayEl, nightEl];
   inputs.forEach(function(input){
     if (!input) return;
     input.disabled = !scheduled;
     input.title = scheduled ? '' : 'Enable Theme Mode = Scheduled to edit times';
   });
+  if (luxEl) {
+    luxEl.disabled = !ambient;
+    luxEl.title = ambient ? '' : 'Enable Theme Mode = Light Sensor to edit threshold';
+  }
 }
 
 function applyAutoDstAvailability(){
@@ -723,18 +731,28 @@ function loadAll(){
       if (uClockEl) uClockEl.value = (s.units.clock24h ? 1 : 0);
       alarmClockIs24 = !!s.units.clock24h;
       applyAlarmHourFormat(alarmClockIs24);
-    }
+  }
 
-    var themeEl = document.getElementById('theme');
-    if (themeEl) themeEl.value = (typeof s.theme !== 'undefined' ? s.theme : 0);
-    var autoThemeEl = document.getElementById('autoThemeSchedule');
-    if (autoThemeEl) autoThemeEl.value = (s.autoThemeSchedule ? 1 : 0);
-    var dayThemeEl = document.getElementById('dayThemeStart');
-    if (dayThemeEl) dayThemeEl.value = minutesToTimeString((typeof s.dayThemeStart !== 'undefined') ? s.dayThemeStart : 360);
-    var nightThemeEl = document.getElementById('nightThemeStart');
-    if (nightThemeEl) nightThemeEl.value = minutesToTimeString((typeof s.nightThemeStart !== 'undefined') ? s.nightThemeStart : 1200);
-    var brightnessEl = document.getElementById('brightness');
-    if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
+  var themeEl = document.getElementById('theme');
+  if (themeEl) themeEl.value = (typeof s.theme !== 'undefined' ? s.theme : 0);
+  var autoThemeEl = document.getElementById('autoThemeSchedule');
+  if (autoThemeEl) {
+    var modeVal = (typeof s.autoThemeMode !== 'undefined') ? s.autoThemeMode : (s.autoThemeSchedule ? 1 : 0);
+    modeVal = parseInt(modeVal, 10);
+    if (!isFinite(modeVal) || modeVal < 0 || modeVal > 2) modeVal = 0;
+    autoThemeEl.value = modeVal;
+  }
+  var dayThemeEl = document.getElementById('dayThemeStart');
+  if (dayThemeEl) dayThemeEl.value = minutesToTimeString((typeof s.dayThemeStart !== 'undefined') ? s.dayThemeStart : 360);
+  var nightThemeEl = document.getElementById('nightThemeStart');
+  if (nightThemeEl) nightThemeEl.value = minutesToTimeString((typeof s.nightThemeStart !== 'undefined') ? s.nightThemeStart : 1200);
+  var lightThrEl = document.getElementById('themeLightThreshold');
+  if (lightThrEl) {
+    var thr = (typeof s.themeLightThreshold !== 'undefined') ? s.themeLightThreshold : 20;
+    lightThrEl.value = thr;
+  }
+  var brightnessEl = document.getElementById('brightness');
+  if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
     var autoBrightnessEl = document.getElementById('autoBrightness');
     if (autoBrightnessEl) autoBrightnessEl.value = (s.autoBrightness ? 1 : 0);
     var splashDurationEl = document.getElementById('splashDuration');
@@ -901,7 +919,16 @@ function readSettingsForm() {
     autoRotateInterval: autoRotateInterval,
     manualScreen:+(byId('manualScreen')?.value ?? 0),
     theme:       +(byId('theme')?.value ?? 0),
-    autoThemeSchedule: +(byId('autoThemeSchedule')?.value ?? 0),
+    autoThemeMode: +(byId('autoThemeSchedule')?.value ?? 0),
+    autoThemeSchedule: (+(byId('autoThemeSchedule')?.value ?? 0) === 1) ? 1 : 0, // legacy fallback for older firmware
+    themeLightThreshold: (function(){
+      var thr = +(byId('themeLightThreshold')?.value ?? 20);
+      if (!isFinite(thr)) thr = 20;
+      thr = clamp(thr, 1, 5000);
+      var el = byId('themeLightThreshold');
+      if (el) el.value = thr;
+      return thr;
+    })(),
     dayThemeStart: getTimeMinutes('dayThemeStart', 360),
     nightThemeStart: getTimeMinutes('nightThemeStart', 1200),
     brightness:  +(byId('brightness')?.value ?? 10),
@@ -1003,7 +1030,7 @@ async function saveDisplaySettings(event){
     event.preventDefault();
   }
   const payload = pickSettings(readSettingsForm(), [
-    'theme','autoThemeSchedule','dayThemeStart','nightThemeStart','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
+    'theme','autoThemeMode','themeLightThreshold','dayThemeStart','nightThemeStart','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
   ]);
   await submitSettings(payload, 'saveDisplayMsg');
 }

@@ -52,7 +52,9 @@ extern bool initialSetupRequired; // true when device needs first-time setup
 
 // --- Display ---
 extern int theme;            // 0 = Day, 1 = Night
-extern bool autoThemeSchedule;
+extern bool autoThemeSchedule;   // legacy scheduled mode flag
+extern bool autoThemeAmbient;    // true when light-sensor driven theme is enabled
+extern int autoThemeLightThreshold; // lux threshold for ambient switching
 extern int dayThemeStartMinutes;
 extern int nightThemeStartMinutes;
 int normalizeThemeScheduleMinutes(int value);
@@ -108,5 +110,6 @@ void adjustHumOffset(int dir);
 void adjustLightGain(int dir);
 
 void tickAutoThemeSchedule();
+void tickAutoThemeAmbient(float lux);
 void forceAutoThemeSchedule();
 

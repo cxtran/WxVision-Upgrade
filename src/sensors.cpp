@@ -36,6 +36,22 @@ decode_results results;
 SensirionI2cScd4x scd4x;
 Adafruit_AHTX0 aht20;
 Adafruit_BMP280 bmp280;
+static float s_lastCalibratedLux = NAN;
+
+static float computeCalibratedLux(float rawLux)
+{
+  float gain = lightGain / 100.0f;
+  float calibratedLux = rawLux * gain;
+
+  const float minLux = 1.0f;
+  const float maxLux = 700.0f;
+  if (calibratedLux < minLux)
+    calibratedLux = minLux;
+  if (calibratedLux > maxLux)
+    calibratedLux = maxLux;
+
+  return calibratedLux;
+}
 
 namespace
 {
@@ -117,16 +133,11 @@ void setDisplayBrightnessFromLux(float lux)
   if (isScreenOff()) {
     return;
   }
-  float gain = lightGain / 100.0;
-  float calibratedLux = lux * gain;
+  float calibratedLux = computeCalibratedLux(lux);
+  s_lastCalibratedLux = calibratedLux;
 
-  const float minLux = 1.0;
-  const float maxLux = 700.0;
-  if (calibratedLux < minLux)
-    calibratedLux = minLux;
-  if (calibratedLux > maxLux)
-    calibratedLux = maxLux;
-
+  const float minLux = 1.0f;
+  const float maxLux = 700.0f;
   const int minBrightness = 3;
   const int maxBrightness = 255;
   float scale = (log10(calibratedLux) - log10(minLux)) / (log10(maxLux) - log10(minLux));
@@ -147,6 +158,16 @@ void setDisplayBrightnessFromLux(float lux)
 
   Serial.printf("LogAutoBrightness: Raw Lux=%.1f Calibrated=%.1f (Gain=%d%%, Sens=%.2f) -> Brightness=%d\n",
                 lux, calibratedLux, lightGain, sensitivity, brightness);
+}
+
+float getCalibratedLux(float rawLux)
+{
+  return computeCalibratedLux(rawLux);
+}
+
+float getLastCalibratedLux()
+{
+  return s_lastCalibratedLux;
 }
 
 static uint32_t s_lastIrCode = 0;
