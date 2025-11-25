@@ -966,6 +966,16 @@ void InfoModal::handleIR(uint32_t code)
                 {
                     *ptr = normalizeThemeScheduleMinutes(*ptr);
                 }
+                else if (label.startsWith("Light Threshold"))
+                {
+                    *ptr = constrain(*ptr, 1, 5000);
+                    autoThemeLightThreshold = *ptr;
+                    if (autoThemeAmbient)
+                    {
+                        float lux = readBrightnessSensor();
+                        tickAutoThemeAmbient(lux, false, true); // live preview without persisting
+                    }
+                }
 
                 // Also handle Brightness live preview if on that field (by label!)
                 if (lines[selIndex] == "Brightness")
@@ -1001,7 +1011,7 @@ void InfoModal::handleIR(uint32_t code)
                         *ptr = static_cast<int>(lroundf(normalizedDisplay * 10.0f));
                     }
                     else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, -20, 20);
-                    else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, 1, 150);
+                    else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
 
                     // Save to NVS right away
                     saveCalibrationSettings();
@@ -1096,6 +1106,19 @@ void InfoModal::handleIR(uint32_t code)
                             seconds = autoRotateInterval;
                         }
                         setAutoRotateInterval(seconds, true);
+                    }
+
+                    // Rebuild Display modal when Theme Mode changes to show relevant fields
+                    if (this == &displayModal && lines[selIndex] == "Theme Mode")
+                    {
+                        // Cache current selection so the rebuilt modal keeps the new mode
+                        preserveDisplayModeTemp = true;
+                        cachedDisplayModeTemp = val;
+                        autoThemeModeTemp = val;
+                        displayModal.hide();
+                        pendingModalFn = showDisplaySettingsModal;
+                        pendingModalTime = millis() + 10;
+                        return;
                     }
 
                     draw();

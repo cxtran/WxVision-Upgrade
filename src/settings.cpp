@@ -174,7 +174,7 @@ void loadSettings() {
     }
     tempOffset = constrain(tempOffset, -10.0f, 10.0f);
     humOffset    = prefs.getInt("humOffset", 0);
-    lightGain    = prefs.getInt("lightGain", 100);
+    lightGain    = constrain(prefs.getInt("lightGain", 100), LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
 
     loadDateTimeSettings();
 
@@ -241,6 +241,7 @@ void saveCalibrationSettings() {
         prefs.remove("tempOffset");
     }
     prefs.putInt("humOffset", humOffset);
+    lightGain = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
     prefs.putInt("lightGain", lightGain);
     prefs.end();
 }
@@ -368,7 +369,7 @@ void adjustHumOffset(int dir) {
 
 void adjustLightGain(int dir) {
     lightGain += dir * 5;
-    lightGain = constrain(lightGain, 1, 150);
+    lightGain = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
     float lux = readBrightnessSensor();
     setDisplayBrightnessFromLux(lux);
 }
@@ -411,7 +412,7 @@ void tickAutoThemeSchedule()
     s_lastAppliedScheduledTheme = desiredTheme;
 }
 
-void tickAutoThemeAmbient(float lux)
+void tickAutoThemeAmbient(float lux, bool persist, bool force)
 {
     if (!autoThemeAmbient)
     {
@@ -420,18 +421,32 @@ void tickAutoThemeAmbient(float lux)
     }
 
     unsigned long nowMs = millis();
-    if (s_lastAppliedAmbientTheme != -1 && (nowMs - s_lastAmbientThemeCheck) < 5000)
+    if (!force && s_lastAppliedAmbientTheme != -1 && (nowMs - s_lastAmbientThemeCheck) < 5000)
     {
         return;
     }
     s_lastAmbientThemeCheck = nowMs;
 
+    if (isnan(lux) || lux < 0.0f)
+    {
+        Serial.println("[ThemeAmbient] lux invalid; skipping");
+        return;
+    }
+
     int desiredTheme = (lux < autoThemeLightThreshold) ? 1 : 0;
+    Serial.printf("[ThemeAmbient] lux=%.2f thr=%d desired=%s current=%s\n",
+                  lux,
+                  autoThemeLightThreshold,
+                  desiredTheme == 1 ? "Night" : "Day",
+                  theme == 1 ? "Night" : "Day");
     if (desiredTheme != theme)
     {
         theme = desiredTheme;
         themeRefreshPending = true;
-        saveDisplaySettings();
+        if (persist)
+        {
+            saveDisplaySettings();
+        }
     }
     s_lastAppliedAmbientTheme = desiredTheme;
 }

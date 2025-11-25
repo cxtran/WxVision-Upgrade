@@ -57,6 +57,8 @@ extern bool autoThemeAmbient;    // true when light-sensor driven theme is enabl
 extern int autoThemeLightThreshold; // lux threshold for ambient switching
 extern int dayThemeStartMinutes;
 extern int nightThemeStartMinutes;
+static constexpr int LIGHT_GAIN_MIN = 1;
+static constexpr int LIGHT_GAIN_MAX = 300;
 int normalizeThemeScheduleMinutes(int value);
 extern int brightness;       // 1 - 100
 extern int scrollSpeed;      // derived from level
@@ -110,6 +112,6 @@ void adjustHumOffset(int dir);
 void adjustLightGain(int dir);
 
 void tickAutoThemeSchedule();
-void tickAutoThemeAmbient(float lux);
+void tickAutoThemeAmbient(float lux, bool persist = true, bool force = false);
 void forceAutoThemeSchedule();
 

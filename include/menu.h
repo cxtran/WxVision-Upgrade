@@ -151,6 +151,11 @@ extern int alarmSlotShown;
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
 
+// Display modal state helpers
+extern bool preserveDisplayModeTemp;
+extern int cachedDisplayModeTemp;
+extern int autoThemeModeTemp;
+
 
 extern int scrollOffset;
 

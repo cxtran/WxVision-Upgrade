@@ -162,7 +162,10 @@ void setDisplayBrightnessFromLux(float lux)
 
 float getCalibratedLux(float rawLux)
 {
-  return computeCalibratedLux(rawLux);
+  float calibrated = computeCalibratedLux(rawLux);
+  // Keep track of the most recent calibrated value even when auto-brightness is off
+  s_lastCalibratedLux = calibrated;
+  return calibrated;
 }
 
 float getLastCalibratedLux()

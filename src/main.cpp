@@ -841,6 +841,7 @@ void loop()
     {
         lastBrightnessRead = now;
         float lux = readBrightnessSensor();
+        // Always derive a calibrated reading so theme switching has up-to-date lux
         if (autoBrightness)
         {
             setDisplayBrightnessFromLux(lux);
@@ -854,12 +855,7 @@ void loop()
             }
             Serial.printf("Manual Brightness: %d%% -> %d\n", brightness, hwBrightness);
         }
-        float calibratedLux = getLastCalibratedLux();
-        if (isnan(calibratedLux) || calibratedLux <= 0.0f)
-        {
-            calibratedLux = getCalibratedLux(lux);
-        }
-        tickAutoThemeAmbient(calibratedLux);
+        tickAutoThemeAmbient(lux);
     }
 
     /*

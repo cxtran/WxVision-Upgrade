@@ -40,6 +40,11 @@ bool menuActive = false;
 void (*pendingModalFn)() = nullptr;
 unsigned long pendingModalTime = 0;
 
+// Display modal state helpers
+bool preserveDisplayModeTemp = false;
+int cachedDisplayModeTemp = 0;
+int autoThemeModeTemp = 0;
+
 extern void connectToWiFi();
 extern ScreenMode currentScreen;
 // extern const int SCREEN_COUNT;
@@ -517,8 +522,18 @@ void showDisplaySettingsModal()
     currentMenuLevel = MENU_DISPLAY;
     menuActive = true;
 
-    static int autoThemeModeTemp;
-    autoThemeModeTemp = autoThemeAmbient ? 2 : (autoThemeSchedule ? 1 : 0);
+    // Persist across rebuilds so we can re-open with the just-selected mode
+    if (preserveDisplayModeTemp)
+    {
+        autoThemeModeTemp = constrain(cachedDisplayModeTemp, 0, 2);
+        preserveDisplayModeTemp = false;
+    }
+    else
+    {
+        autoThemeModeTemp = autoThemeAmbient ? 2 : (autoThemeSchedule ? 1 : 0);
+    }
+    cachedDisplayModeTemp = autoThemeModeTemp;
+    preserveDisplayModeTemp = false;
     static int dayThemeStartTemp;
     static int nightThemeStartTemp;
     static int lightThresholdTemp;
@@ -562,26 +577,79 @@ void showDisplaySettingsModal()
         }
     }
 
-    String labels[] = {"Theme", "Theme Mode", "Day Theme Start", "Night Theme Start", "Light Threshold (Lux)", "Auto Brightness", "Brightness", "Scroll Speed", "Auto Rotate", "Rotate Interval", "Custom Msg"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoNumber, InfoNumber, InfoNumber, InfoChooser, InfoNumber, InfoChooser, InfoChooser, InfoChooser, InfoText};
-    int *chooserRefs[] = {&theme, &autoThemeModeTemp, &autoBrightnessInt, &scrollLevelTemp, &autoRotateTemp, &rotateIntervalIndex};
+    float currentLux = readBrightnessSensor();
     static const char *themeOpts[] = {"Day", "Night"};
     static const char *themeModeOpts[] = {"Manual", "Scheduled", "Light Sensor"};
     static const char *autoOpts[] = {"Off", "On"};
     static const char *speedOpts[] = {"1 - Slow", "2", "3", "4", "5", "6", "7", "8", "9", "10 - Fast"};
     static const char *autoRotateOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {themeOpts, themeModeOpts, autoOpts, speedOpts, autoRotateOpt, rotateIntervalOpt};
-    int chooserCounts[] = {2, 3, 2, 10, 2, rotateIntervalCount};
-    int *numberRefs[] = {&dayThemeStartTemp, &nightThemeStartTemp, &lightThresholdTemp, &brightnessTemp};
+
+    // Build dynamic lines based on theme mode selection
+    const int MAX_LINES = 12;
+    String labels[MAX_LINES];
+    InfoFieldType types[MAX_LINES];
+    int *numberRefs[MAX_LINES];
+    int numberCount = 0;
+    int *chooserRefs[MAX_LINES];
+    const char *const *chooserOpts[MAX_LINES];
+    int chooserCounts[MAX_LINES];
+    int chooserCount = 0;
+    int lineCount = 0;
+
+    auto addChooserLine = [&](const String &label, int *ref, const char *const *opts, int count) {
+        labels[lineCount] = label;
+        types[lineCount] = InfoChooser;
+        chooserRefs[chooserCount] = ref;
+        chooserOpts[chooserCount] = opts;
+        chooserCounts[chooserCount] = count;
+        ++chooserCount;
+        ++lineCount;
+    };
+    auto addNumberLine = [&](const String &label, int *ref) {
+        labels[lineCount] = label;
+        types[lineCount] = InfoNumber;
+        numberRefs[numberCount] = ref;
+        ++numberCount;
+        ++lineCount;
+    };
+
+    // Place Theme Mode above Theme so users choose behavior before palette
+    addChooserLine("Theme Mode", &autoThemeModeTemp, themeModeOpts, 3);
+    addChooserLine("Theme", &theme, themeOpts, 2);
+
+    if (autoThemeModeTemp == 1)
+    {
+        addNumberLine("Day Theme Start", &dayThemeStartTemp);
+        addNumberLine("Night Theme Start", &nightThemeStartTemp);
+    }
+    else if (autoThemeModeTemp == 2)
+    {
+        String lightLabel = "Light Threshold (Lux)";
+        if (!isnan(currentLux))
+        {
+            lightLabel += " [" + String(currentLux, 1) + " lx]";
+        }
+        addNumberLine(lightLabel, &lightThresholdTemp);
+    }
+
+    addChooserLine("Auto Brightness", &autoBrightnessInt, autoOpts, 2);
+    addNumberLine("Brightness", &brightnessTemp);
+    addChooserLine("Scroll Speed", &scrollLevelTemp, speedOpts, 10);
+    addChooserLine("Auto Rotate", &autoRotateTemp, autoRotateOpt, 2);
+    addChooserLine("Rotate Interval", &rotateIntervalIndex, rotateIntervalOpt, rotateIntervalCount);
 
     static char customMsgBuf[64];
     strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
     customMsgBuf[sizeof(customMsgBuf) - 1] = 0;
+    labels[lineCount] = "Custom Msg";
+    types[lineCount] = InfoText;
     char *textRefs[] = {customMsgBuf};
     int textSizes[] = {sizeof(customMsgBuf)};
+    ++lineCount;
 
-    displayModal.setLines(labels, types, 8);
-    displayModal.setValueRefs(numberRefs, 4, chooserRefs, 6, chooserOpts, chooserCounts, textRefs, 1, textSizes);
+    displayModal.setLines(labels, types, lineCount);
+    displayModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, textRefs, 1, textSizes);
+    displayModal.setShowNumberArrows(true); // show left/right arrows for numeric fields (e.g., Light Threshold)
 
     displayModal.setCallback([](bool /*accepted*/, int)
     {

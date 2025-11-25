@@ -944,7 +944,14 @@ function readSettingsForm() {
     wfStationId:      (byId('wfStationId')?.value || '').trim(),
     tempOffset:  +(byId('tempOffset')?.value ?? 0),
     humOffset:   +(byId('humOffset')?.value ?? 0),
-    lightGain:   +(byId('lightGain')?.value ?? 100),
+    lightGain:   (function(){
+      var lg = +(byId('lightGain')?.value ?? 100);
+      if (!isFinite(lg)) lg = 100;
+      lg = clamp(lg, 1, 300);
+      var el = byId('lightGain');
+      if (el) el.value = lg;
+      return lg;
+    })(),
     alarms: [0,1,2].map(function(i){
       var idx = i + 1;
       return {

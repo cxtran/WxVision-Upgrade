@@ -856,7 +856,7 @@ void setupWebServer() {
         }
         tempOffset = constrain(tempOffset, -10.0f, 10.0f);
         humOffset  = constrain(humOffset, -20, 20);
-        lightGain  = constrain(lightGain, 1, 150);
+        lightGain  = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
 
         // Alarms
         if (!doc["alarms"].isNull() && doc["alarms"].is<JsonArray>())
