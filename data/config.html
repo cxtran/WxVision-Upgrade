@@ -141,13 +141,6 @@
     <h2>Display</h2>
     <div class="grid2">
       <div class="row">
-        <label for="theme">Theme</label>
-        <select id="theme">
-          <option value="0">Day</option>
-          <option value="1">Night</option>
-        </select>
-      </div>
-      <div class="row">
         <label for="autoThemeSchedule">Theme Mode</label>
         <select id="autoThemeSchedule">
           <option value="0">Manual</option>
@@ -156,15 +149,22 @@
         </select>
       </div>
       <div class="row">
+        <label for="theme">Theme (Manual mode)</label>
+        <select id="theme">
+          <option value="0">Day</option>
+          <option value="1">Night</option>
+        </select>
+      </div>
+      <div class="row" data-theme-mode="scheduled">
         <label for="dayThemeStart">Day Theme Starts</label>
         <input id="dayThemeStart" type="time" step="300" value="06:00">
       </div>
-      <div class="row">
+      <div class="row" data-theme-mode="scheduled">
         <label for="nightThemeStart">Night Theme Starts</label>
         <input id="nightThemeStart" type="time" step="300" value="20:00">
       </div>
-      <div class="row">
-        <label for="themeLightThreshold">Light Threshold (lux)</label>
+      <div class="row" data-theme-mode="ambient">
+        <label for="themeLightThreshold">Light Threshold [<span id="currentLuxLabel" class="current-lux">Current: --</span> ](lux):</label>
         <input id="themeLightThreshold" type="number" min="1" max="5000" step="1" placeholder="20">
       </div>
       <div class="row">

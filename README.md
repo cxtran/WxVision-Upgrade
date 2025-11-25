@@ -6,7 +6,7 @@ VisionWX is a fully custom ESP32 firmware that drives a 64×32 RGB LED panel to 
 
 - **Weather & Sensor Display** – Shows live weather data, environmental sensor readings (CO₂, temperature, humidity, pressure) and device status information using animated scenes tailored for day and night themes.
 - **On-Device Menu System** – Navigate settings such as Wi‑Fi credentials, units, calibration, system info, and display preferences via IR remote control. Menus use the shared `InfoModal` component to handle chooser, number, text, and button fields.
-- **Auto Theme Scheduling** – Configure day/night theme switching manually or via a schedule with adjustable start times. Theme switches can also be triggered instantly using the IR `Theme` button.
+- **Theme Modes (Manual / Scheduled / Light Sensor)** – Choose Day/Night manually, set schedule start times, or let the light sensor pick Day/Night using a raw lux threshold (live lux is shown while editing). Theme switches can also be triggered instantly using the IR `Theme` button and the on-device display menu now hides fields not relevant to the selected mode.
 - **Wi-Fi & OTA Friendly** – Manage multiple Wi-Fi networks, perform scans, and expose a web UI (`data/config.html`) for configuring every device parameter through REST endpoints defined in `src/web.cpp`.
 - **Sensor Integration** – Reads SCD40, AHT20, BMP280, and other sensors (see `src/sensors.cpp`) for accurate environmental monitoring, adjusting display brightness automatically when desired.
 - **Extensible Rendering** – The display pipeline (e.g., `src/display.cpp`, `src/InfoScreen.cpp`) uses custom drawing utilities to render gradients, icons, scrolling text, and button bars optimized for small RGB matrices.

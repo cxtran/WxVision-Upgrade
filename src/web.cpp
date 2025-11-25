@@ -296,6 +296,8 @@ void setupWebServer() {
     doc["ip"] = WiFi.localIP().toString();
     doc["mac"] = WiFi.macAddress();
     doc["rssi"] = WiFi.RSSI();
+    float luxNow = readBrightnessSensor();
+    doc["lux"] = luxNow;
 
     unsigned long uptimeSec = millis() / 1000UL;
     doc["uptimeSec"] = uptimeSec;
@@ -590,6 +592,10 @@ void setupWebServer() {
     doc["scrollLevel"]      = scrollLevel;
     doc["splashDuration"]   = splashDurationSec;
     doc["customMsg"]        = customMsg;
+    // Live sensor snapshot
+    float luxNow = readBrightnessSensor();
+    doc["currentLux"] = luxNow;
+    doc["lux"] = luxNow; // alias for status parity
     doc["owmCity"]          = owmCity;
     doc["owmCountryIndex"]  = owmCountryIndex;
     doc["owmCountryCustom"] = owmCountryCustom;

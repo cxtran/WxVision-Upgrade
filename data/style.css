@@ -113,6 +113,41 @@ textarea { min-height:72px; }
   justify-self:start;
   white-space:nowrap;
 }
+
+/* Display card: left-align labels so Theme/Mode align with inputs */
+#card-display label {
+  text-align:left;
+  justify-self:start;
+}
+#card-display #autoThemeSchedule {
+  width:100% !important;
+  min-width:0;
+}
+#card-display .grid2 > .row {
+  width:100%;
+  min-width:0;
+}
+#card-display select,
+#card-display input[type="time"],
+#card-display input[type="number"],
+#card-display input[type="text"] {
+  width:100%;
+}
+#card-display .row {
+  grid-template-columns: minmax(140px, max-content) minmax(200px, 1fr);
+}
+#card-display select {
+  display:block;
+  min-width:180px;
+}
+#card-display .current-lux {
+  color:var(--muted);
+  font-weight:400;
+  margin-left:6px;
+}
+#card-display .muted {
+  color:var(--muted);
+}
 .grid div .value-stack {
   display:flex;
   flex-direction:column;

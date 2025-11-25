@@ -612,20 +612,48 @@ function applyAutoThemeUI(){
   var dayEl = document.getElementById('dayThemeStart');
   var nightEl = document.getElementById('nightThemeStart');
   var luxEl = document.getElementById('themeLightThreshold');
+  var themeEl = document.getElementById('theme');
+  var rowManual = document.querySelectorAll('[data-theme-mode="manual"]');
+  var rowScheduled = document.querySelectorAll('[data-theme-mode="scheduled"]');
+  var rowAmbient = document.querySelectorAll('[data-theme-mode="ambient"]');
   if (!modeEl) return;
   var modeVal = parseInt(modeEl.value, 10);
   if (!isFinite(modeVal)) modeVal = 0;
   var scheduled = (modeVal === 1);
   var ambient = (modeVal === 2);
-  var inputs = [dayEl, nightEl];
-  inputs.forEach(function(input){
-    if (!input) return;
-    input.disabled = !scheduled;
-    input.title = scheduled ? '' : 'Enable Theme Mode = Scheduled to edit times';
-  });
+  var manual = (modeVal === 0);
+
+  var toggleRows = function(nodes, show){
+    Array.prototype.forEach.call(nodes, function(node){
+      if (!node) return;
+      node.classList.toggle('hidden', !show);
+      var input = node.querySelector('input, select');
+      if (input) {
+        input.disabled = !show;
+        input.title = show ? '' : 'Hidden for this Theme Mode';
+      }
+    });
+  };
+
+  toggleRows(rowManual, manual);
+  toggleRows(rowScheduled, scheduled);
+  toggleRows(rowAmbient, ambient);
+
+  if (dayEl) {
+    dayEl.disabled = !scheduled;
+    dayEl.title = scheduled ? '' : 'Enable Theme Mode = Scheduled to edit times';
+  }
+  if (nightEl) {
+    nightEl.disabled = !scheduled;
+    nightEl.title = scheduled ? '' : 'Enable Theme Mode = Scheduled to edit times';
+  }
   if (luxEl) {
     luxEl.disabled = !ambient;
     luxEl.title = ambient ? '' : 'Enable Theme Mode = Light Sensor to edit threshold';
+  }
+  if (themeEl) {
+    themeEl.disabled = !manual;
+    themeEl.title = manual ? '' : 'Theme is editable only in Manual mode (still shows current selection)';
   }
 }
 
@@ -751,6 +779,8 @@ function loadAll(){
     var thr = (typeof s.themeLightThreshold !== 'undefined') ? s.themeLightThreshold : 20;
     lightThrEl.value = thr;
   }
+  var luxLabel = document.getElementById('currentLuxLabel');
+  setCurrentLuxLabel((s.currentLux !== undefined) ? s.currentLux : s.lux);
   var brightnessEl = document.getElementById('brightness');
   if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
     var autoBrightnessEl = document.getElementById('autoBrightness');
@@ -869,7 +899,28 @@ function loadAll(){
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = setInterval(renderClock, 1000);
     renderClock();
+
+    // Refresh lux from status shortly after load to display live value
+    setTimeout(refreshCurrentLuxFromStatus, 1000);
   });
+}
+
+function setCurrentLuxLabel(value){
+  var luxLabel = document.getElementById('currentLuxLabel');
+  if (!luxLabel) return;
+  var luxVal = Number(value);
+  var luxText = (isFinite(luxVal)) ? luxVal.toFixed(1) : '--';
+  luxLabel.textContent = 'Current: ' + luxText;
+}
+
+function refreshCurrentLuxFromStatus(){
+  fetch('/status.json')
+    .then(function(r){ return r.ok ? r.json() : null; })
+    .then(function(data){
+      if (!data) return;
+      if (data.lux !== undefined) setCurrentLuxLabel(data.lux);
+    })
+    .catch(function(){});
 }
 
 
