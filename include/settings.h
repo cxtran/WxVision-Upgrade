@@ -80,6 +80,8 @@ extern String wfStationId;
 extern float tempOffset;   // degrees C
 extern int humOffset;    // %
 extern int lightGain;    // %
+extern int buzzerVolume;   // 0-100
+extern int buzzerToneSet;  // 0 = Bright, 1 = Soft
 
 void loadSettings();
 void saveDeviceSettings();

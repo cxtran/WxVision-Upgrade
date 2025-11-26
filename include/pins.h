@@ -32,9 +32,13 @@
 #define PANEL_CHAIN 1
 
 // Buttons
-#define BTN_UP 33
-#define BTN_DN 32
-#define BTN_SEL 25
+#define BTN_UP 32
+#define BTN_DN 35
+#define BTN_LEFT 39
+#define BTN_RIGHT 23
+#define BTN_SEL 33
+
+
 
 // Infrared Receiver
 #define IR_RECEIVE_PIN 34 // GPIO 34    
@@ -46,5 +50,5 @@
 // Brghtness Sensor
 #define BRIGHTNESS_PIN 36  // GPIO 36 (ADC1_CH0)
 
-// Buzzer
-#define BUZZER_PIN 35   // Update if you use another GPIO!
+// Buzzer (drives NPN base; active-high)
+#define BUZZER_PIN 25   // Matches schematic BUZZER net via NPN driver

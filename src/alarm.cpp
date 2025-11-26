@@ -5,11 +5,15 @@
 static bool s_alarmActive = false;
 static bool s_alarmFlashVisible = true;
 static unsigned long s_lastFlashToggleMs = 0;
+static unsigned long s_lastBeepMs = 0;
 static uint32_t s_lastTriggerMinuteKey = 0;
 static uint32_t s_silencedMinuteKey = 0;
 static int s_activeSlot = -1;
 
 static constexpr unsigned long kAlarmFlashIntervalMs = 400;
+static constexpr unsigned long kAlarmBeepIntervalMs = 1000;
+static constexpr int kAlarmBeepFreq = 3000;
+static constexpr int kAlarmBeepMs = 120;
 
 static bool doesAlarmApplyToday(int slot, int dayOfWeek)
 {
@@ -53,6 +57,7 @@ static void resetRuntimeAlarm()
     s_alarmActive = false;
     s_alarmFlashVisible = true;
     s_lastFlashToggleMs = millis();
+    s_lastBeepMs = 0;
     s_lastTriggerMinuteKey = 0;
     s_silencedMinuteKey = 0;
 }
@@ -71,6 +76,7 @@ void notifyAlarmSettingsChanged()
 
 void tickAlarmState(const DateTime &now)
 {
+    bool wasActive = s_alarmActive;
     uint32_t currentMinuteKey = now.unixtime() / 60;
     if (s_silencedMinuteKey && currentMinuteKey != s_silencedMinuteKey)
     {
@@ -130,11 +136,20 @@ void tickAlarmState(const DateTime &now)
             s_alarmFlashVisible = !s_alarmFlashVisible;
             s_lastFlashToggleMs = nowMs;
         }
+        if (nowMs - s_lastBeepMs >= kAlarmBeepIntervalMs)
+        {
+            playBuzzerTone(kAlarmBeepFreq, kAlarmBeepMs);
+            s_lastBeepMs = nowMs;
+        }
     }
     else
     {
         s_alarmFlashVisible = true;
         s_lastFlashToggleMs = nowMs;
+        if (wasActive)
+        {
+            stopAlarmBuzzer();
+        }
     }
 }
 

@@ -384,7 +384,7 @@ void handleIR(uint32_t code)
             handleScreenSwitch(+1);
             return;
         }
-        if (code == IR_CANCEL)
+        if (code == IR_CANCEL || code == IR_OK)
         {
             if (millis() - lastMenuToggle < 500)
                 return;
@@ -1221,7 +1221,14 @@ void showSystemModal()
     currentMenuLevel = MENU_SYSTEM;
     menuActive = true;
 
+    static int buzzerVolumeTemp = 100;
+    static int buzzerToneSetTemp = 0;
+    buzzerVolumeTemp = buzzerVolume;
+    buzzerToneSetTemp = buzzerToneSet;
+
     String labels[] = {
+        "Sound Volume (0-100)",
+        "Sound Profile",
         "Show System Info",
         "Set Date & Time",
         "Unit Settings",
@@ -1233,9 +1240,18 @@ void showSystemModal()
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
-        InfoButton, InfoButton, InfoButton, InfoButton};
-    systemModal.setLines(labels, types, 9);
+        InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+    int *numberRefs[] = {&buzzerVolumeTemp};
+    int *chooserRefs[] = {&buzzerToneSetTemp};
+    static const char *toneOpts[] = {"Bright", "Soft", "Click"};
+    const char *const *chooserOpts[] = {toneOpts};
+    int chooserCounts[] = {3};
+
+    systemModal.setLines(labels, types, 11);
+    systemModal.setValueRefs(numberRefs, 1, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    systemModal.setShowNumberArrows(true);
+    systemModal.setShowChooserArrows(true);
     systemModal.setShowForwardArrow(true);
     systemModal.setCallback([](bool accepted, int btnIdx)
                             {
@@ -1249,44 +1265,53 @@ void showSystemModal()
             action = systemModal.getSelIndex();
         }
 
+        // Persist volume regardless of which action chosen
+        buzzerVolume = constrain(buzzerVolumeTemp, 0, 100);
+        buzzerToneSet = constrain(buzzerToneSetTemp, 0, 2);
+        saveDeviceSettings();
+
         if (action >= 0)
         {
             switch (action)
             {
-            case 0:
+            case 0: // volume row -> no navigation
+                break;
+            case 1: // tone profile row
+                break;
+            case 2:
                 systemModal.hide();
                 showSystemInfoScreen();
                 return;
-            case 1:
+            case 3:
                 systemModal.hide();
                 showDateTimeModal();
                 return;
-            case 2:
+            case 4:
                 systemModal.hide();
                 pendingModalFn = showUnitSettingsModal;
                 pendingModalTime = millis();
                 return;
-            case 3:
+            case 5:
                 systemModal.hide();
                 showWiFiSignalTest();
                 return;
-            case 4:
+            case 6:
                 systemModal.hide();
                 showScenePreviewModal();
                 return;
-            case 5:
+            case 7:
                 systemModal.hide();
                 quickRestore();
                 break;
-            case 6:
+            case 8:
                 systemModal.hide();
                 resetPowerUsage();
                 break;
-            case 7:
+            case 9:
                 systemModal.hide();
                 factoryReset();
                 break;
-            case 8:
+            case 10:
                 systemModal.hide();
                 ESP.restart();
                 return;
@@ -1456,6 +1481,12 @@ void handleRight()
 void handleSelect()
 {
     lastMenuActivity = millis();
+    // If no menu is active, open the main menu on Select
+    if (currentMenuLevel == MENU_NONE)
+    {
+        showMainMenuModal();
+        return;
+    }
     int count = (currentMenuLevel == MENU_MAIN)           ? mainCount
                : (currentMenuLevel == MENU_DEVICE)        ? deviceCount
                : (currentMenuLevel == MENU_DISPLAY)       ? displayCount

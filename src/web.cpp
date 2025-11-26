@@ -35,6 +35,7 @@ extern void saveAllSettings();
 extern void loadSettings();
 extern String str_Weather_Conditions, str_Temp, str_Humd;
 extern char chr_t_hour[3], chr_t_minute[3], chr_t_second[3];
+bool otaInProgress = false;
 extern bool alarmEnabled[3];
 extern int alarmHour[3];
 extern int alarmMinute[3];
@@ -1116,26 +1117,35 @@ void setupWebServer() {
   });
 
   server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
-    String html = "<form method='POST' action='/update' enctype='multipart/form-data'>"
-                  "<input type='file' name='firmware'><input type='submit' value='Upload'></form>";
-    req->send(200, "text/html", html);
+    req->send(SPIFFS, "/ota.html", "text/html");
   });
 
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *req) {
       bool ok = !Update.hasError();
+      otaInProgress = false;
       req->send(200, "text/html", ok ?
-        "<h2>Update Successful!</h2><a href='/'>Return to Settings</a><script>setTimeout(()=>location.href='/',2000);</script>"
+        "<h2>Update Successful!</h2><a href='/ota'>Return</a>"
         : "<h2>Update FAILED!</h2><a href='/ota'>Try Again</a>");
-      delay(1000);
-      if (ok) ESP.restart();
     },
     [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
-      if (!index) { Serial.printf("OTA Update Start: %s\n", filename.c_str()); Update.begin(UPDATE_SIZE_UNKNOWN); }
+      if (!index) {
+        Serial.printf("OTA Update Start: %s\n", filename.c_str());
+        Update.begin(UPDATE_SIZE_UNKNOWN);
+        otaInProgress = true;
+        // Show upgrade message on display
+        if (dma_display) {
+          dma_display->fillScreen(0);
+          dma_display->setTextColor(dma_display->color565(0, 255, 255));
+          dma_display->setCursor(2, 8);
+          dma_display->print("Upgrading...");
+        }
+      }
       if (Update.write(data, len) != len) { Serial.println("OTA Write Fail!"); }
       if (final) {
         if (Update.end(true)) { Serial.println("OTA Update Success."); }
         else { Serial.println("OTA Update Error!"); }
+        otaInProgress = false;
       }
     }
   );

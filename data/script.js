@@ -902,6 +902,12 @@ function loadAll(){
 
     // Refresh lux from status shortly after load to display live value
     setTimeout(refreshCurrentLuxFromStatus, 1000);
+
+    // OTA upload handler
+    var otaBtn = document.getElementById('btnUploadOta');
+    if (otaBtn) {
+      otaBtn.addEventListener('click', uploadOtaFirmware);
+    }
   });
 }
 
@@ -921,6 +927,60 @@ function refreshCurrentLuxFromStatus(){
       if (data.lux !== undefined) setCurrentLuxLabel(data.lux);
     })
     .catch(function(){});
+}
+
+async function uploadOtaFirmware(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  var fileInput = document.getElementById('otaFile');
+  if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+    setMsg('otaMsg', 'Choose a firmware .bin file first.', false);
+    return;
+  }
+  var file = fileInput.files[0];
+  setMsg('otaMsg', 'Uploading...', true);
+  var btn = document.getElementById('btnUploadOta');
+  if (btn) btn.disabled = true;
+  var progRow = document.getElementById('otaProgressRow');
+  var progBar = document.getElementById('otaProgressBar');
+  if (progRow) progRow.style.display = '';
+  if (progBar) progBar.style.width = '0%';
+  try {
+    var res = await fetch('/update', {
+      method: 'POST',
+      body: (() => {
+        // Manually stream to track progress
+        var form = new FormData();
+        form.append('firmware', file, file.name);
+        return form;
+      })()
+    });
+    if (res.body && progBar) {
+      // Track progress if browser supports it
+      const reader = res.body.getReader();
+      let received = 0;
+      const total = file.size;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        received += value.length;
+        const pct = Math.min(100, Math.round(received / total * 100));
+        progBar.style.width = pct + '%';
+      }
+    }
+    var text = await res.text();
+    if (!res.ok) throw new Error(text || 'Upload failed');
+    if (progBar) progBar.style.width = '100%';
+    setMsg('otaMsg', 'Upload ok. Device will reboot...', true);
+    setTimeout(function(){ location.reload(); }, 2000);
+  } catch (err) {
+    console.error('OTA upload failed', err);
+    setMsg('otaMsg', 'OTA failed: ' + (err.message || 'error'), false);
+    if (btn) btn.disabled = false;
+    if (progRow) progRow.style.display = 'none';
+    if (progBar) progBar.style.width = '0%';
+  }
 }
 
 
@@ -1254,6 +1314,7 @@ window.addEventListener('load', function(){
   var full = document.getElementById('full-status');
   if (!full) return;
   loadFullStatus();
+  setInterval(loadFullStatus, 3000); // refresh every 3s for snappier status page
 });
 
 

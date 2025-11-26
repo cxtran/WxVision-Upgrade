@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "alarm.h"
 #include "keyboard.h"
+#include "buzzer.h"
 #include <cstring>
 #include <vector>
 #include <ctype.h>
@@ -718,6 +719,7 @@ void InfoModal::handleIR(uint32_t code)
 {
     if (!active)
         return;
+    auto beep = [&](int freq, int ms = 80) { playBuzzerTone(freq, ms); };
     //   Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
 
     if (inEdit && fieldTypes[editIndex] == InfoText)
@@ -726,6 +728,7 @@ void InfoModal::handleIR(uint32_t code)
         {
             inEdit = false;
             editIndex = -1;
+            beep(900);
             draw();
         }
         return;
@@ -738,6 +741,7 @@ void InfoModal::handleIR(uint32_t code)
         {
             if (callback)
                 callback(false, -1);
+            beep(900);
 
             hide(); // Always hide THIS modal first!
 
@@ -796,12 +800,13 @@ void InfoModal::handleIR(uint32_t code)
                     return;
                 }
                 // Otherwise, show main menu as root
-                currentMenuLevel = MENU_MAIN;
-                menuActive = true;
-                showMainMenuModal();
-            }
-            return;
+            currentMenuLevel = MENU_MAIN;
+            menuActive = true;
+            showMainMenuModal();
         }
+        beep(1200);
+        return;
+    }
         if (code == IR_DOWN || code == IR_UP)
         {
             atClose = false;
@@ -819,14 +824,17 @@ void InfoModal::handleIR(uint32_t code)
         {
             inButtonBar = false;
             selIndex = lineCount - 1;
+            beep(1500);
         }
         else if (code == IR_LEFT)
         {
             btnSel = (btnSel - 1 + btnCount) % btnCount;
+            beep(900);
         }
         else if (code == IR_RIGHT)
         {
             btnSel = (btnSel + 1) % btnCount;
+            beep(1800);
         }
         else if (code == IR_OK)
         {
@@ -837,6 +845,7 @@ void InfoModal::handleIR(uint32_t code)
                 hide();
                 drawMenu();
             }
+            beep(2200);
         }
         draw();
         return;
@@ -859,6 +868,7 @@ void InfoModal::handleIR(uint32_t code)
         {
             selIndex--;
         }
+        beep(1500);
         draw();
         return;
     }
@@ -887,6 +897,7 @@ void InfoModal::handleIR(uint32_t code)
                 atClose = true; // --- PATCH: move from last line to X
             }
         }
+        beep(1200);
         draw();
         return;
     }
@@ -966,6 +977,16 @@ void InfoModal::handleIR(uint32_t code)
                 {
                     *ptr = normalizeThemeScheduleMinutes(*ptr);
                 }
+                else if (label.startsWith("Sound Volume"))
+                {
+                    *ptr = constrain(*ptr, 0, 100);
+                    buzzerVolume = *ptr;
+                    if (buzzerVolume > 0)
+                    {
+                        playBuzzerTone((buzzerToneSet == 0) ? 2000 : 1200, 80);
+                    }
+                    saveDeviceSettings();
+                }
                 else if (label.startsWith("Light Threshold"))
                 {
                     *ptr = constrain(*ptr, 1, 5000);
@@ -1027,6 +1048,7 @@ void InfoModal::handleIR(uint32_t code)
                                 tempOffset, humOffset, lightGain);
                 }
 
+                beep(code == IR_LEFT ? 900 : 1800);
                 draw();
             }
         }
@@ -1120,7 +1142,19 @@ void InfoModal::handleIR(uint32_t code)
                         pendingModalTime = millis() + 10;
                         return;
                     }
+                    if (lines[selIndex].startsWith("Sound Profile"))
+                    {
+                        val = constrain(val, 0, 2);
+                        buzzerToneSet = val;
+                        int preview = 0;
+                        if (val == 0) preview = 2200;
+                        else if (val == 1) preview = 1200;
+                        else preview = 5000;
+                        playBuzzerTone(preview, 60);
+                        saveDeviceSettings();
+                    }
 
+                    beep(code == IR_LEFT ? 900 : 1800);
                     draw();
                 }
             }
@@ -1143,6 +1177,7 @@ void InfoModal::handleIR(uint32_t code)
                     textRefs[textIdx],
                     keyboardTextDoneShim,
                     lines[selIndex].c_str());
+                beep(2200);
             }
         }
         else if (fieldTypes[selIndex] == InfoChooser)
@@ -1166,6 +1201,7 @@ void InfoModal::handleIR(uint32_t code)
             hide();
             drawMenu();
         }
+        beep(2200);
         return;
     }
 

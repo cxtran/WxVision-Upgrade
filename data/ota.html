@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTA Update - VisionWX</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1>VisionWX</h1>
+    <nav>
+      <a class="nav-btn" href="/">Home</a>
+      <a class="nav-btn" href="/config.html">Settings</a>
+      <a class="nav-btn" href="/status.html">Full Status</a>
+      <a class="nav-btn" href="/ota" aria-current="page">OTA Update</a>
+      <a class="nav-btn" href="/reboot">Reboot</a>
+    </nav>
+  </header>
+  <main class="container">
+    <section class="card" id="card-ota">
+      <h2>OTA Update</h2>
+      <p class="muted">Upload the firmware .bin (e.g. <code>firmware.bin</code> from <code>.pio/build/esp32dev/</code>). Device will reboot on success.</p>
+      <form id="otaForm" class="grid2">
+        <div class="row">
+          <label for="otaFile">Firmware</label>
+          <input id="otaFile" class="file-input" type="file" accept=".bin,application/octet-stream" required>
+        </div>
+        <div class="actions">
+          <button class="btn primary" type="submit" id="btnUploadOta">Upload & Update</button>
+          <span class="msg" id="otaMsg"></span>
+        </div>
+        <div class="row" id="otaProgressRow" style="display:none;">
+          <label>Progress</label>
+          <div class="progress">
+            <div class="progress-bar" id="otaProgressBar" style="width:0%;"></div>
+          </div>
+        </div>
+      </form>
+    </section>
+  </main>
+  <script>
+    (function(){
+      const form = document.getElementById('otaForm');
+      const fileInput = document.getElementById('otaFile');
+      const msgEl = document.getElementById('otaMsg');
+      const btn = document.getElementById('btnUploadOta');
+      const progRow = document.getElementById('otaProgressRow');
+      const progBar = document.getElementById('otaProgressBar');
+
+      function setMsg(text, ok=true){
+        if (!msgEl) return;
+        msgEl.textContent = text || '';
+        msgEl.classList.remove('ok','err');
+        msgEl.classList.add(ok ? 'ok' : 'err');
+      }
+
+      form.addEventListener('submit', function(e){
+        e.preventDefault();
+        if (!fileInput || !fileInput.files || fileInput.files.length === 0){
+          setMsg('Choose a firmware .bin file first.', false);
+          return;
+        }
+        const file = fileInput.files[0];
+        setMsg('Uploading...', true);
+        if (btn) btn.disabled = true;
+        if (progRow) progRow.style.display = '';
+        if (progBar) progBar.style.width = '0%';
+
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', '/update', true);
+        let uploaded = false;
+        xhr.onreadystatechange = function(){
+          if (xhr.readyState === 4){
+            if (xhr.status >= 200 && xhr.status < 300){
+              if (progBar) progBar.style.width = '100%';
+              setMsg('Upload succeeded. Rebooting to apply...', true);
+              if (btn) btn.disabled = true;
+              triggerRebootAndPoll();
+            } else if (uploaded && xhr.status === 0) {
+              // Connection dropped; treat as success and poll
+              setMsg('Upload sent. Rebooting to apply...', true);
+              if (progBar) progBar.style.width = '100%';
+              triggerRebootAndPoll();
+            } else {
+              setMsg('OTA failed: ' + (xhr.responseText || xhr.statusText), false);
+              if (btn) btn.disabled = false;
+            }
+          }
+        };
+        xhr.upload.onprogress = function(event){
+          if (event.lengthComputable && progBar){
+            const pct = Math.min(100, Math.round(event.loaded / event.total * 100));
+            progBar.style.width = pct + '%';
+          }
+        };
+        xhr.upload.onload = function(){
+          uploaded = true;
+          setMsg('Upload sent. Waiting for device...', true);
+        };
+        xhr.onerror = function(){
+          if (uploaded){
+            // Likely rebooted; treat as success
+            setMsg('Upload sent. Rebooting to apply...', true);
+            if (progBar) progBar.style.width = '100%';
+            triggerRebootAndPoll();
+          } else {
+            setMsg('OTA failed: network error', false);
+            if (btn) btn.disabled = false;
+          }
+        };
+        const formData = new FormData();
+        formData.append('firmware', file, file.name);
+        xhr.send(formData);
+      });
+
+      function triggerRebootAndPoll(){
+        fetch('/reboot').catch(()=>{});
+        setMsg('Rebooting device to apply update...', true);
+        pollForReturn(0);
+      }
+
+      function pollForReturn(attempt){
+        const maxAttempts = 20; // ~20 seconds
+        setTimeout(function(){
+          fetch('/status.json', { cache:'no-store' })
+            .then(function(r){ return r.ok ? r.json() : null; })
+            .then(function(data){
+              if (data){
+                setMsg('Upgrade complete. New firmware is running. You can return to Home/Settings.', true);
+                if (btn) btn.style.display = 'none';
+                if (fileInput) fileInput.style.display = 'none';
+                const fileLabel = document.querySelector('label[for=\"otaFile\"]');
+                if (fileLabel) fileLabel.style.display = 'none';
+                const actions = document.querySelector('#card-ota .actions');
+                if (actions) actions.style.display = 'none';
+                const progRow = document.getElementById('otaProgressRow');
+                if (progRow) progRow.style.display = 'none';
+                return;
+              }
+              throw new Error('No data');
+            })
+            .catch(function(){
+              if (attempt + 1 < maxAttempts){
+                pollForReturn(attempt + 1);
+              } else {
+                setMsg('Device did not come back. Please power-cycle or try again.', false);
+                if (btn) btn.disabled = false;
+              }
+            });
+        }, 1000);
+      }
+    })();
+  </script>
+</body>
+</html>

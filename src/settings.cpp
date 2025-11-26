@@ -44,6 +44,8 @@ const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
 int splashDurationSec = 3;
 bool themeRefreshPending = false;
+int buzzerVolume = 100;
+int buzzerToneSet = 0; // 0=Bright,1=Soft,2=Click
 
 static constexpr int MINUTES_PER_DAY = 24 * 60;
 int normalizeThemeScheduleMinutes(int value)
@@ -157,6 +159,8 @@ void loadSettings() {
     autoBrightness = prefs.getBool("autoBrightness", true);
     splashDurationSec = prefs.getInt("splashDur", 3);
     splashDurationSec = constrain(splashDurationSec, 1, 10);
+    buzzerVolume = constrain(prefs.getInt("buzzVol", 100), 0, 100);
+    buzzerToneSet = constrain(prefs.getInt("buzzTone", 0), 0, 2);
 
     // Weather
     owmCity      = prefs.getString("owmCity", "");
@@ -194,6 +198,8 @@ void saveDeviceSettings() {
     prefs.putInt("autoRotate", autoRotate);
     prefs.putInt("autoRotInt", autoRotateInterval);
     prefs.putInt("manualScreen", manualScreen);
+    prefs.putInt("buzzVol", constrain(buzzerVolume, 0, 100));
+    prefs.putInt("buzzTone", constrain(buzzerToneSet, 0, 1));
     prefs.end();
     // Units are saved via saveUnits() (see saveAllSettings())
 }

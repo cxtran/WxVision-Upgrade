@@ -654,6 +654,9 @@ void setup()
     splashUpdate("IR Remote", 3, 6);
     setupIRSensor();
 
+    splashUpdate("Buzzer", 4, 6);
+    setupBuzzer();
+
     // Initialise RTC once sensors/I2C are ready
     rtcReady = rtc.begin();
     if (!rtcReady)
@@ -734,6 +737,13 @@ void loop()
     static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
     const unsigned long blinkInterval = 500;
+
+    // Pause normal rendering during OTA uploads; keep lightweight processing only
+    if (otaInProgress)
+    {
+        delay(50);
+        return;
+    }
 
     DateTime alarmNow;
     bool haveAlarmTime = false;
@@ -833,6 +843,13 @@ void loop()
     if (udpListening)
     {
         fetchTempestData();
+    }
+
+    // --- Physical button handling (active low) ---
+    if (now - lastButtonCheck >= buttonInterval)
+    {
+        lastButtonCheck = now;
+        getButton(); // maps UP/DOWN/LEFT/RIGHT/SELECT to menu actions
     }
 
     // --- Brightness control ---
