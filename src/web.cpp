@@ -748,7 +748,7 @@ void setupWebServer() {
           buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 4);
         }
         if (!doc["alarmSound"].isNull()) {
-          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 1);
+          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 2);
         }
         if (!doc["scrollLevel"].isNull()) {
           scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);

@@ -82,7 +82,7 @@ extern int humOffset;    // %
 extern int lightGain;    // %
 extern int buzzerVolume;   // 0-100
 extern int buzzerToneSet;  // 0 = Bright, 1 = Soft, 2 = Click, 3 = Chime, 4 = Pulse
-extern int alarmSoundMode; // 0 = Tone, 1 = Melody
+extern int alarmSoundMode; // 0 = Tone, 1 = Fur Elise, 2 = Turkish March
 
 void loadSettings();
 void saveDeviceSettings();

@@ -25,6 +25,21 @@ static const MelodyNote kAlarmMelody[] = {
 };
 static const int kAlarmMelodyLen = sizeof(kAlarmMelody) / sizeof(kAlarmMelody[0]);
 
+// Fur Elise (very short fragment)
+static const MelodyNote kMelodyFurElise[] = {
+    {659, 180}, {622, 180}, {659, 180}, {622, 180}, {659, 180}, {494, 180}, {587, 180}, {523, 180},
+    {440, 220}
+};
+static const int kMelodyFurEliseLen = sizeof(kMelodyFurElise) / sizeof(kMelodyFurElise[0]);
+
+// Turkish March (very short fragment)
+static const MelodyNote kMelodyTurkishMarch[] = {
+    {523, 160}, {659, 160}, {698, 160}, {784, 200},
+    {0, 100},
+    {784, 160}, {698, 160}, {659, 160}, {523, 200}
+};
+static const int kMelodyTurkishMarchLen = sizeof(kMelodyTurkishMarch) / sizeof(kMelodyTurkishMarch[0]);
+
 static bool doesAlarmApplyToday(int slot, int dayOfWeek)
 {
     if (!alarmEnabled[slot])
@@ -172,15 +187,20 @@ void tickAlarmState(const DateTime &now)
         }
         else // Melody mode
         {
+            const MelodyNote *melody = kAlarmMelody;
+            int melodyLen = kAlarmMelodyLen;
+            if (alarmSoundMode == 1) { melody = kMelodyFurElise; melodyLen = kMelodyFurEliseLen; }
+            else if (alarmSoundMode == 2) { melody = kMelodyTurkishMarch; melodyLen = kMelodyTurkishMarchLen; }
+
             if (nowMs >= s_melodyNoteEndMs)
             {
-                const MelodyNote &note = kAlarmMelody[s_melodyIndex];
+                const MelodyNote &note = melody[s_melodyIndex];
                 if (note.freq > 0)
                 {
                     playBuzzerTone(note.freq, note.durMs);
                 }
                 s_melodyNoteEndMs = nowMs + (unsigned long)note.durMs + 20;
-                s_melodyIndex = (s_melodyIndex + 1) % kAlarmMelodyLen;
+                s_melodyIndex = (s_melodyIndex + 1) % melodyLen;
             }
         }
     }
