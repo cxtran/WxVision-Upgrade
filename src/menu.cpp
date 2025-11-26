@@ -726,15 +726,15 @@ void showAlarmSettingsModal()
         alarmHourTemp = hour12;
     }
 
-    String labels[7];
-    InfoFieldType types[7];
+    String labels[8];
+    InfoFieldType types[8];
     int lineCount = 0;
 
     int *numberRefs[2];
     int numberCount = 0;
-    int *chooserRefs[5];
-    const char *const *chooserOpts[5];
-    int chooserCounts[5];
+    int *chooserRefs[6];
+    const char *const *chooserOpts[6];
+    int chooserCounts[6];
     int chooserCount = 0;
 
     auto addNumberLine = [&](const String &label, int *ref) {
@@ -756,6 +756,7 @@ void showAlarmSettingsModal()
     static const char *repeatOpts[] = {"No Repeat", "Daily", "Weekly", "Weekdays", "Weekend"};
     static const char *dowOpts[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char *ampmOpts[] = {"AM", "PM"};
+    static const char *alarmSoundOpts[] = {"Tone", "Melody"};
 
     addChooserLine("Select Alarm", &alarmSlotSelection, alarmSlotOpts, 3);
     addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
@@ -767,6 +768,7 @@ void showAlarmSettingsModal()
     addNumberLine("Minute (0-59)", &alarmMinuteTemp);
     addChooserLine("Repeat Mode", &alarmRepeatTemp, repeatOpts, 5);
     addChooserLine("Weekly Day", &alarmWeeklyDayTemp, dowOpts, 7);
+    addChooserLine("Alarm Sound", &alarmSoundMode, alarmSoundOpts, 2);
 
     alarmModal.setLines(labels, types, lineCount);
     alarmModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, nullptr, 0, nullptr);
@@ -811,6 +813,7 @@ void showAlarmSettingsModal()
         }
         alarmMinute[slot] = constrain(alarmMinuteTemp, 0, 59);
         alarmWeeklyDay[slot] = constrain(alarmWeeklyDayTemp, 0, 6);
+        alarmSoundMode = constrain(alarmSoundMode, 0, 1);
 
         refreshAlarmArming();
         saveAlarmSettings();

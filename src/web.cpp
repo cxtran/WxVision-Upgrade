@@ -31,6 +31,7 @@ extern String owmCountryCustom;
 extern String owmCountryCode;
 extern float tempOffset;
 extern int humOffset, lightGain;
+extern int buzzerVolume, buzzerToneSet, alarmSoundMode;
 extern void saveAllSettings();
 extern void loadSettings();
 extern String str_Weather_Conditions, str_Temp, str_Humd;
@@ -593,6 +594,9 @@ void setupWebServer() {
     doc["scrollLevel"]      = scrollLevel;
     doc["splashDuration"]   = splashDurationSec;
     doc["customMsg"]        = customMsg;
+    doc["buzzerVolume"]     = buzzerVolume;
+    doc["buzzerTone"]       = buzzerToneSet;
+    doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
     float luxNow = readBrightnessSensor();
     doc["currentLux"] = luxNow;
@@ -736,6 +740,15 @@ void setupWebServer() {
         if (!doc["splashDuration"].isNull()) {
           int dur = doc["splashDuration"].as<int>();
           splashDurationSec = constrain(dur, 1, 10);
+        }
+        if (!doc["buzzerVolume"].isNull()) {
+          buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
+        }
+        if (!doc["buzzerTone"].isNull()) {
+          buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 4);
+        }
+        if (!doc["alarmSound"].isNull()) {
+          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 1);
         }
         if (!doc["scrollLevel"].isNull()) {
           scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);

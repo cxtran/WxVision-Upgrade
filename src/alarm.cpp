@@ -9,11 +9,21 @@ static unsigned long s_lastBeepMs = 0;
 static uint32_t s_lastTriggerMinuteKey = 0;
 static uint32_t s_silencedMinuteKey = 0;
 static int s_activeSlot = -1;
+static int s_melodyIndex = 0;
+static unsigned long s_melodyNoteEndMs = 0;
 
 static constexpr unsigned long kAlarmFlashIntervalMs = 400;
 static constexpr unsigned long kAlarmBeepIntervalMs = 1000;
 static constexpr int kAlarmBeepFreq = 3000;
 static constexpr int kAlarmBeepMs = 120;
+
+struct MelodyNote { int freq; int durMs; };
+static const MelodyNote kAlarmMelody[] = {
+    {262, 160}, {330, 160}, {392, 160}, {523, 200},
+    {0, 120},
+    {523, 160}, {392, 160}, {330, 160}, {262, 220}
+};
+static const int kAlarmMelodyLen = sizeof(kAlarmMelody) / sizeof(kAlarmMelody[0]);
 
 static bool doesAlarmApplyToday(int slot, int dayOfWeek)
 {
@@ -60,6 +70,9 @@ static void resetRuntimeAlarm()
     s_lastBeepMs = 0;
     s_lastTriggerMinuteKey = 0;
     s_silencedMinuteKey = 0;
+    s_melodyIndex = 0;
+    s_melodyNoteEndMs = 0;
+    stopAlarmBuzzer();
 }
 
 void initAlarmModule()
@@ -76,8 +89,21 @@ void notifyAlarmSettingsChanged()
 
 void tickAlarmState(const DateTime &now)
 {
-    bool wasActive = s_alarmActive;
     uint32_t currentMinuteKey = now.unixtime() / 60;
+    // If silenced for this minute, keep alarm off entirely
+    if (s_silencedMinuteKey == currentMinuteKey)
+    {
+        s_alarmActive = false;
+        s_alarmFlashVisible = true;
+        s_lastFlashToggleMs = millis();
+        s_lastBeepMs = millis();
+        s_melodyIndex = 0;
+        s_melodyNoteEndMs = 0;
+        stopAlarmBuzzer();
+        return;
+    }
+
+    bool wasActive = s_alarmActive;
     if (s_silencedMinuteKey && currentMinuteKey != s_silencedMinuteKey)
     {
         s_silencedMinuteKey = 0;
@@ -136,10 +162,26 @@ void tickAlarmState(const DateTime &now)
             s_alarmFlashVisible = !s_alarmFlashVisible;
             s_lastFlashToggleMs = nowMs;
         }
-        if (nowMs - s_lastBeepMs >= kAlarmBeepIntervalMs)
+        if (alarmSoundMode == 0)
         {
-            playBuzzerTone(kAlarmBeepFreq, kAlarmBeepMs);
-            s_lastBeepMs = nowMs;
+            if (nowMs - s_lastBeepMs >= kAlarmBeepIntervalMs)
+            {
+                playBuzzerTone(kAlarmBeepFreq, kAlarmBeepMs);
+                s_lastBeepMs = nowMs;
+            }
+        }
+        else // Melody mode
+        {
+            if (nowMs >= s_melodyNoteEndMs)
+            {
+                const MelodyNote &note = kAlarmMelody[s_melodyIndex];
+                if (note.freq > 0)
+                {
+                    playBuzzerTone(note.freq, note.durMs);
+                }
+                s_melodyNoteEndMs = nowMs + (unsigned long)note.durMs + 20;
+                s_melodyIndex = (s_melodyIndex + 1) % kAlarmMelodyLen;
+            }
         }
     }
     else
@@ -185,6 +227,8 @@ void cancelActiveAlarm()
     s_alarmActive = false;
     s_alarmFlashVisible = true;
     s_lastFlashToggleMs = millis();
+    s_melodyIndex = 0;
+    s_melodyNoteEndMs = 0;
     stopAlarmBuzzer();
 }
 

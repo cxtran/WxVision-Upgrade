@@ -381,6 +381,13 @@
         </div>
       </div>
     </div>
+    <div class="row">
+      <label for="alarmSoundMode">Alarm Sound</label>
+      <select id="alarmSoundMode">
+        <option value="0">Tone</option>
+        <option value="1">Melody</option>
+      </select>
+    </div>
     <div class="actions">
       <button class="btn" id="btnSaveAlarms">Save Alarms</button>
       <span class="msg" id="saveAlarmsMsg"></span>
@@ -481,6 +488,25 @@
     <div class="actions">
       <button class="btn primary" id="btnSaveTime">Save Date/Time</button>
       <span id="saveTimeMsg" class="msg"></span>
+    </div>
+  </section>
+
+  <!-- Save All -->
+  <section class="card" id="card-sound">
+    <h2>Sound</h2>
+    <div class="row">
+      <label for="buzzerVolume">Sound Volume</label>
+      <input id="buzzerVolume" type="number" min="0" max="100" step="1" placeholder="100">
+    </div>
+    <div class="row">
+      <label for="buzzerToneSet">Sound Profile</label>
+      <select id="buzzerToneSet">
+        <option value="0">Bright</option>
+        <option value="1">Soft</option>
+        <option value="2">Click</option>
+        <option value="3">Chime</option>
+        <option value="4">Pulse</option>
+      </select>
     </div>
   </section>
 

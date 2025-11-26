@@ -831,6 +831,10 @@ function loadAll(){
     if (humOffsetEl) humOffsetEl.value = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
     var lightGainEl = document.getElementById('lightGain');
     if (lightGainEl) lightGainEl.value = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
+    var buzzVolEl = document.getElementById('buzzerVolume');
+    if (buzzVolEl) buzzVolEl.value = (typeof s.buzzerVolume !== 'undefined' ? s.buzzerVolume : 100);
+    var buzzToneEl = document.getElementById('buzzerToneSet');
+    if (buzzToneEl) buzzToneEl.value = (typeof s.buzzerTone !== 'undefined' ? s.buzzerTone : 0);
 
     // Alarms
     if (Array.isArray(s.alarms))
@@ -851,6 +855,8 @@ function loadAll(){
         if (wd) wd.value = (typeof a.weekDay === 'number') ? a.weekDay : 0;
       });
     }
+    var alarmSoundEl = document.getElementById('alarmSoundMode');
+    if (alarmSoundEl) alarmSoundEl.value = (typeof s.alarmSound !== 'undefined') ? s.alarmSound : 0;
     // NOAA
     if (s.noaa) {
       var nEn = document.getElementById('noaaEnabled');
@@ -1063,6 +1069,9 @@ function readSettingsForm() {
       if (el) el.value = lg;
       return lg;
     })(),
+    buzzerVolume: +(byId('buzzerVolume')?.value ?? 100),
+    buzzerTone:  +(byId('buzzerToneSet')?.value ?? 0),
+    alarmSound:  +(byId('alarmSoundMode')?.value ?? 0),
     alarms: [0,1,2].map(function(i){
       var idx = i + 1;
       return {
@@ -1183,7 +1192,7 @@ async function saveAlarmSettingsWeb(event){
   if (event && typeof event.preventDefault === 'function') {
     event.preventDefault();
   }
-  const payload = pickSettings(readSettingsForm(), ['alarms']);
+  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','buzzerTone']);
   await submitSettings(payload, 'saveAlarmsMsg');
 }
 

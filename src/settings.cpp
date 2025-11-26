@@ -46,6 +46,7 @@ int splashDurationSec = 3;
 bool themeRefreshPending = false;
 int buzzerVolume = 100;
 int buzzerToneSet = 0; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse
+int alarmSoundMode = 0; // 0=Tone,1=Melody
 
 static constexpr int MINUTES_PER_DAY = 24 * 60;
 int normalizeThemeScheduleMinutes(int value)
@@ -161,6 +162,7 @@ void loadSettings() {
     splashDurationSec = constrain(splashDurationSec, 1, 10);
     buzzerVolume = constrain(prefs.getInt("buzzVol", 100), 0, 100);
     buzzerToneSet = constrain(prefs.getInt("buzzTone", 0), 0, 4);
+    alarmSoundMode = constrain(prefs.getInt("alarmSound", 0), 0, 1);
 
     // Weather
     owmCity      = prefs.getString("owmCity", "");
@@ -200,6 +202,7 @@ void saveDeviceSettings() {
     prefs.putInt("manualScreen", manualScreen);
     prefs.putInt("buzzVol", constrain(buzzerVolume, 0, 100));
     prefs.putInt("buzzTone", constrain(buzzerToneSet, 0, 4));
+    prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 1));
     prefs.end();
     // Units are saved via saveUnits() (see saveAllSettings())
 }
@@ -263,6 +266,7 @@ void saveAlarmSettings() {
         prefs.putInt(("alarmWeekDay" + String(i)).c_str(), constrain(alarmWeeklyDay[i], 0, 6));
         prefs.putBool(("alarmOneShot" + String(i)).c_str(), alarmOneShotPending[i]);
     }
+    prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 1));
     prefs.end();
 }
 

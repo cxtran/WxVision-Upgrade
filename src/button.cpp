@@ -8,6 +8,7 @@
 #include "ir_codes.h"
 #include "sensors.h" // for enqueueVirtualIRCode
 #include "buzzer.h"
+#include "alarm.h"
 
 void setupButtons() {
    
@@ -35,27 +36,32 @@ void getButton(){
   if (lastUp == HIGH && up == LOW) {
     Serial.println("UP button pressed");
     playBuzzerTone(1500, toneMs);
+    if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRCode(IR_UP);
   
   }
   if (lastDn == HIGH && dn == LOW) {
     Serial.println("DOWN button pressed");
     playBuzzerTone(1200, toneMs);
+    if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRCode(IR_DOWN);
   }
   if (lastLeft == HIGH && left == LOW) {
     Serial.println("LEFT button pressed");
     playBuzzerTone(900, toneMs);
+    if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRCode(IR_LEFT);
   }
   if (lastRight == HIGH && right == LOW) {
     Serial.println("RIGHT button pressed");
     playBuzzerTone(1800, toneMs);
+    if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRCode(IR_RIGHT);
   }
   if (lastCtr == HIGH && ctr == LOW) {
     Serial.println("CENTER button pressed");
     playBuzzerTone(2200, toneMs);
+    if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     if (!menuActive)
     {
       menuActive = true;
