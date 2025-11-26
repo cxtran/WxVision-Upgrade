@@ -1144,12 +1144,16 @@ void InfoModal::handleIR(uint32_t code)
                     }
                     if (lines[selIndex].startsWith("Sound Profile"))
                     {
-                        val = constrain(val, 0, 2);
+                        val = constrain(val, 0, 4);
                         buzzerToneSet = val;
                         int preview = 0;
-                        if (val == 0) preview = 2200;
-                        else if (val == 1) preview = 1200;
-                        else preview = 5000;
+                        switch (val) {
+                            case 0: preview = 2200; break; // Bright
+                            case 1: preview = 1200; break; // Soft
+                            case 2: preview = 5000; break; // Click
+                            case 3: preview = 1800; break; // Chime
+                            case 4: preview = 2000; break; // Pulse
+                        }
                         playBuzzerTone(preview, 60);
                         saveDeviceSettings();
                     }
@@ -1191,6 +1195,16 @@ void InfoModal::handleIR(uint32_t code)
             if (label == "Day Theme Start" || label == "Night Theme Start")
             {
                 // Ignore OK press on scheduled theme rows to prevent accidental exit
+                return;
+            }
+            if (label.startsWith("Light Threshold"))
+            {
+                // Apply and exit Display menu cleanly when OK is pressed on Light Threshold
+                if (callback)
+                    callback(true, selIndex);
+                hide();
+                drawMenu();
+                beep(2200);
                 return;
             }
         }

@@ -20,14 +20,35 @@ void playBuzzerTone(int frequency, int duration) {
 
     int duty = map(constrain(buzzerVolume, 0, 100), 0, 100, 0, 1023); // 10-bit resolution
     int freq = frequency;
-    if (buzzerToneSet == 1) { // Soft profile
-        freq = max(200, (frequency * 70) / 100);
-    } else if (buzzerToneSet == 2) { // Click profile
-        freq = 5000;
+    int dur = duration;
+    switch (buzzerToneSet) {
+        case 1: // Soft
+            freq = max(200, (frequency * 70) / 100);
+            break;
+        case 2: // Click
+            freq = 5000;
+            dur = min(duration, 50);
+            break;
+        case 3: // Chime
+            freq = 1500 + (frequency / 4);
+            dur = duration + 20;
+            break;
+        case 4: // Pulse
+            freq = frequency;
+            dur = duration;
+            break;
+        default: // Bright
+            break;
     }
     ledcWriteTone(BUZZER_CHANNEL, freq);  // Set frequency
     ledcWrite(BUZZER_CHANNEL, duty);           // Set duty (volume)
-    delay(duration);                           // Wait
+    delay(dur);                                // Wait
+    if (buzzerToneSet == 4) { // Pulse: brief gap then quick second pulse
+        ledcWrite(BUZZER_CHANNEL, 0);
+        delay(30);
+        ledcWrite(BUZZER_CHANNEL, duty);
+        delay(40);
+    }
     ledcWrite(BUZZER_CHANNEL, 0);              // Stop tone
     ledcWriteTone(BUZZER_CHANNEL, 0);
 }

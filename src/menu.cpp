@@ -374,6 +374,8 @@ void handleIR(uint32_t code)
     static unsigned long lastMenuToggle = 0;
     if (!menuActive)
     {
+        // Always provide audible feedback when not in a menu
+        playBuzzerTone(1200, 80);
         if (code == IR_LEFT)
         {
             handleScreenSwitch(-1);
@@ -1221,11 +1223,6 @@ void showSystemModal()
     currentMenuLevel = MENU_SYSTEM;
     menuActive = true;
 
-    static int buzzerVolumeTemp = 100;
-    static int buzzerToneSetTemp = 0;
-    buzzerVolumeTemp = buzzerVolume;
-    buzzerToneSetTemp = buzzerToneSet;
-
     String labels[] = {
         "Sound Volume (0-100)",
         "Sound Profile",
@@ -1242,11 +1239,11 @@ void showSystemModal()
     InfoFieldType types[] = {
         InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
-    int *numberRefs[] = {&buzzerVolumeTemp};
-    int *chooserRefs[] = {&buzzerToneSetTemp};
-    static const char *toneOpts[] = {"Bright", "Soft", "Click"};
+    int *numberRefs[] = {&buzzerVolume};
+    int *chooserRefs[] = {&buzzerToneSet};
+    static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse"};
     const char *const *chooserOpts[] = {toneOpts};
-    int chooserCounts[] = {3};
+    int chooserCounts[] = {5};
 
     systemModal.setLines(labels, types, 11);
     systemModal.setValueRefs(numberRefs, 1, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
@@ -1265,9 +1262,9 @@ void showSystemModal()
             action = systemModal.getSelIndex();
         }
 
-        // Persist volume regardless of which action chosen
-        buzzerVolume = constrain(buzzerVolumeTemp, 0, 100);
-        buzzerToneSet = constrain(buzzerToneSetTemp, 0, 2);
+        // Persist volume/profile regardless of which action chosen
+        buzzerVolume = constrain(buzzerVolume, 0, 100);
+        buzzerToneSet = constrain(buzzerToneSet, 0, 4);
         saveDeviceSettings();
 
         if (action >= 0)

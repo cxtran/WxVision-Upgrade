@@ -10,6 +10,7 @@
 #include <Wire.h>
 #include "units.h"
 #include "system.h"
+#include "buzzer.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 
@@ -184,6 +185,10 @@ uint32_t getIRCodeNonBlocking()
   if (popVirtualIR(queuedCode))
   {
     PRINT_IR_CODE(queuedCode);
+    if (!menuActive && (queuedCode == IR_UP || queuedCode == IR_DOWN || queuedCode == IR_LEFT || queuedCode == IR_RIGHT || queuedCode == IR_OK || queuedCode == IR_CANCEL))
+    {
+      playBuzzerTone(1200, 80);
+    }
     if (isAlarmCurrentlyActive() && isAlarmCancelCode(queuedCode))
     {
         cancelActiveAlarm();
@@ -214,6 +219,10 @@ uint32_t getIRCodeNonBlocking()
     if (code != 0)
     {
       PRINT_IR_CODE(code);
+      if (!menuActive && (code == IR_UP || code == IR_DOWN || code == IR_LEFT || code == IR_RIGHT || code == IR_OK || code == IR_CANCEL))
+      {
+          playBuzzerTone(1200, 80);
+      }
       if (isAlarmCurrentlyActive() && isAlarmCancelCode(code))
       {
           cancelActiveAlarm();
