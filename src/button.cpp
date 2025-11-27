@@ -10,6 +10,10 @@
 #include "buzzer.h"
 #include "alarm.h"
 
+// Explicit forward declarations to satisfy compilation order
+extern bool isAlarmCurrentlyActive();
+extern void cancelActiveAlarm();
+
 void setupButtons() {
    
 // Serial.begin(115200);

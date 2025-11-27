@@ -37,6 +37,8 @@
 #include "windmeter.h"
 #include "ScrollLine.h"
 #include "system.h"
+#include "datalogger.h"
+#include "graph.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -47,6 +49,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_FORECAST,
     SCREEN_WIND_DIR,
     SCREEN_ENV_INDEX,
+    SCREEN_TEMP_HISTORY,
     SCREEN_NOAA_ALERT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
@@ -416,6 +419,9 @@ void rotateScreen(int direction)
     case SCREEN_ENV_INDEX:
         showEnvironmentalQualityScreen();
         break;
+    case SCREEN_TEMP_HISTORY:
+        drawTemperatureHistoryScreen();
+        break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
         break;
@@ -657,6 +663,9 @@ void setup()
     splashUpdate("Buzzer", 4, 6);
     setupBuzzer();
 
+    splashUpdate("Data Log", 5, 6);
+    initSensorLog();
+
     // Initialise RTC once sensors/I2C are ready
     rtcReady = rtc.begin();
     if (!rtcReady)
@@ -850,6 +859,27 @@ void loop()
     {
         lastButtonCheck = now;
         getButton(); // maps UP/DOWN/LEFT/RIGHT/SELECT to menu actions
+    }
+
+    // --- Sensor trend logging (every 5 minutes) ---
+    static unsigned long lastLogMs = 0;
+    if (!otaInProgress && now - lastLogMs >= 300000UL) // 5 minutes
+    {
+        lastLogMs = now;
+        float temp = NAN, hum = NAN, press = NAN;
+        if (!isnan(SCD40_temp)) temp = SCD40_temp;
+        else if (!isnan(aht20_temp)) temp = aht20_temp;
+        if (!isnan(SCD40_hum)) hum = SCD40_hum;
+        else if (!isnan(aht20_hum)) hum = aht20_hum;
+        if (!isnan(bmp280_pressure)) press = bmp280_pressure;
+        float lux = readBrightnessSensor();
+        DateTime logNow;
+        uint32_t ts = millis() / 1000;
+        if (getLocalDateTime(logNow)) {
+            ts = logNow.unixtime();
+        }
+        SensorSample s{ts, temp, hum, press, lux};
+        appendSensorSample(s);
     }
 
     // --- Brightness control ---
@@ -1304,6 +1334,19 @@ void loop()
             lastConditionSceneUpdate = now;
         }
         tickConditionSceneMarquee();
+    }
+
+    if (currentScreen == SCREEN_TEMP_HISTORY)
+    {
+        static unsigned long lastTempHistoryRedraw = 0;
+        const unsigned long redrawInterval = 15000;
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || (now - lastTempHistoryRedraw) >= redrawInterval))
+        {
+            drawTemperatureHistoryScreen();
+            needsClear = false;
+            lastTempHistoryRedraw = now;
+        }
     }
 
     if (envQualityScreen.isActive())

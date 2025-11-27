@@ -6,3 +6,6 @@ void setupWebServer();      // Call this from setup()
 // Flag set during OTA upload to pause normal rendering
 extern bool otaInProgress;
 
+// Trend logging (declared in datalogger.cpp)
+void sensorLogToJson(class JsonDocument &doc);
+

@@ -1204,6 +1204,14 @@ async function saveNoaaSettingsWeb(event){
   await submitSettings(payload, 'saveNoaaMsg');
 }
 
+// Trend chart for future use
+async function loadTrend(){
+  const res = await fetch('/trend.json');
+  if (!res.ok) return;
+  const data = await res.json();
+  console.log('trend', data);
+}
+
 function parseManualToEpoch() {
   var d = document.getElementById('manualDate').value;
   var t = document.getElementById('manualTime').value;

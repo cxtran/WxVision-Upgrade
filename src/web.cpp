@@ -13,6 +13,7 @@
 #include "datetimesettings.h"
 #include "tempest.h"
 #include "system.h"
+#include "datalogger.h"
 #include "weather_countries.h"
 #include "sensors.h"
 #include "ir_codes.h"
@@ -158,6 +159,8 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Wind Direction";
   case SCREEN_ENV_INDEX:
     return "Air Quality";
+  case SCREEN_TEMP_HISTORY:
+    return "Temp (24h)";
   case SCREEN_CONDITION_SCENE:
     return "Weather Scene";
   case SCREEN_CURRENT:
@@ -270,6 +273,7 @@ void setupWebServer() {
   server.serveStatic("/config.html", SPIFFS, "/config.html").setCacheControl("no-cache");
   server.serveStatic("/style.css",   SPIFFS, "/style.css").setCacheControl("no-cache");
   server.serveStatic("/script.js",   SPIFFS, "/script.js").setCacheControl("no-cache");
+  server.serveStatic("/sensor-log.json", SPIFFS, "/sensor_log.bin"); // fallback if needed
 
 
   // Explicit route for config.html
@@ -278,6 +282,12 @@ void setupWebServer() {
   });
 
   // ---------- JSON endpoints ----------
+  server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
+    JsonDocument doc;
+    sensorLogToJson(doc);
+    String json; serializeJson(doc, json);
+    req->send(200, "application/json", json);
+  });
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     JsonDocument doc;
       String dispTemp;
