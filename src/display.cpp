@@ -1879,11 +1879,16 @@ bool start_Scroll_Text = false;
 // Condition scene marquee state
 static String conditionSceneMarqueeBase = "";
 static String conditionSceneMarqueeText = "";
+static String conditionSceneMarqueePendingText = "";
+static int conditionSceneMarqueeContentWidth = 0;
 static int conditionSceneMarqueeWidth = 0;
+static int conditionSceneMarqueePendingWidth = 0;
 static int conditionSceneMarqueeOffset = 0;
 static uint16_t conditionSceneMarqueeColor = 0;
 static unsigned long conditionSceneMarqueeLastTick = 0;
-static constexpr int kConditionMarqueeGap = 12;
+static constexpr int kConditionMarqueeGap = 16;
+static constexpr int kConditionMarqueeTailPadPx = 24; // padding added to ensure the tail clears before wrap
+
 
 void getTimeFromRTC()
 {
@@ -2290,16 +2295,90 @@ static String formatConditionSceneTimeTag()
     return String(buf);
 }
 
+// Build the condition marquee text with extra telemetry fields (humid, press, wind, feels like)
+static String buildConditionMarqueeText(const String &label)
+{
+    String combined = label;
+
+    auto appendField = [&](const String &field) {
+        if (field.length() == 0)
+            return;
+        if (combined.length() > 0)
+            combined += " ¦ ";
+        combined += field;
+    };
+
+    // Time always first
+    appendField(formatConditionSceneTimeTag());
+
+    bool feelsAppended = false;
+
+    if (isDataSourceWeatherFlow())
+    {
+        if (currentCond.humidity >= 0)
+            appendField(String("Hum ") + currentCond.humidity + "%");
+        else if (!isnan(tempest.humidity))
+            appendField(String("Hum ") + String((int)roundf(tempest.humidity)) + "%");
+
+        double press = !isnan(currentCond.pressure) ? currentCond.pressure : tempest.pressure;
+        if (!isnan(press))
+            appendField(String("Press ") + fmtPress(press, 0));
+
+        double wind = !isnan(currentCond.windAvg) ? currentCond.windAvg : tempest.windAvg;
+        if (!isnan(wind))
+            appendField(String("Wind ") + fmtWind(wind, 1));
+
+        double feels = !isnan(currentCond.feelsLike) ? currentCond.feelsLike : tempest.temperature;
+        if (!isnan(feels))
+        {
+            appendField(String("Feels ") + fmtTemp(feels, 0));
+            feelsAppended = true;
+        }
+    }
+    else if (isDataSourceOwm())
+    {
+        String hum = formatOutdoorHumidity();
+        if (hum.length() > 0 && hum != "--")
+            appendField(String("Hum ") + hum + "%");
+
+        if (str_Pressure.length() > 0 && str_Pressure != "--")
+            appendField(String("Press ") + fmtPress(atof(str_Pressure.c_str()), 0));
+
+        if (str_Wind_Speed.length() > 0 && str_Wind_Speed != "--")
+            appendField(String("Wind ") + fmtWind(atof(str_Wind_Speed.c_str()), 1));
+
+        if (str_Feels_like.length() > 0 && str_Feels_like != "--")
+        {
+            appendField(String("Feels ") + fmtTemp(atof(str_Feels_like.c_str()), 0));
+            feelsAppended = true;
+        }
+        else if (str_Temp.length() > 0 && str_Temp != "--")
+        {
+            appendField(String("Feels ") + fmtTemp(atof(str_Temp.c_str()), 0));
+            feelsAppended = true;
+        }
+    }
+
+    // Fallback: if we still don't have a feels-like value but we have a temperature, reuse it
+    if (!feelsAppended)
+    {
+        double tempVal = NAN;
+        if (isDataSourceWeatherFlow())
+            tempVal = !isnan(currentCond.temp) ? currentCond.temp : tempest.temperature;
+        else if (isDataSourceOwm() && str_Temp.length() > 0 && str_Temp != "--")
+            tempVal = atof(str_Temp.c_str());
+
+        if (!isnan(tempVal))
+            appendField(String("Feels ") + fmtTemp(tempVal, 0));
+    }
+
+    return combined;
+}
+
 static void renderConditionSceneMarquee(bool force)
 {
     if (conditionSceneMarqueeText.length() == 0)
         return;
-
-    const unsigned long intervalMs = (scrollSpeed > 0) ? static_cast<unsigned long>(scrollSpeed) : 60ul;
-    unsigned long now = millis();
-    if (!force && (now - conditionSceneMarqueeLastTick) < intervalMs)
-        return;
-    conditionSceneMarqueeLastTick = now;
 
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
@@ -2311,8 +2390,16 @@ static void renderConditionSceneMarquee(bool force)
 
     if (conditionSceneMarqueeWidth <= PANEL_RES_X)
     {
-        conditionSceneMarqueeOffset = 0;
-        int startX = (PANEL_RES_X - conditionSceneMarqueeWidth) / 2;
+        if (conditionSceneMarqueePendingText.length() > 0)
+        {
+            conditionSceneMarqueeText = conditionSceneMarqueePendingText;
+            conditionSceneMarqueeContentWidth = getTextWidth(conditionSceneMarqueeText.c_str());
+            conditionSceneMarqueeWidth = conditionSceneMarqueeContentWidth + kConditionMarqueeTailPadPx;
+            conditionSceneMarqueePendingText = "";
+            conditionSceneMarqueePendingWidth = 0;
+            conditionSceneMarqueeOffset = 0;
+        }
+        int startX = (PANEL_RES_X - conditionSceneMarqueeContentWidth) / 2;
         if (startX < 0)
             startX = 0;
         dma_display->setCursor(startX, marqueeY);
@@ -2320,24 +2407,33 @@ static void renderConditionSceneMarquee(bool force)
         return;
     }
 
-    const int totalWidth = conditionSceneMarqueeWidth + kConditionMarqueeGap;
-    int startX = -conditionSceneMarqueeOffset;
-    while (startX > -conditionSceneMarqueeWidth)
+    // Scroll (Air Quality style): advance at scrollSpeed, loop after width+gap, apply pending on loop
+    const unsigned long intervalMs = (scrollSpeed > 0) ? static_cast<unsigned long>(scrollSpeed) : 60ul;
+    unsigned long now = millis();
+    if (force || (now - conditionSceneMarqueeLastTick) >= intervalMs)
     {
-        startX -= totalWidth;
-    }
-    for (; startX < PANEL_RES_X; startX += totalWidth)
-    {
-        if (startX + conditionSceneMarqueeWidth > 0)
+        conditionSceneMarqueeLastTick = now;
+        conditionSceneMarqueeOffset++;
+        if (conditionSceneMarqueeOffset >= conditionSceneMarqueeWidth + kConditionMarqueeGap)
         {
-            dma_display->setCursor(startX, marqueeY);
-            dma_display->print(conditionSceneMarqueeText);
+            conditionSceneMarqueeOffset = 0;
+            if (conditionSceneMarqueePendingText.length() > 0)
+            {
+                conditionSceneMarqueeText = conditionSceneMarqueePendingText;
+                conditionSceneMarqueeContentWidth = getTextWidth(conditionSceneMarqueeText.c_str());
+                conditionSceneMarqueeWidth = conditionSceneMarqueeContentWidth + kConditionMarqueeTailPadPx;
+                conditionSceneMarqueePendingText = "";
+                conditionSceneMarqueePendingWidth = 0;
+            }
         }
     }
 
-    conditionSceneMarqueeOffset = (conditionSceneMarqueeOffset + 1) % totalWidth;
+    int cursorX = -conditionSceneMarqueeOffset;
+    dma_display->setCursor(cursorX, marqueeY);
+    dma_display->print(conditionSceneMarqueeText);
+    dma_display->setCursor(cursorX + conditionSceneMarqueeWidth + kConditionMarqueeGap, marqueeY);
+    dma_display->print(conditionSceneMarqueeText);
 }
-
 void drawSunIcon(int x, int y, uint16_t color)
 {
     // Consistent 7x7 sun with center + 8 rays
@@ -2798,15 +2894,24 @@ void drawConditionSceneScreen()
         drawTextWithShadow(tempX, 6, tempTag, accent);
     }
 
-    conditionSceneMarqueeBase = label;
-    conditionSceneMarqueeColor = accent;
-    String timeTag = formatConditionSceneTimeTag();
-    conditionSceneMarqueeText = conditionSceneMarqueeBase;
-    if (conditionSceneMarqueeText.length() > 0 && timeTag.length() > 0)
-        conditionSceneMarqueeText += " ¦ ";
-    conditionSceneMarqueeText += timeTag;
-    conditionSceneMarqueeWidth = getTextWidth(conditionSceneMarqueeText.c_str());
-    conditionSceneMarqueeOffset = 0;
+    // Only (re)initialize the marquee when the underlying condition label changes.
+    // Time, wind, feels, etc. are updated via tickConditionSceneMarquee() using the pending buffer.
+    if (label != conditionSceneMarqueeBase || conditionSceneMarqueeText.length() == 0)
+    {
+        conditionSceneMarqueeBase = label;
+        conditionSceneMarqueeColor = accent;
+        conditionSceneMarqueeText = buildConditionMarqueeText(conditionSceneMarqueeBase);
+        conditionSceneMarqueeContentWidth = getTextWidth(conditionSceneMarqueeText.c_str());
+        conditionSceneMarqueeWidth = conditionSceneMarqueeContentWidth + kConditionMarqueeTailPadPx;
+        conditionSceneMarqueeOffset = 0;
+        conditionSceneMarqueePendingText = "";
+        conditionSceneMarqueePendingWidth = 0;
+    }
+    else
+    {
+        // Keep accent color in sync even if we don't rebuild the text
+        conditionSceneMarqueeColor = accent;
+    }
     renderConditionSceneMarquee(true);
 }
 
@@ -2818,17 +2923,12 @@ void tickConditionSceneMarquee()
     if (conditionSceneMarqueeBase.length() == 0)
         return;
 
-    String combined = conditionSceneMarqueeBase;
-    String timeTag = formatConditionSceneTimeTag();
-    if (combined.length() > 0 && timeTag.length() > 0)
-        combined += " ¦ ";
-    combined += timeTag;
+    String combined = buildConditionMarqueeText(conditionSceneMarqueeBase);
 
-    if (combined != conditionSceneMarqueeText)
+    if (combined != conditionSceneMarqueeText && combined != conditionSceneMarqueePendingText)
     {
-        conditionSceneMarqueeText = combined;
-        conditionSceneMarqueeWidth = getTextWidth(conditionSceneMarqueeText.c_str());
-        conditionSceneMarqueeOffset = 0;
+        conditionSceneMarqueePendingText = combined;
+        conditionSceneMarqueePendingWidth = getTextWidth(combined.c_str()) + kConditionMarqueeTailPadPx;
     }
 
     renderConditionSceneMarquee(false);
