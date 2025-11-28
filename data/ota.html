@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OTA Update - VisionWX</title>
+  <title>OTA Update - WxVision</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <h1>VisionWX</h1>
+    <h1>WxVision</h1>
     <nav>
       <a class="nav-btn" href="/">Home</a>
       <a class="nav-btn" href="/config.html">Settings</a>
@@ -28,13 +28,15 @@
         </div>
         <div class="actions">
           <button class="btn primary" type="submit" id="btnUploadOta">Upload & Update</button>
-          <span class="msg" id="otaMsg"></span>
         </div>
         <div class="row" id="otaProgressRow" style="display:none;">
           <label>Progress</label>
           <div class="progress">
             <div class="progress-bar" id="otaProgressBar" style="width:0%;"></div>
           </div>
+        </div>
+        <div class="row">
+          <span class="msg" id="otaMsg"></span>
         </div>
       </form>
     </section>
@@ -74,7 +76,15 @@
           if (xhr.readyState === 4){
             if (xhr.status >= 200 && xhr.status < 300){
               if (progBar) progBar.style.width = '100%';
-              setMsg('Upload succeeded. Rebooting to apply...', true);
+              // Update the main description text and inline status instead of navigating away
+              const intro = document.querySelector('#card-ota p.muted');
+              if (intro){
+                intro.innerHTML = 'Your WxVision panel firmware was updated successfully. '
+                  + 'The device will reboot shortly. You can reconnect to the web UI at '
+                  + '<code>http://wxvision-xxxx.local</code> or its IP address.';
+              }
+
+              setMsg('Update successful \u2714 New firmware will start after reboot.', true);
               if (btn) btn.disabled = true;
               triggerRebootAndPoll();
             } else if (uploaded && xhr.status === 0) {
@@ -127,7 +137,21 @@
             .then(function(r){ return r.ok ? r.json() : null; })
             .then(function(data){
               if (data){
-                setMsg('Upgrade complete. New firmware is running. You can return to Home/Settings.', true);
+                // Update the main description text so the old upload instructions are replaced
+                const intro = document.querySelector('#card-ota p.muted');
+                if (intro){
+                  const host = (data.hostname && data.hostname.length)
+                    ? data.hostname + '.local'
+                    : 'wxvision-xxxx.local';
+                  const ip = data.ip || '';
+                  intro.innerHTML =
+                    'Upgrade complete. This device is now running the new firmware. '
+                    + 'You can safely return to Home or Settings, or reconnect at '
+                    + '<code>http://' + host + '</code>'
+                    + (ip ? ' or <code>http://' + ip + '</code>' : '') + '.';
+                }
+
+                setMsg('Upgrade complete. New firmware is running.', true);
                 if (btn) btn.style.display = 'none';
                 if (fileInput) fileInput.style.display = 'none';
                 const fileLabel = document.querySelector('label[for=\"otaFile\"]');

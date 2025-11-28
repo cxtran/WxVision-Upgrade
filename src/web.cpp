@@ -37,6 +37,7 @@ extern void saveAllSettings();
 extern void loadSettings();
 extern String str_Weather_Conditions, str_Temp, str_Humd;
 extern char chr_t_hour[3], chr_t_minute[3], chr_t_second[3];
+extern String deviceHostname;
 bool otaInProgress = false;
 extern bool alarmEnabled[3];
 extern int alarmHour[3];
@@ -161,6 +162,8 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Air Quality";
   case SCREEN_TEMP_HISTORY:
     return "Temp (24h)";
+  case SCREEN_CO2_HISTORY:
+    return "CO2 (24h)";
   case SCREEN_CONDITION_SCENE:
     return "Weather Scene";
   case SCREEN_CURRENT:
@@ -305,6 +308,7 @@ void setupWebServer() {
 
     doc["wifiSSID"] = WiFi.SSID();
     doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
+    doc["hostname"] = deviceHostname;
     doc["ip"] = WiFi.localIP().toString();
     doc["mac"] = WiFi.macAddress();
     doc["rssi"] = WiFi.RSSI();
@@ -1147,9 +1151,14 @@ void setupWebServer() {
     [](AsyncWebServerRequest *req) {
       bool ok = !Update.hasError();
       otaInProgress = false;
-      req->send(200, "text/html", ok ?
-        "<h2>Update Successful!</h2><a href='/ota'>Return</a>"
-        : "<h2>Update FAILED!</h2><a href='/ota'>Try Again</a>");
+      if (ok) {
+        // OTA page handles success messaging; keep response minimal
+        req->send(200, "text/plain", "OK");
+      } else {
+        req->send(200, "text/html",
+                  "<h2>Update FAILED!</h2><p>Please check the firmware file and try again.</p>"
+                  "<a href='/ota'>Back to OTA page</a>");
+      }
     },
     [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!index) {

@@ -50,6 +50,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_WIND_DIR,
     SCREEN_ENV_INDEX,
     SCREEN_TEMP_HISTORY,
+    SCREEN_CO2_HISTORY,
     SCREEN_NOAA_ALERT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
@@ -106,7 +107,7 @@ static bool startupCompleted = false;
 bool initialSetupAwaitingWifi = false;
 static bool udpListening = false;
 
-static String deviceHostname;
+String deviceHostname;
 static bool otaInitialized = false;
 static bool mdnsRunning = false;
 static bool lastWifiState = false;
@@ -178,6 +179,17 @@ static String buildDefaultHostname()
     base.toLowerCase();
 
     base.replace(" ", "-");
+
+    // Append last 4 hex characters of the MAC address as a suffix
+    String mac = WiFi.macAddress(); // e.g. "AA:BB:CC:DD:EE:FF"
+    mac.replace(":", "");
+    if (mac.length() >= 4)
+    {
+        String suffix = mac.substring(mac.length() - 4);
+        suffix.toLowerCase();
+        base += "-";
+        base += suffix;
+    }
     return base;
 }
 
@@ -421,6 +433,9 @@ void rotateScreen(int direction)
         break;
     case SCREEN_TEMP_HISTORY:
         drawTemperatureHistoryScreen();
+        break;
+    case SCREEN_CO2_HISTORY:
+        drawCo2HistoryScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -866,19 +881,20 @@ void loop()
     if (!otaInProgress && now - lastLogMs >= 300000UL) // 5 minutes
     {
         lastLogMs = now;
-        float temp = NAN, hum = NAN, press = NAN;
+        float temp = NAN, hum = NAN, press = NAN, co2 = NAN;
         if (!isnan(SCD40_temp)) temp = SCD40_temp;
         else if (!isnan(aht20_temp)) temp = aht20_temp;
         if (!isnan(SCD40_hum)) hum = SCD40_hum;
         else if (!isnan(aht20_hum)) hum = aht20_hum;
         if (!isnan(bmp280_pressure)) press = bmp280_pressure;
+        if (SCD40_co2 > 0) co2 = static_cast<float>(SCD40_co2);
         float lux = readBrightnessSensor();
         DateTime logNow;
         uint32_t ts = millis() / 1000;
         if (getLocalDateTime(logNow)) {
             ts = logNow.unixtime();
         }
-        SensorSample s{ts, temp, hum, press, lux};
+        SensorSample s{ts, temp, hum, press, lux, co2};
         appendSensorSample(s);
     }
 
@@ -1346,6 +1362,19 @@ void loop()
             drawTemperatureHistoryScreen();
             needsClear = false;
             lastTempHistoryRedraw = now;
+        }
+    }
+
+    if (currentScreen == SCREEN_CO2_HISTORY)
+    {
+        static unsigned long lastCo2HistoryRedraw = 0;
+        const unsigned long redrawInterval = 15000;
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || (now - lastCo2HistoryRedraw) >= redrawInterval))
+        {
+            drawCo2HistoryScreen();
+            needsClear = false;
+            lastCo2HistoryRedraw = now;
         }
     }
 

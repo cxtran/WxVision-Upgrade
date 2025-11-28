@@ -9,6 +9,7 @@ struct SensorSample {
     float hum;     // %
     float press;   // hPa
     float lux;     // raw lux
+    float co2;     // ppm
 };
 
 // Initialize and load existing log from flash

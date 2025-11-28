@@ -4,7 +4,7 @@
 //==========================
 // General Project Settings
 //==========================
-#define PROJECT_NAME "VisionWX"
+#define PROJECT_NAME "WxVision"
 #define DEBUG true    // Set false to disable debug prints
 
 //==========================
@@ -17,8 +17,8 @@
 //==========================
 // WiFi / AP Settings
 //==========================
-#define WIFI_AP_NAME "VisionWX-Setup"   // SoftAP SSID when no WiFi is configured
-#define WIFI_AP_PASS "VisionWX123"      // SoftAP password (min 8 chars)
+#define WIFI_AP_NAME "WxVision-Setup"   // SoftAP SSID when no WiFi is configured
+#define WIFI_AP_PASS "WxVision123"      // SoftAP password (min 8 chars)
 #define WIFI_AP_CHANNEL 6               // SoftAP channel to broadcast on
 #define WIFI_AP_MAX_CLIENTS 4           // Limit concurrent AP clients
 #define WIFI_AP_IP 10,10,10,1           // SoftAP IP address

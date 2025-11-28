@@ -20,6 +20,7 @@
 #include "tempest.h"
 #include "alarm.h"
 #include "noaa.h"
+#include "config.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -115,6 +116,7 @@ extern String customMsg;
 extern int fmt24, dateFmt;
 extern void handleInitialSetupDecision(bool wantsWiFi);
 extern bool initialSetupAwaitingWifi;
+extern String deviceHostname;
 
 static int tempOffsetDisplayTenths = 0;
 /*
@@ -1675,13 +1677,14 @@ void showSystemInfoScreen()
     String lines[] = {
         "FW: 1.0.0",
         "IP: " + WiFi.localIP().toString(),
+        "mDNS: " + deviceHostname + ".local",
         "MAC: " + WiFi.macAddress(),
         "RSSI: " + String(WiFi.RSSI()) + " dBm",
         "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
         "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
         "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"};
-    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    sysInfoModal.setLines(lines, types, 7);
+    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    sysInfoModal.setLines(lines, types, 8);
 
     // Minimal callback enables stack-based X/cancel navigation!
     sysInfoModal.setCallback([](bool, int) {});

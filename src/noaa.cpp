@@ -181,7 +181,7 @@ static void fetchNoaaAlert()
     client.setInsecure();
     HTTPClient http;
     http.setTimeout(12000);
-    http.setUserAgent("VisionWX NOAA/1.0 (visionwx.local)");
+    http.setUserAgent("WxVision NOAA/1.0 (wxvision.local)");
     http.addHeader("Accept", "application/geo+json");
 
     if (!http.begin(client, url))

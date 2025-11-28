@@ -45,7 +45,7 @@ bool startAccessPoint(const char *ssidOverride, const char *passOverride)
     ssid.trim();
     if (ssid.isEmpty())
     {
-        ssid = "VisionWX";
+        ssid = "WxVision";
     }
 
     String pass = (passOverride && passOverride[0] != '\0') ? passOverride : WIFI_AP_PASS;
@@ -81,15 +81,8 @@ bool startAccessPoint(const char *ssidOverride, const char *passOverride)
         return false;
     }
 
+    // Open AP: do not require a password
     const char *passPtr = nullptr;
-    if (pass.length() >= 8)
-    {
-        passPtr = pass.c_str();
-    }
-    else if (pass.length() > 0)
-    {
-        Serial.println("[WiFi][AP] Password too short (<8 chars); AP will be open.");
-    }
 
     bool started = WiFi.softAP(ssid.c_str(), passPtr, WIFI_AP_CHANNEL, 0, WIFI_AP_MAX_CLIENTS);
     if (!started)
