@@ -519,7 +519,9 @@ void showMainMenuModal()
 
 void showDisplaySettingsModal()
 {
-    if (currentMenuLevel != MENU_NONE)
+    // Avoid stacking duplicate Display entries when rebuilding the modal after Theme Mode changes
+    bool rebuildingDisplay = (currentMenuLevel == MENU_DISPLAY && preserveDisplayModeTemp);
+    if (currentMenuLevel != MENU_NONE && !rebuildingDisplay)
     {
         pushMenu(currentMenuLevel);
     }

@@ -750,6 +750,15 @@ void InfoModal::handleIR(uint32_t code)
             {
                 MenuLevel prev = menuStack.back();
                 menuStack.pop_back();
+                while (prev == MENU_DISPLAY && !menuStack.empty())
+                {
+                    prev = menuStack.back();
+                    menuStack.pop_back();
+                }
+                if (prev == MENU_DISPLAY && menuStack.empty())
+                {
+                    prev = MENU_MAIN;
+                }
                 currentMenuLevel = prev;
 
                 switch (prev)
@@ -1197,16 +1206,6 @@ void InfoModal::handleIR(uint32_t code)
                 // Ignore OK press on scheduled theme rows to prevent accidental exit
                 return;
             }
-            if (label.startsWith("Light Threshold"))
-            {
-                // Apply and exit Display menu cleanly when OK is pressed on Light Threshold
-                if (callback)
-                    callback(true, selIndex);
-                hide();
-                drawMenu();
-                beep(2200);
-                return;
-            }
         }
         else if (btnCount == 0 && callback)
         {
@@ -1233,10 +1232,20 @@ void InfoModal::handleIR(uint32_t code)
 
             hide(); // Always hide THIS modal first!
 
+            // --- Stack-aware navigation; collapse duplicate Display modal rebuilds ---
             if (!menuStack.empty())
             {
                 MenuLevel prev = menuStack.back();
                 menuStack.pop_back();
+                while (prev == MENU_DISPLAY && !menuStack.empty())
+                {
+                    prev = menuStack.back();
+                    menuStack.pop_back();
+                }
+                if (prev == MENU_DISPLAY && menuStack.empty())
+                {
+                    prev = MENU_MAIN;
+                }
                 currentMenuLevel = prev;
 
                 switch (prev)
