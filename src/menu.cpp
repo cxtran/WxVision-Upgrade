@@ -158,7 +158,7 @@ const char *tempestMenu[] = {"WF Token", "WF Station ID", "< Back"};
 const int tempestCount = sizeof(tempestMenu) / sizeof(tempestMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Preview Screens", "Quick Restore", "Reset Power", "Factory Reset", "Reboot"};
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Preview Screens", "Quick Restore", "Factory Reset", "Reboot"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
@@ -1233,26 +1233,25 @@ void showSystemModal()
     String labels[] = {
         "Sound Volume (0-100)",
         "Sound Profile",
-        "Show System Info",
         "Set Date & Time",
         "Unit Settings",
+        "Show System Info",
         "WiFi Signal Test",
         "Preview Screens",
         "Quick Restore",
-        "Reset Power",
         "Factory Reset",
         "Reboot"};
 
     InfoFieldType types[] = {
         InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton,
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+        InfoButton, InfoButton, InfoButton, InfoButton};
     int *numberRefs[] = {&buzzerVolume};
     int *chooserRefs[] = {&buzzerToneSet};
     static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse"};
     const char *const *chooserOpts[] = {toneOpts};
     int chooserCounts[] = {5};
 
-    systemModal.setLines(labels, types, 11);
+    systemModal.setLines(labels, types, 10);
     systemModal.setValueRefs(numberRefs, 1, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
     systemModal.setShowNumberArrows(true);
     systemModal.setShowChooserArrows(true);
@@ -1284,16 +1283,16 @@ void showSystemModal()
                 break;
             case 2:
                 systemModal.hide();
-                showSystemInfoScreen();
+                showDateTimeModal();
                 return;
             case 3:
                 systemModal.hide();
-                showDateTimeModal();
+                pendingModalFn = showUnitSettingsModal;
+                pendingModalTime = millis();
                 return;
             case 4:
                 systemModal.hide();
-                pendingModalFn = showUnitSettingsModal;
-                pendingModalTime = millis();
+                showSystemInfoScreen();
                 return;
             case 5:
                 systemModal.hide();
@@ -1309,13 +1308,9 @@ void showSystemModal()
                 break;
             case 8:
                 systemModal.hide();
-                resetPowerUsage();
-                break;
-            case 9:
-                systemModal.hide();
                 factoryReset();
                 break;
-            case 10:
+            case 9:
                 systemModal.hide();
                 ESP.restart();
                 return;
@@ -1818,6 +1813,12 @@ void showDateTimeModal()
     lines[lineIdx] = localSummary;
     types[lineIdx++] = InfoLabel;
 
+    lines[lineIdx] = "Timezone";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Manual Offset (min)";
+    types[lineIdx++] = InfoNumber;
+    lines[lineIdx] = "Auto DST";
+    types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "Year";
     types[lineIdx++] = InfoNumber;
     lines[lineIdx] = "Month";
@@ -1830,12 +1831,6 @@ void showDateTimeModal()
     types[lineIdx++] = InfoNumber;
     lines[lineIdx] = "Second";
     types[lineIdx++] = InfoNumber;
-    lines[lineIdx] = "Timezone";
-    types[lineIdx++] = InfoChooser;
-    lines[lineIdx] = "Manual Offset (min)";
-    types[lineIdx++] = InfoNumber;
-    lines[lineIdx] = "Auto DST";
-    types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "Time Format";
     types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "Date Format";
@@ -1849,8 +1844,8 @@ void showDateTimeModal()
     lines[lineIdx] = rtcNote;
     types[lineIdx++] = InfoLabel;
 
-    int *intRefs[] = {&dtYear, &dtMonth, &dtDay, &dtHour, &dtMinute,
-                      &dtSecond, &dtManualOffset};
+    int *intRefs[] = {&dtManualOffset, &dtYear, &dtMonth, &dtDay, &dtHour,
+                      &dtMinute, &dtSecond};
     int *chooserRefs[] = {&dtTimezoneIndex, &dtAutoDst, &dtFmt24, &dtDateFmt, &dtNtpPreset};
     const char *const *chooserOptPtrs[] = {timezoneOptions, autoDstOpts, fmt24Opts, dateFmtOpts, ntpPresetOptions};
     int chooserOptCounts[] = {timezoneChooserCount, 2, 2, 3, NTP_PRESET_CUSTOM + 1};

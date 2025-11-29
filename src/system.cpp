@@ -16,19 +16,6 @@ void startOTA() {
     // ElegantOTA.begin(&server); if using in web.cpp
 }
 
-void resetPowerUsage() {
-    Serial.println("[SYSTEM] Resetting Power Usage...");
-    dma_display->clearScreen();
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,0,0));
-    dma_display->print("Reset Power...");
-    // Reset your power usage stats
-    prefs.begin("visionwx", false);
-    prefs.putFloat("kWhTotal", 0);
-    prefs.putFloat("powerCost", 0);
-    prefs.end();
-}
-
 void quickRestore() {
     Serial.println("[SYSTEM] Quick Restore to Defaults...");
     dma_display->clearScreen();

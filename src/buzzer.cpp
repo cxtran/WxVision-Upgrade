@@ -2,7 +2,9 @@
 #include "pins.h"
 #include "buzzer.h"    
 #include "settings.h"
-#define BUZZER_CHANNEL 0
+// Use a dedicated LEDC channel unlikely to conflict with other peripherals
+static const int BUZZER_CHANNEL = 7;
+static bool buzzerReady = false;
 
 void setupBuzzer() {
     pinMode(BUZZER_PIN, OUTPUT);
@@ -11,11 +13,15 @@ void setupBuzzer() {
     ledcSetup(BUZZER_CHANNEL, 2000, 10);       // base freq/resolution
     ledcAttachPin(BUZZER_PIN, BUZZER_CHANNEL); // Attach once!
     ledcWriteTone(BUZZER_CHANNEL, 0);          // Make sure off
+    ledcWrite(BUZZER_CHANNEL, 0);
+    buzzerReady = true;
 }
 
 void playBuzzerTone(int frequency, int duration) {
     if (frequency <= 0 || duration <= 0) return; // Invalid parameters
-
+    if (!buzzerReady) {
+        setupBuzzer();
+    }
     if (buzzerVolume <= 0) return;
 
     int duty = map(constrain(buzzerVolume, 0, 100), 0, 100, 0, 1023); // 10-bit resolution
@@ -55,4 +61,5 @@ void playBuzzerTone(int frequency, int duration) {
 
 void stopBuzzer() {
     ledcWriteTone(BUZZER_CHANNEL, 0);
+    ledcWrite(BUZZER_CHANNEL, 0);
 }

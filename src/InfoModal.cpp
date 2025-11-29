@@ -5,6 +5,8 @@
 #include "alarm.h"
 #include "keyboard.h"
 #include "buzzer.h"
+#include "datetimesettings.h"
+#include <RTClib.h>
 #include <cstring>
 #include <vector>
 #include <ctype.h>
@@ -16,6 +18,14 @@ extern int scrollLevel;
 extern void saveDisplaySettings();
 extern std::vector<MenuLevel> menuStack;
 extern int theme;
+extern bool rtcReady;
+extern RTC_DS3231 rtc;
+extern bool reset_Time_and_Date_Display;
+extern int dtTimezoneIndex;
+extern int dtManualOffset;
+extern int dtAutoDst;
+extern void getTimeFromRTC();
+extern void setSystemTimeFromDateTime(const DateTime &dt);
 
 // --- Static trampoline for keyboard -> InfoModal::setTextValue ---
 static InfoModal *s_modalForText = nullptr;
@@ -1112,6 +1122,64 @@ void InfoModal::handleIR(uint32_t code)
                     if (lines[selIndex] == "Auto Rotate")
                     { // Auto Rotate toggle
                         setAutoRotateEnabled(val > 0, true);
+                    }
+
+                    if (lines[selIndex] == "Timezone")
+                    {
+                        int tzCountInt = static_cast<int>(timezoneCount());
+                        if (tzCountInt > 31)
+                            tzCountInt = 31;
+                        dtTimezoneIndex = constrain(dtTimezoneIndex, 0, tzCountInt);
+                        bool useCustomTz = (dtTimezoneIndex == tzCountInt);
+                        if (useCustomTz)
+                        {
+                            setCustomTimezoneOffset(dtManualOffset);
+                            dtAutoDst = 0;
+                        }
+                        else
+                        {
+                            selectTimezoneByIndex(dtTimezoneIndex);
+                            setTimezoneAutoDst(dtAutoDst != 0);
+                            dtManualOffset = tzStandardOffset;
+                        }
+                        saveDateTimeSettings();
+                        DateTime utcNow;
+                        if (rtcReady)
+                            utcNow = rtc.now();
+                        else
+                        {
+                            DateTime localNow;
+                            if (getLocalDateTime(localNow))
+                                utcNow = localToUtc(localNow);
+                            else
+                                utcNow = DateTime(2000, 1, 1, 0, 0, 0);
+                        }
+                        updateTimezoneOffsetWithUtc(utcNow);
+                        // Keep system clock in sync with UTC so timezone offset is applied immediately
+                        setSystemTimeFromDateTime(utcNow);
+                        getTimeFromRTC();
+                        reset_Time_and_Date_Display = true;
+                    }
+
+                    if (lines[selIndex] == "Auto DST")
+                    {
+                        setTimezoneAutoDst(dtAutoDst != 0);
+                        saveDateTimeSettings();
+                        DateTime utcNow;
+                        if (rtcReady)
+                            utcNow = rtc.now();
+                        else
+                        {
+                            DateTime localNow;
+                            if (getLocalDateTime(localNow))
+                                utcNow = localToUtc(localNow);
+                            else
+                                utcNow = DateTime(2000, 1, 1, 0, 0, 0);
+                        }
+                        updateTimezoneOffsetWithUtc(utcNow);
+                        setSystemTimeFromDateTime(utcNow);
+                        getTimeFromRTC();
+                        reset_Time_and_Date_Display = true;
                     }
 
                     if (lines[selIndex] == "Rotate Interval")
