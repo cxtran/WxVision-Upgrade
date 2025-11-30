@@ -111,6 +111,15 @@ textarea { min-height:72px; }
   gap:10px;
   flex-wrap:wrap;
 }
+.chart-title {
+  margin: 0 0 6px;
+  color: #cfe8ff;
+}
+.small-muted {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 6px;
+}
 .grid {
   display:grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

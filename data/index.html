@@ -28,8 +28,24 @@
       <div><b>Temp:</b> <span id="st-temp">--</span></div>
       <div><b>Humidity:</b> <span id="st-humd">--</span></div>
       <div><b>Time:</b> <span id="st-time">--</span></div>
+      <div><b>Timezone:</b> <span id="st-tz">--</span></div>
     </div>
     
+  </section>
+
+  <section class="card" id="trend-card">
+    <h2>24h Trends</h2>
+    <div class="grid">
+      <div>
+        <h3 class="chart-title">Temperature</h3>
+        <canvas id="tempChart" width="460" height="200" aria-label="Temperature trend"></canvas>
+      </div>
+      <div>
+        <h3 class="chart-title">CO₂</h3>
+        <canvas id="co2Chart" width="460" height="200" aria-label="CO2 trend"></canvas>
+      </div>
+    </div>
+    <div id="trendMeta" class="small-muted">Awaiting data...</div>
   </section>
 
   <section class="card">

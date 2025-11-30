@@ -694,6 +694,20 @@ function loadIndexStatus(){
         if (el) el.innerText = formatHumidityValue(st.humidity);
       el = document.getElementById('st-time');
       if (el) el.innerText = st.time || '--';
+      fetch('/time.json')
+        .then(function(r){ return r.json(); })
+        .then(function(t){
+          var tzEl = document.getElementById('st-tz');
+          if (tzEl) {
+            var name = t.tzLabel || t.tzName || '';
+            var offset = (typeof t.tzOffset === 'number') ? fmtUtc(t.tzOffset) : '';
+            tzEl.textContent = name ? (name + (offset ? ' ('+offset+')' : '')) : (offset || '--');
+          }
+          if (el && t.epoch) {
+            el.innerText = formatLocalTime(t.epoch, t.tzOffset);
+          }
+        })
+        .catch(function(){});
     })
     .catch(function(e){
       console.warn("Status load failed:", e);
@@ -1209,7 +1223,81 @@ async function loadTrend(){
   const res = await fetch('/trend.json');
   if (!res.ok) return;
   const data = await res.json();
-  console.log('trend', data);
+  renderTrendCharts(data || []);
+}
+
+function formatLocalTime(epochSec, offsetMinutes){
+  var ms = (epochSec + (offsetMinutes||0)*60) * 1000;
+  var d = new Date(ms);
+  if (isNaN(d.getTime())) return '--';
+  return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()) +
+         ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+
+function renderTrendCharts(samples){
+  var tempCanvas = document.getElementById('tempChart');
+  var co2Canvas = document.getElementById('co2Chart');
+  if (!tempCanvas && !co2Canvas) return;
+
+  var pts = (samples || []).filter(function(s){ return s && typeof s.ts === 'number'; });
+  pts.sort(function(a,b){ return a.ts - b.ts; });
+  var lastTs = pts.length ? pts[pts.length-1].ts : null;
+
+  drawLineChart(tempCanvas, pts, function(p){ return p.temp; }, 'Temp', '#4cd964');
+  drawLineChart(co2Canvas, pts, function(p){ return p.co2; }, 'CO₂', '#ffcc66');
+
+  var meta = document.getElementById('trendMeta');
+  if (meta) {
+    if (!pts.length) {
+      meta.textContent = 'No trend data yet.';
+    } else {
+      meta.textContent = 'Last sample: ' + new Date(lastTs*1000).toLocaleString();
+    }
+  }
+}
+
+function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
+  if (!canvas || !canvas.getContext) return;
+  var ctx = canvas.getContext('2d');
+  var w = canvas.width, h = canvas.height;
+  ctx.clearRect(0,0,w,h);
+  ctx.fillStyle = '#0f1726';
+  ctx.fillRect(0,0,w,h);
+
+  var vals = samples.map(valueFn).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
+  if (!vals.length) {
+    ctx.fillStyle = '#9fb3c8';
+    ctx.fillText('No data', 10, 20);
+    return;
+  }
+  var min = Math.min.apply(null, vals);
+  var max = Math.max.apply(null, vals);
+  if (Math.abs(max - min) < 0.01) { max += 0.5; min -= 0.5; }
+
+  var margin = 24;
+  var plotW = w - margin*2;
+  var plotH = h - margin*2;
+  ctx.strokeStyle = '#1f2b42';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(margin, margin, plotW, plotH);
+
+  ctx.strokeStyle = strokeStyle || '#4cd964';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  var first = true;
+  samples.forEach(function(s, idx){
+    var v = valueFn(s);
+    if (typeof v !== 'number' || isNaN(v)) return;
+    var x = margin + (plotW * idx / Math.max(1, samples.length - 1));
+    var norm = (v - min) / (max - min);
+    var y = margin + plotH - norm * plotH;
+    if (first) { ctx.moveTo(x,y); first=false; } else { ctx.lineTo(x,y); }
+  });
+  ctx.stroke();
+
+  ctx.fillStyle = '#9fb3c8';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(label + ' min: ' + min.toFixed(1) + ' max: ' + max.toFixed(1), margin, h - 6);
 }
 
 function parseManualToEpoch() {
@@ -1323,6 +1411,7 @@ window.addEventListener('load', function(){
     return;
   }
   loadIndexStatus();
+  loadTrend();
   setupRemoteControls();
   setInterval(loadIndexStatus, 5000); // refresh every 5s
 });

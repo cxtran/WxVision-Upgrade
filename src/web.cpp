@@ -270,6 +270,23 @@ void setupWebServer() {
     return;
   }
 
+  // ---------- JSON endpoints ----------
+  // Place dynamic endpoints before the catch-all static handler so they aren't shadowed.
+  server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
+    const auto &log = getSensorLog();
+    size_t count = log.size();
+    size_t capacity = JSON_ARRAY_SIZE(count) + count * JSON_OBJECT_SIZE(6) + 512;
+    if (capacity < 1024) {
+      capacity = 1024;
+    }
+    DynamicJsonDocument doc(capacity);
+    sensorLogToJson(doc);
+
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
+  });
+
   // Serve index.html at root
   // Static files with dev-friendly caching
   server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
@@ -282,14 +299,6 @@ void setupWebServer() {
   // Explicit route for config.html
   server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest* req){
     req->send(SPIFFS, "/config.html", "text/html");
-  });
-
-  // ---------- JSON endpoints ----------
-  server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
-    JsonDocument doc;
-    sensorLogToJson(doc);
-    String json; serializeJson(doc, json);
-    req->send(200, "application/json", json);
   });
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     JsonDocument doc;
