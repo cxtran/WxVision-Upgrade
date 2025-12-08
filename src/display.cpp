@@ -2645,13 +2645,16 @@ void drawClockScreen()
             dma_display->print(ampmStr);
         }
     }
+    int wifiX = 57;
+    int wifiY = 7;
+    int alarmX = units.clock24h ? wifiX : 51;
+    int alarmY = units.clock24h ? (wifiY + 8) : 8; // drop the bell under Wi-Fi when 24h
+
     // ---- Draw Wi-Fi icon if connected ---- if connected ----
     if (WiFi.status() == WL_CONNECTED)
     {
         // Position the Wi-Fi icon just above AM/PM
 
-        int wifiX = 57;
-        int wifiY = 7;
         /*
                     int wifiX = ampmX + 5;   // just after time text
                     int wifiY = ampmY - 8;        // above AM/PM
@@ -2668,7 +2671,7 @@ void drawClockScreen()
                                   ? dma_display->color565(255, 80, 80)
                                   : ((theme == 1) ? dma_display->color565(120, 120, 180)
                                                   : dma_display->color565(255, 255, 120));
-        drawAlarmIcon(51, 8, alarmColor);
+        drawAlarmIcon(alarmX, alarmY, alarmColor);
     }
     // ---- DATE ----
     dma_display->setFont(&Font5x7Uts);
