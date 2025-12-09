@@ -618,7 +618,7 @@ void setupWebServer() {
     doc["splashDuration"]   = splashDurationSec;
     doc["customMsg"]        = customMsg;
     doc["buzzerVolume"]     = buzzerVolume;
-    doc["buzzerTone"]       = buzzerToneSet;
+  doc["buzzerTone"]       = buzzerToneSet;
     doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
     float luxNow = readBrightnessSensor();
@@ -768,10 +768,10 @@ void setupWebServer() {
           buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
         }
         if (!doc["buzzerTone"].isNull()) {
-          buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 4);
+          buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
         }
         if (!doc["alarmSound"].isNull()) {
-          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 2);
+          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 4);
         }
         if (!doc["scrollLevel"].isNull()) {
           scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);

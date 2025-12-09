@@ -43,6 +43,14 @@ void playBuzzerTone(int frequency, int duration) {
             freq = frequency;
             dur = duration;
             break;
+        case 5: // Warm: lower pitch slightly and lengthen sustain for music
+            freq = max(180, (frequency * 85) / 100);
+            dur = duration + 30;
+            break;
+        case 6: // Melody: keep accurate pitch, add a touch of sustain for song playback
+            freq = frequency;
+            dur = duration + 40;
+            break;
         default: // Bright
             break;
     }

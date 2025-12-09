@@ -1221,7 +1221,7 @@ void InfoModal::handleIR(uint32_t code)
                     }
                     if (lines[selIndex].startsWith("Sound Profile"))
                     {
-                        val = constrain(val, 0, 4);
+                        val = constrain(val, 0, 6);
                         buzzerToneSet = val;
                         int preview = 0;
                         switch (val) {
@@ -1230,8 +1230,10 @@ void InfoModal::handleIR(uint32_t code)
                             case 2: preview = 5000; break; // Click
                             case 3: preview = 1800; break; // Chime
                             case 4: preview = 2000; break; // Pulse
+                            case 5: preview = 900;  break; // Warm
+                            case 6: preview = 1600; break; // Melody
                         }
-                        playBuzzerTone(preview, 60);
+                        playBuzzerTone(preview, 70);
                         saveDeviceSettings();
                     }
 

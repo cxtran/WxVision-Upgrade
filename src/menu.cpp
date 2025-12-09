@@ -760,7 +760,7 @@ void showAlarmSettingsModal()
     static const char *repeatOpts[] = {"No Repeat", "Daily", "Weekly", "Weekdays", "Weekend"};
     static const char *dowOpts[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char *ampmOpts[] = {"AM", "PM"};
-    static const char *alarmSoundOpts[] = {"Tone", "Fur Elise", "Turkish March"};
+    static const char *alarmSoundOpts[] = {"Tone", "Fur Elise", "Swan Lake", "Turkey March", "Moon Light Sonata"};
 
     addChooserLine("Select Alarm", &alarmSlotSelection, alarmSlotOpts, 3);
     addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
@@ -772,7 +772,7 @@ void showAlarmSettingsModal()
     addNumberLine("Minute (0-59)", &alarmMinuteTemp);
     addChooserLine("Repeat Mode", &alarmRepeatTemp, repeatOpts, 5);
     addChooserLine("Weekly Day", &alarmWeeklyDayTemp, dowOpts, 7);
-    addChooserLine("Alarm Sound", &alarmSoundMode, alarmSoundOpts, 3);
+    addChooserLine("Alarm Sound", &alarmSoundMode, alarmSoundOpts, 5);
 
     alarmModal.setLines(labels, types, lineCount);
     alarmModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, nullptr, 0, nullptr);
@@ -817,7 +817,7 @@ void showAlarmSettingsModal()
         }
         alarmMinute[slot] = constrain(alarmMinuteTemp, 0, 59);
         alarmWeeklyDay[slot] = constrain(alarmWeeklyDayTemp, 0, 6);
-        alarmSoundMode = constrain(alarmSoundMode, 0, 2);
+        alarmSoundMode = constrain(alarmSoundMode, 0, 4);
 
         refreshAlarmArming();
         saveAlarmSettings();
@@ -1247,9 +1247,9 @@ void showSystemModal()
         InfoButton, InfoButton, InfoButton, InfoButton};
     int *numberRefs[] = {&buzzerVolume};
     int *chooserRefs[] = {&buzzerToneSet};
-    static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse"};
+    static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse", "Warm", "Melody"};
     const char *const *chooserOpts[] = {toneOpts};
-    int chooserCounts[] = {5};
+    int chooserCounts[] = {7};
 
     systemModal.setLines(labels, types, 10);
     systemModal.setValueRefs(numberRefs, 1, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
@@ -1270,7 +1270,7 @@ void showSystemModal()
 
         // Persist volume/profile regardless of which action chosen
         buzzerVolume = constrain(buzzerVolume, 0, 100);
-        buzzerToneSet = constrain(buzzerToneSet, 0, 4);
+        buzzerToneSet = constrain(buzzerToneSet, 0, 6);
         saveDeviceSettings();
 
         if (action >= 0)

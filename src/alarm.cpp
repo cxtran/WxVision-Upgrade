@@ -25,20 +25,47 @@ static const MelodyNote kAlarmMelody[] = {
 };
 static const int kAlarmMelodyLen = sizeof(kAlarmMelody) / sizeof(kAlarmMelody[0]);
 
-// Fur Elise (very short fragment)
+// Fur Elise (recognizable opening phrase)
+// Frequencies are in Hz, durations in ms
 static const MelodyNote kMelodyFurElise[] = {
+    // e d# e d# e b d c a
     {659, 180}, {622, 180}, {659, 180}, {622, 180}, {659, 180}, {494, 180}, {587, 180}, {523, 180},
-    {440, 220}
+    {440, 260}, {0, 100}, // brief breath
+    // c a-arpeggio and lead-in
+    {262, 180}, {330, 180}, {440, 180}, {494, 240}, {0, 80},
+    {330, 180}, {415, 180}, {494, 180}, {523, 240}, {0, 80},
+    // repeat the opener once more
+    {330, 180}, {659, 180}, {622, 180}, {659, 180}, {622, 180}, {659, 180}, {494, 180}, {587, 180},
+    {523, 180}, {440, 320}
 };
 static const int kMelodyFurEliseLen = sizeof(kMelodyFurElise) / sizeof(kMelodyFurElise[0]);
 
-// Turkish March (very short fragment)
+// Swan Lake (main theme fragment)
+static const MelodyNote kMelodySwanLake[] = {
+    {494, 200},  {554, 200},  {587, 240},  {740, 240},  {880, 240},  {784, 220},
+    {740, 200},  {659, 200},  {740, 220},  {587, 240},  {494, 260},  {0, 120},
+    {494, 200},  {554, 200},  {587, 240},  {554, 200},  {494, 200},  {440, 200},
+    {370, 180},  {392, 200},  {370, 200},  {330, 200},  {370, 240},  {0, 140}
+};
+static const int kMelodySwanLakeLen = sizeof(kMelodySwanLake) / sizeof(kMelodySwanLake[0]);
+
+// Turkish March (Mozart) - bright opening motif
 static const MelodyNote kMelodyTurkishMarch[] = {
-    {523, 160}, {659, 160}, {698, 160}, {784, 200},
-    {0, 100},
-    {784, 160}, {698, 160}, {659, 160}, {523, 200}
+    {659, 150}, {698, 150}, {784, 150}, {698, 150}, {659, 150}, {622, 150}, {659, 180}, {494, 120},
+    {523, 150}, {587, 150}, {659, 170}, {587, 150}, {523, 150}, {494, 170}, {523, 190}, {0, 110},
+    {523, 150}, {587, 150}, {659, 180}, {698, 180}, {784, 200}, {698, 170}, {659, 170}, {622, 190},
+    {659, 240}
 };
 static const int kMelodyTurkishMarchLen = sizeof(kMelodyTurkishMarch) / sizeof(kMelodyTurkishMarch[0]);
+
+// Moonlight Sonata (Beethoven) - arpeggiated intro
+static const MelodyNote kMelodyMoonlight[] = {
+    {277, 240}, {330, 240}, {415, 240}, {523, 320}, {0, 140},
+    {277, 240}, {330, 240}, {415, 240}, {494, 320}, {0, 140},
+    {247, 240}, {311, 240}, {392, 240}, {494, 320}, {0, 140},
+    {220, 240}, {277, 240}, {349, 240}, {466, 320}, {0, 200}
+};
+static const int kMelodyMoonlightLen = sizeof(kMelodyMoonlight) / sizeof(kMelodyMoonlight[0]);
 
 static bool doesAlarmApplyToday(int slot, int dayOfWeek)
 {
@@ -190,7 +217,9 @@ void tickAlarmState(const DateTime &now)
             const MelodyNote *melody = kAlarmMelody;
             int melodyLen = kAlarmMelodyLen;
             if (alarmSoundMode == 1) { melody = kMelodyFurElise; melodyLen = kMelodyFurEliseLen; }
-            else if (alarmSoundMode == 2) { melody = kMelodyTurkishMarch; melodyLen = kMelodyTurkishMarchLen; }
+            else if (alarmSoundMode == 2) { melody = kMelodySwanLake; melodyLen = kMelodySwanLakeLen; }
+            else if (alarmSoundMode == 3) { melody = kMelodyTurkishMarch; melodyLen = kMelodyTurkishMarchLen; }
+            else if (alarmSoundMode == 4) { melody = kMelodyMoonlight; melodyLen = kMelodyMoonlightLen; }
 
             if (nowMs >= s_melodyNoteEndMs)
             {
