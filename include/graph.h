@@ -1,4 +1,10 @@
 #pragma once
 void updateGraphData();
 void drawTemperatureHistoryScreen();
+void drawHumidityHistoryScreen();
 void drawCo2HistoryScreen();
+void drawBaroHistoryScreen();
+void tickTemperatureHistoryMarquee();
+void tickHumidityHistoryMarquee();
+void tickCo2HistoryMarquee();
+void tickBaroHistoryMarquee();

@@ -50,7 +50,9 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_WIND_DIR,
     SCREEN_ENV_INDEX,
     SCREEN_TEMP_HISTORY,
+    SCREEN_HUM_HISTORY,
     SCREEN_CO2_HISTORY,
+    SCREEN_BARO_HISTORY,
     SCREEN_NOAA_ALERT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
@@ -295,6 +297,12 @@ static void renderScreenContents(ScreenMode mode)
     case SCREEN_ENV_INDEX:
         envQualityScreen.tick();
         break;
+    case SCREEN_HUM_HISTORY:
+        drawHumidityHistoryScreen();
+        break;
+    case SCREEN_BARO_HISTORY:
+        drawBaroHistoryScreen();
+        break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
         break;
@@ -434,8 +442,14 @@ void rotateScreen(int direction)
     case SCREEN_TEMP_HISTORY:
         drawTemperatureHistoryScreen();
         break;
+    case SCREEN_HUM_HISTORY:
+        drawHumidityHistoryScreen();
+        break;
     case SCREEN_CO2_HISTORY:
         drawCo2HistoryScreen();
+        break;
+    case SCREEN_BARO_HISTORY:
+        drawBaroHistoryScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -1363,6 +1377,27 @@ void loop()
             needsClear = false;
             lastTempHistoryRedraw = now;
         }
+        if (!needsClear && !anyModalOrInfoScreenActive)
+        {
+            tickTemperatureHistoryMarquee();
+        }
+    }
+
+    if (currentScreen == SCREEN_HUM_HISTORY)
+    {
+        static unsigned long lastHumHistoryRedraw = 0;
+        const unsigned long redrawInterval = 15000;
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || (now - lastHumHistoryRedraw) >= redrawInterval))
+        {
+            drawHumidityHistoryScreen();
+            needsClear = false;
+            lastHumHistoryRedraw = now;
+        }
+        if (!needsClear && !anyModalOrInfoScreenActive)
+        {
+            tickHumidityHistoryMarquee();
+        }
     }
 
     if (currentScreen == SCREEN_CO2_HISTORY)
@@ -1375,6 +1410,27 @@ void loop()
             drawCo2HistoryScreen();
             needsClear = false;
             lastCo2HistoryRedraw = now;
+        }
+        if (!needsClear && !anyModalOrInfoScreenActive)
+        {
+            tickCo2HistoryMarquee();
+        }
+    }
+
+    if (currentScreen == SCREEN_BARO_HISTORY)
+    {
+        static unsigned long lastBaroHistoryRedraw = 0;
+        const unsigned long redrawInterval = 15000;
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || (now - lastBaroHistoryRedraw) >= redrawInterval))
+        {
+            drawBaroHistoryScreen();
+            needsClear = false;
+            lastBaroHistoryRedraw = now;
+        }
+        if (!needsClear && !anyModalOrInfoScreenActive)
+        {
+            tickBaroHistoryMarquee();
         }
     }
 
