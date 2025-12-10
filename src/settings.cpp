@@ -38,7 +38,9 @@ int dayThemeStartMinutes = 6 * 60;
 int nightThemeStartMinutes = 20 * 60;
 int brightness = 10;      // 1???100
 int scrollSpeed = 150;    // derived from scrollLevel
+int verticalScrollSpeed = 150; // independent vertical scroll speed
 int scrollLevel = 7;      // 0 (slow) to 9 (fast)
+int verticalScrollLevel = 7;
 String customMsg = "";
 const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 bool autoBrightness = true;
@@ -156,6 +158,9 @@ void loadSettings() {
     scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
     scrollSpeed  = scrollDelays[scrollLevel];
+    verticalScrollLevel = prefs.getInt("vScrollLevel", scrollLevel);
+    verticalScrollLevel = constrain(verticalScrollLevel, 0, 9);
+    verticalScrollSpeed = scrollDelays[verticalScrollLevel];
     customMsg    = prefs.getString("customMsg", "");
     autoBrightness = prefs.getBool("autoBrightness", true);
     splashDurationSec = prefs.getInt("splashDur", 3);
@@ -220,12 +225,13 @@ void saveDisplaySettings() {
         prefs.putBool("autoBrightness", autoBrightness);
         prefs.putInt("brightness", brightness);
         prefs.putInt("scrollLevel", scrollLevel);  // persist level only
+        prefs.putInt("vScrollLevel", verticalScrollLevel);
         prefs.putString("customMsg", customMsg);
         splashDurationSec = constrain(splashDurationSec, 1, 10);
         prefs.putInt("splashDur", splashDurationSec);
         prefs.end();
-        Serial.printf("[Prefs] Saved: theme=%d, autoThemeMode=%d, luxThr=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d\n",
-            theme, autoThemeMode, autoThemeLightThreshold, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel);
+        Serial.printf("[Prefs] Saved: theme=%d, autoThemeMode=%d, luxThr=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d vScrollLevel=%d\n",
+            theme, autoThemeMode, autoThemeLightThreshold, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel, verticalScrollLevel);
     } else {
         Serial.println("[Prefs] Failed to open namespace 'display'");
     }
@@ -389,6 +395,13 @@ void adjustScrollSpeed(int dir) {
     if (scrollLevel < 0) scrollLevel = 0;
     if (scrollLevel > 9) scrollLevel = 9;
     scrollSpeed = scrollDelays[scrollLevel];
+}
+
+void adjustVerticalScrollSpeed(int dir) {
+    verticalScrollLevel += dir;
+    if (verticalScrollLevel < 0) verticalScrollLevel = 0;
+    if (verticalScrollLevel > 9) verticalScrollLevel = 9;
+    verticalScrollSpeed = scrollDelays[verticalScrollLevel];
 }
 
 void tickAutoThemeSchedule()

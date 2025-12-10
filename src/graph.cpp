@@ -9,6 +9,7 @@
 #include "units.h"
 #include "settings.h"
 #include "ScrollLine.h"
+#include "RollingUpScreen.h"
 
 extern int theme;
 
@@ -24,6 +25,9 @@ static ScrollLine s_tempScroll(PANEL_RES_X, 60);
 static ScrollLine s_co2Scroll(PANEL_RES_X, 60);
 static ScrollLine s_humScroll(PANEL_RES_X, 60);
 static ScrollLine s_baroScroll(PANEL_RES_X, 60);
+static std::vector<String> s_predictLines;
+static RollingUpScreen s_predictRoll(PANEL_RES_X, PANEL_RES_Y - 9, 8);
+static bool s_predictPaused = false;
 
 String formatTempShort(float tempC, uint8_t decimals)
 {
@@ -69,6 +73,82 @@ String formatPressShort(float hpa)
     String out(buf);
     out += (units.press == PressUnit::INHG) ? " inHg" : " hPa";
     return out;
+}
+
+String formatTempDelta(double delta)
+{
+    double disp = (units.temp == TempUnit::F) ? (delta * 9.0 / 5.0) : delta;
+    char buf[16];
+    dtostrf(disp, 0, 1, buf);
+    String out(buf);
+    out += "\xB0";
+    out += (units.temp == TempUnit::F) ? "F" : "C";
+    return out;
+}
+
+String formatPressDelta(double delta)
+{
+    double disp = dispPress(delta);
+    uint8_t dp = (units.press == PressUnit::INHG) ? 2 : 1;
+    char buf[16];
+    dtostrf(disp, 0, dp, buf);
+    String out(buf);
+    out += (units.press == PressUnit::INHG) ? " inHg" : " hPa";
+    return out;
+}
+
+String formatHumDelta(double delta)
+{
+    char buf[16];
+    dtostrf(delta, 0, 1, buf);
+    String out(buf);
+    out += "%";
+    return out;
+}
+
+static std::vector<String> wrapLines(const String &text, int maxWidthPx)
+{
+    std::vector<String> lines;
+    String current = "";
+    int currentW = 0;
+    int spaceW = getTextWidth(" ");
+    int maxChars = maxWidthPx / 6;
+    if (maxChars < 4) maxChars = 4;
+
+    int idx = 0;
+    while (idx < text.length())
+    {
+        int nextSpace = text.indexOf(' ', idx);
+        if (nextSpace < 0) nextSpace = text.length();
+        String word = text.substring(idx, nextSpace);
+        int wordW = getTextWidth(word.c_str());
+        if (current.length() == 0)
+        {
+            if (word.length() > maxChars)
+            {
+                lines.push_back(word);
+                idx = nextSpace + 1;
+                continue;
+            }
+            current = word;
+            currentW = wordW;
+        }
+        else if (currentW + spaceW + wordW <= maxWidthPx)
+        {
+            current += " " + word;
+            currentW += spaceW + wordW;
+        }
+        else
+        {
+            lines.push_back(current);
+            current = word;
+            currentW = wordW;
+        }
+        idx = nextSpace + 1;
+    }
+    if (current.length() > 0)
+        lines.push_back(current);
+    return lines;
 }
 
 Point mapSampleToPoint(size_t idx, size_t total, float value, float minVal, float maxVal,
@@ -693,6 +773,158 @@ void drawCo2HistoryScreen()
     // No current marker/label on the chart per request
 }
 
+void drawPredictionScreen()
+{
+    if (!dma_display)
+        return;
+
+    dma_display->setTextWrap(false);
+    dma_display->setTextSize(1);
+    dma_display->setFont(&Font5x7Uts);
+
+    const auto &log = getSensorLog();
+    if (log.size() < 2)
+    {
+        dma_display->fillScreen(0);
+        dma_display->setTextColor(INFOMODAL_UNSEL);
+        dma_display->setCursor(2, 10);
+        dma_display->print("Not enough data");
+        return;
+    }
+
+    size_t firstIdx = 0;
+    size_t lastIdx = log.size() - 1;
+    float tFirst = log[firstIdx].temp + tempOffset;
+    float tLast = log[lastIdx].temp + tempOffset;
+    float hFirst = log[firstIdx].hum;
+    float hLast = log[lastIdx].hum;
+    float pFirst = log[firstIdx].press;
+    float pLast = log[lastIdx].press;
+
+    double tempDeltaC = (double)tLast - (double)tFirst;
+    double humDelta = (double)hLast - (double)hFirst;
+    double pressDelta = (double)pLast - (double)pFirst;
+    // Shorter-term pressure tendency (last ~6 samples) for near-term signal
+    size_t shortIdx = (log.size() > 6) ? (log.size() - 6) : 0;
+    double pressDeltaShort = (double)pLast - (double)log[shortIdx].press;
+
+    String tempTrend = formatTempDelta(tempDeltaC);
+    String humTrend = formatHumDelta(humDelta);
+    String pressTrend = formatPressDelta(pressDelta);
+    String pressTendency = "Steady";
+    if (pressDeltaShort <= -3.0)
+        pressTendency = "Rapid drop";
+    else if (pressDeltaShort <= -1.5)
+        pressTendency = "Falling";
+    else if (pressDeltaShort >= 3.0)
+        pressTendency = "Rapid rise";
+    else if (pressDeltaShort >= 1.5)
+        pressTendency = "Rising";
+
+    String outlook = "Steady/Clouds";
+    if (pressDelta < -3.0 && humDelta > 5.0)
+        outlook = "Rain/Storm risk";
+    else if (pressDelta < -1.5 && humDelta > 2.5)
+        outlook = "Rain likely";
+    else if (pressDelta > 2.0 && humDelta < -3.0)
+        outlook = "Clearing/Fair";
+
+    String tempDir = (tempDeltaC > 1.0) ? "Warming" : (tempDeltaC < -1.0) ? "Cooling" : "Stable";
+    // Simple confidence estimate based on signal strength
+    String confidence = "Medium";
+    double absPress = fabs(pressDeltaShort);
+    double absHum = fabs(humDelta);
+    if (absPress > 3.5 || (absPress > 2.5 && absHum > 4.0))
+        confidence = "High";
+    else if (absPress < 1.0 && absHum < 2.0)
+        confidence = "Low";
+
+    dma_display->fillScreen(0);
+
+    const bool mono = (theme == 1);
+    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
+    const uint16_t bodyColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
+    // Match the theme palette: labels use the header color, values use the body color
+    const uint16_t labelColor = mono ? dma_display->color565(220, 220, 120) : dma_display->color565(255, 240, 140);
+    const uint16_t valueColor = mono ? dma_display->color565(120, 160, 255) : dma_display->color565(120, 200, 255);
+    constexpr int matrixHeight = 24; // emulate a 64x24 dot-matrix window for scrolling
+
+    const int headerHeight = 8;
+    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
+    dma_display->setTextColor(headerFg, headerBg); // opaque title background
+    const char *title = "Next 24h";
+    dma_display->setCursor(1, 0);
+    dma_display->print(title);
+
+    // Build labeled lines with distinct colors and a bit more context
+    // Current values are taken from the last sample to give a concise snapshot
+    float currentTemp = tLast;
+    float currentHum = hLast;
+    float currentPress = pLast;
+    String tempLine = "Temperature: " + tempDir + " (" + tempTrend + "), now " + formatTempShort(currentTemp, 1);
+    String humLine = "Humidity: " + formatHumDelta(humDelta) + ", now " + formatHumShort(currentHum, 0);
+    String pressLine = "Pressure: " + pressTrend + ", now " + formatPressShort(currentPress);
+    String outlookLine = "Outlook: " + outlook;
+    String tendLine = "Pressure Tend: " + pressTendency;
+    String confLine = "Confidence: " + confidence;
+
+    int textWidth = min(PANEL_RES_X - 2, 64); // constrain to 64px like a 64x24 matrix
+    s_predictLines.clear();
+    std::vector<uint16_t> lineColors;
+    auto pushWrapped = [&](const String &line, uint16_t colorLabels, uint16_t colorValues) {
+        // Split label/value at first colon for coloring
+        int colon = line.indexOf(':');
+        String labelPart = (colon >= 0) ? line.substring(0, colon + 1) : "";
+        String valuePart = (colon >= 0) ? line.substring(colon + 1) : line;
+        String combined = labelPart + valuePart;
+        auto wrapped = wrapLines(combined, textWidth);
+        for (const auto &w : wrapped)
+        {
+            // Apply label color if the wrapped line still starts inside the label span
+            if (!labelPart.isEmpty() && w.startsWith(labelPart))
+            {
+                s_predictLines.push_back(w);
+                lineColors.push_back(colorLabels);
+            }
+            else
+            {
+                s_predictLines.push_back(w);
+                lineColors.push_back(colorValues);
+            }
+        }
+    };
+    pushWrapped(tempLine, labelColor, valueColor);
+    pushWrapped(humLine, labelColor, valueColor);
+    pushWrapped(pressLine, labelColor, valueColor);
+    pushWrapped(outlookLine, labelColor, valueColor);
+    pushWrapped(tendLine, labelColor, valueColor);
+    pushWrapped(confLine, labelColor, valueColor);
+
+    s_predictRoll.setLines(s_predictLines, false); // keep position continuous
+    s_predictRoll.setLineColors(lineColors);
+    s_predictRoll.setGapHoldMs(500); // 0.5 second gap between cycles
+    s_predictRoll.setPaused(false);
+    s_predictPaused = false;
+    int yStart = headerHeight + 1;
+    int entryY = yStart + matrixHeight;
+    int exitY = 8; // exit just above the header line
+    s_predictRoll.setEntryExit(entryY, exitY);
+    // Enter from bottom of body (y=32) and exit just above header (y=9)
+    unsigned int speed = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
+    s_predictRoll.setScrollSpeed(speed);
+
+    dma_display->setTextColor(bodyColor);
+    int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart);
+    int y = yStart;
+    for (const auto &line : s_predictLines)
+    {
+        dma_display->setCursor(0, y);
+        dma_display->print(line);
+        y += 8;
+    }
+}
+
 // Tick functions to animate marquee between full redraws
 void tickTemperatureHistoryMarquee()
 {
@@ -725,4 +957,41 @@ void tickBaroHistoryMarquee()
     s_baroScroll.update();
     uint16_t defaultColor = INFOMODAL_UNSEL;
     s_baroScroll.draw(0, PANEL_RES_Y - 8, defaultColor);
+}
+
+void tickPredictionScreen()
+{
+    if (!dma_display) return;
+    if (s_predictLines.empty())
+        return;
+    // Ensure paused state applies
+    s_predictRoll.setPaused(s_predictPaused);
+
+    const bool mono = (theme == 1);
+    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
+    uint16_t bodyColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
+    constexpr int headerHeight = 8;
+    constexpr int matrixHeight = 24;
+    const int yStart = headerHeight + 1; // body begins under the title
+    const int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart); // emulate 64x24 dot-matrix window
+
+    // Clear only the body area (keep header intact)
+    dma_display->fillRect(0, yStart, PANEL_RES_X, bodyHeight, 0);
+    // Clear the separator row so no pixels linger under the title line
+    dma_display->fillRect(0, yStart - 1, PANEL_RES_X, 1, 0);
+    s_predictRoll.setScrollSpeed((verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u);
+    s_predictRoll.update();
+    s_predictRoll.draw(*dma_display, 0, yStart, bodyHeight, bodyColor);
+
+    // Repaint the header so scrolling text can never discolor it
+    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
+    dma_display->setTextColor(headerFg, headerBg); // opaque title background
+    dma_display->setCursor(1, 0);
+    dma_display->print("Next 24h");
+}
+
+void setPredictionScrollPaused(bool paused)
+{
+    s_predictPaused = paused;
 }

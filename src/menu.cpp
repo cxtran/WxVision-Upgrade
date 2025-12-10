@@ -110,7 +110,7 @@ extern float tempOffset;
 extern int lightGain;
 extern int dayFormat, dataSource, autoRotate, autoRotateInterval, manualScreen;
 extern UnitPrefs units;
-extern int theme, brightness, scrollSpeed, scrollLevel;
+extern int theme, brightness, scrollSpeed, verticalScrollSpeed, scrollLevel, verticalScrollLevel;
 extern bool autoBrightness;
 extern String customMsg;
 extern int fmt24, dateFmt;
@@ -550,11 +550,20 @@ void showDisplaySettingsModal()
     autoBrightnessInt = autoBrightness ? 1 : 0;
     static int brightnessTemp = brightness;
     static int scrollLevelTemp = 3;
+    static int vScrollLevelTemp = 3;
     for (int i = 0; i < 10; ++i)
     {
         if (scrollSpeed >= scrollDelays[i])
         {
             scrollLevelTemp = i;
+            break;
+        }
+    }
+    for (int i = 0; i < 10; ++i)
+    {
+        if (verticalScrollSpeed >= scrollDelays[i])
+        {
+            vScrollLevelTemp = i;
             break;
         }
     }
@@ -641,6 +650,7 @@ void showDisplaySettingsModal()
     addChooserLine("Auto Brightness", &autoBrightnessInt, autoOpts, 2);
     addNumberLine("Brightness", &brightnessTemp);
     addChooserLine("Scroll Speed", &scrollLevelTemp, speedOpts, 10);
+    addChooserLine("Vert Scroll", &vScrollLevelTemp, speedOpts, 10);
     addChooserLine("Auto Rotate", &autoRotateTemp, autoRotateOpt, 2);
     addChooserLine("Rotate Interval", &rotateIntervalIndex, rotateIntervalOpt, rotateIntervalCount);
 
@@ -663,6 +673,8 @@ void showDisplaySettingsModal()
         autoBrightness = (autoBrightnessInt > 0);
         scrollLevel = constrain(scrollLevelTemp, 0, 9);
         scrollSpeed = scrollDelays[scrollLevel];
+        verticalScrollLevel = constrain(vScrollLevelTemp, 0, 9);
+        verticalScrollSpeed = scrollDelays[verticalScrollLevel];
         setAutoRotateEnabled(autoRotateTemp > 0, true);
         setAutoRotateInterval(rotateIntervalValues[rotateIntervalIndex], true);
         customMsg = String(customMsgBuf);
@@ -685,8 +697,8 @@ void showDisplaySettingsModal()
         {
             forceAutoThemeSchedule();
         }
-        Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds dayStart=%d nightStart=%d autoThemeMode=%d luxThr=%d\n",
-                      brightness, scrollLevel + 1, scrollSpeed, autoBrightness, autoRotate, autoRotateInterval,
+        Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d vScrollLevel=%d -> vScrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds dayStart=%d nightStart=%d autoThemeMode=%d luxThr=%d\n",
+                      brightness, scrollLevel + 1, scrollSpeed, verticalScrollLevel + 1, verticalScrollSpeed, autoBrightness, autoRotate, autoRotateInterval,
                       dayThemeStartMinutes, nightThemeStartMinutes, autoThemeModeTemp, autoThemeLightThreshold);
         displayModal.hide();
         currentMenuLevel = MENU_MAIN;
@@ -1088,11 +1100,16 @@ struct WeatherScenePreviewOption
 };
 
 static const WeatherScenePreviewOption WEATHER_SCENE_PREVIEW_OPTIONS[] = {
-    {"Sunny", WeatherSceneKind::Sunny},
-    {"Cloudy", WeatherSceneKind::Cloudy},
-    {"Rain", WeatherSceneKind::Rain},
-    {"Thunderstorm", WeatherSceneKind::Thunderstorm},
-    {"Snow", WeatherSceneKind::Snow},
+    {"Sunny (Day)", WeatherSceneKind::Sunny},
+    {"Sunny (Night)", WeatherSceneKind::SunnyNight},
+    {"Cloudy (Day)", WeatherSceneKind::Cloudy},
+    {"Cloudy (Night)", WeatherSceneKind::CloudyNight},
+    {"Rain (Day)", WeatherSceneKind::Rain},
+    {"Rain (Night)", WeatherSceneKind::RainNight},
+    {"Thunderstorm (Day)", WeatherSceneKind::Thunderstorm},
+    {"Thunderstorm (Night)", WeatherSceneKind::ThunderstormNight},
+    {"Snow (Day)", WeatherSceneKind::Snow},
+    {"Snow (Night)", WeatherSceneKind::SnowNight},
     {"Clear Night", WeatherSceneKind::ClearNight}};
 
 static constexpr int WEATHER_SCENE_PREVIEW_COUNT =

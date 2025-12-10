@@ -62,8 +62,10 @@ static constexpr int LIGHT_GAIN_MAX = 300;
 int normalizeThemeScheduleMinutes(int value);
 extern int brightness;       // 1 - 100
 extern int scrollSpeed;      // derived from level
+extern int verticalScrollSpeed; // independent speed for vertical marquees
 extern String customMsg;
 extern int scrollLevel;      // <-- fixed name (was scrollingLevel)
+extern int verticalScrollLevel;
 extern bool autoBrightness;
 extern int splashDurationSec; // minimum splash display time
 extern bool themeRefreshPending;
@@ -109,6 +111,7 @@ void markSetupComplete(bool complete=true);
 void toggleTheme(int dir);
 void adjustBrightness(int dir);
 void adjustScrollSpeed(int dir);
+void adjustVerticalScrollSpeed(int dir);
 
 void adjustTempOffset(int dir);
 void adjustHumOffset(int dir);

@@ -39,6 +39,7 @@
 #include "system.h"
 #include "datalogger.h"
 #include "graph.h"
+#include "graph.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -53,6 +54,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_HUM_HISTORY,
     SCREEN_CO2_HISTORY,
     SCREEN_BARO_HISTORY,
+    SCREEN_PREDICT,
     SCREEN_NOAA_ALERT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
@@ -297,11 +299,20 @@ static void renderScreenContents(ScreenMode mode)
     case SCREEN_ENV_INDEX:
         envQualityScreen.tick();
         break;
+    case SCREEN_TEMP_HISTORY:
+        drawTemperatureHistoryScreen();
+        break;
     case SCREEN_HUM_HISTORY:
         drawHumidityHistoryScreen();
         break;
+    case SCREEN_CO2_HISTORY:
+        drawCo2HistoryScreen();
+        break;
     case SCREEN_BARO_HISTORY:
         drawBaroHistoryScreen();
+        break;
+    case SCREEN_PREDICT:
+        drawPredictionScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -450,6 +461,9 @@ void rotateScreen(int direction)
         break;
     case SCREEN_BARO_HISTORY:
         drawBaroHistoryScreen();
+        break;
+    case SCREEN_PREDICT:
+        drawPredictionScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -1243,6 +1257,18 @@ void loop()
     }
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
     uint32_t code = getIRCodeDebounced();
+    // Pause/resume Next 24h scroll with Down/Up when on prediction screen
+    if (code == IR_DOWN && currentScreen == SCREEN_PREDICT)
+    {
+        setPredictionScrollPaused(true);
+        return;
+    }
+    if (code == IR_UP && currentScreen == SCREEN_PREDICT)
+    {
+        setPredictionScrollPaused(false);
+        return;
+    }
+
     if (code == IR_LEFT)
     {
         rotateScreen(-1);
@@ -1414,6 +1440,23 @@ void loop()
         if (!needsClear && !anyModalOrInfoScreenActive)
         {
             tickCo2HistoryMarquee();
+        }
+    }
+
+    if (currentScreen == SCREEN_PREDICT)
+    {
+        static unsigned long lastPredictRedraw = 0;
+        const unsigned long redrawInterval = 15000;
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || (now - lastPredictRedraw) >= redrawInterval))
+        {
+            drawPredictionScreen();
+            needsClear = false;
+            lastPredictRedraw = now;
+        }
+        if (!needsClear && !anyModalOrInfoScreenActive)
+        {
+            tickPredictionScreen();
         }
     }
 

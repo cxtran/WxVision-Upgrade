@@ -32,6 +32,7 @@ enum ScreenMode {
     SCREEN_HUM_HISTORY,
     SCREEN_CO2_HISTORY,
     SCREEN_BARO_HISTORY,
+    SCREEN_PREDICT,
     SCREEN_CONDITION_SCENE,
     SCREEN_CURRENT,
     SCREEN_HOURLY,
@@ -43,10 +44,15 @@ enum ScreenMode {
 
 enum class WeatherSceneKind {
     Sunny,
+    SunnyNight,
     Cloudy,
+    CloudyNight,
     Rain,
+    RainNight,
     Thunderstorm,
+    ThunderstormNight,
     Snow,
+    SnowNight,
     ClearNight,
     Unknown
 };
