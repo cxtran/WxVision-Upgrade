@@ -278,43 +278,38 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
 }
 
 void updateDailyForecastFromJson(const String& jsonStr) {
+    ForecastDay parsed[MAX_FORECAST_DAYS];
+    int parsedDays = 0;
+
     int forecastIdx = jsonStr.indexOf("\"forecast\"");
     if (forecastIdx < 0) {
-        Serial.println("[ERROR] No 'forecast' found!");
-        forecast.numDays = 0;
+        Serial.println("[ERROR] No 'forecast' found (daily) - keeping previous daily data");
         return;
     }
 
     int dailyIdx = jsonStr.indexOf("\"daily\"", forecastIdx);
     if (dailyIdx < 0) {
-        Serial.println("[ERROR] No 'daily' in forecast!");
-        forecast.numDays = 0;
+        Serial.println("[ERROR] No 'daily' in forecast - keeping previous daily data");
         return;
     }
 
-    int arrayStart = jsonStr.indexOf('[', dailyIdx);
-    int arrayEnd   = (arrayStart >= 0) ? jsonStr.indexOf(']', arrayStart) : -1;
-    if (arrayStart < 0 || arrayEnd < 0) {
-        Serial.println("[ERROR] Could not find daily array brackets!");
-        forecast.numDays = 0;
+    String dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
+    if (dailyArrayStr.length() == 0) {
+        Serial.println("[ERROR] Could not find daily array - keeping previous daily data");
         return;
     }
-
-    String dailyArrayStr = jsonStr.substring(arrayStart, arrayEnd + 1);
     _sanitizeBools(dailyArrayStr);
 
     JSONVar daily = JSON.parse(dailyArrayStr);
     if (JSON.typeof_(daily) != "array") {
-        Serial.println("[ERROR] Parsed daily forecast is not an array!");
-        forecast.numDays = 0;
+        Serial.println("[ERROR] Parsed daily forecast is not an array - keeping previous daily data");
         return;
     }
 
     int days = min((int)daily.length(), MAX_FORECAST_DAYS);
-    forecast.numDays = days;
     for (int i = 0; i < days; i++) {
         JSONVar d = daily[i];
-        ForecastDay& f = forecast.days[i];
+        ForecastDay f;
         f.highTemp   = (JSON.typeof_(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
         f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
         f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
@@ -324,8 +319,19 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
         f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
         f.monthNum   = (JSON.typeof_(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
+        parsed[i] = f;
+        parsedDays++;
     }
-    // was: Serial.printf("[FORECAST] Parsed %d daily entries\n", forecast.numDays);
+
+    if (parsedDays <= 0) {
+        Serial.println("[FORECAST] Parsed 0 daily entries - keeping previous daily data");
+        return;
+    }
+
+    forecast.numDays = parsedDays;
+    for (int i = 0; i < parsedDays; ++i) {
+        forecast.days[i] = parsed[i];
+    }
     Serial.print("[FORECAST] Parsed ");
     Serial.print(forecast.numDays);
     Serial.println(" daily entries");
@@ -334,7 +340,8 @@ void updateDailyForecastFromJson(const String& jsonStr) {
 // Parse hourly array by extracting individual objects (memory-safe on ESP32)
 void updateHourlyForecastFromJson(const String& jsonStr) {
     forecast.hourlyKeyPresent = (jsonStr.indexOf("\"hourly\"") >= 0);
-    forecast.numHours = 0;
+    ForecastHour parsed[MAX_FORECAST_HOURS];
+    int parsedCount = 0;
 
     if (!forecast.hourlyKeyPresent) {
         Serial.println("[FORECAST] 'hourly' key NOT found in payload");
@@ -427,19 +434,20 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
             continue;
         }
 
-        ForecastHour& fh = forecast.hours[count];
+        ForecastHour fh;
         fh.temp       = (JSON.typeof_(h["air_temperature"])    == "number") ? (double)h["air_temperature"] : NAN;
         fh.rainChance = (JSON.typeof_(h["precip_probability"]) == "number") ? (int)h["precip_probability"] : -1;
         fh.conditions = (JSON.typeof_(h["conditions"])         == "string") ? String((const char*)h["conditions"]) : "";
         fh.icon       = (JSON.typeof_(h["icon"])               == "string") ? String((const char*)h["icon"])       : "";
         fh.time       = (JSON.typeof_(h["time"])               == "number") ? (uint32_t)(double)h["time"]          : 0;
 
+        parsed[count] = fh;
         count++;
     }
 
-    forecast.numHours = count;
     if (count == 0) {
-        Serial.println("[FORECAST] Parsed 0 hourly entries");
+        Serial.println("[FORECAST] Parsed 0 hourly entries - keeping previous hourly data");
+        return;
     } else {
         // was: Serial.printf(...)
         Serial.print("[FORECAST] Parsed ");
@@ -448,9 +456,14 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
         Serial.print(MAX_FORECAST_HOURS);
         Serial.println(")");
         Serial.print("  first=");
-        Serial.print(forecast.hours[0].time);
+        Serial.print(parsed[0].time);
         Serial.print(" last=");
-        Serial.println(forecast.hours[count-1].time);
+        Serial.println(parsed[count-1].time);
+    }
+
+    forecast.numHours = count;
+    for (int j = 0; j < count; ++j) {
+        forecast.hours[j] = parsed[j];
     }
 }
 
@@ -485,8 +498,6 @@ void fetchForecastData() {
 
     if (stationId.isEmpty() || token.isEmpty()) {
         Serial.println("[Tempest] Missing WeatherFlow credentials");
-        forecast.numHours = 0;
-        forecast.hourlyKeyPresent = false;
         return;
     }
 
@@ -503,8 +514,6 @@ void fetchForecastData() {
 
     if (!http.begin(url.c_str())) {
         Serial.println("[HTTP] begin() failed");
-        forecast.numHours = 0;
-        forecast.hourlyKeyPresent = false;
         return;
     }
 
@@ -514,8 +523,6 @@ void fetchForecastData() {
         Serial.print("[HTTP] Forecast error: ");
         Serial.println(httpCode);
         http.end();
-        forecast.numHours = 0;
-        forecast.hourlyKeyPresent = false;
         return;
     }
 
@@ -569,7 +576,7 @@ void showUdpScreen() {
 }
 
 void showForecastScreen() {
-    int num = forecast.numDays;
+    int num = min(forecast.numDays, 10); // show up to 10 days
     // was: Serial.printf("Showing %d forecast days\n", num);
     Serial.print("Showing ");
     Serial.print(num);
@@ -590,7 +597,8 @@ void showForecastScreen() {
                 f.conditions + " " + String(f.rainChance) + "%";
     }
 
-    forecastScreen.setLines(lines, num);
+    bool reset = !forecastScreen.isActive();
+    forecastScreen.setLines(lines, num, reset);
     forecastScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 }
 
@@ -632,7 +640,7 @@ void showHourlyForecastScreen() {
         time_t tt = (time_t)h.time;
         struct tm* ti = localtime(&tt);
 
-        // e.g., "14:00  21.5C  30%"
+        // Build a wrapped, two-line friendly string per hour
         String line;
         int hh = ti ? ti->tm_hour : 0;
         int mm = ti ? ti->tm_min  : 0;
@@ -648,26 +656,21 @@ void showHourlyForecastScreen() {
             if (hour12 == 0)
                 hour12 = 12;
             const char *suffix = (hh >= 12) ? "PM" : "AM";
-            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d %s", hour12, mm, suffix);
+            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d%s", hour12, mm, suffix);
         }
         String timeLabel(timeBuf);
-        int colonPos = timeLabel.indexOf(':');
-        if (colonPos >= 0 && colonPos + 1 < timeLabel.length())
-        {
-            timeLabel = timeLabel.substring(0, colonPos + 1) + " " + timeLabel.substring(colonPos + 1);
-        }
         timeLabel += ":";
-        line = timeLabel;
-
-        line += "  ";
-        line += isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1);
-        line += "  ";
-        line += (h.rainChance >= 0) ? String(h.rainChance) : String('-');
-        line += '%';
-
-
-        lines[i] = line;
-        if (h.conditions.length()) lines[i] += "  " + h.conditions;
+        String labelLine = timeLabel;
+        String dataLine;
+        dataLine += (isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1));
+        dataLine += "  ";
+        dataLine += (h.rainChance >= 0) ? String(h.rainChance) + "% Chance of Rain" : String("- % Chance of Rain");
+        if (h.conditions.length()) {
+            dataLine += "  ";
+            dataLine += h.conditions;
+        }
+        // Combine into two lines separated by newline for wrap downstream
+        lines[i] = labelLine + "\n" + dataLine;
     }
 
     hourlyScreen.setLines(lines, count, true);
@@ -748,7 +751,8 @@ void showCurrentConditionsScreen() {
     lines[5] = "Wind:   " + (isnan(currentCond.windAvg)   ? String("--") : fmtWind(currentCond.windAvg, 1)) + " " + currentCond.windCardinal;
     lines[6] = "Gust:   " + (isnan(currentCond.windGust)  ? String("--") : fmtWind(currentCond.windGust, 1));
     lines[7] = "Cond:   " + (String(currentCond.cond).length() == 0 ? String("--") : currentCond.cond);
-    currentCondScreen.setLines(lines, 8);
+    bool reset = !currentCondScreen.isActive();
+    currentCondScreen.setLines(lines, 8, reset);
     currentCondScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 
 }

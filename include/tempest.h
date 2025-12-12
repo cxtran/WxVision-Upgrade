@@ -7,7 +7,7 @@
 // ==============================
 // ===== CONSTANTS & LIMITS =====
 // ==============================
-#define MAX_FORECAST_DAYS 7
+#define MAX_FORECAST_DAYS 10
 #define MAX_FORECAST_HOURS 48    // you can lower to 24 if you prefer
 
 // ==============================

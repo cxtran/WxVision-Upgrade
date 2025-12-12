@@ -5,7 +5,7 @@
 #include <math.h>
 
 namespace {
-constexpr size_t kMaxSamples = 288;        // 24h at 5-minute intervals
+constexpr size_t kRamMaxSamples = 2000;    // keep ~7 days in RAM, full history on flash
 constexpr const char *kLogPath = "/sensor_log.bin";
 std::vector<SensorSample> s_log;
 bool s_spiffsReady = false;
@@ -29,12 +29,6 @@ bool ensureSpiffsMounted() {
     return s_spiffsReady;
 }
 
-void trimToWindow() {
-    while (s_log.size() > kMaxSamples) {
-        s_log.erase(s_log.begin());
-    }
-}
-
 void loadLog() {
     if (!ensureSpiffsMounted()) return;
     if (!SPIFFS.exists(kLogPath)) return;
@@ -53,29 +47,36 @@ void loadLog() {
         f.close();
         return;
     }
+    // Only keep the most recent kRamMaxSamples in memory to save RAM
+    size_t startIdx = 0;
+    if (count > kRamMaxSamples)
+        startIdx = count - kRamMaxSamples;
+    size_t startOffset = startIdx * (legacyV1 ? sizeof(LegacySampleV1) : sizeof(SensorSample));
+    if (startOffset > 0) f.seek(startOffset, SeekSet);
+
     s_log.clear();
-    s_log.reserve(kMaxSamples);
+    s_log.reserve(kRamMaxSamples);
     if (!legacyV1) {
         SensorSample s;
-        for (size_t i = 0; i < count && f.readBytes(reinterpret_cast<char*>(&s), sizeof(SensorSample)) == sizeof(SensorSample); ++i) {
+        for (size_t i = startIdx; i < count && f.readBytes(reinterpret_cast<char*>(&s), sizeof(SensorSample)) == sizeof(SensorSample); ++i) {
             s_log.push_back(s);
         }
     } else {
         LegacySampleV1 s;
-        for (size_t i = 0; i < count && f.readBytes(reinterpret_cast<char*>(&s), sizeof(LegacySampleV1)) == sizeof(LegacySampleV1); ++i) {
+        for (size_t i = startIdx; i < count && f.readBytes(reinterpret_cast<char*>(&s), sizeof(LegacySampleV1)) == sizeof(LegacySampleV1); ++i) {
             SensorSample converted{s.ts, s.temp, s.hum, s.press, s.lux, NAN};
             s_log.push_back(converted);
         }
     }
     f.close();
-    trimToWindow();
 }
 
 void saveLog() {
     if (!ensureSpiffsMounted()) return;
-    File f = SPIFFS.open(kLogPath, "w");
+    File f = SPIFFS.open(kLogPath, "a");
     if (!f) return;
-    for (const auto &s : s_log) {
+    if (!s_log.empty()) {
+        const SensorSample &s = s_log.back();
         f.write(reinterpret_cast<const uint8_t*>(&s), sizeof(SensorSample));
     }
     f.close();
@@ -88,13 +89,52 @@ void initSensorLog() {
 
 void appendSensorSample(const SensorSample &s) {
     s_log.push_back(s);
-    trimToWindow();
+    // Keep RAM bounded while persisting full history to flash
+    if (s_log.size() > kRamMaxSamples) {
+        s_log.erase(s_log.begin());
+    }
     saveLog();
 }
 
 void sensorLogToJson(JsonDocument &doc) {
     JsonArray arr = doc.to<JsonArray>();
     for (const auto &s : s_log) {
+        JsonObject o = arr.add<JsonObject>();
+        o["ts"] = s.ts;
+        o["temp"] = s.temp;
+        o["hum"] = s.hum;
+        o["press"] = s.press;
+        o["lux"] = s.lux;
+        if (!isnan(s.co2) && s.co2 > 0.0f) {
+            o["co2"] = s.co2;
+        } else {
+            o["co2"] = nullptr;
+        }
+    }
+}
+
+void sensorLogToJsonDownsample(JsonDocument &doc, size_t maxSamples) {
+    JsonArray arr = doc.to<JsonArray>();
+    if (maxSamples == 0 || s_log.empty()) return;
+    size_t stride = (s_log.size() + maxSamples - 1) / maxSamples; // ceil
+    if (stride < 1) stride = 1;
+    for (size_t i = 0; i < s_log.size(); i += stride) {
+        const auto &s = s_log[i];
+        JsonObject o = arr.add<JsonObject>();
+        o["ts"] = s.ts;
+        o["temp"] = s.temp;
+        o["hum"] = s.hum;
+        o["press"] = s.press;
+        o["lux"] = s.lux;
+        if (!isnan(s.co2) && s.co2 > 0.0f) {
+            o["co2"] = s.co2;
+        } else {
+            o["co2"] = nullptr;
+        }
+    }
+    // Ensure the newest sample is present even if stride skipped it
+    if (arr.size() == 0 || arr[arr.size() - 1]["ts"].as<uint32_t>() != s_log.back().ts) {
+        const auto &s = s_log.back();
         JsonObject o = arr.add<JsonObject>();
         o["ts"] = s.ts;
         o["temp"] = s.temp;

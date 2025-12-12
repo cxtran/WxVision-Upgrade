@@ -26,6 +26,8 @@ public:
     static const int MAXROWS = 4;
     static const int DATA_ROWS_FULL = 3; // 3 data rows if NO button bar
     static const int SCREEN_WIDTH = 64;
+    static const int SCREEN_HEIGHT = 32;
+    static const int CHARW = 6; // 5x7 font width + 1 spacing for wrapping
     int getScrollY() const { return scrollY; }
     void setScrollY(int val) { if (val < 0) val = 0;   scrollY = val; }
 

@@ -10,4 +10,5 @@ void tickHumidityHistoryMarquee();
 void tickCo2HistoryMarquee();
 void tickBaroHistoryMarquee();
 void tickPredictionScreen();
-void setPredictionScrollPaused(bool paused);
+void handlePredictionDownPress();
+void handlePredictionUpPress();

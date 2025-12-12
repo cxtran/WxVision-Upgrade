@@ -68,7 +68,7 @@ ScreenMode currentScreen = SCREEN_CLOCK;
 extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal, alarmModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
-InfoScreen forecastScreen("Next 7 Days", SCREEN_UDP_FORECAST);
+InfoScreen forecastScreen("Next 10 Days", SCREEN_UDP_FORECAST);
 InfoScreen envQualityScreen("Air Quality", SCREEN_ENV_INDEX);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
 InfoScreen hourlyScreen("Next 24 HRS", SCREEN_HOURLY);
@@ -1260,12 +1260,12 @@ void loop()
     // Pause/resume Next 24h scroll with Down/Up when on prediction screen
     if (code == IR_DOWN && currentScreen == SCREEN_PREDICT)
     {
-        setPredictionScrollPaused(true);
+        handlePredictionDownPress();
         return;
     }
     if (code == IR_UP && currentScreen == SCREEN_PREDICT)
     {
-        setPredictionScrollPaused(false);
+        handlePredictionUpPress();
         return;
     }
 
@@ -1458,6 +1458,7 @@ void loop()
         {
             tickPredictionScreen();
         }
+        delay(40); // align tick cadence with other scrolling screens
     }
 
     if (currentScreen == SCREEN_BARO_HISTORY)

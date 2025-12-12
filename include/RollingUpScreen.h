@@ -14,7 +14,13 @@ public:
     void setLines(const std::vector<String> &lines, bool resetPosition = true);
     void setScrollSpeed(unsigned int ms);
     void setLineColors(const std::vector<uint16_t> &colors);
+    // Optional per-line X offsets (pixels). Missing entries default to 0.
+    void setLineOffsets(const std::vector<int> &offsets);
     void setPaused(bool paused);
+    // Stop/resume helpers for user input
+    void onDownPress();  // single press steps view downward by 1px and pauses
+    void onUpPress();    // resume scrolling up immediately
+    void setAutoResumeMs(unsigned int ms); // default 5000 ms
     bool isPaused() const { return _paused; }
     // Optional gap (ms) to pause between cycles (default 1000 ms)
     void setGapHoldMs(unsigned int ms);
@@ -37,7 +43,10 @@ private:
     int _entryY;
     int _exitY;
     std::vector<uint16_t> _lineColors;
+    std::vector<int> _lineOffsets;
     bool _paused;
     unsigned int _gapHoldMs;
     unsigned long _gapHoldUntil;
+    unsigned long _resumeAt;
+    unsigned int _autoResumeMs;
 };

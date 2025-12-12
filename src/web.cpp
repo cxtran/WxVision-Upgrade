@@ -274,13 +274,13 @@ void setupWebServer() {
   // Place dynamic endpoints before the catch-all static handler so they aren't shadowed.
   server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     const auto &log = getSensorLog();
-    size_t count = log.size();
-    size_t capacity = JSON_ARRAY_SIZE(count) + count * JSON_OBJECT_SIZE(6) + 512;
-    if (capacity < 1024) {
-      capacity = 1024;
-    }
+    // Cap payload to keep client/server responsive
+    constexpr size_t kMaxTrendSamples = 400;
+    size_t sampleCount = (log.size() < kMaxTrendSamples) ? log.size() : kMaxTrendSamples;
+    size_t capacity = JSON_ARRAY_SIZE(sampleCount) + sampleCount * JSON_OBJECT_SIZE(6) + 256;
+    if (capacity < 1024) capacity = 1024;
     DynamicJsonDocument doc(capacity);
-    sensorLogToJson(doc);
+    sensorLogToJsonDownsample(doc, kMaxTrendSamples);
 
     AsyncResponseStream *res = req->beginResponseStream("application/json");
     serializeJson(doc, *res);
@@ -289,10 +289,10 @@ void setupWebServer() {
 
   // Serve index.html at root
   // Static files with dev-friendly caching
-  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html");
+  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html").setCacheControl("max-age=86400, public");
   server.serveStatic("/config.html", SPIFFS, "/config.html").setCacheControl("no-cache");
-  server.serveStatic("/style.css",   SPIFFS, "/style.css").setCacheControl("no-cache");
-  server.serveStatic("/script.js",   SPIFFS, "/script.js").setCacheControl("no-cache");
+  server.serveStatic("/style.css",   SPIFFS, "/style.css").setCacheControl("max-age=86400, public");
+  server.serveStatic("/script.js",   SPIFFS, "/script.js").setCacheControl("max-age=86400, public");
   server.serveStatic("/sensor-log.json", SPIFFS, "/sensor_log.bin"); // fallback if needed
 
 

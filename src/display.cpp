@@ -824,7 +824,7 @@ static void drawWeatherSceneSunny()
     uint16_t horizonGlow = dma_display->color565(255, 220, 120);
     uint16_t fieldBase = dma_display->color565(215, 160, 55);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 10, PANEL_RES_X, 4, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 1; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 5 : 3;
@@ -854,7 +854,7 @@ static void drawWeatherSceneCloudy()
     uint16_t horizonGlow = dma_display->color565(240, 210, 125);
     uint16_t fieldBase = dma_display->color565(205, 150, 60);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 1; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 5 : 3;
@@ -886,7 +886,7 @@ static void drawWeatherSceneCloudyNight()
     uint16_t fieldBase = dma_display->color565(90, 80, 40);
     uint16_t grassColor = dma_display->color565(20, 50, 25);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 8, PANEL_RES_X, 2, grassColor);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, grassColor);
     for (int x = 2; x < PANEL_RES_X; x += 5)
         dma_display->drawFastVLine(x, PANEL_RES_Y - 8, 2, scaleColor565(fieldBase, 1.1f));
 
@@ -914,7 +914,7 @@ static void drawWeatherSceneRain()
     uint16_t horizonGlow = dma_display->color565(230, 200, 110);
     uint16_t fieldBase = dma_display->color565(180, 145, 60);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -977,7 +977,7 @@ static void drawWeatherSceneRainNight()
     uint16_t fieldBase = dma_display->color565(90, 80, 45);
     uint16_t horizonGlow = dma_display->color565(110, 90, 55);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -1040,7 +1040,7 @@ static void drawWeatherSceneThunderstorm()
     uint16_t horizonGlow = dma_display->color565(230, 200, 110);
     uint16_t fieldBase = dma_display->color565(180, 145, 60);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -1132,7 +1132,7 @@ static void drawWeatherSceneThunderstormNight()
     uint16_t fieldBase = dma_display->color565(90, 80, 45);
     uint16_t horizonGlow = dma_display->color565(110, 90, 55);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -1224,7 +1224,7 @@ static void drawWeatherSceneSnow()
     uint16_t horizonGlow = dma_display->color565(230, 200, 110);
     uint16_t fieldBase = dma_display->color565(180, 145, 60);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -1273,7 +1273,7 @@ static void drawWeatherSceneSnowNight()
     uint16_t fieldBase = dma_display->color565(90, 80, 40);
     uint16_t horizonGlow = dma_display->color565(110, 90, 55);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 9, PANEL_RES_X, 3, horizonGlow);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
     for (int x = 2; x < PANEL_RES_X; x += 5)
     {
         int blades = (x % 10 == 0) ? 4 : 2;
@@ -1322,7 +1322,7 @@ static void drawWeatherSceneClearNight()
     uint16_t fieldColor = dma_display->color565(200, 140, 40);
     uint16_t grassColor = dma_display->color565(30, 70, 25);
     dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldColor);
-    dma_display->fillRect(0, PANEL_RES_Y - 8, PANEL_RES_X, 2, grassColor);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, grassColor);
     for (int x = 2; x < PANEL_RES_X; x += 5)
         dma_display->drawFastVLine(x, PANEL_RES_Y - 8, 2, scaleColor565(fieldColor, 1.1f));
 
@@ -1352,6 +1352,34 @@ struct WeatherSceneRenderer
 static void drawWeatherSceneDefault()
 {
     drawWeatherSceneSunny();
+}
+
+// Mono-friendly scene for theme 1
+static void drawWeatherSceneMono()
+{
+    // Soft grayscale sky gradient
+    uint16_t skyColors[] = {
+        dma_display->color565(12, 12, 18),
+        dma_display->color565(20, 20, 28),
+        dma_display->color565(32, 32, 42),
+        dma_display->color565(44, 44, 56)
+    };
+    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
+
+    uint16_t fieldBase = dma_display->color565(35, 35, 35);
+    uint16_t horizonGlow = dma_display->color565(60, 60, 70);
+    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
+    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
+    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 80, 90));
+
+    // Simple muted clouds
+    uint16_t cloudLight = dma_display->color565(120, 120, 130);
+    uint16_t cloudMid = dma_display->color565(90, 90, 100);
+    uint16_t cloudDark = dma_display->color565(70, 70, 80);
+
+    drawCompactCloud(PANEL_RES_X / 5, 8, cloudLight);
+    drawCompactCloud(PANEL_RES_X / 2, 10, cloudMid);
+    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 4, 12, cloudDark);
 }
 
 static const WeatherSceneRenderer WEATHER_SCENE_RENDERERS[] = {
@@ -1554,6 +1582,12 @@ static String formatConditionLabel(const String &condition)
 
 void drawWeatherConditionScene(WeatherSceneKind kind)
 {
+    if (theme == 1)
+    {
+        drawWeatherSceneMono();
+        return;
+    }
+
     for (const auto &renderer : WEATHER_SCENE_RENDERERS)
     {
         if (renderer.kind == kind)
@@ -2660,6 +2694,12 @@ static void renderConditionSceneMarquee(bool force)
     }
 
     const int marqueeY = PANEL_RES_Y - 7;
+    int borderY = marqueeY - 1;
+    if (borderY >= 0)
+    {
+        uint16_t borderColor = scaleColor565(conditionSceneMarqueeColor, 0.65f);
+        dma_display->drawFastHLine(0, borderY, PANEL_RES_X, borderColor);
+    }
     conditionSceneScroll.update();
     conditionSceneScroll.draw(0, marqueeY, conditionSceneMarqueeColor);
 }

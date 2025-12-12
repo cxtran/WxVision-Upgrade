@@ -2,12 +2,19 @@
 #include "InfoModal.h"
 #include "display.h"
 #include "utils.h"
+#include "RollingUpScreen.h"
 
 extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
 extern ScreenMode currentScreen;
 extern int scrollSpeed;
+extern int verticalScrollSpeed;
 extern int theme;
+
+static RollingUpScreen s_hourlyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
+static RollingUpScreen s_dailyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
+static RollingUpScreen s_liveRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
+static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 
 
 static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
@@ -27,6 +34,49 @@ static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
     g = clamp(g, boost);
     b = clamp(b, boost);
     return dma_display->color565(r, g, b);
+}
+
+// Simple word-wrap to fit within the small 64px screen width
+static std::vector<String> wrapToWidth(const String &text, int maxWidthPx)
+{
+    std::vector<String> out;
+    String current;
+    int currentW = 0;
+    int spaceW = getTextWidth(" ");
+    int idx = 0;
+    while (idx < text.length())
+    {
+        // read next word
+        int start = idx;
+        while (idx < text.length() && !isspace(text[idx])) idx++;
+        String word = text.substring(start, idx);
+        int wW = getTextWidth(word.c_str());
+        if (!current.isEmpty() && currentW + spaceW + wW > maxWidthPx)
+        {
+            out.push_back(current);
+            current = word;
+            currentW = wW;
+        }
+        else
+        {
+            if (!current.isEmpty())
+            {
+                current += " ";
+                currentW += spaceW;
+            }
+            current += word;
+            currentW += wW;
+        }
+        while (idx < text.length() && isspace(text[idx]))
+        {
+            idx++;
+        }
+    }
+    if (!current.isEmpty())
+        out.push_back(current);
+    if (out.empty())
+        out.push_back("");
+    return out;
 }
 
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
@@ -71,6 +121,180 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         selIndex = 0;
         lastSelIndex = -1;
         resetHScroll();
+    }
+
+    // For the WeatherFlow hourly screen, also feed the vertical scroller with wrapped lines
+    if (_screenMode == SCREEN_HOURLY) {
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        vec.reserve(_lineCount * 2);
+        for (int i = 0; i < _lineCount; ++i) {
+            // Split on '\n' to allow multi-line entries
+            int sep = _lines[i].indexOf('\n');
+            const bool monoTheme = (theme == 1);
+            const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
+                                                  : dma_display->color565(255, 240, 140);
+            const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
+                                                  : dma_display->color565(120, 200, 255);
+        const int valueIndentPx = 1; // slight indent for data values
+            auto pushWrapped = [&](const String &text, uint16_t color, bool indentValue) {
+                auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH);
+                for (const auto &w : wrapped) {
+                    vec.push_back(w);
+                    colors.push_back(color);
+                    offsets.push_back(indentValue ? valueIndentPx : 0);
+                }
+            };
+            if (sep >= 0) {
+                String first = _lines[i].substring(0, sep);
+                String second = _lines[i].substring(sep + 1);
+                if (first.length()) { pushWrapped(first, labelColor, false); }
+                if (second.length()) { pushWrapped(second, valueColor, true); }
+            } else {
+                pushWrapped(_lines[i], valueColor, true);
+            }
+        }
+        s_hourlyRoll.setLines(vec, resetPosition);
+        s_hourlyRoll.setLineColors(colors);
+        s_hourlyRoll.setLineOffsets(offsets);
+        s_hourlyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_hourlyRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH); // enter from bottom, exit just under title
+    }
+    else if (_screenMode == SCREEN_UDP_FORECAST) {
+        // Convert daily forecast list into a vertical scroll-up body similar to the hourly screen
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        vec.reserve(_lineCount * 2);
+        const bool monoTheme = (theme == 1);
+        const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
+                                              : dma_display->color565(255, 240, 140);
+        const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
+                                              : dma_display->color565(120, 200, 255);
+        const int valueIndentPx = 1;
+        auto pushValueWrapped = [&](const String &text) {
+            auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH - valueIndentPx);
+            for (const auto &w : wrapped) {
+                vec.push_back(w);
+                colors.push_back(valueColor);
+                offsets.push_back(valueIndentPx);
+            }
+        };
+        for (int i = 0; i < _lineCount; ++i) {
+            String raw = _lines[i];
+            int colon = raw.indexOf(':');
+            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
+            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
+            label.trim();
+            value.trim();
+            if (label.length()) {
+                vec.push_back(label);
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+            }
+            if (value.length()) {
+                pushValueWrapped(value);
+            }
+        }
+        if (vec.empty()) {
+            vec.push_back("No forecast data");
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+        }
+        s_dailyRoll.setLines(vec, resetPosition);
+        s_dailyRoll.setLineColors(colors);
+        s_dailyRoll.setLineOffsets(offsets);
+        s_dailyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_dailyRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH); // enter from bottom, exit under title
+    }
+    else if (_screenMode == SCREEN_UDP_DATA) {
+        // Live Weather screen also uses vertical scroll-up like hourly
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        vec.reserve(_lineCount * 2);
+        const bool monoTheme = (theme == 1);
+        const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
+                                              : dma_display->color565(255, 240, 140);
+        const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
+                                              : dma_display->color565(120, 200, 255);
+        const int valueIndentPx = 1;
+        for (int i = 0; i < _lineCount; ++i) {
+            String raw = _lines[i];
+            int colon = raw.indexOf(':');
+            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
+            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
+            label.trim();
+            value.trim();
+            if (label.length()) {
+                vec.push_back(label);
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+            }
+            if (value.length()) {
+                auto wrapped = wrapToWidth(value, InfoScreen::SCREEN_WIDTH - valueIndentPx);
+                for (const auto &w : wrapped) {
+                    vec.push_back(w);
+                    colors.push_back(valueColor);
+                    offsets.push_back(valueIndentPx);
+                }
+            }
+        }
+        if (vec.empty()) {
+            vec.push_back("No live data");
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+        }
+        s_liveRoll.setLines(vec, resetPosition);
+        s_liveRoll.setLineColors(colors);
+        s_liveRoll.setLineOffsets(offsets);
+        s_liveRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_liveRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
+    }
+    else if (_screenMode == SCREEN_CURRENT) {
+        // Current conditions as vertical scroll-up
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        vec.reserve(_lineCount * 2);
+        const bool monoTheme = (theme == 1);
+        const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
+                                              : dma_display->color565(255, 240, 140);
+        const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
+                                              : dma_display->color565(120, 200, 255);
+        const int valueIndentPx = 1;
+        for (int i = 0; i < _lineCount; ++i) {
+            String raw = _lines[i];
+            int colon = raw.indexOf(':');
+            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
+            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
+            label.trim();
+            value.trim();
+            if (label.length()) {
+                vec.push_back(label);
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+            }
+            if (value.length()) {
+                auto wrapped = wrapToWidth(value, InfoScreen::SCREEN_WIDTH - valueIndentPx);
+                for (const auto &w : wrapped) {
+                    vec.push_back(w);
+                    colors.push_back(valueColor);
+                    offsets.push_back(valueIndentPx);
+                }
+            }
+        }
+        if (vec.empty()) {
+            vec.push_back("No current data");
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+        }
+        s_currentRoll.setLines(vec, resetPosition);
+        s_currentRoll.setLineColors(colors);
+        s_currentRoll.setLineOffsets(offsets);
+        s_currentRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_currentRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
     }
 }
 
@@ -154,24 +378,76 @@ void InfoScreen::resetHScroll() {
 }
 
 void InfoScreen::draw() {
-    dma_display->fillScreen(0);
-
     const bool monoTheme = (theme == 1);
     const uint16_t headerBg = monoTheme ? dma_display->color565(20,20,40) : INFOSCREEN_HEADERBG;
     const uint16_t headerFg = monoTheme ? dma_display->color565(60,60,120) : INFOSCREEN_HEADERFG;
     const uint16_t defaultLineColor = monoTheme ? dma_display->color565(60,60,120)
                                                 : dma_display->color565(230,230,230);
+    const bool isVerticalScrollScreen =
+        (_screenMode == SCREEN_HOURLY) ||
+        (_screenMode == SCREEN_UDP_DATA) ||
+        (_screenMode == SCREEN_UDP_FORECAST) ||
+        (_screenMode == SCREEN_CURRENT);
 
-    // Header
+    // Avoid full-screen clears on vertical scrollers to reduce flicker; other screens still clear.
+    if (!isVerticalScrollScreen) {
+        dma_display->fillScreen(0);
+    }
+
+    // Header renderer so we can repaint after the scroller to mask any overshoot
     const int headerHeight = CHARH;
-    dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, headerBg);
-    dma_display->setTextColor(headerFg);
-    dma_display->setCursor(1, 0);
-    String t = _title; if (t.length() > 12) t = t.substring(0, 12);
-    dma_display->print(t);
-    const uint16_t underlineColor = monoTheme ? dma_display->color565(18, 18, 40)
-                                              : dma_display->color565(12, 40, 80);
-    dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, underlineColor);
+    auto drawHeader = [&]() {
+        dma_display->fillRect(0, 0, SCREEN_WIDTH, headerHeight, headerBg);
+        dma_display->setTextColor(headerFg, headerBg);
+        dma_display->setCursor(1, 0);
+        String t = _title; if (t.length() > 12) t = t.substring(0, 12);
+        dma_display->print(t);
+        const uint16_t underlineColor = monoTheme ? dma_display->color565(18, 18, 40)
+                                                  : dma_display->color565(12, 40, 80);
+        dma_display->drawFastHLine(0, headerHeight - 1, SCREEN_WIDTH, underlineColor);
+    };
+
+    // Special path: WeatherFlow hourly screen uses vertical scroll-up display
+    if (_screenMode == SCREEN_HOURLY) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        // Blank the header band to ensure any stray pixels are cleared before redraw
+        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
+        // Clear the separator row so any stray pixels under the title are zeroed
+        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
+        s_hourlyRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        // Redraw header after scrolling so the title never gets contaminated by partial lines
+        drawHeader();
+        return;
+    }
+    // Live Weather screen: vertical scroll-up body
+    if (_screenMode == SCREEN_UDP_DATA) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
+        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
+        s_liveRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        drawHeader();
+        return;
+    }
+    if (_screenMode == SCREEN_CURRENT) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
+        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
+        s_currentRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        drawHeader();
+        return;
+    }
+    // Special path: 7-day forecast uses the same vertical scroll-up treatment
+    if (_screenMode == SCREEN_UDP_FORECAST) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
+        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
+        s_dailyRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        drawHeader();
+        return;
+    }
+
+    // Standard screens: draw header once before rendering lines
+    drawHeader();
 
     // Lines
     int y = headerHeight;
@@ -291,6 +567,31 @@ void InfoScreen::draw() {
 void InfoScreen::tick() {
     if (!_active) return;
 
+    if (_screenMode == SCREEN_HOURLY) {
+        s_hourlyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_hourlyRoll.update();
+        draw();
+        return;
+    }
+    if (_screenMode == SCREEN_UDP_DATA) {
+        s_liveRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_liveRoll.update();
+        draw();
+        return;
+    }
+    if (_screenMode == SCREEN_CURRENT) {
+        s_currentRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_currentRoll.update();
+        draw();
+        return;
+    }
+    if (_screenMode == SCREEN_UDP_FORECAST) {
+        s_dailyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_dailyRoll.update();
+        draw();
+        return;
+    }
+
     unsigned long now = millis();
     int pageLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
 
@@ -328,6 +629,19 @@ void InfoScreen::tick() {
 
 void InfoScreen::handleIR(uint32_t code) {
     if (!_active) return;
+
+    auto verticalScroller = [&]() -> RollingUpScreen* {
+        if (_screenMode == SCREEN_HOURLY) return &s_hourlyRoll;
+        if (_screenMode == SCREEN_UDP_FORECAST) return &s_dailyRoll;
+        if (_screenMode == SCREEN_UDP_DATA) return &s_liveRoll;
+        if (_screenMode == SCREEN_CURRENT) return &s_currentRoll;
+        return nullptr;
+    };
+
+    if (RollingUpScreen* scroller = verticalScroller()) {
+        if (code == IR_DOWN) { scroller->onDownPress(); return; }
+        if (code == IR_UP)   { scroller->onUpPress();   return; }
+    }
 
     int pageLines = min(_lineCount - scrollY, INFOSCREEN_VISIBLE_ROWS);
 

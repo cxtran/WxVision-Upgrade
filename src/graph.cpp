@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <math.h>
 #include <float.h>
+#include <time.h>
+#include <functional>
 #include "datalogger.h"
 #include "display.h"
 #include "InfoModal.h"
@@ -21,13 +23,69 @@ struct Point
     int y;
 };
 
+struct TimedValue
+{
+    uint32_t ts;
+    float value;
+};
+
+// Forward declaration
+Point mapSampleToPoint(uint32_t ts, uint32_t dayStart, float value, float minVal, float maxVal,
+                       int graphLeft, int graphWidth, int graphTop, int graphHeight);
+
+static std::vector<Point> buildUniquePoints(const std::vector<TimedValue> &vals,
+                                            uint32_t dayStart,
+                                            float minVal, float maxVal,
+                                            int graphLeft, int graphWidth, int graphTop, int graphHeight)
+{
+    std::vector<Point> points;
+    if (graphWidth <= 0) return points;
+
+    std::vector<float> sum(graphWidth, 0.0f);
+    std::vector<int> count(graphWidth, 0);
+
+    for (const auto &tv : vals)
+    {
+        uint32_t delta = (tv.ts > dayStart) ? (tv.ts - dayStart) : 0;
+        if (delta > 86400) delta = 86400;
+        float frac = static_cast<float>(delta) / 86400.0f;
+        int xIdx = static_cast<int>((graphWidth - 1) * frac + 0.5f);
+        if (xIdx < 0) xIdx = 0;
+        if (xIdx >= graphWidth) xIdx = graphWidth - 1;
+        sum[xIdx] += tv.value;
+        count[xIdx] += 1;
+    }
+
+    float range = maxVal - minVal;
+    if (range < 0.1f) range = 0.1f;
+
+    for (int i = 0; i < graphWidth; ++i)
+    {
+        if (count[i] <= 0) continue;
+        float avg = sum[i] / static_cast<float>(count[i]);
+        float norm = (avg - minVal) / range;
+        if (norm < 0.0f) norm = 0.0f;
+        if (norm > 1.0f) norm = 1.0f;
+        int x = graphLeft + i;
+        int y = graphTop + (graphHeight - 1) - static_cast<int>(norm * (graphHeight - 1) + 0.5f);
+        points.push_back({x, y});
+    }
+    return points;
+}
+
+// Get day start in epoch seconds using UTC arithmetic to avoid TZ/DST drift.
+static uint32_t midnightFor(uint32_t ts)
+{
+    return ts - (ts % 86400UL);
+}
+
 static ScrollLine s_tempScroll(PANEL_RES_X, 60);
 static ScrollLine s_co2Scroll(PANEL_RES_X, 60);
 static ScrollLine s_humScroll(PANEL_RES_X, 60);
 static ScrollLine s_baroScroll(PANEL_RES_X, 60);
 static std::vector<String> s_predictLines;
 static RollingUpScreen s_predictRoll(PANEL_RES_X, PANEL_RES_Y - 9, 8);
-static bool s_predictPaused = false;
+static std::vector<int> s_predictOffsets;
 
 String formatTempShort(float tempC, uint8_t decimals)
 {
@@ -151,7 +209,7 @@ static std::vector<String> wrapLines(const String &text, int maxWidthPx)
     return lines;
 }
 
-Point mapSampleToPoint(size_t idx, size_t total, float value, float minVal, float maxVal,
+Point mapSampleToPoint(uint32_t ts, uint32_t dayStart, float value, float minVal, float maxVal,
                        int graphLeft, int graphWidth, int graphTop, int graphHeight)
 {
     if (graphWidth < 1 || graphHeight < 1)
@@ -160,16 +218,15 @@ Point mapSampleToPoint(size_t idx, size_t total, float value, float minVal, floa
     if (range < 0.1f)
         range = 0.1f;
 
-    int x;
-    if (total <= 1)
+    // Position along 0..24h day (seconds 0..86400)
+    float frac = 0.0f;
+    if (ts > dayStart)
     {
-        x = graphLeft + graphWidth / 2;
+        uint32_t delta = ts - dayStart;
+        if (delta > 86400) delta = 86400;
+        frac = static_cast<float>(delta) / 86400.0f;
     }
-    else
-    {
-        float pos = static_cast<float>(idx) / static_cast<float>(total - 1);
-        x = graphLeft + static_cast<int>((graphWidth - 1) * pos + 0.5f);
-    }
+    int x = graphLeft + static_cast<int>((graphWidth - 1) * frac + 0.5f);
 
     float norm = (value - minVal) / range;
     if (norm < 0.0f)
@@ -228,14 +285,27 @@ void drawTemperatureHistoryScreen()
     dma_display->setFont(&Font5x7Uts);
 
     const auto &log = getSensorLog();
-    std::vector<float> tempsC;
+    uint32_t dayStart = 0;
+    std::vector<TimedValue> tempsC;
     tempsC.reserve(log.size());
     for (const auto &s : log)
     {
         if (!isnan(s.temp))
         {
-            tempsC.push_back(s.temp + tempOffset);
+            tempsC.push_back({s.ts, s.temp + tempOffset});
         }
+    }
+    if (!tempsC.empty())
+    {
+        dayStart = midnightFor(tempsC.back().ts);
+        std::vector<TimedValue> filtered;
+        filtered.reserve(tempsC.size());
+        for (const auto &tv : tempsC)
+        {
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+                filtered.push_back(tv);
+        }
+        tempsC.swap(filtered);
     }
 
     dma_display->fillScreen(0);
@@ -278,11 +348,11 @@ void drawTemperatureHistoryScreen()
         return;
     }
 
-    float minVal = tempsC[0];
-    float maxVal = tempsC[0];
+    float minVal = tempsC[0].value;
+    float maxVal = tempsC[0].value;
     for (size_t i = 1; i < tempsC.size(); ++i)
     {
-        float v = tempsC[i];
+        float v = tempsC[i].value;
         if (v < minVal)
         {
             minVal = v;
@@ -296,7 +366,7 @@ void drawTemperatureHistoryScreen()
     uint8_t decimals = 0; // always show whole numbers
     String minStr = formatTempShort(minVal, decimals);
     String maxStr = formatTempShort(maxVal, decimals);
-    String curStr = formatTempShort(tempsC.back(), decimals);
+    String curStr = formatTempShort(tempsC.back().value, decimals);
 
     String statsLine = "Min: " + minStr + " ¦ Max: " + maxStr + " ¦ Current: " + curStr;
     static String prevTempStats;
@@ -328,23 +398,16 @@ void drawTemperatureHistoryScreen()
     uint16_t afternoonTickColor = morningTickColor;
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    Point prev{-1, -1};
-    for (int xStep = 0; xStep < graphWidth; ++xStep)
-    {
-        size_t idx;
-        if (tempsC.size() <= 1)
-        {
-            idx = 0;
-        }
-        else
-        {
-            float pos = static_cast<float>(xStep) / static_cast<float>(graphWidth - 1);
-            idx = static_cast<size_t>(pos * (tempsC.size() - 1) + 0.5f);
-            if (idx >= tempsC.size())
-                idx = tempsC.size() - 1;
-        }
-        Point pt = mapSampleToPoint(idx, tempsC.size(), tempsC[idx], minVal, maxVal,
+    // Line chart for clearer trend
+    // Smooth line chart with per-pixel segments
+    static bool blinkOn = true;
+    static unsigned long lastBlinkToggle = 0;
+
+    auto points = buildUniquePoints(tempsC, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
+    Point prev{-1, -1};
+    for (const auto &pt : points)
+    {
         if (prev.x >= 0)
         {
             dma_display->drawLine(prev.x, prev.y, pt.x, pt.y, lineColor);
@@ -354,6 +417,29 @@ void drawTemperatureHistoryScreen()
             dma_display->drawPixel(pt.x, pt.y, lineColor);
         }
         prev = pt;
+    }
+
+    // Vertical guide from axis to top (through latest point)
+    if (!tempsC.empty())
+    {
+        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
+        Point last = mapSampleToPoint(tempsC.back().ts, dayStart, tempsC.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
+    }
+
+    // Blink current-time marker every 0.5s
+    unsigned long now = millis();
+    if (now - lastBlinkToggle >= 500)
+    {
+        blinkOn = !blinkOn;
+        lastBlinkToggle = now;
+    }
+    if (!tempsC.empty())
+    {
+        Point last = mapSampleToPoint(tempsC.back().ts, dayStart, tempsC.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
     }
 
     // No current marker/label on the chart per request
@@ -369,14 +455,27 @@ void drawHumidityHistoryScreen()
     dma_display->setFont(&Font5x7Uts);
 
     const auto &log = getSensorLog();
-    std::vector<float> hums;
+    uint32_t dayStart = 0;
+    std::vector<TimedValue> hums;
     hums.reserve(log.size());
     for (const auto &s : log)
     {
         if (!isnan(s.hum))
         {
-            hums.push_back(s.hum);
+            hums.push_back({s.ts, s.hum});
         }
+    }
+    if (!hums.empty())
+    {
+        dayStart = midnightFor(hums.back().ts);
+        std::vector<TimedValue> filtered;
+        filtered.reserve(hums.size());
+        for (const auto &tv : hums)
+        {
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+                filtered.push_back(tv);
+        }
+        hums.swap(filtered);
     }
 
     dma_display->fillScreen(0);
@@ -418,11 +517,11 @@ void drawHumidityHistoryScreen()
         return;
     }
 
-    float minVal = hums[0];
-    float maxVal = hums[0];
+    float minVal = hums[0].value;
+    float maxVal = hums[0].value;
     for (size_t i = 1; i < hums.size(); ++i)
     {
-        float v = hums[i];
+        float v = hums[i].value;
         if (v < minVal)
         {
             minVal = v;
@@ -436,7 +535,7 @@ void drawHumidityHistoryScreen()
     uint8_t decimals = (fabsf(maxVal - minVal) < 10.0f) ? 1 : 0;
     String minStr = formatHumShort(minVal, decimals);
     String maxStr = formatHumShort(maxVal, decimals);
-    String curStr = formatHumShort(hums.back(), decimals);
+    String curStr = formatHumShort(hums.back().value, decimals);
 
     String statsLine = "Min: " + minStr + " ¦ Max: " + maxStr + " ¦ Current: " + curStr;
     static String prevHumStats;
@@ -466,23 +565,28 @@ void drawHumidityHistoryScreen()
     uint16_t afternoonTickColor = morningTickColor;
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    Point prev{-1, -1};
-    for (int xStep = 0; xStep < graphWidth; ++xStep)
+    // Dim vertical guide at current time through the full chart height
+    if (!hums.empty() && dayStart != 0)
     {
-        size_t idx;
-        if (hums.size() <= 1)
-        {
-            idx = 0;
-        }
-        else
-        {
-            float pos = static_cast<float>(xStep) / static_cast<float>(graphWidth - 1);
-            idx = static_cast<size_t>(pos * (hums.size() - 1) + 0.5f);
-            if (idx >= hums.size())
-                idx = hums.size() - 1;
-        }
-        Point pt = mapSampleToPoint(idx, hums.size(), hums[idx], minVal, maxVal,
+        uint32_t delta = (hums.back().ts > dayStart) ? (hums.back().ts - dayStart) : 0;
+        if (delta > 86400) delta = 86400;
+        float frac = static_cast<float>(delta) / 86400.0f;
+        int curX = graphLeft + static_cast<int>((graphWidth - 1) * frac + 0.5f);
+        curX = constrain(curX, graphLeft, graphLeft + graphWidth - 1);
+        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
+        Point last = mapSampleToPoint(hums.back().ts, dayStart, hums.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawLine(curX, axisY, curX, lineTop, dma_display->color565(20, 40, 90));
+    }
+
+    static bool blinkOn = true;
+    static unsigned long lastBlinkToggle = 0;
+
+    auto points = buildUniquePoints(hums, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
+    Point prev{-1, -1};
+    for (const auto &pt : points)
+    {
         if (prev.x >= 0)
         {
             dma_display->drawLine(prev.x, prev.y, pt.x, pt.y, lineColor);
@@ -492,6 +596,19 @@ void drawHumidityHistoryScreen()
             dma_display->drawPixel(pt.x, pt.y, lineColor);
         }
         prev = pt;
+    }
+
+    unsigned long now = millis();
+    if (now - lastBlinkToggle >= 500)
+    {
+        blinkOn = !blinkOn;
+        lastBlinkToggle = now;
+    }
+    if (!hums.empty())
+    {
+        Point last = mapSampleToPoint(hums.back().ts, dayStart, hums.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
     }
 
     // No current marker/label on the chart per request
@@ -507,14 +624,27 @@ void drawBaroHistoryScreen()
     dma_display->setFont(&Font5x7Uts);
 
     const auto &log = getSensorLog();
-    std::vector<float> pressVals;
+    uint32_t dayStart = 0;
+    std::vector<TimedValue> pressVals;
     pressVals.reserve(log.size());
     for (const auto &s : log)
     {
         if (!isnan(s.press) && s.press > 0.0f)
         {
-            pressVals.push_back(s.press);
+            pressVals.push_back({s.ts, s.press});
         }
+    }
+    if (!pressVals.empty())
+    {
+        dayStart = midnightFor(pressVals.back().ts);
+        std::vector<TimedValue> filtered;
+        filtered.reserve(pressVals.size());
+        for (const auto &tv : pressVals)
+        {
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+                filtered.push_back(tv);
+        }
+        pressVals.swap(filtered);
     }
 
     dma_display->fillScreen(0);
@@ -556,11 +686,11 @@ void drawBaroHistoryScreen()
         return;
     }
 
-    float minVal = pressVals[0];
-    float maxVal = pressVals[0];
+    float minVal = pressVals[0].value;
+    float maxVal = pressVals[0].value;
     for (size_t i = 1; i < pressVals.size(); ++i)
     {
-        float v = pressVals[i];
+        float v = pressVals[i].value;
         if (v < minVal)
         {
             minVal = v;
@@ -573,7 +703,7 @@ void drawBaroHistoryScreen()
 
     String minStr = formatPressShort(minVal);
     String maxStr = formatPressShort(maxVal);
-    String curStr = formatPressShort(pressVals.back());
+    String curStr = formatPressShort(pressVals.back().value);
 
     String statsLine = "Min: " + minStr + " ¦ Max: " + maxStr + " ¦ Current: " + curStr;
     static String prevBaroStats;
@@ -603,23 +733,28 @@ void drawBaroHistoryScreen()
     uint16_t afternoonTickColor = morningTickColor;
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    Point prev{-1, -1};
-    for (int xStep = 0; xStep < graphWidth; ++xStep)
+    // Dim vertical guide at current time through the full chart height
+    if (!pressVals.empty() && dayStart != 0)
     {
-        size_t idx;
-        if (pressVals.size() <= 1)
-        {
-            idx = 0;
-        }
-        else
-        {
-            float pos = static_cast<float>(xStep) / static_cast<float>(graphWidth - 1);
-            idx = static_cast<size_t>(pos * (pressVals.size() - 1) + 0.5f);
-            if (idx >= pressVals.size())
-                idx = pressVals.size() - 1;
-        }
-        Point pt = mapSampleToPoint(idx, pressVals.size(), pressVals[idx], minVal, maxVal,
+        uint32_t delta = (pressVals.back().ts > dayStart) ? (pressVals.back().ts - dayStart) : 0;
+        if (delta > 86400) delta = 86400;
+        float frac = static_cast<float>(delta) / 86400.0f;
+        int curX = graphLeft + static_cast<int>((graphWidth - 1) * frac + 0.5f);
+        curX = constrain(curX, graphLeft, graphLeft + graphWidth - 1);
+        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
+        Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawLine(curX, axisY, curX, lineTop, dma_display->color565(20, 40, 90));
+    }
+
+    static bool blinkOn = true;
+    static unsigned long lastBlinkToggle = 0;
+
+    auto points = buildUniquePoints(pressVals, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
+    Point prev{-1, -1};
+    for (const auto &pt : points)
+    {
         if (prev.x >= 0)
         {
             dma_display->drawLine(prev.x, prev.y, pt.x, pt.y, lineColor);
@@ -629,6 +764,28 @@ void drawBaroHistoryScreen()
             dma_display->drawPixel(pt.x, pt.y, lineColor);
         }
         prev = pt;
+    }
+
+    // Vertical guide from axis to top (through latest point)
+    if (!pressVals.empty())
+    {
+        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
+        Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
+    }
+
+    unsigned long now = millis();
+    if (now - lastBlinkToggle >= 500)
+    {
+        blinkOn = !blinkOn;
+        lastBlinkToggle = now;
+    }
+    if (!pressVals.empty())
+    {
+        Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
     }
 
     // No current marker/label on the chart per request
@@ -644,14 +801,27 @@ void drawCo2HistoryScreen()
     dma_display->setFont(&Font5x7Uts);
 
     const auto &log = getSensorLog();
-    std::vector<float> co2Vals;
+    uint32_t dayStart = 0;
+    std::vector<TimedValue> co2Vals;
     co2Vals.reserve(log.size());
     for (const auto &s : log)
     {
         if (!isnan(s.co2) && s.co2 > 0.0f)
         {
-            co2Vals.push_back(s.co2);
+            co2Vals.push_back({s.ts, s.co2});
         }
+    }
+    if (!co2Vals.empty())
+    {
+        dayStart = midnightFor(co2Vals.back().ts);
+        std::vector<TimedValue> filtered;
+        filtered.reserve(co2Vals.size());
+        for (const auto &tv : co2Vals)
+        {
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+                filtered.push_back(tv);
+        }
+        co2Vals.swap(filtered);
     }
 
     dma_display->fillScreen(0);
@@ -693,11 +863,11 @@ void drawCo2HistoryScreen()
         return;
     }
 
-    float minVal = co2Vals[0];
-    float maxVal = co2Vals[0];
+    float minVal = co2Vals[0].value;
+    float maxVal = co2Vals[0].value;
     for (size_t i = 1; i < co2Vals.size(); ++i)
     {
-        float v = co2Vals[i];
+        float v = co2Vals[i].value;
         if (v < minVal)
         {
             minVal = v;
@@ -710,7 +880,7 @@ void drawCo2HistoryScreen()
 
     String minStr = formatCo2Short(minVal);
     String maxStr = formatCo2Short(maxVal);
-    String curStr = formatCo2Short(co2Vals.back());
+    String curStr = formatCo2Short(co2Vals.back().value);
 
     String statsLine = "Min: " + minStr + " ppm ¦ Max: " + maxStr + " ppm ¦ Current: " + curStr + " ppm";
     static String prevCo2Stats;
@@ -742,23 +912,14 @@ void drawCo2HistoryScreen()
     uint16_t afternoonTickColor = morningTickColor;
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    Point prev{-1, -1};
-    for (int xStep = 0; xStep < graphWidth; ++xStep)
-    {
-        size_t idx;
-        if (co2Vals.size() <= 1)
-        {
-            idx = 0;
-        }
-        else
-        {
-            float pos = static_cast<float>(xStep) / static_cast<float>(graphWidth - 1);
-            idx = static_cast<size_t>(pos * (co2Vals.size() - 1) + 0.5f);
-            if (idx >= co2Vals.size())
-                idx = co2Vals.size() - 1;
-        }
-        Point pt = mapSampleToPoint(idx, co2Vals.size(), co2Vals[idx], minVal, maxVal,
+    static bool blinkOn = true;
+    static unsigned long lastBlinkToggle = 0;
+
+    auto points = buildUniquePoints(co2Vals, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
+    Point prev{-1, -1};
+    for (const auto &pt : points)
+    {
         if (prev.x >= 0)
         {
             dma_display->drawLine(prev.x, prev.y, pt.x, pt.y, lineColor);
@@ -768,6 +929,28 @@ void drawCo2HistoryScreen()
             dma_display->drawPixel(pt.x, pt.y, lineColor);
         }
         prev = pt;
+    }
+
+    // Vertical guide from axis to slightly above top (through latest point)
+    if (!co2Vals.empty())
+    {
+        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
+        Point last = mapSampleToPoint(co2Vals.back().ts, dayStart, co2Vals.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
+    }
+
+    unsigned long now = millis();
+    if (now - lastBlinkToggle >= 500)
+    {
+        blinkOn = !blinkOn;
+        lastBlinkToggle = now;
+    }
+    if (!co2Vals.empty())
+    {
+        Point last = mapSampleToPoint(co2Vals.back().ts, dayStart, co2Vals.back().value, minVal, maxVal,
+                                      graphLeft, graphWidth, graphTop, graphHeight);
+        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
     }
 
     // No current marker/label on the chart per request
@@ -839,6 +1022,23 @@ void drawPredictionScreen()
     else if (absPress < 1.0 && absHum < 2.0)
         confidence = "Low";
 
+    // Gather last-24h ranges for readability
+    uint32_t windowStart = log.back().ts > 86400 ? (log.back().ts - 86400) : 0;
+    float tMin = NAN, tMax = NAN, hMin = NAN, hMax = NAN, pMin = NAN, pMax = NAN, co2Min = NAN, co2Max = NAN;
+    auto updateMinMax = [](float v, float &mn, float &mx) {
+        if (isnan(v)) return;
+        if (isnan(mn) || v < mn) mn = v;
+        if (isnan(mx) || v > mx) mx = v;
+    };
+    for (const auto &s : log)
+    {
+        if (s.ts < windowStart) continue;
+        updateMinMax(s.temp + tempOffset, tMin, tMax);
+        updateMinMax(s.hum, hMin, hMax);
+        updateMinMax(s.press, pMin, pMax);
+        updateMinMax(s.co2, co2Min, co2Max);
+    }
+
     dma_display->fillScreen(0);
 
     const bool mono = (theme == 1);
@@ -868,10 +1068,25 @@ void drawPredictionScreen()
     String outlookLine = "Outlook: " + outlook;
     String tendLine = "Pressure Tend: " + pressTendency;
     String confLine = "Confidence: " + confidence;
+    // Ranges for last 24h where available
+    auto makeRange = [&](const String &label, float mn, float mx, const std::function<String(float)> &fmtFn) -> String {
+        if (isnan(mn) || isnan(mx)) return "";
+        return label + ": " + fmtFn(mn) + " - " + fmtFn(mx);
+    };
+    String tempRange = makeRange("Temp 24h", tMin, tMax, std::function<String(float)>([&](float v){ return formatTempShort(v, 1); }));
+    String humRange = makeRange("Hum 24h", hMin, hMax, std::function<String(float)>([&](float v){ return formatHumShort(v, 0); }));
+    String pressRange = makeRange("Press 24h", pMin, pMax, std::function<String(float)>([&](float v){ return formatPressShort(v); }));
+    String co2Range;
+    if (!isnan(co2Min) && !isnan(co2Max) && co2Min > 0 && co2Max > 0)
+    {
+        co2Range = "CO2 24h: " + String(static_cast<int>(co2Min + 0.5f)) + "-" +
+                   String(static_cast<int>(co2Max + 0.5f)) + " ppm";
+    }
 
     int textWidth = min(PANEL_RES_X - 2, 64); // constrain to 64px like a 64x24 matrix
     s_predictLines.clear();
     std::vector<uint16_t> lineColors;
+    s_predictOffsets.clear();
     auto pushWrapped = [&](const String &line, uint16_t colorLabels, uint16_t colorValues) {
         // Split label/value at first colon for coloring
         int colon = line.indexOf(':');
@@ -886,11 +1101,13 @@ void drawPredictionScreen()
             {
                 s_predictLines.push_back(w);
                 lineColors.push_back(colorLabels);
+                s_predictOffsets.push_back(0);
             }
             else
             {
                 s_predictLines.push_back(w);
                 lineColors.push_back(colorValues);
+                s_predictOffsets.push_back(1); // indent value lines 1px under their labels
             }
         }
     };
@@ -900,22 +1117,26 @@ void drawPredictionScreen()
     pushWrapped(outlookLine, labelColor, valueColor);
     pushWrapped(tendLine, labelColor, valueColor);
     pushWrapped(confLine, labelColor, valueColor);
+    if (tempRange.length()) pushWrapped(tempRange, labelColor, valueColor);
+    if (humRange.length()) pushWrapped(humRange, labelColor, valueColor);
+    if (pressRange.length()) pushWrapped(pressRange, labelColor, valueColor);
+    if (co2Range.length()) pushWrapped(co2Range, labelColor, valueColor);
 
     s_predictRoll.setLines(s_predictLines, false); // keep position continuous
     s_predictRoll.setLineColors(lineColors);
-    s_predictRoll.setGapHoldMs(500); // 0.5 second gap between cycles
-    s_predictRoll.setPaused(false);
-    s_predictPaused = false;
-    int yStart = headerHeight + 1;
-    int entryY = yStart + matrixHeight;
-    int exitY = 8; // exit just above the header line
+    s_predictRoll.setLineOffsets(s_predictOffsets);
+    // Use 500 ms gap hold to match other scroll-up screens
+    s_predictRoll.setGapHoldMs(500);
+    s_predictRoll.onUpPress(); // ensure auto-scroll enabled
+    const int yStart = headerHeight + 1;
+    const int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart); // visible body height
+    const int entryY = yStart + bodyHeight; // enter from bottom of body
+    const int exitY = 7; // exit one pixel higher above the header line
     s_predictRoll.setEntryExit(entryY, exitY);
-    // Enter from bottom of body (y=32) and exit just above header (y=9)
     unsigned int speed = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
     s_predictRoll.setScrollSpeed(speed);
 
     dma_display->setTextColor(bodyColor);
-    int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart);
     int y = yStart;
     for (const auto &line : s_predictLines)
     {
@@ -964,8 +1185,6 @@ void tickPredictionScreen()
     if (!dma_display) return;
     if (s_predictLines.empty())
         return;
-    // Ensure paused state applies
-    s_predictRoll.setPaused(s_predictPaused);
 
     const bool mono = (theme == 1);
     const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
@@ -973,14 +1192,15 @@ void tickPredictionScreen()
     uint16_t bodyColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
     constexpr int headerHeight = 8;
     constexpr int matrixHeight = 24;
-    const int yStart = headerHeight + 1; // body begins under the title
+    const int yStart = headerHeight; // body begins immediately under the title
     const int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart); // emulate 64x24 dot-matrix window
 
     // Clear only the body area (keep header intact)
     dma_display->fillRect(0, yStart, PANEL_RES_X, bodyHeight, 0);
-    // Clear the separator row so no pixels linger under the title line
-    dma_display->fillRect(0, yStart - 1, PANEL_RES_X, 1, 0);
+    // No separator row; text starts directly under header
     s_predictRoll.setScrollSpeed((verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u);
+    // Ensure exit stays one pixel above previous (y=7); entry from bottom of body
+    s_predictRoll.setEntryExit(yStart + bodyHeight, 7);
     s_predictRoll.update();
     s_predictRoll.draw(*dma_display, 0, yStart, bodyHeight, bodyColor);
 
@@ -991,7 +1211,12 @@ void tickPredictionScreen()
     dma_display->print("Next 24h");
 }
 
-void setPredictionScrollPaused(bool paused)
+void handlePredictionDownPress()
 {
-    s_predictPaused = paused;
+    s_predictRoll.onDownPress();
+}
+
+void handlePredictionUpPress()
+{
+    s_predictRoll.onUpPress();
 }
