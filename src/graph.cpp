@@ -1083,7 +1083,8 @@ void drawPredictionScreen()
                    String(static_cast<int>(co2Max + 0.5f)) + " ppm";
     }
 
-    int textWidth = min(PANEL_RES_X - 2, 64); // constrain to 64px like a 64x24 matrix
+    int textWidth = min(PANEL_RES_X - 2 - 4, 64); // constrain and leave room for indent
+    if (textWidth < 1) textWidth = 1;
     s_predictLines.clear();
     std::vector<uint16_t> lineColors;
     s_predictOffsets.clear();
@@ -1107,7 +1108,7 @@ void drawPredictionScreen()
             {
                 s_predictLines.push_back(w);
                 lineColors.push_back(colorValues);
-                s_predictOffsets.push_back(1); // indent value lines 1px under their labels
+                s_predictOffsets.push_back(4); // indent value lines 4px under their labels
             }
         }
     };

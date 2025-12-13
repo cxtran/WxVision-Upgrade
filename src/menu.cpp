@@ -70,6 +70,40 @@ InfoModal noaaModal("NOAA Alerts");
 
 int alarmSlotSelection = 0;
 int alarmSlotShown = 0;
+int alarmEnabledTemp = 0;
+int alarmHourTemp = 0;
+int alarmMinuteTemp = 0;
+int alarmRepeatTemp = 0;
+int alarmWeeklyDayTemp = 0;
+int alarmAmPmTemp = 0;
+
+static void refreshAlarmTemps()
+{
+    alarmSlotSelection = constrain(alarmSlotSelection, 0, 2);
+    alarmSlotShown = alarmSlotSelection;
+    alarmEnabledTemp = alarmEnabled[alarmSlotSelection] ? 1 : 0;
+    alarmAmPmTemp = 0;
+    alarmHourTemp = alarmHour[alarmSlotSelection];
+    alarmMinuteTemp = alarmMinute[alarmSlotSelection];
+    alarmRepeatTemp = static_cast<int>(alarmRepeatMode[alarmSlotSelection]);
+    alarmWeeklyDayTemp = alarmWeeklyDay[alarmSlotSelection];
+    bool use12h = !units.clock24h;
+    if (use12h)
+    {
+        alarmAmPmTemp = (alarmHour[alarmSlotSelection] >= 12) ? 1 : 0;
+        int hour12 = alarmHour[alarmSlotSelection] % 12;
+        if (hour12 == 0)
+            hour12 = 12;
+        alarmHourTemp = hour12;
+    }
+}
+
+// Exposed for InfoModal to refresh alarm fields without resetting scroll
+void handleAlarmSlotChangedInModal()
+{
+    refreshAlarmTemps();
+    alarmModal.redraw();
+}
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
@@ -145,7 +179,7 @@ int dtNtpPreset;
 int dtAutoDst;
 int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
 
-const char *mainMenu[] = {"Device Settings", "WiFi Settings", "Display Settings", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
+const char *mainMenu[] = {"Device", "WiFi", "Display", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
 const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Data Source", "Manual Screen", "< Back"};
@@ -478,7 +512,7 @@ void showMainMenuModal()
     menuActive = true;
 
     String items[] = {
-        "Device Settings", "WiFi Settings", "Display Settings", "Alarm Settings",
+        "Device", "WiFi", "Display", "Alarm",
         "NOAA Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
@@ -717,30 +751,7 @@ void showAlarmSettingsModal()
     currentMenuLevel = MENU_ALARM;
     menuActive = true;
 
-    alarmSlotSelection = constrain(alarmSlotSelection, 0, 2);
-    alarmSlotShown = alarmSlotSelection;
-    static int alarmEnabledTemp = 0;
-    static int alarmHourTemp = 0;
-    static int alarmMinuteTemp = 0;
-    static int alarmRepeatTemp = 0;
-    static int alarmWeeklyDayTemp = 0;
-    static int alarmAmPmTemp = 0;
-
-    alarmEnabledTemp = alarmEnabled[alarmSlotSelection] ? 1 : 0;
-    alarmAmPmTemp = 0;
-    alarmHourTemp = alarmHour[alarmSlotSelection];
-    alarmMinuteTemp = alarmMinute[alarmSlotSelection];
-    alarmRepeatTemp = static_cast<int>(alarmRepeatMode[alarmSlotSelection]);
-    alarmWeeklyDayTemp = alarmWeeklyDay[alarmSlotSelection];
-    bool use12h = !units.clock24h;
-    if (use12h)
-    {
-        alarmAmPmTemp = (alarmHour[alarmSlotSelection] >= 12) ? 1 : 0;
-        int hour12 = alarmHour[alarmSlotSelection] % 12;
-        if (hour12 == 0)
-            hour12 = 12;
-        alarmHourTemp = hour12;
-    }
+    refreshAlarmTemps();
 
     String labels[8];
     InfoFieldType types[8];
@@ -776,6 +787,7 @@ void showAlarmSettingsModal()
 
     addChooserLine("Select Alarm", &alarmSlotSelection, alarmSlotOpts, 3);
     addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
+    bool use12h = !units.clock24h;
     if (use12h)
     {
         addChooserLine("AM/PM", &alarmAmPmTemp, ampmOpts, 2);
@@ -795,10 +807,10 @@ void showAlarmSettingsModal()
         alarmSlotSelection = constrain(alarmSlotSelection, 0, 2);
         if (alarmSlotSelection != alarmSlotShown)
         {
-            alarmSlotShown = alarmSlotSelection;
-            alarmModal.hide();
-            pendingModalFn = showAlarmSettingsModal;
-            pendingModalTime = millis() + 10;
+            // Update temp values in-place without hiding/reopening so scroll/position stay intact
+            refreshAlarmTemps();
+            // Redraw modal in-place without resetting scroll/offset
+            alarmModal.redraw();
             return;
         }
         int slot = alarmSlotSelection;

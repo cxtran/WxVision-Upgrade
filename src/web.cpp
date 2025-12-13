@@ -275,7 +275,7 @@ void setupWebServer() {
   server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     const auto &log = getSensorLog();
     // Cap payload to keep client/server responsive
-    constexpr size_t kMaxTrendSamples = 400;
+    constexpr size_t kMaxTrendSamples = 200;
     size_t sampleCount = (log.size() < kMaxTrendSamples) ? log.size() : kMaxTrendSamples;
     size_t capacity = JSON_ARRAY_SIZE(sampleCount) + sampleCount * JSON_OBJECT_SIZE(6) + 256;
     if (capacity < 1024) capacity = 1024;

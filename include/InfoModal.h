@@ -54,6 +54,8 @@ public:
     void setShowChooserArrows(bool enable);
     void setShowForwardArrow(bool enable);
     void show();
+    // Redraw without resetting scroll/selection state
+    void redraw();
     void hide();
     bool isActive() const;
     void tick();

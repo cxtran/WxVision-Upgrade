@@ -13,6 +13,9 @@
 #include <math.h>
 #include "system.h"
 
+extern InfoModal alarmModal;
+extern void handleAlarmSlotChangedInModal();
+
 extern bool autoBrightness;
 extern int scrollLevel;
 extern void saveDisplaySettings();
@@ -295,6 +298,12 @@ void InfoModal::show()
     btnSel = 0;
     inButtonBar = false;
     active = true;
+    draw();
+}
+
+void InfoModal::redraw()
+{
+    if (!active) return;
     draw();
 }
 
@@ -1082,6 +1091,23 @@ void InfoModal::handleIR(uint32_t code)
                 if (count > 0)
                 {
                     val = (val + (code == IR_LEFT ? count - 1 : 1)) % count;
+
+                    // Special case: Alarm modal "Select Alarm" should refresh without restarting scroll
+                    if (this == &alarmModal && lines[selIndex] == "Select Alarm")
+                    {
+                        int savedOffset = scrollOffset;
+                        bool savedFirst = firstScroll;
+                        int savedLastSel = lastSelIndex;
+                        unsigned long savedLastScroll = lastScrollTime;
+                        handleAlarmSlotChangedInModal();
+                        // Restore scroll state so marquee doesn't restart
+                        scrollOffset = savedOffset;
+                        firstScroll = savedFirst;
+                        lastSelIndex = savedLastSel;
+                        lastScrollTime = savedLastScroll;
+                        beep(code == IR_LEFT ? 900 : 1800);
+                        return;
+                    }
 
                     if (lines[selIndex].equalsIgnoreCase("Auto Brightness"))
                     { // Auto Brightness toggle

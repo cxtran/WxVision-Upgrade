@@ -5,6 +5,7 @@
 #undef typeof
 #endif
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <math.h>
 #include "ScrollLine.h"
 #include "units.h"
@@ -490,7 +491,6 @@ void fetchTempestData() {
 
 // --------- WeatherFlow Forecast Fetch ----------
 void fetchForecastData() {
-    HTTPClient http;
     String stationId = wfStationId;
     String token = wfToken;
     stationId.trim();
@@ -506,20 +506,27 @@ void fetchForecastData() {
         return;
     }
 
-    String url = "https://swd.weatherflow.com/swd/rest/better_forecast?station_id=" + stationId +
-                 "&token=" + token;
-    // Keep it simple: HTTP/1.0 + longer timeout helps on some networks
+    // Use plain HTTP to save RAM and avoid TLS allocation errors
+    const String url = "http://swd.weatherflow.com/swd/rest/better_forecast?station_id=" + stationId +
+                       "&token=" + token;
+
+    HTTPClient http;
+    WiFiClient client;
     http.useHTTP10(true);
     http.setTimeout(15000);
+    http.setReuse(false);
 
-    if (!http.begin(url.c_str())) {
+    if (!http.begin(client, url)) {
         Serial.println("[HTTP] begin() failed");
         return;
     }
 
+    Serial.print("[HTTP] Forecast URL: ");
+    Serial.println(url);
     int httpCode = http.GET();
+    Serial.print("[HTTP] Forecast status: ");
+    Serial.println(httpCode);
     if (httpCode != HTTP_CODE_OK) {
-        // was: Serial.printf("[HTTP] Forecast error: %d\n", httpCode);
         Serial.print("[HTTP] Forecast error: ");
         Serial.println(httpCode);
         http.end();
@@ -528,8 +535,7 @@ void fetchForecastData() {
 
     String payload = http.getString();
     http.end();
-
-    updateForecastFromJson(payload); // calls all 3 parts
+    updateForecastFromJson(payload);
 }
 
 // --------- String Helpers ----------

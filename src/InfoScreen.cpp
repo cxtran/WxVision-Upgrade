@@ -137,9 +137,11 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
                                                   : dma_display->color565(255, 240, 140);
             const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                                   : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 1; // slight indent for data values
+        const int valueIndentPx = 4; // indent data values
             auto pushWrapped = [&](const String &text, uint16_t color, bool indentValue) {
-                auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH);
+                int maxW = InfoScreen::SCREEN_WIDTH - (indentValue ? valueIndentPx : 0);
+                if (maxW < 1) maxW = 1;
+                auto wrapped = wrapToWidth(text, maxW);
                 for (const auto &w : wrapped) {
                     vec.push_back(w);
                     colors.push_back(color);
@@ -172,7 +174,7 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
                                               : dma_display->color565(255, 240, 140);
         const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                               : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 1;
+        const int valueIndentPx = 4;
         auto pushValueWrapped = [&](const String &text) {
             auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH - valueIndentPx);
             for (const auto &w : wrapped) {
@@ -219,7 +221,7 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
                                               : dma_display->color565(255, 240, 140);
         const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                               : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 1;
+        const int valueIndentPx = 4;
         for (int i = 0; i < _lineCount; ++i) {
             String raw = _lines[i];
             int colon = raw.indexOf(':');
@@ -263,7 +265,7 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
                                               : dma_display->color565(255, 240, 140);
         const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                               : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 1;
+        const int valueIndentPx = 4;
         for (int i = 0; i < _lineCount; ++i) {
             String raw = _lines[i];
             int colon = raw.indexOf(':');
