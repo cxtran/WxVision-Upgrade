@@ -254,6 +254,35 @@
     </div>
   </section>
 
+  <!-- Forecast UI -->
+  <section class="card" id="card-forecastui">
+    <h2>Forecast UI</h2>
+    <div class="grid3">
+      <div class="row tight">
+        <label for="forecastLinesPerDay">Lines Per Day</label>
+        <select id="forecastLinesPerDay">
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </div>
+      <div class="row tight">
+        <label for="forecastPauseMs">Pause At Title (ms)</label>
+        <input id="forecastPauseMs" type="number" step="250" min="0" max="10000" placeholder="3000">
+      </div>
+      <div class="row tight">
+        <label for="forecastIconSize">Icon</label>
+        <select id="forecastIconSize">
+          <option value="16">16x16</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveForecastUi">Save Forecast UI</button>
+      <span class="msg" id="saveForecastUiMsg"></span>
+    </div>
+  </section>
+
   <!-- Calibration -->
   <section class="card" id="card-calib">
     <h2>Calibration</h2>
@@ -523,4 +552,3 @@
 </main>
 </body>
 </html>
-

@@ -3,6 +3,8 @@
 #include "display.h"
 #include "utils.h"
 #include "RollingUpScreen.h"
+#include "noaa.h"
+#include "settings.h"
 
 extern const int NUM_INFOSCREENS;
 extern const ScreenMode InfoScreenModes[];
@@ -15,6 +17,7 @@ static RollingUpScreen s_hourlyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN
 static RollingUpScreen s_dailyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_liveRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
+static RollingUpScreen s_noaaRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 
 
 static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
@@ -79,6 +82,22 @@ static std::vector<String> wrapToWidth(const String &text, int maxWidthPx)
     return out;
 }
 
+static String truncateToWidth(const String &text, int maxWidthPx)
+{
+    if (maxWidthPx < 1)
+        return "";
+    if (getTextWidth(text.c_str()) <= maxWidthPx)
+        return text;
+
+    String out = text;
+    // Keep at least 1 char
+    while (out.length() > 1 && getTextWidth(out.c_str()) > maxWidthPx)
+    {
+        out.remove(out.length() - 1);
+    }
+    return out;
+}
+
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
     : _title(title), _screenMode(mode), _lineCount(0), _active(false),
       _onExit(nullptr), scrollY(0), selIndex(0), lastSelIndex(-1),
@@ -128,61 +147,105 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<String> vec;
         std::vector<uint16_t> colors;
         std::vector<int> offsets;
+        std::vector<int> yOffsets;
+        std::vector<const uint8_t *> icons;
+        std::vector<uint16_t> iconColors;
         vec.reserve(_lineCount * 2);
         for (int i = 0; i < _lineCount; ++i) {
-            // Split on '\n' to allow multi-line entries
-            int sep = _lines[i].indexOf('\n');
+            // Split on '\n' to allow fixed block entries
             const bool monoTheme = (theme == 1);
             const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
                                                   : dma_display->color565(255, 240, 140);
             const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                                   : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 4; // indent data values
-            auto pushWrapped = [&](const String &text, uint16_t color, bool indentValue) {
-                int maxW = InfoScreen::SCREEN_WIDTH - (indentValue ? valueIndentPx : 0);
-                if (maxW < 1) maxW = 1;
-                auto wrapped = wrapToWidth(text, maxW);
-                for (const auto &w : wrapped) {
-                    vec.push_back(w);
-                    colors.push_back(color);
-                    offsets.push_back(indentValue ? valueIndentPx : 0);
+            const bool iconEnabled = (forecastIconSize == 16);
+            const int iconPad = iconEnabled ? 18 : 0;
+            const int valueIndentPx = 4;
+
+            // Split into up to 3 lines (time, data, condition)
+            String raw = _lines[i];
+            int firstNl = raw.indexOf('\n');
+            int secondNl = (firstNl >= 0) ? raw.indexOf('\n', firstNl + 1) : -1;
+            String line1 = (firstNl >= 0) ? raw.substring(0, firstNl) : raw;
+            String line2 = (firstNl >= 0) ? (secondNl >= 0 ? raw.substring(firstNl + 1, secondNl) : raw.substring(firstNl + 1)) : "";
+            String line3 = (secondNl >= 0) ? raw.substring(secondNl + 1) : "";
+            line1.trim();
+            line2.trim();
+            line3.trim();
+
+            const uint8_t *iconPtr = nullptr;
+            uint16_t iconClr = 0;
+            // Parse icon hint from line1 only
+            int hint = line1.lastIndexOf("[icon=");
+            if (hint >= 0) {
+                int end = line1.indexOf(']', hint);
+                if (end > hint) {
+                    String code = line1.substring(hint + 6, end);
+                    line1.remove(hint);
+                    code.trim();
+                    if (iconEnabled && code.length()) {
+                        iconPtr = getWeatherIconFromCondition(code);
+                        iconClr = getIconColorFromCondition(code);
+                    }
                 }
-            };
-            if (sep >= 0) {
-                String first = _lines[i].substring(0, sep);
-                String second = _lines[i].substring(sep + 1);
-                if (first.length()) { pushWrapped(first, labelColor, false); }
-                if (second.length()) { pushWrapped(second, valueColor, true); }
-            } else {
-                pushWrapped(_lines[i], valueColor, true);
             }
+
+            // Add 1px visual gap between blocks by cumulatively offsetting each hour's block.
+            const int blockYOffset = i; // per-hour entry index
+
+            // Line 1: timestamp with icon anchored at left margin
+            if (line1.length()) {
+                vec.push_back(truncateToWidth(line1, InfoScreen::SCREEN_WIDTH - iconPad));
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+                yOffsets.push_back(blockYOffset);
+                icons.push_back(iconEnabled ? iconPtr : nullptr);
+                iconColors.push_back(iconEnabled ? iconClr : 0);
+            }
+            // Line 2: data line aligned to the right of icon
+            vec.push_back(truncateToWidth(line2, InfoScreen::SCREEN_WIDTH - valueIndentPx - iconPad));
+            colors.push_back(valueColor);
+            offsets.push_back(valueIndentPx + iconPad);
+            yOffsets.push_back(blockYOffset);
+            icons.push_back(nullptr);
+            iconColors.push_back(0);
+
+            // Line 3: condition line (optional) aligned to the right of icon
+            vec.push_back(truncateToWidth(line3, InfoScreen::SCREEN_WIDTH));
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+            yOffsets.push_back(blockYOffset + 1); // +1px: last line down within block
+            icons.push_back(nullptr);
+            iconColors.push_back(0);
         }
         s_hourlyRoll.setLines(vec, resetPosition);
         s_hourlyRoll.setLineColors(colors);
         s_hourlyRoll.setLineOffsets(offsets);
+        s_hourlyRoll.setLineYOffsets(yOffsets);
+        s_hourlyRoll.setLineIcons(icons, iconColors);
         s_hourlyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
         s_hourlyRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH); // enter from bottom, exit just under title
+        s_hourlyRoll.setGapHoldMs(0);
+        s_hourlyRoll.setExitHoldMs(constrain(forecastPauseMs, 0, 10000));
+        s_hourlyRoll.setBlockSizePx(max(forecastIconSize == 16 ? 16 : 0, InfoScreen::CHARH * 3 + 1));
     }
     else if (_screenMode == SCREEN_UDP_FORECAST) {
         // Convert daily forecast list into a vertical scroll-up body similar to the hourly screen
         std::vector<String> vec;
         std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        vec.reserve(_lineCount * 2);
-        const bool monoTheme = (theme == 1);
+           std::vector<int> offsets;
+           std::vector<int> yOffsets;
+           std::vector<const uint8_t *> icons;
+           std::vector<uint16_t> iconColors;
+           vec.reserve(_lineCount * 4);
+           const int linesPerDay = constrain(forecastLinesPerDay, 2, 3);
+           const bool iconEnabled = (forecastIconSize == 16);
+          const bool monoTheme = (theme == 1);
         const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
                                               : dma_display->color565(255, 240, 140);
         const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
                                               : dma_display->color565(120, 200, 255);
-        const int valueIndentPx = 4;
-        auto pushValueWrapped = [&](const String &text) {
-            auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH - valueIndentPx);
-            for (const auto &w : wrapped) {
-                vec.push_back(w);
-                colors.push_back(valueColor);
-                offsets.push_back(valueIndentPx);
-            }
-        };
+          const int iconPad = iconEnabled ? 18 : 0; // space for 16px icon + padding
         for (int i = 0; i < _lineCount; ++i) {
             String raw = _lines[i];
             int colon = raw.indexOf(':');
@@ -190,24 +253,89 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
             String value = (colon >= 0) ? raw.substring(colon + 1) : "";
             label.trim();
             value.trim();
+            const uint8_t *iconPtr = nullptr;
+            uint16_t iconColor = 0;
+            // Parse trailing "[icon=...]" hint if present to pick the proper bitmap/color
+            int hint = value.lastIndexOf("[icon=");
+            if (hint >= 0) {
+                int end = value.indexOf(']', hint);
+                if (end > hint) {
+                      String code = value.substring(hint + 6, end);
+                      value.remove(hint); // drop hint from visible text
+                      code.trim();
+                      if (iconEnabled)
+                      {
+                          iconPtr = code.length() ? getWeatherIconFromCondition(code) : nullptr;
+                          iconColor = code.length() ? getIconColorFromCondition(code) : 0;
+                      }
+                  }
+              }
+            // Extract temps (before double space) and condition text (after)
+            String temps = value;
+            String condText;
+            int split = value.indexOf("  ");
+            if (split >= 0) {
+                temps = value.substring(0, split);
+                condText = value.substring(split + 2);
+              }
+              temps.trim();
+              condText.trim();
+               if (linesPerDay == 2 && condText.length())
+               {
+                   temps += "  " + condText;
+                   condText = "";
+               }
+
+               // Add 1px visual gap between blocks by cumulatively offsetting each day block.
+               const int blockYOffset = i;
+
+            // Line 1: day label (e.g., 12/13:) with icon anchored at left
             if (label.length()) {
-                vec.push_back(label);
-                colors.push_back(labelColor);
-                offsets.push_back(0);
-            }
-            if (value.length()) {
-                pushValueWrapped(value);
-            }
-        }
+                   vec.push_back(label);
+                   colors.push_back(labelColor);
+                   offsets.push_back(0);      // icon at x=0, text will shift to iconPad in renderer
+                   yOffsets.push_back(blockYOffset);
+                   icons.push_back(iconEnabled ? iconPtr : nullptr);
+                   iconColors.push_back(iconEnabled ? iconColor : 0);
+               }
+            // Line 2: temps (aligned with text to the right of the icon)
+            vec.push_back(temps.length() ? temps : String("--/--"));
+            colors.push_back(valueColor);
+            offsets.push_back(iconPad); // keep temps aligned to the right of icon
+            yOffsets.push_back(blockYOffset + ((linesPerDay == 2) ? 1 : 0)); // last line down 1px in 2-line mode
+            icons.push_back(nullptr);
+            iconColors.push_back(0);
+
+               // Line 3: condition text (rain chance, etc.), no icon
+               if (linesPerDay >= 3)
+               {
+                   vec.push_back(condText.length() ? condText : String(""));
+                   colors.push_back(valueColor);
+                   offsets.push_back(0);
+                   yOffsets.push_back(blockYOffset + 1); // last line down 1px in 3-line mode
+                   icons.push_back(nullptr);
+                   iconColors.push_back(0);
+               }
+           }
         if (vec.empty()) {
             vec.push_back("No forecast data");
             colors.push_back(valueColor);
             offsets.push_back(0);
+            yOffsets.push_back(0);
+            icons.push_back(nullptr);
+            iconColors.push_back(0);
         }
         s_dailyRoll.setLines(vec, resetPosition);
         s_dailyRoll.setLineColors(colors);
         s_dailyRoll.setLineOffsets(offsets);
+        s_dailyRoll.setLineYOffsets(yOffsets);
+        s_dailyRoll.setLineIcons(icons, iconColors);
         s_dailyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_dailyRoll.setGapHoldMs(0); // no blank gap; let the block roll continuously
+           s_dailyRoll.setExitHoldMs(constrain(forecastPauseMs, 0, 10000));
+        // Treat each day as a block; include icon height so the whole icon stays visible during pause
+           int blockPx = max(iconEnabled ? 16 : 0, InfoScreen::CHARH * linesPerDay + 1);
+        s_dailyRoll.setBlockSizePx(blockPx);
         s_dailyRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH); // enter from bottom, exit under title
     }
     else if (_screenMode == SCREEN_UDP_DATA) {
@@ -298,6 +426,53 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         s_currentRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
         s_currentRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
     }
+    else if (_screenMode == SCREEN_NOAA_ALERT) {
+        // NOAA alert: show all fields with vertical roll-up
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        vec.reserve(_lineCount * 2);
+        const bool monoTheme = (theme == 1);
+        const uint16_t labelColor = monoTheme ? dma_display->color565(220, 220, 120)
+                                              : dma_display->color565(255, 240, 140);
+        const uint16_t valueColor = monoTheme ? dma_display->color565(120, 160, 255)
+                                              : dma_display->color565(120, 200, 255);
+        const int valueIndentPx = 4;
+        auto pushValueWrapped = [&](const String &text) {
+            auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH - valueIndentPx);
+            for (const auto &w : wrapped) {
+                vec.push_back(w);
+                colors.push_back(valueColor);
+                offsets.push_back(valueIndentPx);
+            }
+        };
+        for (int i = 0; i < _lineCount; ++i) {
+            String raw = _lines[i];
+            int colon = raw.indexOf(':');
+            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
+            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
+            label.trim();
+            value.trim();
+            if (label.length()) {
+                vec.push_back(label);
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+            }
+            if (value.length()) {
+                pushValueWrapped(value);
+            }
+        }
+        if (vec.empty()) {
+            vec.push_back("No alert data");
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+        }
+        s_noaaRoll.setLines(vec, resetPosition);
+        s_noaaRoll.setLineColors(colors);
+        s_noaaRoll.setLineOffsets(offsets);
+        s_noaaRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_noaaRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
+    }
 }
 
 void InfoScreen::setHighlightEnabled(bool enabled)
@@ -381,15 +556,23 @@ void InfoScreen::resetHScroll() {
 
 void InfoScreen::draw() {
     const bool monoTheme = (theme == 1);
-    const uint16_t headerBg = monoTheme ? dma_display->color565(20,20,40) : INFOSCREEN_HEADERBG;
-    const uint16_t headerFg = monoTheme ? dma_display->color565(60,60,120) : INFOSCREEN_HEADERFG;
+    const bool isNoaa = (_screenMode == SCREEN_NOAA_ALERT);
+    uint16_t headerBg = monoTheme ? dma_display->color565(20,20,40) : INFOSCREEN_HEADERBG;
+    uint16_t headerFg = monoTheme ? dma_display->color565(60,60,120) : INFOSCREEN_HEADERFG;
+    if (isNoaa && noaaHasActiveAlert())
+    {
+        uint16_t alertColor = noaaActiveColor();
+        if (alertColor != 0)
+            headerFg = alertColor;
+    }
     const uint16_t defaultLineColor = monoTheme ? dma_display->color565(60,60,120)
                                                 : dma_display->color565(230,230,230);
     const bool isVerticalScrollScreen =
         (_screenMode == SCREEN_HOURLY) ||
         (_screenMode == SCREEN_UDP_DATA) ||
         (_screenMode == SCREEN_UDP_FORECAST) ||
-        (_screenMode == SCREEN_CURRENT);
+        (_screenMode == SCREEN_CURRENT) ||
+        (_screenMode == SCREEN_NOAA_ALERT);
 
     // Avoid full-screen clears on vertical scrollers to reduce flicker; other screens still clear.
     if (!isVerticalScrollScreen) {
@@ -435,6 +618,14 @@ void InfoScreen::draw() {
         dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
         dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
         s_currentRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        drawHeader();
+        return;
+    }
+    if (_screenMode == SCREEN_NOAA_ALERT) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
+        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
+        s_noaaRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
         drawHeader();
         return;
     }
@@ -587,6 +778,12 @@ void InfoScreen::tick() {
         draw();
         return;
     }
+    if (_screenMode == SCREEN_NOAA_ALERT) {
+        s_noaaRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_noaaRoll.update();
+        draw();
+        return;
+    }
     if (_screenMode == SCREEN_UDP_FORECAST) {
         s_dailyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
         s_dailyRoll.update();
@@ -637,6 +834,7 @@ void InfoScreen::handleIR(uint32_t code) {
         if (_screenMode == SCREEN_UDP_FORECAST) return &s_dailyRoll;
         if (_screenMode == SCREEN_UDP_DATA) return &s_liveRoll;
         if (_screenMode == SCREEN_CURRENT) return &s_currentRoll;
+        if (_screenMode == SCREEN_NOAA_ALERT) return &s_noaaRoll;
         return nullptr;
     };
 

@@ -2046,6 +2046,11 @@ const uint8_t *getWeatherIconFromCode(String code)
 const uint8_t *getWeatherIconFromCondition(String condition)
 {
     condition.toLowerCase();
+    const bool isNight = (condition.indexOf("night") >= 0) || condition.endsWith("-n");
+    if (isNight && condition.indexOf("clear") >= 0)
+        return icon_clear_night;
+    if (isNight && condition.indexOf("cloud") >= 0)
+        return icon_cloud_night;
     if (condition.indexOf("clear") >= 0)
         return icon_clear;
     if (condition.indexOf("cloud") >= 0)
@@ -2063,6 +2068,23 @@ const uint8_t *getWeatherIconFromCondition(String condition)
 
 const uint16_t getIconColorFromCondition(String condition)
 {
+    condition.toLowerCase();
+    const bool isNight = (condition.indexOf("night") >= 0) || condition.endsWith("-n");
+    if (isNight) {
+        if (condition.indexOf("clear") >= 0)
+            return myBLUE;
+        if (condition.indexOf("cloud") >= 0)
+            return dma_display->color565(120, 160, 220);
+        if (condition.indexOf("rain") >= 0)
+            return dma_display->color565(0, 120, 200);
+        if (condition.indexOf("storm") >= 0)
+            return dma_display->color565(180, 120, 255);
+        if (condition.indexOf("snow") >= 0)
+            return dma_display->color565(170, 220, 255);
+        if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+            return dma_display->color565(120, 140, 180);
+        return myBLUE;
+    }
     if (condition.indexOf("clear") >= 0)
         return dma_display->color565(255, 255, 0); // (yellow)
     if (condition.indexOf("cloud") >= 0)
@@ -3245,8 +3267,6 @@ void applyUnitPreferences()
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
 }
-
-
 
 
 

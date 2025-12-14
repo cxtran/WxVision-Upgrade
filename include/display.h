@@ -68,6 +68,7 @@ extern bool useImperial;
 void setupDisplay();
 int getTextWidth(const char* text);
 const uint8_t* getWeatherIconFromCode(String code);
+const uint8_t* getWeatherIconFromCondition(String condition);
 const uint8_t* getWFIconFromCondition(String condition) ;
 const uint16_t getIconColorFromCondition(String condition);
 const uint16_t  getDayNightColorFromCode( String code);

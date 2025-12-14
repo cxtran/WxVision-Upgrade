@@ -555,10 +555,12 @@ function applyDataSourceVisibility() {
   var isWeatherFlow = value === 1;
   var isNone = value === 2;
 
-  var owmCard = document.getElementById('card-owmap');
-  if (owmCard) owmCard.classList.toggle('hidden', !isOwm);
-  var wfCard = document.getElementById('card-tempest');
-  if (wfCard) wfCard.classList.toggle('hidden', !isWeatherFlow);
+    var owmCard = document.getElementById('card-owmap');
+    if (owmCard) owmCard.classList.toggle('hidden', !isOwm);
+    var wfCard = document.getElementById('card-tempest');
+    if (wfCard) wfCard.classList.toggle('hidden', !isWeatherFlow);
+    var forecastUiCard = document.getElementById('card-forecastui');
+    if (forecastUiCard) forecastUiCard.classList.toggle('hidden', !isWeatherFlow);
 
   var toggleDisable = function(selector, disabled) {
     var nodes = document.querySelectorAll(selector);
@@ -567,8 +569,9 @@ function applyDataSourceVisibility() {
     });
   };
 
-  toggleDisable('#card-owmap input, #card-owmap select, #card-owmap button', !isOwm);
-  toggleDisable('#card-tempest input, #card-tempest select, #card-tempest button', !isWeatherFlow);
+    toggleDisable('#card-owmap input, #card-owmap select, #card-owmap button', !isOwm);
+    toggleDisable('#card-tempest input, #card-tempest select, #card-tempest button', !isWeatherFlow);
+    toggleDisable('#card-forecastui input, #card-forecastui select, #card-forecastui button', !isWeatherFlow);
 
   if (isOwm) {
     applyCountryCustomAvailability();
@@ -827,6 +830,15 @@ function loadAll(){
     if (wfTokenEl) wfTokenEl.value = s.wfToken || '';
     var wfStationIdEl = document.getElementById('wfStationId');
     if (wfStationIdEl) wfStationIdEl.value = s.wfStationId || '';
+
+    if (s.forecastUi) {
+      var fcLinesEl = document.getElementById('forecastLinesPerDay');
+      if (fcLinesEl) fcLinesEl.value = (typeof s.forecastUi.linesPerDay !== 'undefined') ? String(s.forecastUi.linesPerDay) : '3';
+      var fcPauseEl = document.getElementById('forecastPauseMs');
+      if (fcPauseEl) fcPauseEl.value = (typeof s.forecastUi.pauseMs !== 'undefined') ? String(s.forecastUi.pauseMs) : '3000';
+      var fcIconEl = document.getElementById('forecastIconSize');
+      if (fcIconEl) fcIconEl.value = (typeof s.forecastUi.iconSize !== 'undefined') ? String(s.forecastUi.iconSize) : '16';
+    }
 
     var tempOffsetEl = document.getElementById('tempOffset');
     var tempOffsetLabel = document.querySelector('label[for="tempOffset"]');
@@ -1096,13 +1108,39 @@ function readSettingsForm() {
         weekDay: +(byId('alarm'+idx+'Weekday')?.value ?? 0)
       };
     }),
-    noaa: {
-      enabled: +(byId('noaaEnabled')?.value ?? 0) === 1,
-      lat: parseFloat(byId('noaaLat')?.value ?? 0) || 0,
-      lon: parseFloat(byId('noaaLon')?.value ?? 0) || 0
-    }
-  };
-}
+      noaa: {
+        enabled: +(byId('noaaEnabled')?.value ?? 0) === 1,
+        lat: parseFloat(byId('noaaLat')?.value ?? 0) || 0,
+        lon: parseFloat(byId('noaaLon')?.value ?? 0) || 0
+      },
+      forecastUi: {
+        linesPerDay: (function(){
+          var v = parseInt(byId('forecastLinesPerDay')?.value ?? 3, 10);
+          if (!isFinite(v)) v = 3;
+          v = clamp(v, 2, 3);
+          var el = byId('forecastLinesPerDay');
+          if (el) el.value = String(v);
+          return v;
+        })(),
+        pauseMs: (function(){
+          var v = parseInt(byId('forecastPauseMs')?.value ?? 3000, 10);
+          if (!isFinite(v)) v = 3000;
+          v = clamp(v, 0, 10000);
+          var el = byId('forecastPauseMs');
+          if (el) el.value = String(v);
+          return v;
+        })(),
+        iconSize: (function(){
+          var v = parseInt(byId('forecastIconSize')?.value ?? 16, 10);
+          if (!isFinite(v)) v = 16;
+          v = (v === 0) ? 0 : 16;
+          var el = byId('forecastIconSize');
+          if (el) el.value = String(v);
+          return v;
+        })()
+      }
+    };
+  }
 
 function pickSettings(all, keys) {
   var out = {};
@@ -1211,20 +1249,29 @@ async function saveAlarmSettingsWeb(event){
 }
 
 async function saveNoaaSettingsWeb(event){
-  if (event && typeof event.preventDefault === 'function') {
-    event.preventDefault();
-  }
+    if (event && typeof event.preventDefault === 'function') {
+      event.preventDefault();
+    }
   const payload = pickSettings(readSettingsForm(), ['noaa']);
   await submitSettings(payload, 'saveNoaaMsg');
 }
 
-// Trend chart for future use
-async function loadTrend(){
-  const res = await fetch('/trend.json');
-  if (!res.ok) return;
-  const data = await res.json();
-  renderTrendCharts(data || []);
+async function saveForecastUiSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['forecastUi']);
+  await submitSettings(payload, 'saveForecastUiMsg');
 }
+
+// Trend chart for future use
+  var _lastTrendSamples = null;
+  async function loadTrend(){
+    const res = await fetch('/trend.json');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderTrendCharts(data || []);
+  }
 
 function formatLocalTime(epochSec, offsetMinutes){
   var ms = (epochSec + (offsetMinutes||0)*60) * 1000;
@@ -1235,13 +1282,14 @@ function formatLocalTime(epochSec, offsetMinutes){
 }
 
 function renderTrendCharts(samples){
-  var tempCanvas = document.getElementById('tempChart');
-  var co2Canvas = document.getElementById('co2Chart');
-  if (!tempCanvas && !co2Canvas) return;
+    var tempCanvas = document.getElementById('tempChart');
+    var co2Canvas = document.getElementById('co2Chart');
+    if (!tempCanvas && !co2Canvas) return;
 
-  var pts = (samples || []).filter(function(s){ return s && typeof s.ts === 'number'; });
-  pts.sort(function(a,b){ return a.ts - b.ts; });
-  var lastTs = pts.length ? pts[pts.length-1].ts : null;
+    var pts = (samples || []).filter(function(s){ return s && typeof s.ts === 'number'; });
+    pts.sort(function(a,b){ return a.ts - b.ts; });
+    _lastTrendSamples = pts;
+    var lastTs = pts.length ? pts[pts.length-1].ts : null;
 
   drawLineChart(tempCanvas, pts, function(p){ return p.temp; }, 'Temp', '#4cd964');
   drawLineChart(co2Canvas, pts, function(p){ return p.co2; }, 'CO₂', '#ffcc66');
@@ -1254,22 +1302,41 @@ function renderTrendCharts(samples){
       meta.textContent = 'Last sample: ' + new Date(lastTs*1000).toLocaleString();
     }
   }
-}
-
-function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
-  if (!canvas || !canvas.getContext) return;
-  var ctx = canvas.getContext('2d');
-  var w = canvas.width, h = canvas.height;
-  ctx.clearRect(0,0,w,h);
-  ctx.fillStyle = '#0f1726';
-  ctx.fillRect(0,0,w,h);
-
-  var vals = samples.map(valueFn).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
-  if (!vals.length) {
-    ctx.fillStyle = '#9fb3c8';
-    ctx.fillText('No data', 10, 20);
-    return;
   }
+
+  function resizeCanvasToDisplaySize(canvas, heightCssPx) {
+    if (!canvas) return null;
+    var rect = canvas.getBoundingClientRect();
+    var cssW = Math.max(1, Math.floor(rect.width || canvas.clientWidth || 1));
+    var cssH = Math.max(1, Math.floor(heightCssPx || rect.height || canvas.clientHeight || 200));
+    var dpr = window.devicePixelRatio || 1;
+    var needW = Math.floor(cssW * dpr);
+    var needH = Math.floor(cssH * dpr);
+    if (canvas.width !== needW) canvas.width = needW;
+    if (canvas.height !== needH) canvas.height = needH;
+    var ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return { w: cssW, h: cssH, ctx: ctx };
+  }
+
+  function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
+    if (!canvas || !canvas.getContext) return;
+    var sized = resizeCanvasToDisplaySize(canvas, 200);
+    if (!sized) return;
+    var ctx = sized.ctx;
+    var w = sized.w, h = sized.h;
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle = '#0f1726';
+    ctx.fillRect(0,0,w,h);
+
+    var vals = samples.map(valueFn).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
+    if (!vals.length) {
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#9fb3c8';
+      ctx.fillText('No data', 10, 20);
+      return;
+    }
   var min = Math.min.apply(null, vals);
   var max = Math.max.apply(null, vals);
   if (Math.abs(max - min) < 0.01) { max += 0.5; min -= 0.5; }
@@ -1281,9 +1348,9 @@ function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
   ctx.lineWidth = 1;
   ctx.strokeRect(margin, margin, plotW, plotH);
 
-  ctx.strokeStyle = strokeStyle || '#4cd964';
-  ctx.lineWidth = 2;
-  ctx.beginPath();
+    ctx.strokeStyle = strokeStyle || '#4cd964';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
   var first = true;
   samples.forEach(function(s, idx){
     var v = valueFn(s);
@@ -1293,12 +1360,12 @@ function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
     var y = margin + plotH - norm * plotH;
     if (first) { ctx.moveTo(x,y); first=false; } else { ctx.lineTo(x,y); }
   });
-  ctx.stroke();
+    ctx.stroke();
 
-  ctx.fillStyle = '#9fb3c8';
-  ctx.font = '12px sans-serif';
-  ctx.fillText(label + ' min: ' + min.toFixed(1) + ' max: ' + max.toFixed(1), margin, h - 6);
-}
+    ctx.fillStyle = '#9fb3c8';
+    ctx.font = '12px sans-serif';
+    ctx.fillText(label + ' min: ' + min.toFixed(1) + ' max: ' + max.toFixed(1), margin, h - 6);
+  }
 
 function parseManualToEpoch() {
   var d = document.getElementById('manualDate').value;
@@ -1378,6 +1445,8 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', saveAlarmSettingsWeb);
     btn = document.getElementById('btnSaveNoaa');
     if (btn) btn.addEventListener('click', saveNoaaSettingsWeb);
+    btn = document.getElementById('btnSaveForecastUi');
+    if (btn) btn.addEventListener('click', saveForecastUiSettingsWeb);
     var clockFormatEl = document.getElementById('uClock');
     if (clockFormatEl) clockFormatEl.addEventListener('change', function(){
       applyAlarmHourFormat(isClock24Selected());
@@ -1416,14 +1485,15 @@ window.addEventListener('load', function(){
   setInterval(loadIndexStatus, 5000); // refresh every 5s
 });
 
+window.addEventListener('resize', function(){
+  if (_lastTrendSamples) {
+    renderTrendCharts(_lastTrendSamples);
+  }
+});
+
 window.addEventListener('load', function(){
   var full = document.getElementById('full-status');
   if (!full) return;
   loadFullStatus();
   setInterval(loadFullStatus, 3000); // refresh every 3s for snappier status page
 });
-
-
-
-
-

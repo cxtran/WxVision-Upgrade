@@ -69,6 +69,10 @@ extern int verticalScrollLevel;
 extern bool autoBrightness;
 extern int splashDurationSec; // minimum splash display time
 extern bool themeRefreshPending;
+// --- Forecast UI (WeatherFlow) ---
+extern int forecastLinesPerDay;   // 2 or 3
+extern int forecastPauseMs;       // pause at header per block
+extern int forecastIconSize;      // 0=off, 16=16x16 icons
 
 // --- Weather ---
 extern String owmCity;
@@ -120,4 +124,3 @@ void adjustLightGain(int dir);
 void tickAutoThemeSchedule();
 void tickAutoThemeAmbient(float lux, bool persist = true, bool force = false);
 void forceAutoThemeSchedule();
-

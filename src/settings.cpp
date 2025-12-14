@@ -49,6 +49,9 @@ bool themeRefreshPending = false;
 int buzzerVolume = 100;
 int buzzerToneSet = 0; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse,5=Warm,6=Melody
 int alarmSoundMode = 0; // 0=Tone,1=FurElise,2=SwanLake,3=TurkeyMarch,4=Moonlight
+int forecastLinesPerDay = 3;
+int forecastPauseMs = 3000;
+int forecastIconSize = 16;
 
 static constexpr int MINUTES_PER_DAY = 24 * 60;
 int normalizeThemeScheduleMinutes(int value)
@@ -163,11 +166,16 @@ void loadSettings() {
     verticalScrollSpeed = scrollDelays[verticalScrollLevel];
     customMsg    = prefs.getString("customMsg", "");
     autoBrightness = prefs.getBool("autoBrightness", true);
-    splashDurationSec = prefs.getInt("splashDur", 3);
-    splashDurationSec = constrain(splashDurationSec, 1, 10);
-    buzzerVolume = constrain(prefs.getInt("buzzVol", 100), 0, 100);
-    buzzerToneSet = constrain(prefs.getInt("buzzTone", 0), 0, 6);
-    alarmSoundMode = constrain(prefs.getInt("alarmSound", 0), 0, 4);
+      splashDurationSec = prefs.getInt("splashDur", 3);
+      splashDurationSec = constrain(splashDurationSec, 1, 10);
+      buzzerVolume = constrain(prefs.getInt("buzzVol", 100), 0, 100);
+      buzzerToneSet = constrain(prefs.getInt("buzzTone", 0), 0, 6);
+      alarmSoundMode = constrain(prefs.getInt("alarmSound", 0), 0, 4);
+      forecastLinesPerDay = constrain(prefs.getInt("fcLines", 3), 2, 3);
+      forecastPauseMs = constrain(prefs.getInt("fcPause", 3000), 0, 10000);
+      forecastIconSize = prefs.getInt("fcIcon", 16);
+      if (forecastIconSize != 0 && forecastIconSize != 16)
+          forecastIconSize = 16;
 
     // Weather
     owmCity      = prefs.getString("owmCity", "");
@@ -229,6 +237,9 @@ void saveDisplaySettings() {
         prefs.putString("customMsg", customMsg);
         splashDurationSec = constrain(splashDurationSec, 1, 10);
         prefs.putInt("splashDur", splashDurationSec);
+        prefs.putInt("fcLines", constrain(forecastLinesPerDay, 2, 3));
+        prefs.putInt("fcPause", constrain(forecastPauseMs, 0, 10000));
+        prefs.putInt("fcIcon", (forecastIconSize == 0) ? 0 : 16);
         prefs.end();
         Serial.printf("[Prefs] Saved: theme=%d, autoThemeMode=%d, luxThr=%d, dayStart=%d, nightStart=%d, auto=%d, bright=%d, scrollLevel=%d vScrollLevel=%d\n",
             theme, autoThemeMode, autoThemeLightThreshold, dayThemeStartMinutes, nightThemeStartMinutes, autoBrightness, brightness, scrollLevel, verticalScrollLevel);

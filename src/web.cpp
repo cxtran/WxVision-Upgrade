@@ -41,12 +41,15 @@ extern String deviceHostname;
 bool otaInProgress = false;
 extern bool alarmEnabled[3];
 extern int alarmHour[3];
-extern int alarmMinute[3];
-extern AlarmRepeatMode alarmRepeatMode[3];
-extern int alarmWeeklyDay[3];
-extern bool noaaAlertsEnabled;
-extern float noaaLatitude;
-extern float noaaLongitude;
+  extern int alarmMinute[3];
+  extern AlarmRepeatMode alarmRepeatMode[3];
+  extern int alarmWeeklyDay[3];
+  extern bool noaaAlertsEnabled;
+  extern float noaaLatitude;
+  extern float noaaLongitude;
+  extern int forecastLinesPerDay;
+  extern int forecastPauseMs;
+  extern int forecastIconSize;
 
 // Date/Time bits
 extern RTC_DS3231 rtc;
@@ -613,10 +616,14 @@ void setupWebServer() {
     doc["themeLightThreshold"] = autoThemeLightThreshold;
     doc["brightness"]       = brightness;
     doc["autoBrightness"]   = autoBrightness;
-    doc["scrollSpeed"]      = scrollSpeed;
-    doc["scrollLevel"]      = scrollLevel;
-    doc["splashDuration"]   = splashDurationSec;
-    doc["customMsg"]        = customMsg;
+      doc["scrollSpeed"]      = scrollSpeed;
+      doc["scrollLevel"]      = scrollLevel;
+      doc["splashDuration"]   = splashDurationSec;
+      JsonObject forecastUi = doc.createNestedObject("forecastUi");
+      forecastUi["linesPerDay"] = forecastLinesPerDay;
+      forecastUi["pauseMs"] = forecastPauseMs;
+      forecastUi["iconSize"] = forecastIconSize;
+      doc["customMsg"]        = customMsg;
     doc["buzzerVolume"]     = buzzerVolume;
   doc["buzzerTone"]       = buzzerToneSet;
     doc["alarmSound"]       = alarmSoundMode;
@@ -760,13 +767,26 @@ void setupWebServer() {
             autoBrightness = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0);
           }
         }
-        if (!doc["splashDuration"].isNull()) {
-          int dur = doc["splashDuration"].as<int>();
-          splashDurationSec = constrain(dur, 1, 10);
-        }
-        if (!doc["buzzerVolume"].isNull()) {
-          buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
-        }
+          if (!doc["splashDuration"].isNull()) {
+            int dur = doc["splashDuration"].as<int>();
+            splashDurationSec = constrain(dur, 1, 10);
+          }
+          if (!doc["forecastUi"].isNull() && doc["forecastUi"].is<JsonObject>())
+          {
+            JsonObject f = doc["forecastUi"].as<JsonObject>();
+            if (!f["linesPerDay"].isNull())
+              forecastLinesPerDay = constrain(f["linesPerDay"].as<int>(), 2, 3);
+            if (!f["pauseMs"].isNull())
+              forecastPauseMs = constrain(f["pauseMs"].as<int>(), 0, 10000);
+            if (!f["iconSize"].isNull())
+            {
+              int sz = f["iconSize"].as<int>();
+              forecastIconSize = (sz == 0) ? 0 : 16;
+            }
+          }
+          if (!doc["buzzerVolume"].isNull()) {
+            buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
+          }
         if (!doc["buzzerTone"].isNull()) {
           buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
         }
@@ -1200,7 +1220,6 @@ void setupWebServer() {
   webServerRunning = true;
   Serial.println("[Web] Async server started.");
 }
-
 
 
 

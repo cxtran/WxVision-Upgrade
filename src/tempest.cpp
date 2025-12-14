@@ -597,10 +597,23 @@ void showForecastScreen() {
     }
     for (int i = 0; i < num; ++i) {
         const ForecastDay& f = forecast.days[i];
-        lines[i] = String(f.monthNum) + "/" + String(f.dayNum) + ": " +
-                (isnan(f.highTemp) ? String("--") : fmtTemp(f.highTemp, 0)) + "/" +
-                (isnan(f.lowTemp)  ? String("--") : fmtTemp(f.lowTemp,  0)) + "  " +
-                f.conditions + " " + String(f.rainChance) + "%";
+        String iconKey = f.conditions.length() ? f.conditions : f.icon;
+        auto stripUnits = [](String s) {
+            while (s.length() && !isDigit(s[s.length() - 1]) && s[s.length() - 1] != '.')
+                s.remove(s.length() - 1);
+            return s;
+        };
+        String hi = isnan(f.highTemp) ? String("--") : fmtTemp(f.highTemp, 0);
+        String lo = isnan(f.lowTemp)  ? String("--") : fmtTemp(f.lowTemp,  0);
+        String hiNoUnit = stripUnits(hi);
+        String value = hiNoUnit + "/" + lo + "  " +
+                       f.conditions + " " + String(f.rainChance) + "%";
+        // Add icon hint for renderer; stripped before display
+        if (iconKey.length())
+        {
+            value += " [icon=" + iconKey + "]";
+        }
+        lines[i] = String(f.monthNum) + "/" + String(f.dayNum) + ": " + value;
     }
 
     bool reset = !forecastScreen.isActive();
@@ -666,17 +679,38 @@ void showHourlyForecastScreen() {
         }
         String timeLabel(timeBuf);
         timeLabel += ":";
+
+        // Keep hourly entries to a predictable 3-line block.
+        // Icon hint is consumed by the renderer and not shown in text.
+        String iconKey = h.conditions.length() ? h.conditions : h.icon;
+        auto isNightAt = [&](time_t epoch, const tm* tmi) -> bool {
+            if (!tmi) return false;
+            const int month = tmi->tm_mon + 1;
+            const int day = tmi->tm_mday;
+            for (int di = 0; di < forecast.numDays; ++di) {
+                const ForecastDay& d = forecast.days[di];
+                if (d.monthNum == month && d.dayNum == day && d.sunrise > 0 && d.sunset > 0) {
+                    return !(epoch >= (time_t)d.sunrise && epoch < (time_t)d.sunset);
+                }
+            }
+            const int hhLocal = tmi->tm_hour;
+            return (hhLocal < 6 || hhLocal >= 18);
+        };
+        const bool night = isNightAt(tt, ti);
+        if (night && iconKey.length() && iconKey.indexOf("night") < 0) {
+            iconKey += " night";
+        }
         String labelLine = timeLabel;
+        if (iconKey.length())
+        {
+            labelLine += " [icon=" + iconKey + "]";
+        }
+
         String dataLine;
         dataLine += (isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1));
-        dataLine += "  ";
-        dataLine += (h.rainChance >= 0) ? String(h.rainChance) + "% Chance of Rain" : String("- % Chance of Rain");
-        if (h.conditions.length()) {
-            dataLine += "  ";
-            dataLine += h.conditions;
-        }
-        // Combine into two lines separated by newline for wrap downstream
-        lines[i] = labelLine + "\n" + dataLine;
+        dataLine += " ";
+        String condLine = h.conditions.length() ? h.conditions : String("");
+        lines[i] = labelLine + "\n" + dataLine + "\n" + condLine;
     }
 
     hourlyScreen.setLines(lines, count, true);
@@ -762,6 +796,3 @@ void showCurrentConditionsScreen() {
     currentCondScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 
 }
-
-
-

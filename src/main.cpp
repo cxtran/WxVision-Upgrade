@@ -1502,7 +1502,7 @@ void loop()
 
     if (noaaAlertScreen.isActive())
     {
-        uint32_t code = getIRCodeDebounced();
+        uint32_t code = getIRCodeNonBlocking();
         if (code == IR_CANCEL)
         {
             hideAllInfoScreens();
@@ -1510,8 +1510,10 @@ void loop()
             playBuzzerTone(3000, 100);
             return;
         }
+        // Apply input before ticking so pause/step actions take effect immediately
+        if (code)
+            noaaAlertScreen.handleIR(code);
         noaaAlertScreen.tick();
-        noaaAlertScreen.handleIR(code);
         delay(40);
         return;
     }
