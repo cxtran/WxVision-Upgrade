@@ -804,543 +804,488 @@ static void drawStar(int x, int y, uint16_t color)
 static void drawCompactCloud(int cx, int cy, uint16_t color)
 {
     uint16_t shade = scaleColor565(color, 0.85f);
+    uint16_t outline = scaleColor565(color, 0.62f);
+    uint16_t highlight = scaleColor565(color, 1.08f);
     dma_display->fillCircle(cx, cy, 4, color);
     dma_display->fillCircle(cx - 4, cy + 1, 3, shade);
     dma_display->fillCircle(cx + 4, cy + 1, 3, shade);
     dma_display->fillCircle(cx - 2, cy + 3, 2, color);
     dma_display->fillCircle(cx + 2, cy + 3, 2, color);
+
+    // Outline + highlight for better definition on 64x32 panels.
+    dma_display->drawCircle(cx, cy, 4, outline);
+    dma_display->drawCircle(cx - 4, cy + 1, 3, outline);
+    dma_display->drawCircle(cx + 4, cy + 1, 3, outline);
+    dma_display->drawCircle(cx - 2, cy + 3, 2, outline);
+    dma_display->drawCircle(cx + 2, cy + 3, 2, outline);
+    dma_display->drawFastHLine(cx - 8, cy + 5, 17, outline);
+    dma_display->drawPixel(cx - 2, cy - 2, highlight);
+    dma_display->drawPixel(cx + 1, cy - 1, highlight);
+}
+
+// Condition Scene (64x24) helpers ------------------------------------------------
+static constexpr int SCENE_W = PANEL_RES_X;
+static constexpr int SCENE_H = 24; // top area used for the scene; bottom is reserved for marquee/status
+
+static void clearConditionSceneArea()
+{
+    dma_display->fillRect(0, 0, SCENE_W, SCENE_H, myBLACK);
+    if (PANEL_RES_Y > SCENE_H)
+        dma_display->fillRect(0, SCENE_H, SCENE_W, PANEL_RES_Y - SCENE_H, myBLACK);
+}
+
+static void fillDayBackground()
+{
+    // Pixel-art style (banded) sky like the reference image.
+    uint16_t top = dma_display->color565(10, 120, 255);
+    uint16_t mid = dma_display->color565(40, 165, 255);
+    uint16_t bot = dma_display->color565(85, 205, 255);
+    for (int y = 0; y < SCENE_H; ++y)
+    {
+        uint16_t c = (y < 8) ? top : (y < 16 ? mid : bot);
+        dma_display->drawFastHLine(0, y, SCENE_W, c);
+    }
+}
+
+static void fillNightBackground()
+{
+    // Deep blue + stars like the reference image.
+    uint16_t top = dma_display->color565(2, 6, 28);
+    uint16_t mid = dma_display->color565(4, 10, 40);
+    uint16_t bot = dma_display->color565(7, 16, 58);
+    for (int y = 0; y < SCENE_H; ++y)
+    {
+        uint16_t c = (y < 8) ? top : (y < 16 ? mid : bot);
+        dma_display->drawFastHLine(0, y, SCENE_W, c);
+    }
+
+    uint16_t star = dma_display->color565(230, 240, 255);
+    // Fixed starfield (no flicker)
+    const uint8_t stars[][2] = {
+        {6, 3},  {13, 6}, {18, 2}, {28, 5}, {36, 3}, {44, 7},
+        {52, 4}, {58, 6}, {24, 11}, {40, 12}, {12, 14}, {54, 13}
+    };
+    for (auto &p : stars)
+    {
+        dma_display->drawPixel(p[0], p[1], star);
+        // occasional plus star
+        if ((p[0] % 3) == 0)
+        {
+            if (p[0] > 0) dma_display->drawPixel(p[0] - 1, p[1], star);
+            if (p[0] < SCENE_W - 1) dma_display->drawPixel(p[0] + 1, p[1], star);
+            if (p[1] > 0) dma_display->drawPixel(p[0], p[1] - 1, star);
+            if (p[1] < SCENE_H - 1) dma_display->drawPixel(p[0], p[1] + 1, star);
+        }
+    }
+}
+
+static void drawPixelSun(int cx, int cy)
+{
+    // Compact pixel sun with orange edge + yellow center
+    uint16_t edge = dma_display->color565(255, 170, 0);
+    uint16_t fill = dma_display->color565(255, 235, 70);
+    uint16_t hi = dma_display->color565(255, 255, 150);
+    const int r = 6;
+    for (int dy = -r; dy <= r; ++dy)
+    {
+        int ady = abs(dy);
+        int span = (ady == 6) ? 1 : (ady == 5 ? 3 : (ady == 4 ? 4 : (ady == 3 ? 5 : (ady == 2 ? 6 : (ady == 1 ? 6 : 6)))));
+        int y = cy + dy;
+        if (y < 0 || y >= SCENE_H) continue;
+        for (int dx = -span; dx <= span; ++dx)
+        {
+            int x = cx + dx;
+            if (x < 0 || x >= SCENE_W) continue;
+            bool border = (ady == r) || (abs(dx) == span);
+            dma_display->drawPixel(x, y, border ? edge : fill);
+        }
+    }
+    // highlight
+    dma_display->drawPixel(cx - 2, cy - 2, hi);
+    dma_display->drawPixel(cx - 1, cy - 3, hi);
+    // rays (8-bit style)
+    dma_display->drawPixel(cx, cy - 9, edge);
+    dma_display->drawPixel(cx, cy + 9, edge);
+    dma_display->drawPixel(cx - 9, cy, edge);
+    dma_display->drawPixel(cx + 9, cy, edge);
+    dma_display->drawPixel(cx - 7, cy - 7, edge);
+    dma_display->drawPixel(cx + 7, cy - 7, edge);
+    dma_display->drawPixel(cx - 7, cy + 7, edge);
+    dma_display->drawPixel(cx + 7, cy + 7, edge);
+}
+
+static void drawPixelMoon(int cx, int cy)
+{
+    // Crescent moon (filled disc minus offset disc), tuned for pixel art.
+    uint16_t moon = dma_display->color565(255, 235, 95);
+    uint16_t rim = dma_display->color565(255, 210, 40);
+    uint16_t skyCut = dma_display->color565(4, 10, 40);
+    const int r = 7;
+    for (int dy = -r; dy <= r; ++dy)
+    {
+        int y = cy + dy;
+        if (y < 0 || y >= SCENE_H) continue;
+        int span = (int)sqrt((double)(r * r - dy * dy));
+        for (int dx = -span; dx <= span; ++dx)
+        {
+            int x = cx + dx;
+            if (x < 0 || x >= SCENE_W) continue;
+            dma_display->drawPixel(x, y, moon);
+        }
+    }
+    // cut-out to form crescent
+    int cutR = 6;
+    for (int dy = -cutR; dy <= cutR; ++dy)
+    {
+        int y = cy + dy;
+        if (y < 0 || y >= SCENE_H) continue;
+        int span = (int)sqrt((double)(cutR * cutR - dy * dy));
+        for (int dx = -span; dx <= span; ++dx)
+        {
+            int x = cx + dx + 3;
+            if (x < 0 || x >= SCENE_W) continue;
+            dma_display->drawPixel(x, y, skyCut);
+        }
+    }
+    // rim accent
+    dma_display->drawPixel(cx - 5, cy - 4, rim);
+    dma_display->drawPixel(cx - 6, cy - 1, rim);
+    dma_display->drawPixel(cx - 5, cy + 2, rim);
+}
+
+static void drawPixelCloud(int x, int y, bool night)
+{
+    // Pixel-art cloud built from scanline spans (outline + 2 shades).
+    const uint8_t spans[][2] = {
+        {12, 12}, {9, 18}, {6, 24}, {4, 28}, {2, 32}, {1, 34},
+        {1, 34}, {2, 32}, {3, 30}, {5, 26}, {7, 22}, {9, 18}
+    };
+    uint16_t outline = night ? dma_display->color565(40, 55, 85) : dma_display->color565(70, 95, 140);
+    uint16_t fill = night ? dma_display->color565(140, 160, 195) : dma_display->color565(215, 230, 245);
+    uint16_t shade = night ? dma_display->color565(95, 115, 150) : dma_display->color565(170, 190, 215);
+    uint16_t hi = night ? dma_display->color565(175, 195, 230) : dma_display->color565(245, 250, 255);
+
+    for (int row = 0; row < 12; ++row)
+    {
+        int yy = y + row;
+        if (yy < 0 || yy >= SCENE_H) continue;
+        int start = x + spans[row][0];
+        int width = spans[row][1];
+        int end = start + width - 1;
+        if (end < 0 || start >= SCENE_W) continue;
+
+        // Outline edges
+        for (int xx = start; xx <= end; ++xx)
+        {
+            if (xx < 0 || xx >= SCENE_W) continue;
+            bool edge = (row == 0) || (row == 11) || (xx == start) || (xx == end);
+            dma_display->drawPixel(xx, yy, edge ? outline : fill);
+        }
+
+        // Bottom shading band
+        if (row >= 7 && width > 6)
+        {
+            for (int xx = start + 2; xx <= end - 2; ++xx)
+            {
+                if ((xx + row) % 3 == 0)
+                    dma_display->drawPixel(xx, yy, shade);
+            }
+        }
+    }
+
+    // Highlights on upper-left
+    dma_display->drawPixel(x + 16, y + 2, hi);
+    dma_display->drawPixel(x + 18, y + 3, hi);
+    dma_display->drawPixel(x + 14, y + 4, hi);
+}
+
+static void drawPixelRain(int x, int y, int w, bool night)
+{
+    uint16_t drop = night ? dma_display->color565(80, 170, 255) : dma_display->color565(0, 200, 255);
+    uint16_t drop2 = night ? dma_display->color565(40, 120, 220) : dma_display->color565(0, 140, 220);
+    int phase = (millis() / 130) % 6;
+    for (int col = x; col < x + w; col += 4)
+    {
+        for (int i = 0; i < 6; ++i)
+        {
+            int yy = y + ((i * 3 + (col / 4) + phase) % 12);
+            if (yy >= SCENE_H - 1) continue;
+            dma_display->drawPixel(col, yy, (i % 2 == 0) ? drop : drop2);
+            dma_display->drawPixel(col - 1, yy + 1, (i % 2 == 0) ? drop : drop2);
+        }
+    }
+}
+
+static void drawPixelSnow(int x, int y, int w, bool night)
+{
+    uint16_t snow = night ? dma_display->color565(200, 220, 255) : dma_display->color565(240, 255, 255);
+    int phase = (millis() / 250) % 8;
+    for (int col = x; col < x + w; col += 7)
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            int yy = y + ((i * 4 + (col / 7) + phase) % 12);
+            if (yy >= SCENE_H - 1) continue;
+            dma_display->drawPixel(col, yy, snow);
+            if (col > 0) dma_display->drawPixel(col - 1, yy, snow);
+            if (col < SCENE_W - 1) dma_display->drawPixel(col + 1, yy, snow);
+            if (yy > 0) dma_display->drawPixel(col, yy - 1, snow);
+            if (yy < SCENE_H - 1) dma_display->drawPixel(col, yy + 1, snow);
+        }
+    }
+}
+
+static void drawPixelBolt(int x, int y)
+{
+    uint16_t bolt = dma_display->color565(255, 210, 40);
+    uint16_t hi = dma_display->color565(255, 255, 180);
+    // thick zig-zag bolt
+    dma_display->drawLine(x, y, x - 4, y + 7, bolt);
+    dma_display->drawLine(x + 1, y, x - 3, y + 7, bolt);
+    dma_display->drawLine(x - 4, y + 7, x + 2, y + 7, bolt);
+    dma_display->drawLine(x + 2, y + 7, x - 5, y + 16, bolt);
+    dma_display->drawLine(x - 5, y + 16, x + 3, y + 12, bolt);
+    dma_display->drawLine(x + 3, y + 12, x - 1, y + 20, bolt);
+    // highlight pixels
+    dma_display->drawPixel(x - 1, y + 2, hi);
+    dma_display->drawPixel(x - 2, y + 10, hi);
+}
+
+static void drawSceneSkyGradient(const uint16_t *colors, int count)
+{
+    if (count <= 0)
+        return;
+    for (int y = 0; y < SCENE_H; ++y)
+    {
+        int idx = (count == 1) ? 0 : (y * (count - 1)) / (SCENE_H - 1);
+        dma_display->drawFastHLine(0, y, SCENE_W, colors[idx]);
+    }
+}
+
+static uint16_t lerp565(uint16_t a, uint16_t b, int t256)
+{
+    uint8_t ar = ((a >> 11) & 0x1F) * 255 / 31;
+    uint8_t ag = ((a >> 5) & 0x3F) * 255 / 63;
+    uint8_t ab = (a & 0x1F) * 255 / 31;
+    uint8_t br = ((b >> 11) & 0x1F) * 255 / 31;
+    uint8_t bg = ((b >> 5) & 0x3F) * 255 / 63;
+    uint8_t bb = (b & 0x1F) * 255 / 31;
+
+    uint8_t r = (uint8_t)((ar * (256 - t256) + br * t256) / 256);
+    uint8_t g = (uint8_t)((ag * (256 - t256) + bg * t256) / 256);
+    uint8_t bl = (uint8_t)((ab * (256 - t256) + bb * t256) / 256);
+    return dma_display->color565(r, g, bl);
+}
+
+static void drawSceneSkyLerp(uint16_t top, uint16_t bottom)
+{
+    for (int y = 0; y < SCENE_H; ++y)
+    {
+        int t256 = (SCENE_H <= 1) ? 0 : (y * 256) / (SCENE_H - 1);
+        dma_display->drawFastHLine(0, y, SCENE_W, lerp565(top, bottom, t256));
+    }
+}
+
+static void drawSceneGround(uint16_t groundTop, uint16_t groundBottom)
+{
+    const int h = 3;
+    for (int i = 0; i < h; ++i)
+    {
+        int y = SCENE_H - h + i;
+        int t256 = (h <= 1) ? 0 : (i * 256) / (h - 1);
+        dma_display->drawFastHLine(0, y, SCENE_W, lerp565(groundTop, groundBottom, t256));
+    }
+    dma_display->drawFastHLine(0, SCENE_H - h - 1, SCENE_W, scaleColor565(groundTop, 1.1f));
+}
+
+static void drawCrescentMoon(int cx, int cy, int r, uint16_t moonColor, uint16_t skyColor)
+{
+    dma_display->fillCircle(cx, cy, r, moonColor);
+    dma_display->fillCircle(cx + (r / 3), cy - (r / 4), r - 2, skyColor);
+    dma_display->drawCircle(cx, cy, r, scaleColor565(moonColor, 0.75f));
+}
+
+static void drawSunWithGlow(int cx, int cy, int r, uint16_t sunColor)
+{
+    uint16_t glow = scaleColor565(sunColor, 0.45f);
+    dma_display->fillCircle(cx, cy, r + 2, glow);
+    dma_display->fillCircle(cx, cy, r, sunColor);
+    dma_display->fillCircle(cx, cy, r - 3, dma_display->color565(255, 255, 160));
+    dma_display->drawCircle(cx, cy, r, scaleColor565(sunColor, 0.75f));
+
+    uint16_t ray = scaleColor565(sunColor, 0.80f);
+    dma_display->drawLine(cx, cy - (r + 3), cx, cy - (r + 1), ray);
+    dma_display->drawLine(cx, cy + (r + 1), cx, cy + (r + 3), ray);
+    dma_display->drawLine(cx - (r + 3), cy, cx - (r + 1), cy, ray);
+    dma_display->drawLine(cx + (r + 1), cy, cx + (r + 3), cy, ray);
+    dma_display->drawLine(cx - (r + 2), cy - (r + 2), cx - r, cy - r, ray);
+    dma_display->drawLine(cx + r, cy - (r + 2), cx + (r + 2), cy - r, ray);
+    dma_display->drawLine(cx - (r + 2), cy + (r + 2), cx - r, cy + r, ray);
+    dma_display->drawLine(cx + r, cy + (r + 2), cx + (r + 2), cy + r, ray);
+}
+
+static void drawCloudIconLarge(int x, int y, uint16_t cLight, uint16_t cMid, uint16_t cDark, uint16_t outline)
+{
+    // Large readable cloud (~40x16)
+    dma_display->fillCircle(x + 10, y + 8, 6, cLight);
+    dma_display->fillCircle(x + 20, y + 6, 7, cMid);
+    dma_display->fillCircle(x + 30, y + 8, 6, cDark);
+    dma_display->fillRoundRect(x + 6, y + 10, 32, 7, 3, cMid);
+    dma_display->fillRect(x + 6, y + 12, 32, 5, cMid);
+
+    // Shading band
+    dma_display->drawFastHLine(x + 7, y + 12, 30, scaleColor565(cMid, 0.85f));
+    dma_display->drawFastHLine(x + 8, y + 13, 28, scaleColor565(cMid, 0.80f));
+
+    // Outline
+    dma_display->drawCircle(x + 10, y + 8, 6, outline);
+    dma_display->drawCircle(x + 20, y + 6, 7, outline);
+    dma_display->drawCircle(x + 30, y + 8, 6, outline);
+    dma_display->drawRoundRect(x + 6, y + 10, 32, 7, 3, outline);
+    dma_display->drawFastHLine(x + 6, y + 16, 32, outline);
+
+    // Highlights
+    dma_display->drawPixel(x + 17, y + 3, scaleColor565(cLight, 1.08f));
+    dma_display->drawPixel(x + 22, y + 4, scaleColor565(cLight, 1.08f));
+}
+
+static void drawRainStreaks(int x0, int y0, int w, int yMax)
+{
+    int phase = (millis() / 120) % 6;
+    uint16_t dropA = dma_display->color565(170, 245, 255);
+    uint16_t dropB = dma_display->color565(80, 170, 230);
+    for (int x = x0; x < x0 + w; x += 4)
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            int y = y0 + ((i * 3 + (x / 4) + phase) % 16);
+            if (y >= yMax)
+                continue;
+            uint16_t c = (i % 3 == 0) ? dropB : dropA;
+            dma_display->drawPixel(x, y, c);
+            if (x > 0 && y + 1 < yMax)
+                dma_display->drawPixel(x - 1, y + 1, c);
+        }
+    }
+}
+
+static void drawSnowDrift(int x0, int y0, int w, int yMax, uint16_t snowColor)
+{
+    int phase = (millis() / 220) % 8;
+    for (int x = x0; x < x0 + w; x += 7)
+    {
+        for (int i = 0; i < 5; ++i)
+        {
+            int y = y0 + ((i * 4 + (x / 7) + phase) % 16);
+            if (y >= yMax)
+                continue;
+            drawSnowflake(x, y, snowColor);
+        }
+    }
+}
+
+static void drawLightningBolt(int tipX, int tipY, uint16_t bolt, uint16_t glow)
+{
+    dma_display->drawLine(tipX, tipY, tipX - 4, tipY + 8, bolt);
+    dma_display->drawLine(tipX - 4, tipY + 8, tipX + 1, tipY + 8, bolt);
+    dma_display->drawLine(tipX + 1, tipY + 8, tipX - 6, tipY + 18, bolt);
+    dma_display->drawLine(tipX - 6, tipY + 18, tipX + 3, tipY + 14, bolt);
+    dma_display->drawLine(tipX + 3, tipY + 14, tipX - 1, tipY + 22, bolt);
+    dma_display->drawLine(tipX, tipY, tipX - 4, tipY + 8, glow);
 }
 
 static void drawWeatherSceneSunny()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(15, 105, 185),
-        dma_display->color565(30, 140, 205),
-        dma_display->color565(55, 175, 220),
-        dma_display->color565(85, 205, 235)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t horizonGlow = dma_display->color565(255, 220, 120);
-    uint16_t fieldBase = dma_display->color565(215, 160, 55);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 1; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 5 : 3;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(150, 90, 30));
-
-    uint16_t sunColor = dma_display->color565(255, 240, 90);
-    int sunX = 12;
-    int sunY = 11;
-    dma_display->fillCircle(sunX, sunY, 7, sunColor);
-    dma_display->fillCircle(sunX, sunY, 4, dma_display->color565(255, 255, 120));
-    dma_display->drawCircle(sunX, sunY, 7, scaleColor565(sunColor, 0.8f));
-
+    clearConditionSceneArea();
+    fillDayBackground();
+    // Sunny Day: cloud left, sun right (like reference)
+    drawPixelCloud(2, 8, false);
+    drawPixelSun(50, 11);
 }
 
 static void drawWeatherSceneCloudy()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(20, 110, 190),
-        dma_display->color565(35, 140, 205),
-        dma_display->color565(55, 170, 215),
-        dma_display->color565(85, 200, 225)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t horizonGlow = dma_display->color565(240, 210, 125);
-    uint16_t fieldBase = dma_display->color565(205, 150, 60);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 1; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 5 : 3;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(150, 90, 30));
-
-    uint16_t cloudLight = dma_display->color565(235, 240, 248);
-    uint16_t cloudMid = dma_display->color565(210, 218, 235);
-    uint16_t cloudDark = dma_display->color565(170, 180, 200);
-
-    drawCompactCloud(PANEL_RES_X / 5, 6, cloudLight);
-    drawCompactCloud(PANEL_RES_X / 3 + 2, 9, cloudMid);
-    drawCompactCloud(PANEL_RES_X / 2 + 4, 8, cloudDark);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 4, 10, cloudMid);
-    drawCompactCloud(PANEL_RES_X / 2 - 10, 12, cloudLight);
+    clearConditionSceneArea();
+    fillDayBackground();
+    // Cloudy Day: big cloud centered
+    drawPixelCloud(12, 7, false);
+    drawPixelCloud(2, 10, false);
 }
 
 static void drawWeatherSceneCloudyNight()
 {
-    uint16_t skyColors[] = {
-        scaleColor565(dma_display->color565(4, 6, 20), 1.0f),
-        scaleColor565(dma_display->color565(8, 12, 26), 1.0f),
-        scaleColor565(dma_display->color565(12, 18, 32), 1.0f),
-        scaleColor565(dma_display->color565(16, 24, 40), 1.0f)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(90, 80, 40);
-    uint16_t grassColor = dma_display->color565(20, 50, 25);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, grassColor);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-        dma_display->drawFastVLine(x, PANEL_RES_Y - 8, 2, scaleColor565(fieldBase, 1.1f));
-
-    uint16_t cloudLight = dma_display->color565(200, 210, 225);
-    uint16_t cloudMid = dma_display->color565(170, 180, 195);
-    uint16_t cloudDark = dma_display->color565(140, 150, 170);
-
-    drawCompactCloud(PANEL_RES_X / 5, 6, cloudLight);
-    drawCompactCloud(PANEL_RES_X / 3 + 2, 9, cloudMid);
-    drawCompactCloud(PANEL_RES_X / 2 + 4, 8, cloudDark);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 4, 10, cloudMid);
-    drawCompactCloud(PANEL_RES_X / 2 - 10, 12, cloudLight);
+    clearConditionSceneArea();
+    fillNightBackground();
+    // Cloudy Night: cloud + moon peeking right
+    drawPixelCloud(10, 8, true);
+    drawPixelMoon(54, 9);
 }
 
 static void drawWeatherSceneRain()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(20, 110, 190),
-        dma_display->color565(35, 140, 205),
-        dma_display->color565(55, 170, 215),
-        dma_display->color565(85, 200, 225)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
-    uint16_t fieldBase = dma_display->color565(180, 145, 60);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
-
-    uint16_t cloudLight = dma_display->color565(225, 235, 245);
-    uint16_t cloudMid = dma_display->color565(190, 200, 215);
-    uint16_t cloudDark = dma_display->color565(150, 160, 180);
-
-    struct Cloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } clouds[] = {
-        {PANEL_RES_X / 4, 7, cloudLight},
-        {PANEL_RES_X / 3 + 4, 9, cloudMid},
-        {PANEL_RES_X / 2 + 6, 8, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
-        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
-
-    for (const auto &cloud : clouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t rainColor = dma_display->color565(140, 230, 255);
-    uint16_t rainShadow = dma_display->color565(80, 160, 220);
-    for (const auto &cloud : clouds)
-    {
-        int baseX = cloud.x;
-        int top = cloud.y + 4;
-        for (int x = baseX - 4; x <= baseX + 4; x += 2)
-        {
-            int length = 11;
-            for (int i = 0; i < length; ++i)
-            {
-                int px = x - i / 4;
-                int py = top + i;
-                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
-                {
-                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
-                    dma_display->drawPixel(px, py, color);
-                }
-            }
-        }
-    }
+    clearConditionSceneArea();
+    fillDayBackground();
+    // Rainy Day: cloud + rain
+    drawPixelCloud(10, 6, false);
+    drawPixelRain(12, 14, 50, false);
 }
 
 static void drawWeatherSceneRainNight()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(8, 16, 36),
-        dma_display->color565(12, 22, 48),
-        dma_display->color565(16, 26, 56),
-        dma_display->color565(22, 32, 68)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(90, 80, 45);
-    uint16_t horizonGlow = dma_display->color565(110, 90, 55);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 60, 30));
-
-    uint16_t cloudLight = dma_display->color565(190, 200, 215);
-    uint16_t cloudMid = dma_display->color565(160, 170, 190);
-    uint16_t cloudDark = dma_display->color565(120, 130, 150);
-
-    struct Cloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } clouds[] = {
-        {PANEL_RES_X / 4, 7, cloudLight},
-        {PANEL_RES_X / 3 + 4, 9, cloudMid},
-        {PANEL_RES_X / 2 + 6, 8, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
-        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
-
-    for (const auto &cloud : clouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t rainColor = dma_display->color565(120, 200, 240);
-    uint16_t rainShadow = dma_display->color565(70, 130, 200);
-    for (const auto &cloud : clouds)
-    {
-        int baseX = cloud.x;
-        int top = cloud.y + 4;
-        for (int x = baseX - 4; x <= baseX + 4; x += 2)
-        {
-            int length = 11;
-            for (int i = 0; i < length; ++i)
-            {
-                int px = x - i / 4;
-                int py = top + i;
-                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
-                {
-                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
-                    dma_display->drawPixel(px, py, color);
-                }
-            }
-        }
-    }
+    clearConditionSceneArea();
+    fillNightBackground();
+    // Rainy Night: cloud + moon + rain
+    drawPixelCloud(10, 7, true);
+    drawPixelMoon(54, 9);
+    drawPixelRain(12, 14, 50, true);
 }
 
 static void drawWeatherSceneThunderstorm()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(20, 110, 190),
-        dma_display->color565(35, 140, 205),
-        dma_display->color565(55, 170, 215),
-        dma_display->color565(85, 200, 225)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
-    uint16_t fieldBase = dma_display->color565(180, 145, 60);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
-
-    uint16_t cloudLight = dma_display->color565(225, 235, 245);
-    uint16_t cloudMid = dma_display->color565(190, 200, 215);
-    uint16_t cloudDark = dma_display->color565(150, 160, 180);
-
-    struct Cloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } clouds[] = {
-        {PANEL_RES_X / 4, 7, cloudLight},
-        {PANEL_RES_X / 3 + 4, 9, cloudMid},
-        {PANEL_RES_X / 2 + 6, 8, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
-        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
-
-    for (const auto &cloud : clouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t rainColor = dma_display->color565(140, 230, 255);
-    uint16_t rainShadow = dma_display->color565(80, 160, 220);
-    for (const auto &cloud : clouds)
-    {
-        int baseX = cloud.x;
-        int top = cloud.y + 4;
-        for (int x = baseX - 4; x <= baseX + 4; x += 2)
-        {
-            int length = 11;
-            for (int i = 0; i < length; ++i)
-            {
-                int px = x - i / 4;
-                int py = top + i;
-                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
-                {
-                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
-                    dma_display->drawPixel(px, py, color);
-                }
-            }
-        }
-    }
-
-    auto drawBolt = [&](int tipX, int tipY, uint16_t color) {
-        int x = tipX;
-        int y = tipY;
-        for (int i = 0; i < 6; ++i)
-        {
-            int dx = ((i % 2) == 0) ? -1 : 1;
-            int dy = random(4, 5);
-            int nx = x + dx * 2;
-            int ny = y + dy;
-            if (ny >= PANEL_RES_Y - 6)
-                break;
-            dma_display->drawLine(x, y, nx, ny, color);
-            if (i == 2 || i == 4)
-            {
-                int branchDy = dy / 2;
-                int branchDx = (dx > 0) ? 2 : -2;
-                uint16_t branchColor = scaleColor565(color, 0.6f);
-                int branchX = x + branchDx;
-                int branchY = y + branchDy;
-                dma_display->drawLine(x, y, branchX, branchY, branchColor);
-            }
-            x = nx;
-            y = ny;
-        }
-    };
-
-    uint16_t boltColor = dma_display->color565(255, 240, 120);
-    drawBolt(clouds[0].x, clouds[0].y - 2, boltColor);
+    clearConditionSceneArea();
+    fillDayBackground();
+    // Thunderstorm Day: cloud + bolt + rain
+    drawPixelCloud(10, 6, false);
+    drawPixelBolt(38, 5);
+    drawPixelRain(12, 14, 50, false);
 }
 
 static void drawWeatherSceneThunderstormNight()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(10, 12, 30),
-        dma_display->color565(16, 20, 40),
-        dma_display->color565(20, 24, 48),
-        dma_display->color565(26, 30, 58)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(90, 80, 45);
-    uint16_t horizonGlow = dma_display->color565(110, 90, 55);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 60, 30));
-
-    uint16_t cloudLight = dma_display->color565(200, 210, 225);
-    uint16_t cloudMid = dma_display->color565(170, 180, 195);
-    uint16_t cloudDark = dma_display->color565(130, 140, 160);
-
-    struct Cloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } clouds[] = {
-        {PANEL_RES_X / 4, 7, cloudLight},
-        {PANEL_RES_X / 3 + 4, 9, cloudMid},
-        {PANEL_RES_X / 2 + 6, 8, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 11, cloudMid},
-        {PANEL_RES_X / 2 - 10, 10, cloudLight}};
-
-    for (const auto &cloud : clouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t rainColor = dma_display->color565(120, 200, 240);
-    uint16_t rainShadow = dma_display->color565(70, 130, 200);
-    for (const auto &cloud : clouds)
-    {
-        int baseX = cloud.x;
-        int top = cloud.y + 4;
-        for (int x = baseX - 4; x <= baseX + 4; x += 2)
-        {
-            int length = 11;
-            for (int i = 0; i < length; ++i)
-            {
-                int px = x - i / 4;
-                int py = top + i;
-                if (px >= 0 && px < PANEL_RES_X && py < PANEL_RES_Y - 4)
-                {
-                    uint16_t color = (i % 4 == 0) ? rainShadow : rainColor;
-                    dma_display->drawPixel(px, py, color);
-                }
-            }
-        }
-    }
-
-    auto drawBolt = [&](int tipX, int tipY, uint16_t color) {
-        int x = tipX;
-        int y = tipY;
-        for (int i = 0; i < 6; ++i)
-        {
-            int dx = ((i % 2) == 0) ? -1 : 1;
-            int dy = random(4, 5);
-            int nx = x + dx * 2;
-            int ny = y + dy;
-            if (ny >= PANEL_RES_Y - 6)
-                break;
-            dma_display->drawLine(x, y, nx, ny, color);
-            if (i == 2 || i == 4)
-            {
-                int branchDy = dy / 2;
-                int branchDx = (dx > 0) ? 2 : -2;
-                uint16_t branchColor = scaleColor565(color, 0.6f);
-                int branchX = x + branchDx;
-                int branchY = y + branchDy;
-                dma_display->drawLine(x, y, branchX, branchY, branchColor);
-            }
-            x = nx;
-            y = ny;
-        }
-    };
-
-    uint16_t boltColor = dma_display->color565(255, 240, 120);
-    drawBolt(clouds[0].x, clouds[0].y - 2, boltColor);
+    clearConditionSceneArea();
+    fillNightBackground();
+    // Thunderstorm Night: cloud + moon + bolt + rain
+    drawPixelCloud(10, 7, true);
+    drawPixelMoon(54, 9);
+    drawPixelBolt(38, 5);
+    drawPixelRain(12, 14, 50, true);
 }
 
 static void drawWeatherSceneSnow()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(20, 110, 190),
-        dma_display->color565(35, 140, 205),
-        dma_display->color565(55, 170, 215),
-        dma_display->color565(85, 200, 225)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t horizonGlow = dma_display->color565(230, 200, 110);
-    uint16_t fieldBase = dma_display->color565(180, 145, 60);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(130, 80, 30));
-
-    uint16_t cloudLight = dma_display->color565(240, 245, 255);
-    uint16_t cloudMid = dma_display->color565(210, 220, 235);
-    uint16_t cloudDark = dma_display->color565(180, 190, 205);
-
-    struct SnowCloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } snowClouds[] = {
-        {PANEL_RES_X / 4, 6, cloudLight},
-        {PANEL_RES_X / 3 + 4, 8, cloudMid},
-        {PANEL_RES_X / 2 + 6, 7, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 9, cloudMid},
-        {PANEL_RES_X / 2 - 12, 10, cloudLight}};
-
-    for (const auto &cloud : snowClouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t snowColor = dma_display->color565(240, 250, 255);
-    for (int i = 0; i < 32; ++i)
-    {
-        int x = random(0, PANEL_RES_X);
-        int y = random(8, PANEL_RES_Y - 4);
-        drawSnowflake(x, y, snowColor);
-    }
+    clearConditionSceneArea();
+    fillDayBackground();
+    // Snowy Day: cloud + snow
+    drawPixelCloud(10, 6, false);
+    drawPixelSnow(12, 14, 50, false);
 }
 
 static void drawWeatherSceneSnowNight()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(10, 16, 32),
-        dma_display->color565(14, 20, 40),
-        dma_display->color565(18, 24, 48),
-        dma_display->color565(22, 28, 56)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(90, 80, 40);
-    uint16_t horizonGlow = dma_display->color565(110, 90, 55);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-    {
-        int blades = (x % 10 == 0) ? 4 : 2;
-        dma_display->drawFastVLine(x, PANEL_RES_Y - blades - 3, blades, horizonGlow);
-    }
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 60, 30));
-
-    uint16_t cloudLight = dma_display->color565(210, 220, 235);
-    uint16_t cloudMid = dma_display->color565(180, 190, 210);
-    uint16_t cloudDark = dma_display->color565(150, 160, 180);
-
-    struct SnowCloud
-    {
-        int x;
-        int y;
-        uint16_t color;
-    } snowClouds[] = {
-        {PANEL_RES_X / 4, 6, cloudLight},
-        {PANEL_RES_X / 3 + 4, 8, cloudMid},
-        {PANEL_RES_X / 2 + 6, 7, cloudDark},
-        {PANEL_RES_X - PANEL_RES_X / 4, 9, cloudMid},
-        {PANEL_RES_X / 2 - 12, 10, cloudLight}};
-
-    for (const auto &cloud : snowClouds)
-        drawCompactCloud(cloud.x, cloud.y, cloud.color);
-
-    uint16_t snowColor = dma_display->color565(220, 230, 240);
-    for (int i = 0; i < 32; ++i)
-    {
-        int x = random(0, PANEL_RES_X);
-        int y = random(8, PANEL_RES_Y - 4);
-        drawSnowflake(x, y, snowColor);
-    }
+    clearConditionSceneArea();
+    fillNightBackground();
+    // Snowy Night: cloud + moon + snow
+    drawPixelCloud(10, 7, true);
+    drawPixelMoon(54, 9);
+    drawPixelSnow(12, 14, 50, true);
 }
 
 static void drawWeatherSceneClearNight()
 {
-    uint16_t skyColors[] = {
-        dma_display->color565(4, 6, 20),
-        dma_display->color565(8, 10, 30),
-        dma_display->color565(12, 16, 40),
-        dma_display->color565(16, 20, 50)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldColor = dma_display->color565(200, 140, 40);
-    uint16_t grassColor = dma_display->color565(30, 70, 25);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldColor);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, grassColor);
-    for (int x = 2; x < PANEL_RES_X; x += 5)
-        dma_display->drawFastVLine(x, PANEL_RES_Y - 8, 2, scaleColor565(fieldColor, 1.1f));
-
-    uint16_t moonColor = dma_display->color565(255, 240, 90);
-    int moonX = PANEL_RES_X / 4;
-    int moonY = PANEL_RES_Y / 2 - 6;
-    dma_display->fillCircle(moonX, moonY, 7, moonColor);
-    dma_display->fillCircle(moonX, moonY, 4, dma_display->color565(255, 255, 120));
-    dma_display->drawCircle(moonX, moonY, 7, scaleColor565(moonColor, 0.8f));
-
-    uint16_t starColor = moonColor;
-    drawStar(4, 6, starColor);
-    drawStar(PANEL_RES_X - 6, 8, starColor);
-    drawStar(PANEL_RES_X / 2 + 8, 4, starColor);
-    drawStar(PANEL_RES_X / 3, 2, starColor);
-    drawStar(PANEL_RES_X / 2 + 12, 14, starColor);
-    drawStar(PANEL_RES_X / 2 - 12, 10, starColor);
-
+    clearConditionSceneArea();
+    fillNightBackground();
+    // Clear Night: moon + stars only (like reference)
+    drawPixelMoon(18, 11);
 }
 
 struct WeatherSceneRenderer
@@ -3267,6 +3212,3 @@ void applyUnitPreferences()
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
 }
-
-
-
