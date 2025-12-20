@@ -94,7 +94,7 @@ static double jdToDate(long jd, int &dd, int &mm, int &yy)
     return 0.0;
 }
 
-static double getNewMoonDay(int k, int timeZoneHours)
+static long getNewMoonDay(int k, int timeZoneHours)
 {
     double T = k / 1236.85;
     double T2 = T * T;
@@ -135,7 +135,7 @@ static double getNewMoonDay(int k, int timeZoneHours)
     }
 
     double JdNew = Jd1 + C1 - deltaT;
-    return JdNew + 0.5 + timeZoneHours / 24.0;
+    return (long)floor(JdNew + 0.5 + timeZoneHours / 24.0 + 1e-9);
 }
 
 static double getSunLongitude(double jdn)
@@ -160,13 +160,13 @@ static long getLunarMonth11(int yy, int timeZoneHours)
 {
     long off = jdFromDate(31, 12, yy) - 2415021;
     int k = (int)(off / 29.530588853);
-    double nm = getNewMoonDay(k, timeZoneHours);
-    double sunLong = getSunLongitude(nm);
+    long nm = getNewMoonDay(k, timeZoneHours);
+    double sunLong = getSunLongitude((double)nm);
     if (sunLong > 3 * M_PI / 2)
     {
         nm = getNewMoonDay(k - 1, timeZoneHours);
     }
-    return (long)nm;
+    return nm;
 }
 
 static int getLeapMonthOffset(double a11, int timeZoneHours)
@@ -174,14 +174,14 @@ static int getLeapMonthOffset(double a11, int timeZoneHours)
     int k = (int)((a11 - 2415021.076998695) / 29.530588853 + 0.5);
     int last = 0;
     int i = 1;
-    double arc = getSunLongitude(getNewMoonDay(k + i, timeZoneHours));
+    double arc = getSunLongitude((double)getNewMoonDay(k + i, timeZoneHours));
     double lastArc;
     do
     {
         last = i;
         lastArc = arc;
         i++;
-        arc = getSunLongitude(getNewMoonDay(k + i, timeZoneHours));
+        arc = getSunLongitude((double)getNewMoonDay(k + i, timeZoneHours));
     } while (arc != lastArc && i < 14);
     return last - 1;
 }
@@ -191,8 +191,8 @@ static LunarDate convertSolar2Lunar(int dd, int mm, int yy, int timeZoneMinutes)
     int timeZoneHours = timeZoneMinutes / 60;
     long dayNumber = jdFromDate(dd, mm, yy);
     long k = (long)((dayNumber - 2415021.076998695) / 29.530588853);
-    double monthStart = getNewMoonDay((int)(k + 1), timeZoneHours);
-    if (monthStart > dayNumber + 0.5)
+    long monthStart = getNewMoonDay((int)(k + 1), timeZoneHours);
+    if (monthStart > dayNumber)
     {
         monthStart = getNewMoonDay((int)k, timeZoneHours);
     }
@@ -211,8 +211,8 @@ static LunarDate convertSolar2Lunar(int dd, int mm, int yy, int timeZoneMinutes)
         b11 = getLunarMonth11(yy + 1, timeZoneHours);
     }
 
-    int lunarDay = (int)(dayNumber - (long)monthStart + 1);
-    int diff = (int)(((long)monthStart - a11) / 29);
+    int lunarDay = (int)(dayNumber - monthStart + 1);
+    int diff = (int)((monthStart - a11) / 29);
     int lunarMonth = diff + 11;
     bool lunarLeap = false;
 
