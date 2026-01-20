@@ -29,7 +29,17 @@ RollingUpScreen::RollingUpScreen(int width, int defaultHeight, int lineHeight)
       _resumeAt(0),
       _autoResumeMs(5000),
       _exitHoldMs(0),
-      _blockSizePx(0)
+      _blockSizePx(0),
+      _slowdownActive(false),
+      _dynamicScrollSpeedMs(_scrollSpeedMs),
+      _slowdownStepMs(10),
+      _slowdownStopMs(800),
+      _slowdownStartMs(0),
+      _slowdownDurationMs(1200),
+      _slowdownStartSpeedMs(_scrollSpeedMs),
+      _slowdownEndSpeedMs(800),
+      _slowdownPresses(0),
+      _slowdownPressesToStop(3)
 {
 }
 
@@ -45,6 +55,10 @@ void RollingUpScreen::setLines(const std::vector<String> &lines, bool resetPosit
 void RollingUpScreen::setScrollSpeed(unsigned int ms)
 {
     _scrollSpeedMs = ms;
+    if (!_slowdownActive && !_paused && _slowdownPresses == 0)
+    {
+        _dynamicScrollSpeedMs = ms;
+    }
 }
 
 void RollingUpScreen::setLineColors(const std::vector<uint16_t> &colors)
@@ -71,34 +85,60 @@ void RollingUpScreen::setLineIcons(const std::vector<const uint8_t *> &icons, co
 void RollingUpScreen::setPaused(bool paused)
 {
     _paused = paused;
+    if (_paused)
+        _slowdownActive = false;
 }
 
 void RollingUpScreen::onDownPress()
 {
-    unsigned long now = millis();
-    if (!_paused)
+    if (_lines.empty())
+        return;
+    if (_paused)
+        return;
+
+    unsigned int baseSpeed = _scrollSpeedMs;
+    if (baseSpeed == 0)
+        baseSpeed = 1;
+
+    if (_slowdownPresses == 0)
+        _slowdownPressesToStop = 3;
+    _slowdownPresses++;
+    if (_slowdownPresses >= _slowdownPressesToStop)
     {
-        // First press: pause in place
+        _slowdownActive = false;
         _paused = true;
-        _resumeAt = now + _autoResumeMs;
+        _dynamicScrollSpeedMs = max(600u, baseSpeed * 4u);
+        _resumeAt = 0;
         _gapHoldUntil = 0;
-        _lastTick = now;
+        _lastTick = millis();
         return;
     }
 
-    // Already paused: step one pixel downward (reverse of normal motion)
-    int totalHeight = static_cast<int>(_lines.size()) * _lineHeight + maxExtraOffset(_lineYOffsets);
-    int gap = 24;
-    int cycle = totalHeight + gap;
-    if (cycle <= 0) cycle = 1;
-    _offsetPx = (_offsetPx - 1 + cycle) % cycle;
-    _resumeAt = now + _autoResumeMs; // refresh auto-resume window
-    _lastTick = now;
+    unsigned int maxSlow = max(250u, baseSpeed * 4u);
+    unsigned int step = max(30u, baseSpeed);
+    unsigned int nextTarget = baseSpeed + step * _slowdownPresses;
+    if (nextTarget > maxSlow)
+        nextTarget = maxSlow;
+
+    _slowdownStopMs = maxSlow;
+    _slowdownDurationMs = max(250u, baseSpeed * 2u);
+    _slowdownStartSpeedMs = _dynamicScrollSpeedMs;
+    _slowdownEndSpeedMs = nextTarget;
+    _slowdownActive = true;
+    _slowdownStartMs = millis();
+    _resumeAt = 0;
+    _gapHoldUntil = 0;
 }
 
 void RollingUpScreen::onUpPress()
 {
     _paused = false;
+    _slowdownActive = false;
+    unsigned int baseSpeed = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
+    _scrollSpeedMs = baseSpeed;
+    _dynamicScrollSpeedMs = baseSpeed;
+    _slowdownStartMs = 0;
+    _slowdownPresses = 0;
     _resumeAt = 0;
     _gapHoldUntil = 0;
     _lastTick = millis();
@@ -136,6 +176,10 @@ void RollingUpScreen::reset()
     _lastTick = millis();
     _resumeAt = 0;
     _paused = false;
+    _slowdownActive = false;
+    _dynamicScrollSpeedMs = _scrollSpeedMs;
+    _slowdownStartMs = 0;
+    _slowdownPresses = 0;
 }
 
 void RollingUpScreen::update()
@@ -144,7 +188,13 @@ void RollingUpScreen::update()
         return;
 
     // Keep speed in sync with global vertical setting each tick
-    _scrollSpeedMs = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
+    unsigned int baseSpeed = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
+    if (!_slowdownActive)
+    {
+        _scrollSpeedMs = baseSpeed;
+        if (!_paused && _slowdownPresses == 0)
+            _dynamicScrollSpeedMs = baseSpeed;
+    }
 
     unsigned long now = millis();
 
@@ -165,7 +215,10 @@ void RollingUpScreen::update()
     if (_gapHoldUntil != 0 && now >= _gapHoldUntil)
         _gapHoldUntil = 0;
 
-    if (now - _lastTick >= _scrollSpeedMs)
+    unsigned int effectiveSpeed = (_slowdownActive || _slowdownPresses > 0)
+                                      ? _dynamicScrollSpeedMs
+                                      : _scrollSpeedMs;
+    if (now - _lastTick >= effectiveSpeed)
     {
         int totalHeight = static_cast<int>(_lines.size()) * _lineHeight + maxExtraOffset(_lineYOffsets);
         int travelHeight = (_entryY >= 0 && _exitY >= 0)
@@ -240,6 +293,33 @@ void RollingUpScreen::update()
             _offsetPx = next;
         }
         _lastTick = now;
+
+        if (_slowdownActive)
+        {
+            if (_slowdownStartMs == 0)
+                _slowdownStartMs = now;
+            unsigned long elapsed = now - _slowdownStartMs;
+            if (elapsed >= _slowdownDurationMs)
+                elapsed = _slowdownDurationMs;
+            float t = (_slowdownDurationMs > 0) ? (static_cast<float>(elapsed) / _slowdownDurationMs) : 1.0f;
+            float easeOut = 1.0f - (1.0f - t) * (1.0f - t);
+            float speed = _slowdownStartSpeedMs +
+                          ((_slowdownEndSpeedMs - _slowdownStartSpeedMs) * easeOut);
+            _dynamicScrollSpeedMs = static_cast<unsigned int>(lroundf(speed));
+            if (elapsed >= _slowdownDurationMs || _dynamicScrollSpeedMs >= _slowdownEndSpeedMs)
+            {
+                _slowdownActive = false;
+                if (_slowdownPresses >= _slowdownPressesToStop)
+                {
+                    _paused = true;
+                    _resumeAt = 0;
+                }
+                else
+                {
+                    _dynamicScrollSpeedMs = _slowdownEndSpeedMs;
+                }
+            }
+        }
     }
 }
 

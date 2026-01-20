@@ -1502,19 +1502,30 @@ void loop()
 
     if (noaaAlertScreen.isActive())
     {
-        uint32_t code = getIRCodeNonBlocking();
-        if (code == IR_CANCEL)
+        getButton(); // tighter physical button response while NOAA screen is active
+        bool exitScreen = false;
+        for (int i = 0; i < 4; ++i)
+        {
+            uint32_t code = getIRCodeNonBlocking();
+            if (code == 0)
+                break;
+            if (code == IR_CANCEL)
+            {
+                exitScreen = true;
+                break;
+            }
+            // Apply input before ticking so pause/step actions take effect immediately
+            noaaAlertScreen.handleIR(code);
+        }
+        if (exitScreen)
         {
             hideAllInfoScreens();
             showMainMenuModal();
             playBuzzerTone(3000, 100);
             return;
         }
-        // Apply input before ticking so pause/step actions take effect immediately
-        if (code)
-            noaaAlertScreen.handleIR(code);
         noaaAlertScreen.tick();
-        delay(40);
+        delay(20);
         return;
     }
 

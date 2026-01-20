@@ -2800,9 +2800,11 @@ void drawClockScreen()
     bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
 
     const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char *dayStr = days[now.dayOfTheWeek()];
+    char dateSuffix[10];
+    snprintf(dateSuffix, sizeof(dateSuffix), " %02d/%02d", now.month(), now.day());
     char dateStr[14];
-    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d",
-             days[now.dayOfTheWeek()], now.month(), now.day());
+    snprintf(dateStr, sizeof(dateStr), "%s%s", dayStr, dateSuffix);
 
     // ---- TIME (big Verdana Bold)
     dma_display->setFont(&verdanab8pt7b);
@@ -2914,12 +2916,33 @@ void drawClockScreen()
     dma_display->setTextSize(1);
     uint16_t dateColor = (theme == 1) ? dma_display->color565(60, 60, 120)
                                       : dma_display->color565(150, 200, 255);
-    dma_display->setTextColor(dateColor);
+    uint16_t sundayColor = (theme == 1) ? dma_display->color565(180, 80, 120)
+                                        : dma_display->color565(255, 80, 120);
+    uint16_t saturdayColor = (theme == 1) ? dma_display->color565(80, 140, 200)
+                                          : dma_display->color565(80, 180, 255);
     dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
     int dateX = (64 - (int)w) / 2;
     int dateY = 25;
     dma_display->setCursor(dateX, dateY);
-    dma_display->print(dateStr);
+    if (now.dayOfTheWeek() == 0)
+    {
+        dma_display->setTextColor(sundayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else if (now.dayOfTheWeek() == 6)
+    {
+        dma_display->setTextColor(saturdayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else
+    {
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateStr);
+    }
 
     // ---- TEMPERATURES ----
     dma_display->setFont(&Font5x7Uts);

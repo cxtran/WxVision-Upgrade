@@ -24,8 +24,8 @@ public:
     // Optionally treat groups of pixels as a block for pause logic (e.g., 3 lines * 8px = 24px block)
     void setBlockSizePx(int px);
     // Stop/resume helpers for user input
-    void onDownPress();  // single press steps view downward by 1px and pauses
-    void onUpPress();    // resume scrolling up immediately
+    void onDownPress();  // gradually slow scrolling until it stops
+    void onUpPress();    // resume scrolling up at default speed
     void setAutoResumeMs(unsigned int ms); // default 5000 ms
     bool isPaused() const { return _paused; }
     // Optional gap (ms) to pause between cycles (default 1000 ms)
@@ -62,4 +62,14 @@ private:
     unsigned int _autoResumeMs;
     unsigned int _exitHoldMs;
     int _blockSizePx;
+    bool _slowdownActive;
+    unsigned int _dynamicScrollSpeedMs;
+    unsigned int _slowdownStepMs;
+    unsigned int _slowdownStopMs;
+    unsigned long _slowdownStartMs;
+    unsigned long _slowdownDurationMs;
+    unsigned int _slowdownStartSpeedMs;
+    unsigned int _slowdownEndSpeedMs;
+    int _slowdownPresses;
+    int _slowdownPressesToStop;
 };

@@ -17,53 +17,73 @@ static constexpr unsigned long kAlarmBeepIntervalMs = 1000;
 static constexpr int kAlarmBeepFreq = 3000;
 static constexpr int kAlarmBeepMs = 120;
 
-struct MelodyNote { int freq; int durMs; };
+struct MelodyNote
+{
+    int8_t midi;         // Piano note (MIDI), or NOTE_REST
+    uint16_t durMs;      // total note duration
+    uint16_t attackMs;   // ADSR: attack
+    uint16_t decayMs;    // ADSR: decay
+    uint8_t sustainPct;  // ADSR: sustain (0-100)
+    uint16_t releaseMs;  // ADSR: release
+};
+
 static const MelodyNote kAlarmMelody[] = {
-    {262, 160}, {330, 160}, {392, 160}, {523, 200},
-    {0, 120},
-    {523, 160}, {392, 160}, {330, 160}, {262, 220}
+    {NOTE_C4, 160, 10, 30, 60, 40}, {NOTE_E4, 160, 10, 30, 60, 40}, {NOTE_G4, 160, 10, 30, 60, 40}, {NOTE_C5, 200, 12, 35, 55, 45},
+    {NOTE_REST, 120, 0, 0, 0, 0},
+    {NOTE_C5, 160, 10, 30, 60, 40}, {NOTE_G4, 160, 10, 30, 60, 40}, {NOTE_E4, 160, 10, 30, 60, 40}, {NOTE_C4, 220, 14, 45, 50, 60}
 };
 static const int kAlarmMelodyLen = sizeof(kAlarmMelody) / sizeof(kAlarmMelody[0]);
 
 // Fur Elise (recognizable opening phrase)
-// Frequencies are in Hz, durations in ms
+// Piano notes (MIDI), durations in ms
 static const MelodyNote kMelodyFurElise[] = {
     // e d# e d# e b d c a
-    {659, 180}, {622, 180}, {659, 180}, {622, 180}, {659, 180}, {494, 180}, {587, 180}, {523, 180},
-    {440, 260}, {0, 100}, // brief breath
+    {NOTE_E5, 180, 8, 28, 60, 40}, {NOTE_DS5, 180, 8, 28, 60, 40}, {NOTE_E5, 180, 8, 28, 60, 40}, {NOTE_DS5, 180, 8, 28, 60, 40},
+    {NOTE_E5, 180, 8, 28, 60, 40}, {NOTE_B4, 180, 10, 30, 55, 45}, {NOTE_D5, 180, 10, 30, 55, 45}, {NOTE_C5, 180, 10, 30, 55, 45},
+    {NOTE_A4, 260, 14, 40, 50, 70}, {NOTE_REST, 100, 0, 0, 0, 0}, // brief breath
     // c a-arpeggio and lead-in
-    {262, 180}, {330, 180}, {440, 180}, {494, 240}, {0, 80},
-    {330, 180}, {415, 180}, {494, 180}, {523, 240}, {0, 80},
+    {NOTE_C4, 180, 10, 30, 60, 40}, {NOTE_E4, 180, 10, 30, 60, 40}, {NOTE_A4, 180, 10, 30, 60, 40}, {NOTE_B4, 240, 12, 35, 55, 55},
+    {NOTE_REST, 80, 0, 0, 0, 0},
+    {NOTE_E4, 180, 10, 30, 60, 40}, {NOTE_GS4, 180, 10, 30, 60, 40}, {NOTE_B4, 180, 10, 30, 60, 40}, {NOTE_C5, 240, 12, 35, 55, 55},
+    {NOTE_REST, 80, 0, 0, 0, 0},
     // repeat the opener once more
-    {330, 180}, {659, 180}, {622, 180}, {659, 180}, {622, 180}, {659, 180}, {494, 180}, {587, 180},
-    {523, 180}, {440, 320}
+    {NOTE_E4, 180, 10, 30, 60, 40}, {NOTE_E5, 180, 8, 28, 60, 40}, {NOTE_DS5, 180, 8, 28, 60, 40}, {NOTE_E5, 180, 8, 28, 60, 40},
+    {NOTE_DS5, 180, 8, 28, 60, 40}, {NOTE_E5, 180, 8, 28, 60, 40}, {NOTE_B4, 180, 10, 30, 55, 45}, {NOTE_D5, 180, 10, 30, 55, 45},
+    {NOTE_C5, 180, 10, 30, 55, 45}, {NOTE_A4, 320, 18, 55, 45, 90}
 };
 static const int kMelodyFurEliseLen = sizeof(kMelodyFurElise) / sizeof(kMelodyFurElise[0]);
 
 // Swan Lake (main theme fragment)
 static const MelodyNote kMelodySwanLake[] = {
-    {494, 200},  {554, 200},  {587, 240},  {740, 240},  {880, 240},  {784, 220},
-    {740, 200},  {659, 200},  {740, 220},  {587, 240},  {494, 260},  {0, 120},
-    {494, 200},  {554, 200},  {587, 240},  {554, 200},  {494, 200},  {440, 200},
-    {370, 180},  {392, 200},  {370, 200},  {330, 200},  {370, 240},  {0, 140}
+    {NOTE_B4, 200, 10, 35, 55, 55},  {NOTE_CS5, 200, 10, 35, 55, 55},  {NOTE_D5, 240, 12, 40, 55, 65},
+    {NOTE_FS5, 240, 12, 40, 55, 65}, {NOTE_A5, 240, 12, 40, 55, 65},  {NOTE_G5, 220, 12, 40, 55, 60},
+    {NOTE_FS5, 200, 10, 35, 55, 55}, {NOTE_E5, 200, 10, 35, 55, 55},  {NOTE_FS5, 220, 12, 40, 55, 60},
+    {NOTE_D5, 240, 12, 40, 55, 65},  {NOTE_B4, 260, 14, 45, 50, 70},  {NOTE_REST, 120, 0, 0, 0, 0},
+    {NOTE_B4, 200, 10, 35, 55, 55},  {NOTE_CS5, 200, 10, 35, 55, 55},  {NOTE_D5, 240, 12, 40, 55, 65},
+    {NOTE_CS5, 200, 10, 35, 55, 55}, {NOTE_B4, 200, 10, 35, 55, 55},  {NOTE_A4, 200, 10, 35, 55, 55},
+    {NOTE_FS4, 180, 10, 30, 60, 55}, {NOTE_G4, 200, 10, 35, 55, 55},   {NOTE_FS4, 200, 10, 35, 55, 55},
+    {NOTE_E4, 200, 10, 35, 55, 55},  {NOTE_FS4, 240, 12, 40, 55, 65},  {NOTE_REST, 140, 0, 0, 0, 0}
 };
 static const int kMelodySwanLakeLen = sizeof(kMelodySwanLake) / sizeof(kMelodySwanLake[0]);
 
 // Turkish March (Mozart) - bright opening motif
 static const MelodyNote kMelodyTurkishMarch[] = {
-    {659, 150}, {698, 150}, {784, 150}, {698, 150}, {659, 150}, {622, 150}, {659, 180}, {494, 120},
-    {523, 150}, {587, 150}, {659, 170}, {587, 150}, {523, 150}, {494, 170}, {523, 190}, {0, 110},
-    {523, 150}, {587, 150}, {659, 180}, {698, 180}, {784, 200}, {698, 170}, {659, 170}, {622, 190},
-    {659, 240}
+    {NOTE_E5, 150, 6, 20, 70, 35}, {NOTE_F5, 150, 6, 20, 70, 35}, {NOTE_G5, 150, 6, 20, 70, 35}, {NOTE_F5, 150, 6, 20, 70, 35},
+    {NOTE_E5, 150, 6, 20, 70, 35}, {NOTE_DS5, 150, 6, 20, 70, 35}, {NOTE_E5, 180, 8, 25, 65, 45}, {NOTE_B4, 120, 6, 18, 75, 30},
+    {NOTE_C5, 150, 6, 20, 70, 35}, {NOTE_D5, 150, 6, 20, 70, 35}, {NOTE_E5, 170, 8, 25, 65, 45}, {NOTE_D5, 150, 6, 20, 70, 35},
+    {NOTE_C5, 150, 6, 20, 70, 35}, {NOTE_B4, 170, 8, 25, 65, 45}, {NOTE_C5, 190, 8, 25, 65, 55}, {NOTE_REST, 110, 0, 0, 0, 0},
+    {NOTE_C5, 150, 6, 20, 70, 35}, {NOTE_D5, 150, 6, 20, 70, 35}, {NOTE_E5, 180, 8, 25, 65, 45}, {NOTE_F5, 180, 8, 25, 65, 45},
+    {NOTE_G5, 200, 10, 30, 60, 55}, {NOTE_F5, 170, 8, 25, 65, 45}, {NOTE_E5, 170, 8, 25, 65, 45}, {NOTE_DS5, 190, 8, 25, 65, 55},
+    {NOTE_E5, 240, 12, 35, 55, 70}
 };
 static const int kMelodyTurkishMarchLen = sizeof(kMelodyTurkishMarch) / sizeof(kMelodyTurkishMarch[0]);
 
 // Moonlight Sonata (Beethoven) - arpeggiated intro
 static const MelodyNote kMelodyMoonlight[] = {
-    {277, 240}, {330, 240}, {415, 240}, {523, 320}, {0, 140},
-    {277, 240}, {330, 240}, {415, 240}, {494, 320}, {0, 140},
-    {247, 240}, {311, 240}, {392, 240}, {494, 320}, {0, 140},
-    {220, 240}, {277, 240}, {349, 240}, {466, 320}, {0, 200}
+    {NOTE_CS4, 240, 25, 60, 45, 80}, {NOTE_E4, 240, 25, 60, 45, 80}, {NOTE_GS4, 240, 25, 60, 45, 80}, {NOTE_C5, 320, 30, 70, 40, 100}, {NOTE_REST, 140, 0, 0, 0, 0},
+    {NOTE_CS4, 240, 25, 60, 45, 80}, {NOTE_E4, 240, 25, 60, 45, 80}, {NOTE_GS4, 240, 25, 60, 45, 80}, {NOTE_B4, 320, 30, 70, 40, 100}, {NOTE_REST, 140, 0, 0, 0, 0},
+    {NOTE_B3, 240, 25, 60, 45, 80},  {NOTE_DS4, 240, 25, 60, 45, 80}, {NOTE_G4, 240, 25, 60, 45, 80},  {NOTE_B4, 320, 30, 70, 40, 100}, {NOTE_REST, 140, 0, 0, 0, 0},
+    {NOTE_A3, 240, 25, 60, 45, 80},  {NOTE_CS4, 240, 25, 60, 45, 80}, {NOTE_F4, 240, 25, 60, 45, 80},  {NOTE_AS4, 320, 30, 70, 40, 120}, {NOTE_REST, 200, 0, 0, 0, 0}
 };
 static const int kMelodyMoonlightLen = sizeof(kMelodyMoonlight) / sizeof(kMelodyMoonlight[0]);
 
@@ -224,10 +244,8 @@ void tickAlarmState(const DateTime &now)
             if (nowMs >= s_melodyNoteEndMs)
             {
                 const MelodyNote &note = melody[s_melodyIndex];
-                if (note.freq > 0)
-                {
-                    playBuzzerTone(note.freq, note.durMs);
-                }
+                const ADSR env{note.attackMs, note.decayMs, note.sustainPct, note.releaseMs};
+                playBuzzerPianoNoteADSR(note.midi, note.durMs, env);
                 s_melodyNoteEndMs = nowMs + (unsigned long)note.durMs + 20;
                 s_melodyIndex = (s_melodyIndex + 1) % melodyLen;
             }
