@@ -127,9 +127,14 @@ static bool wifiSelectReturnToSettings = false;
 std::vector<String> foundSSIDs;
 int selectedWifiIdx = 0;
 String scannedSSIDs[16];
+String scannedSSIDLabels[16];
+int scannedSSIDsRSSI[16];
 int wifiScanCount = 0;
 int wifiSelectIndex = 0;
 bool wifiSelectNeedsScan = false;
+static int wifiHScrollIndex = -1;
+static int wifiHScrollOffset = 0;
+static unsigned long wifiHScrollLast = 0;
 
 extern String wifiSSID;
 extern String wifiPass;
@@ -1395,22 +1400,83 @@ int scanWiFiNetworks()
     Serial.println("[WiFi] Scanning networks...");
     int found = performWiFiScan();
 
-    int j = 0;
-    for (int i = 0; i < found && j < 15; ++i)
+    int actualNetworks = 0;
+    int uniqueCount = 0;
+    const int maxEntries = (int)(sizeof(scannedSSIDs) / sizeof(scannedSSIDs[0])) - 1; // reserve for "< Back>"
+
+    if (found > 0)
     {
-        String ssid = WiFi.SSID(i);
-        ssid.trim();
-        if (ssid.isEmpty())
-            continue;
-        scannedSSIDs[j++] = ssid;
+        for (int i = 0; i < found; ++i)
+        {
+            String ssid = WiFi.SSID(i);
+            ssid.trim();
+            if (ssid.isEmpty())
+                continue;
+
+            int rssi = WiFi.RSSI(i);
+            int existing = -1;
+            for (int j = 0; j < uniqueCount; ++j)
+            {
+                if (scannedSSIDs[j] == ssid)
+                {
+                    existing = j;
+                    break;
+                }
+            }
+
+            if (existing >= 0)
+            {
+                if (rssi > scannedSSIDsRSSI[existing])
+                {
+                    scannedSSIDsRSSI[existing] = rssi;
+                }
+                continue;
+            }
+
+            if (uniqueCount >= maxEntries)
+                continue;
+
+            scannedSSIDs[uniqueCount] = ssid;
+            scannedSSIDsRSSI[uniqueCount] = rssi;
+            ++uniqueCount;
+        }
     }
 
-    int actualNetworks = j;
+    // Sort strongest to weakest
+    for (int i = 0; i < uniqueCount - 1; ++i)
+    {
+        for (int j = i + 1; j < uniqueCount; ++j)
+        {
+            if (scannedSSIDsRSSI[j] > scannedSSIDsRSSI[i])
+            {
+                int rssiTmp = scannedSSIDsRSSI[i];
+                scannedSSIDsRSSI[i] = scannedSSIDsRSSI[j];
+                scannedSSIDsRSSI[j] = rssiTmp;
+                String ssidTmp = scannedSSIDs[i];
+                scannedSSIDs[i] = scannedSSIDs[j];
+                scannedSSIDs[j] = ssidTmp;
+            }
+        }
+    }
+
+    int j = 0;
+    if (uniqueCount > 0)
+    {
+        for (int i = 0; i < uniqueCount && j < maxEntries; ++i)
+        {
+            scannedSSIDLabels[j] = scannedSSIDs[i] + " (" + String(scannedSSIDsRSSI[i]) + " dBm)";
+            ++j;
+            actualNetworks++;
+        }
+    }
+
     if (actualNetworks == 0)
     {
         scannedSSIDs[j++] = "(No networks)";
+        scannedSSIDLabels[j - 1] = scannedSSIDs[j - 1];
     }
     scannedSSIDs[j++] = "< Back>";
+    scannedSSIDLabels[j - 1] = scannedSSIDs[j - 1];
 
     wifiScanCount = j;
     wifiSelectIndex = (actualNetworks > 0) ? 0 : (wifiScanCount > 1 ? 1 : 0);
@@ -1611,12 +1677,40 @@ void drawWiFiMenu()
         int idx = wifiMenuScroll + i;
         if (idx >= wifiScanCount) break;
 
-        uint16_t color = (idx == wifiSelectIndex)
+        bool selected = (idx == wifiSelectIndex);
+        uint16_t color = selected
                              ? dma_display->color565(255, 255, 0)   // yellow highlight
                              : dma_display->color565(255, 255, 255); // white text
         dma_display->setTextColor(color);
-        dma_display->setCursor(0, listStartY + wifiLineHeight * i);
-        dma_display->print(scannedSSIDs[idx]);
+        int cursorX = 0;
+        if (selected)
+        {
+            if (wifiHScrollIndex != idx)
+            {
+                wifiHScrollIndex = idx;
+                wifiHScrollOffset = 0;
+                wifiHScrollLast = millis();
+            }
+            int textW = getTextWidth(scannedSSIDLabels[idx].c_str());
+            if (textW > screenW)
+            {
+                unsigned long now = millis();
+                if (now - wifiHScrollLast > (unsigned long)scrollSpeed)
+                {
+                    wifiHScrollLast = now;
+                    wifiHScrollOffset++;
+                    if (wifiHScrollOffset > (textW + 8))
+                        wifiHScrollOffset = -screenW;
+                }
+                cursorX = -wifiHScrollOffset;
+            }
+            else
+            {
+                wifiHScrollOffset = 0;
+            }
+        }
+        dma_display->setCursor(cursorX, listStartY + wifiLineHeight * i);
+        dma_display->print(scannedSSIDLabels[idx]);
     }
 }
 

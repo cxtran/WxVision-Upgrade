@@ -2731,16 +2731,30 @@ void drawHumidityIcon(int x, int y, uint16_t color)
 //    dma_display->drawLine(x + 1, y + 6, x + 5, y + 6, color);              // flat bottom
 }
 
-void drawWiFiIcon(int x, int y, uint16_t color)
+static int wifiSignalLevelFromRssi(int rssi)
 {
-    // Simple 7x5 Wi-Fi signal icon
-    // (x,y) = top-left corner of the icon
-    // three arcs + small dot
-    dma_display->drawPixel(x + 3, y + 4, color);              // bottom dot
-    dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, color); // small arc
-    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color); // mid arc
-    dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, color); // top arc
+    if (rssi >= -55) return 3;   // excellent
+    if (rssi >= -67) return 2;   // good
+    if (rssi >= -75) return 1;   // fair
+    return 0;                    // weak/very weak
+}
+
+void drawWiFiIcon(int x, int y, uint16_t color, int rssi)
+{
+    // Simple 7x5 Wi-Fi signal icon that reflects RSSI strength.
+    // (x,y) = top-left corner of the icon.
+    int level = wifiSignalLevelFromRssi(rssi);
+
+    // bottom dot always visible when connected
+    dma_display->drawPixel(x + 3, y + 4, color);
     dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, color); // support bar
+
+    if (level >= 1)
+        dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, color); // small arc
+    if (level >= 2)
+        dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color); // mid arc
+    if (level >= 3)
+        dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, color); // top arc
 }
 
 void drawAlarmIcon(int x, int y, uint16_t color)
@@ -2901,7 +2915,7 @@ void drawClockScreen()
         uint16_t wifiColor = (theme == 1)
                                  ? dma_display->color565(90, 90, 120)    // dim gray for mono
                                  : dma_display->color565(100, 255, 120); // soft green for color
-        drawWiFiIcon(wifiX, wifiY, wifiColor);
+        drawWiFiIcon(wifiX, wifiY, wifiColor, WiFi.RSSI());
     }
     if (isAnyAlarmEnabled() || alarmActive)
     {
