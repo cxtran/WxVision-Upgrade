@@ -257,6 +257,21 @@ static void refreshNetworkServices(bool wifiConnected)
                   deviceHostname.c_str(), ip.toString().c_str());
 }
 
+static void attemptWifiReconnect(bool apActive)
+{
+    if (wifiSSID.isEmpty() || wifiPass.isEmpty())
+        return;
+
+    wifi_mode_t desiredMode = apActive ? WIFI_AP_STA : WIFI_STA;
+    if (WiFi.getMode() != desiredMode)
+    {
+        WiFi.mode(desiredMode);
+    }
+
+    WiFi.disconnect(false, false); // stop any stale connection attempts
+    WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+}
+
 static bool isRotationBlocked()
 {
     return inKeyboardMode ||
@@ -768,6 +783,7 @@ void setup()
     if (WiFi.status() != WL_CONNECTED)
     {
         Serial.println("[WiFi] Connection failed, showing WiFi menu...");
+        initialSetupAwaitingWifi = true;
         splashEnd();
         onWiFiConnectFailed();
         return;
@@ -836,6 +852,7 @@ void loop()
     }
 
     static unsigned long wifiDownSince = 0;
+    static unsigned long lastWifiReconnectAttempt = 0;
     if (!wifiConnected)
     {
         if (wifiDownSince == 0)
@@ -848,10 +865,18 @@ void loop()
                 apActive = true;
             }
         }
+
+        if (!wifiSelecting && (lastWifiReconnectAttempt == 0 || (now - lastWifiReconnectAttempt) >= WIFI_RETRY_TIMEOUT))
+        {
+            lastWifiReconnectAttempt = now;
+            Serial.println("[WiFi] Reconnect attempt...");
+            attemptWifiReconnect(apActive);
+        }
     }
     else
     {
         wifiDownSince = 0;
+        lastWifiReconnectAttempt = 0;
     }
 
     if (wifiConnected != lastWifiState || apActive != lastApState)

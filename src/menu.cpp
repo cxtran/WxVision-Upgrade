@@ -323,6 +323,15 @@ void handleIR(uint32_t code)
             if (wifiSelectIndex == wifiScanCount - 1)
             { // <Back>
                 wifiSelecting = false;
+                if (initialSetupAwaitingWifi)
+                {
+                    menuActive = false;
+                    currentMenuLevel = MENU_NONE;
+                    menuScroll = 0;
+                    handleInitialSetupDecision(false);
+                    playBuzzerTone(900, 80);
+                    return;
+                }
                 bool returnToWifiSettings = wifiSelectReturnToSettings;
                 wifiSelectReturnToSettings = false;
                 if (returnToWifiSettings)

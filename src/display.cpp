@@ -2739,22 +2739,28 @@ static int wifiSignalLevelFromRssi(int rssi)
     return 0;                    // weak/very weak
 }
 
-void drawWiFiIcon(int x, int y, uint16_t color, int rssi)
+void drawWiFiIcon(int x, int y, uint16_t dimColor, uint16_t activeColor, int rssi)
 {
     // Simple 7x5 Wi-Fi signal icon that reflects RSSI strength.
     // (x,y) = top-left corner of the icon.
     int level = wifiSignalLevelFromRssi(rssi);
 
-    // bottom dot always visible when connected
-    dma_display->drawPixel(x + 3, y + 4, color);
-    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, color); // support bar
+    // Draw full icon in dim color as background.
+    dma_display->drawPixel(x + 3, y + 4, dimColor);
+    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, dimColor); // support bar
+    dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, dimColor); // small arc
+    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, dimColor); // mid arc
+    dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, dimColor); // top arc
 
+    // Overlay the active signal level with green only.
+    dma_display->drawPixel(x + 3, y + 4, activeColor);
+    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, activeColor);
     if (level >= 1)
-        dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, color); // small arc
+        dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, activeColor);
     if (level >= 2)
-        dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color); // mid arc
+        dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, activeColor);
     if (level >= 3)
-        dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, color); // top arc
+        dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, activeColor);
 }
 
 void drawAlarmIcon(int x, int y, uint16_t color)
@@ -2912,10 +2918,13 @@ void drawClockScreen()
                     int wifiY = ampmY - 8;        // above AM/PM
         */
 
-        uint16_t wifiColor = (theme == 1)
-                                 ? dma_display->color565(90, 90, 120)    // dim gray for mono
-                                 : dma_display->color565(100, 255, 120); // soft green for color
-        drawWiFiIcon(wifiX, wifiY, wifiColor, WiFi.RSSI());
+        uint16_t wifiDim = (theme == 1)
+                               ? dma_display->color565(35, 35, 60)   // dim background
+                               : dma_display->color565(80, 80, 80);  // dim background (visible on black)
+        uint16_t wifiActive = (theme == 1)
+                                  ? dma_display->color565(90, 140, 200)
+                                  : dma_display->color565(100, 255, 120);
+        drawWiFiIcon(wifiX, wifiY, wifiDim, wifiActive, WiFi.RSSI());
     }
     if (isAnyAlarmEnabled() || alarmActive)
     {
