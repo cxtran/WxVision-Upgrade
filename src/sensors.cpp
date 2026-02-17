@@ -38,6 +38,7 @@ SensirionI2cScd4x scd4x;
 Adafruit_AHTX0 aht20;
 Adafruit_BMP280 bmp280;
 static float s_lastCalibratedLux = NAN;
+static float s_lastRawLux = NAN;
 
 static float computeCalibratedLux(float rawLux)
 {
@@ -115,6 +116,7 @@ float readBrightnessSensor()
   float ldrResistance = (3.3 - voltage) * FIXED_RESISTOR / voltage;
   float ldr_kOhm = ldrResistance / 1000.0;
   float lux = 500 * pow(ldr_kOhm, -1.4);
+  s_lastRawLux = lux;
 
   Serial.print("ADC: ");
   Serial.print(adcValue);
@@ -174,8 +176,14 @@ float getLastCalibratedLux()
   return s_lastCalibratedLux;
 }
 
+float getLastRawLux()
+{
+  return s_lastRawLux;
+}
+
 static uint32_t s_lastIrCode = 0;
 static unsigned long s_lastIrTimestamp = 0;
+static bool s_lastIrWasVirtual = false;
 // While alarm is firing, any IR key cancels/snoozes it.
 static inline bool isAlarmCancelCode(uint32_t /*code*/) { return true; }
 
@@ -199,6 +207,7 @@ uint32_t getIRCodeNonBlocking()
       return 0;
     s_lastIrCode = queuedCode;
     s_lastIrTimestamp = millis();
+    s_lastIrWasVirtual = true;
     return queuedCode;
   }
 
@@ -215,6 +224,7 @@ uint32_t getIRCodeNonBlocking()
       s_lastIrCode = code;
     }
     s_lastIrTimestamp = millis();
+    s_lastIrWasVirtual = false;
     irrecv.resume();
     if (code != 0)
     {
@@ -253,6 +263,12 @@ uint32_t getIRCodeDebounced(uint16_t debounceMs)
   if (code == 0)
   {
     return 0;
+  }
+
+  // Virtual IR is injected by WebUI/buttons and should be handled immediately.
+  if (s_lastIrWasVirtual)
+  {
+    return code;
   }
 
   unsigned long now = millis();

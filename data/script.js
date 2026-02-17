@@ -120,10 +120,9 @@ function sendRemoteCommand(action){
     toggleScreenRemote();
     return;
   }
-  fetch('/ir?btn=' + encodeURIComponent(action))
+  fetch('/ir?btn=' + encodeURIComponent(action), { cache: 'no-store' })
     .then(function(r){
       if (!r.ok) throw new Error('Failed');
-      return r.json().catch(function(){ return null; });
     })
     .then(function(){
       setMsg('remoteMsg','Command sent.', true);
@@ -679,8 +678,31 @@ function applyAutoDstAvailability(){
   }
 }
 
+var indexStatusPending = false;
+var indexStatusTimer = null;
+var INDEX_REFRESH_VISIBLE_MS = 5000;
+var INDEX_REFRESH_HIDDEN_MS = 15000;
+
+function getIndexRefreshDelay(){
+  return document.hidden ? INDEX_REFRESH_HIDDEN_MS : INDEX_REFRESH_VISIBLE_MS;
+}
+
+function scheduleIndexStatusRefresh(delayMs){
+  if (indexStatusTimer) {
+    clearTimeout(indexStatusTimer);
+    indexStatusTimer = null;
+  }
+  var wait = (typeof delayMs === 'number') ? delayMs : getIndexRefreshDelay();
+  indexStatusTimer = setTimeout(function(){
+    loadIndexStatus();
+    scheduleIndexStatusRefresh();
+  }, wait);
+}
+
 function loadIndexStatus(){
-  fetch('/status.json')
+  if (indexStatusPending) return;
+  indexStatusPending = true;
+  fetch('/status-brief.json', { cache: 'no-store' })
     .then(function(r){
       if (!r.ok) throw new Error("Status fetch failed");
       return r.json();
@@ -697,23 +719,18 @@ function loadIndexStatus(){
         if (el) el.innerText = formatHumidityValue(st.humidity);
       el = document.getElementById('st-time');
       if (el) el.innerText = st.time || '--';
-      fetch('/time.json')
-        .then(function(r){ return r.json(); })
-        .then(function(t){
-          var tzEl = document.getElementById('st-tz');
-          if (tzEl) {
-            var name = t.tzLabel || t.tzName || '';
-            var offset = (typeof t.tzOffset === 'number') ? fmtUtc(t.tzOffset) : '';
-            tzEl.textContent = name ? (name + (offset ? ' ('+offset+')' : '')) : (offset || '--');
-          }
-          if (el && t.epoch) {
-            el.innerText = formatLocalTime(t.epoch, t.tzOffset);
-          }
-        })
-        .catch(function(){});
+      var tzEl = document.getElementById('st-tz');
+      if (tzEl) {
+        var name = st.tzLabel || st.tzName || '';
+        var offset = (typeof st.tzOffset === 'number') ? fmtUtc(st.tzOffset) : '';
+        tzEl.textContent = name ? (name + (offset ? ' (' + offset + ')' : '')) : (offset || '--');
+      }
     })
     .catch(function(e){
       console.warn("Status load failed:", e);
+    })
+    .finally(function(){
+      indexStatusPending = false;
     });
 }
 function loadAll(){
@@ -1264,15 +1281,6 @@ async function saveForecastUiSettingsWeb(event){
   await submitSettings(payload, 'saveForecastUiMsg');
 }
 
-// Trend chart for future use
-  var _lastTrendSamples = null;
-  async function loadTrend(){
-    const res = await fetch('/trend.json');
-    if (!res.ok) return;
-    const data = await res.json();
-    renderTrendCharts(data || []);
-  }
-
 function formatLocalTime(epochSec, offsetMinutes){
   var ms = (epochSec + (offsetMinutes||0)*60) * 1000;
   var d = new Date(ms);
@@ -1280,94 +1288,8 @@ function formatLocalTime(epochSec, offsetMinutes){
   return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()) +
          ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
-
-function renderTrendCharts(samples){
-    var tempCanvas = document.getElementById('tempChart');
-    var co2Canvas = document.getElementById('co2Chart');
-    if (!tempCanvas && !co2Canvas) return;
-
-    var pts = (samples || []).filter(function(s){ return s && typeof s.ts === 'number'; });
-    pts.sort(function(a,b){ return a.ts - b.ts; });
-    _lastTrendSamples = pts;
-    var lastTs = pts.length ? pts[pts.length-1].ts : null;
-
-  drawLineChart(tempCanvas, pts, function(p){ return p.temp; }, 'Temp', '#4cd964');
-  drawLineChart(co2Canvas, pts, function(p){ return p.co2; }, 'CO₂', '#ffcc66');
-
-  var meta = document.getElementById('trendMeta');
-  if (meta) {
-    if (!pts.length) {
-      meta.textContent = 'No trend data yet.';
-    } else {
-      meta.textContent = 'Last sample: ' + new Date(lastTs*1000).toLocaleString();
-    }
-  }
-  }
-
-  function resizeCanvasToDisplaySize(canvas, heightCssPx) {
-    if (!canvas) return null;
-    var rect = canvas.getBoundingClientRect();
-    var cssW = Math.max(1, Math.floor(rect.width || canvas.clientWidth || 1));
-    var cssH = Math.max(1, Math.floor(heightCssPx || rect.height || canvas.clientHeight || 200));
-    var dpr = window.devicePixelRatio || 1;
-    var needW = Math.floor(cssW * dpr);
-    var needH = Math.floor(cssH * dpr);
-    if (canvas.width !== needW) canvas.width = needW;
-    if (canvas.height !== needH) canvas.height = needH;
-    var ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    return { w: cssW, h: cssH, ctx: ctx };
-  }
-
-  function drawLineChart(canvas, samples, valueFn, label, strokeStyle){
-    if (!canvas || !canvas.getContext) return;
-    var sized = resizeCanvasToDisplaySize(canvas, 200);
-    if (!sized) return;
-    var ctx = sized.ctx;
-    var w = sized.w, h = sized.h;
-    ctx.clearRect(0,0,w,h);
-    ctx.fillStyle = '#0f1726';
-    ctx.fillRect(0,0,w,h);
-
-    var vals = samples.map(valueFn).filter(function(v){ return typeof v === 'number' && !isNaN(v); });
-    if (!vals.length) {
-      ctx.font = '12px sans-serif';
-      ctx.fillStyle = '#9fb3c8';
-      ctx.fillText('No data', 10, 20);
-      return;
-    }
-  var min = Math.min.apply(null, vals);
-  var max = Math.max.apply(null, vals);
-  if (Math.abs(max - min) < 0.01) { max += 0.5; min -= 0.5; }
-
-  var margin = 24;
-  var plotW = w - margin*2;
-  var plotH = h - margin*2;
-  ctx.strokeStyle = '#1f2b42';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(margin, margin, plotW, plotH);
-
-    ctx.strokeStyle = strokeStyle || '#4cd964';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-  var first = true;
-  samples.forEach(function(s, idx){
-    var v = valueFn(s);
-    if (typeof v !== 'number' || isNaN(v)) return;
-    var x = margin + (plotW * idx / Math.max(1, samples.length - 1));
-    var norm = (v - min) / (max - min);
-    var y = margin + plotH - norm * plotH;
-    if (first) { ctx.moveTo(x,y); first=false; } else { ctx.lineTo(x,y); }
-  });
-    ctx.stroke();
-
-    ctx.fillStyle = '#9fb3c8';
-    ctx.font = '12px sans-serif';
-    ctx.fillText(label + ' min: ' + min.toFixed(1) + ' max: ' + max.toFixed(1), margin, h - 6);
-  }
-
 function parseManualToEpoch() {
+
   var d = document.getElementById('manualDate').value;
   var t = document.getElementById('manualTime').value;
   if (!d || !t) return null;
@@ -1469,8 +1391,6 @@ window.addEventListener('load', function(){
     if (countrySelectEl) countrySelectEl.addEventListener('change', applyCountryCustomAvailability);
     applyDataSourceVisibility();
     initWifiScanUI();
-  } else {
-    loadIndexStatus();
   }
 });
 
@@ -1480,20 +1400,23 @@ window.addEventListener('load', function(){
     return;
   }
   loadIndexStatus();
-  loadTrend();
   setupRemoteControls();
-  setInterval(loadIndexStatus, 5000); // refresh every 5s
+  scheduleIndexStatusRefresh();
 });
 
-window.addEventListener('resize', function(){
-  if (_lastTrendSamples) {
-    renderTrendCharts(_lastTrendSamples);
+document.addEventListener('visibilitychange', function(){
+  if (!document.getElementById('st-ssid')) {
+    return;
   }
+  if (!document.hidden) {
+    loadIndexStatus();
+  }
+  scheduleIndexStatusRefresh();
 });
+
 
 window.addEventListener('load', function(){
   var full = document.getElementById('full-status');
   if (!full) return;
   loadFullStatus();
-  setInterval(loadFullStatus, 3000); // refresh every 3s for snappier status page
 });

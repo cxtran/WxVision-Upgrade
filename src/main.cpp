@@ -127,14 +127,14 @@ unsigned long lastBrightnessRead = 0;
 unsigned long lastButtonCheck = 0;
 
 const long interval_ShowTimeDate = 1000;
-const unsigned long brightnessInterval = 5000;
+const unsigned long brightnessInterval = 10000;
 const unsigned long buttonInterval = 100;
 
 // === Sensors ===
 unsigned long lastReadSCD40 = 0;
-const unsigned long SCD40ReadInterval = 5000;
+const unsigned long SCD40ReadInterval = 10000;
 unsigned long lastReadAHT20_BMP280 = 0;
-const unsigned long AHT20_BMP280ReadInterval = 5000;
+const unsigned long AHT20_BMP280ReadInterval = 10000;
 
 // CLock Screen
 unsigned long lastClockUpdate = 0;
@@ -804,6 +804,7 @@ void loop()
     unsigned long now = millis();
     static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
+    static bool clockSensorUpdatePending = false;
     const unsigned long blinkInterval = 500;
 
     // Pause normal rendering during OTA uploads; keep lightweight processing only
@@ -953,7 +954,7 @@ void loop()
 
     // --- Brightness control ---
     static unsigned long lastBrightnessRead = 0;
-    if (now - lastBrightnessRead >= 5000)
+    if (now - lastBrightnessRead >= brightnessInterval)
     {
         lastBrightnessRead = now;
         float lux = readBrightnessSensor();
@@ -987,6 +988,7 @@ void loop()
         lastReadSCD40 = now;
         newAirQualityData = true;
         readSCD40();
+        clockSensorUpdatePending = true;
     }
 
     // --- Read AHT20 and BMP280 Sensor ---
@@ -996,6 +998,7 @@ void loop()
         newAHT20_BMP280Data = true;
         readBMP280();
         readAHT20();
+        clockSensorUpdatePending = true;
     }
 
     // === [2] --- UI/modal/menu/infoscreen handling --- ===
@@ -1370,14 +1373,46 @@ void loop()
     }
 
 // Screens not use InfoScreen class   
-    if( currentScreen == SCREEN_CLOCK){
-        // Handle clock screen updates
+    if (currentScreen == SCREEN_CLOCK)
+    {
         static unsigned long lastClockUpdate = 0;
-        unsigned long interval = isAlarmCurrentlyActive() ? 400 : 1000;
-        if (now - lastClockUpdate >= interval) // Update display
+        static int lastClockMinute = -1;
+        static int lastClockHour = -1;
+        static int lastClockDay = -1;
+        static unsigned long lastPulseUpdate = 0;
+
+        bool alarmActive = isAlarmCurrentlyActive();
+        bool timeChanged = false;
+        if (haveAlarmTime)
+        {
+            int curMinute = alarmNow.minute();
+            int curHour = alarmNow.hour();
+            int curDay = alarmNow.day();
+            if (curMinute != lastClockMinute || curHour != lastClockHour || curDay != lastClockDay)
+            {
+                lastClockMinute = curMinute;
+                lastClockHour = curHour;
+                lastClockDay = curDay;
+                timeChanged = true;
+            }
+        }
+
+        unsigned long interval = alarmActive ? 400 : 10000;
+        bool forceRefresh = needsClear;
+        if (forceRefresh || timeChanged || clockSensorUpdatePending || (now - lastClockUpdate >= interval))
         {
             lastClockUpdate = now;
-            drawClockScreen(); // Redraw clock screen
+            drawClockScreen();
+            needsClear = false;
+            clockSensorUpdatePending = false;
+        }
+
+        // Keep the pulse dot blinking every second without full redraw.
+        if (now - lastPulseUpdate >= 1000)
+        {
+            lastPulseUpdate = now;
+            int pulseSecond = haveAlarmTime ? alarmNow.second() : static_cast<int>((now / 1000UL) % 60UL);
+            drawClockPulseDot(pulseSecond);
         }
     }
 

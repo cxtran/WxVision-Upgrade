@@ -83,6 +83,7 @@ void scrollWeatherDetails();
 
 void drawOWMScreen();
 void drawClockScreen(); 
+void drawClockPulseDot(int second);
 void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();

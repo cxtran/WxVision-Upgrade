@@ -3091,6 +3091,11 @@ void drawClockScreen()
     dma_display->fillCircle(eqDotX, eqDotY, dotRadius, eqPulseColor);
     dma_display->fillCircle(co2DotX, co2DotY, dotRadius, co2PulseColor);
 
+    drawClockPulseDot(second);
+}
+
+void drawClockPulseDot(int second)
+{
     // ---- Seconds pulse ----
     uint16_t pulseColor = (second % 2 == 0)
                               ? dma_display->color565(0, 150, 0)

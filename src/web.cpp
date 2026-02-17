@@ -5,6 +5,7 @@
 #include <ArduinoJson.h>
 #include <time.h>
 #include <stdlib.h>
+#include <math.h>
 #include "esp_ota_ops.h"
 
 #include "settings.h"
@@ -324,7 +325,10 @@ void setupWebServer() {
     doc["ip"] = WiFi.localIP().toString();
     doc["mac"] = WiFi.macAddress();
     doc["rssi"] = WiFi.RSSI();
-    float luxNow = readBrightnessSensor();
+    float luxNow = getLastRawLux();
+    if (!isfinite(luxNow)) {
+      luxNow = readBrightnessSensor();
+    }
     doc["lux"] = luxNow;
 
     unsigned long uptimeSec = millis() / 1000UL;
@@ -414,9 +418,50 @@ void setupWebServer() {
       doc["pressureRaw"] = bmp280_pressure;
     }
 
-    String json;
-    serializeJson(doc, json);
-    req->send(200, "application/json", json);
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
+  });
+
+  server.on("/status-brief.json", HTTP_GET, [](AsyncWebServerRequest *req) {
+    static String cachedPayload;
+    static uint32_t cacheBuiltAt = 0;
+    uint32_t now = millis();
+    bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 1000u;
+    if (refreshCache) {
+      JsonDocument doc;
+
+      String dispTemp;
+      if (dataSource == 1) {
+        dispTemp = fmtTemp(currentCond.temp, 0);
+      } else {
+        dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
+      }
+
+      doc["wifiSSID"] = WiFi.SSID();
+      doc["ip"] = WiFi.localIP().toString();
+      doc["temp"] = dispTemp;
+      doc["humidity"] = (dataSource == 1 && currentCond.humidity >= 0)
+        ? String(currentCond.humidity)
+        : str_Humd;
+      doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
+
+      int currentIdx = timezoneCurrentIndex();
+      if (currentIdx >= 0) {
+        doc["tzLabel"] = timezoneLabelAt(static_cast<size_t>(currentIdx));
+      } else {
+        doc["tzLabel"] = "Custom Offset";
+      }
+      doc["tzOffset"] = tzOffset;
+
+      cachedPayload = "";
+      serializeJson(doc, cachedPayload);
+      cacheBuiltAt = now;
+    }
+
+    AsyncWebServerResponse *res = req->beginResponse(200, "application/json", cachedPayload);
+    res->addHeader("Cache-Control", "no-store, max-age=0");
+    req->send(res);
   });
 
   server.on("/wifi/scan", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -497,19 +542,15 @@ void setupWebServer() {
       WiFi.mode(prevMode);
     }
 
-    String json;
-    serializeJson(doc, json);
-    req->send(200, "application/json", json);
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
   });
 
   server.on("/ir", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (!req->hasParam("btn"))
     {
-      JsonDocument doc;
-      doc["error"] = "missing btn";
-      String json;
-      serializeJson(doc, json);
-      req->send(400, "application/json", json);
+      req->send(400, "text/plain", "missing btn");
       return;
     }
 
@@ -517,31 +558,17 @@ void setupWebServer() {
     uint32_t code = irCodeForButton(btn);
     if (code == 0)
     {
-      JsonDocument doc;
-      doc["error"] = "unknown button";
-      doc["btn"] = btn;
-      String json;
-      serializeJson(doc, json);
-      req->send(400, "application/json", json);
+      req->send(400, "text/plain", "unknown button");
       return;
     }
 
     if (!enqueueVirtualIRCode(code))
     {
-      JsonDocument doc;
-      doc["error"] = "busy";
-      String json;
-      serializeJson(doc, json);
-      req->send(503, "application/json", json);
+      req->send(503, "text/plain", "busy");
       return;
     }
 
-    JsonDocument doc;
-    doc["status"] = "queued";
-    doc["btn"] = btn;
-    String json;
-    serializeJson(doc, json);
-    req->send(200, "application/json", json);
+    req->send(204);
   });
 
   server.on("/screen", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -628,7 +655,10 @@ void setupWebServer() {
   doc["buzzerTone"]       = buzzerToneSet;
     doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
-    float luxNow = readBrightnessSensor();
+    float luxNow = getLastRawLux();
+    if (!isfinite(luxNow)) {
+      luxNow = readBrightnessSensor();
+    }
     doc["currentLux"] = luxNow;
     doc["lux"] = luxNow; // alias for status parity
     doc["owmCity"]          = owmCity;
@@ -656,8 +686,9 @@ void setupWebServer() {
     noaa["enabled"] = noaaAlertsEnabled;
     noaa["lat"] = noaaLatitude;
     noaa["lon"] = noaaLongitude;
-    String json; serializeJson(doc, json);
-    req->send(200, "application/json", json);
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
   });
 
   // ---------- POST /settings (chunk-safe) ----------
@@ -1002,8 +1033,9 @@ void setupWebServer() {
       o["label"]     = timezoneLabelAt(i);
       o["supportsDst"] = timezoneSupportsDst(i);
     }
-    String out; serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
   });
 
   server.on("/time.json", HTTP_GET, [](AsyncWebServerRequest* req){
@@ -1028,8 +1060,9 @@ void setupWebServer() {
     doc["dateFmt"]   = dateFmt;
     doc["ntpServer"] = ntpServerHost;
     doc["ntpPreset"] = ntpServerPreset;
-    String out; serializeJson(doc, out);
-    req->send(200, "application/json", out);
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
   });
 
   server.on("/time", HTTP_POST,
