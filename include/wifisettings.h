@@ -24,3 +24,10 @@ bool isAccessPointActive();
 IPAddress getAccessPointIP();
 String getAccessPointSSID();
 
+// --- BEGIN NEW CODE ---
+void serviceWiFiConnection();
+bool isWiFiConnectionInProgress();
+bool consumeWiFiConnectionFailure();
+bool startBackgroundWifiReconnect(bool apActive);
+// --- END NEW CODE ---
+

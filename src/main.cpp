@@ -117,6 +117,7 @@ static bool otaInitialized = false;
 static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
+static bool autoWifiReconnectSuppressed = false;
 
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
@@ -260,17 +261,61 @@ static void refreshNetworkServices(bool wifiConnected)
 
 static void attemptWifiReconnect(bool apActive)
 {
-    if (wifiSSID.isEmpty() || wifiPass.isEmpty())
-        return;
+    // --- BEGIN NEW CODE ---
+    startBackgroundWifiReconnect(apActive);
+    // --- END NEW CODE ---
+}
 
-    wifi_mode_t desiredMode = apActive ? WIFI_AP_STA : WIFI_STA;
-    if (WiFi.getMode() != desiredMode)
+static bool isSavedSsidAvailable()
+{
+    if (wifiSSID.isEmpty())
+        return false;
+
+    bool wifiConnected = (WiFi.status() == WL_CONNECTED);
+    wifi_mode_t previousMode = WiFi.getMode();
+    wifi_mode_t scanMode = previousMode;
+
+    if (scanMode == WIFI_OFF)
     {
-        WiFi.mode(desiredMode);
+        scanMode = WIFI_STA;
+    }
+    else if (scanMode == WIFI_AP)
+    {
+        scanMode = WIFI_AP_STA;
     }
 
-    WiFi.disconnect(false, false); // stop any stale connection attempts
-    WiFi.begin(wifiSSID.c_str(), wifiPass.c_str());
+    if (scanMode != previousMode)
+    {
+        WiFi.mode(scanMode);
+        delay(100);
+    }
+
+    if (!wifiConnected)
+    {
+        WiFi.disconnect(false, false);
+    }
+
+    WiFi.scanDelete();
+    int found = WiFi.scanNetworks(false, true);
+    bool ssidAvailable = false;
+
+    for (int i = 0; i < found; ++i)
+    {
+        if (WiFi.SSID(i) == wifiSSID)
+        {
+            ssidAvailable = true;
+            break;
+        }
+    }
+
+    WiFi.scanDelete();
+
+    if (scanMode != previousMode)
+    {
+        WiFi.mode(previousMode);
+    }
+
+    return ssidAvailable;
 }
 
 static bool isRotationBlocked()
@@ -780,6 +825,16 @@ void setup()
         return;
     }
 
+    if (!isSavedSsidAvailable())
+    {
+        Serial.printf("[WiFi] Saved SSID \"%s\" is not in range; starting offline without prompts.\n", wifiSSID.c_str());
+        autoWifiReconnectSuppressed = true;
+        initialSetupAwaitingWifi = false;
+        splashUpdate("Offline", 6, 6);
+        completeStartupAfterWiFi(true);
+        return;
+    }
+
     Serial.println("Connecting WiFi...");
     splashUpdate("WiFi Link", 6, 6);
     connectToWiFi();
@@ -790,12 +845,21 @@ void setup()
         return;
     }
 
+    // --- BEGIN NEW CODE ---
+    if (isWiFiConnectionInProgress())
+    {
+        initialSetupAwaitingWifi = true;
+        return;
+    }
+    // --- END NEW CODE ---
+
     if (WiFi.status() != WL_CONNECTED)
     {
-        Serial.println("[WiFi] Connection failed, showing WiFi menu...");
-        initialSetupAwaitingWifi = true;
-        splashEnd();
-        onWiFiConnectFailed();
+        Serial.println("[WiFi] Connection failed; starting offline without WiFi prompt.");
+        autoWifiReconnectSuppressed = true;
+        initialSetupAwaitingWifi = false;
+        splashUpdate("Offline", 6, 6);
+        completeStartupAfterWiFi(true);
         return;
     }
 
@@ -843,6 +907,17 @@ void loop()
         tickAlarmState(alarmNow);
     }
 
+    // --- BEGIN NEW CODE ---
+    serviceWiFiConnection();
+    if ((initialSetupAwaitingWifi || !startupCompleted) && consumeWiFiConnectionFailure())
+    {
+        Serial.println("[WiFi] Startup connect failed; continuing offline mode.");
+        autoWifiReconnectSuppressed = true;
+        initialSetupAwaitingWifi = false;
+        completeStartupAfterWiFi(true);
+    }
+    // --- END NEW CODE ---
+
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
     bool apActive = isAccessPointActive();
 
@@ -869,7 +944,10 @@ void loop()
         if (wifiDownSince == 0)
             wifiDownSince = now;
 
-        if (!apActive && !wifiSelecting && (now - wifiDownSince) >= WIFI_RETRY_TIMEOUT)
+        if (!autoWifiReconnectSuppressed &&
+            !apActive &&
+            !wifiSelecting &&
+            (now - wifiDownSince) >= WIFI_RETRY_TIMEOUT)
         {
             if (startAccessPoint())
             {
@@ -877,15 +955,27 @@ void loop()
             }
         }
 
-        if (!wifiSelecting && (lastWifiReconnectAttempt == 0 || (now - lastWifiReconnectAttempt) >= WIFI_RETRY_TIMEOUT))
+        if (!autoWifiReconnectSuppressed &&
+            !isWiFiConnectionInProgress() &&
+            !wifiSelecting &&
+            (lastWifiReconnectAttempt == 0 || (now - lastWifiReconnectAttempt) >= WIFI_RETRY_TIMEOUT))
         {
             lastWifiReconnectAttempt = now;
-            Serial.println("[WiFi] Reconnect attempt...");
-            attemptWifiReconnect(apActive);
+            if (!isSavedSsidAvailable())
+            {
+                autoWifiReconnectSuppressed = true;
+                Serial.printf("[WiFi] Saved SSID \"%s\" is unavailable; auto reconnect suppressed.\n", wifiSSID.c_str());
+            }
+            else
+            {
+                Serial.println("[WiFi] Reconnect attempt...");
+                attemptWifiReconnect(apActive);
+            }
         }
     }
     else
     {
+        autoWifiReconnectSuppressed = false;
         wifiDownSince = 0;
         lastWifiReconnectAttempt = 0;
     }
