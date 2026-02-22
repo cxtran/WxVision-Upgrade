@@ -41,14 +41,22 @@ void getButton(){
     Serial.println("UP button pressed");
     playBuzzerTone(1500, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRCode(IR_UP);
+    if (currentScreen == SCREEN_LUNAR_LUCK) {
+      adjustLunarLuckSpeed(+1);
+    } else {
+      enqueueVirtualIRCode(IR_UP);
+    }
   
   }
   if (lastDn == HIGH && dn == LOW) {
     Serial.println("DOWN button pressed");
     playBuzzerTone(1200, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRCode(IR_DOWN);
+    if (currentScreen == SCREEN_LUNAR_LUCK) {
+      adjustLunarLuckSpeed(-1);
+    } else {
+      enqueueVirtualIRCode(IR_DOWN);
+    }
   }
   if (lastLeft == HIGH && left == LOW) {
     Serial.println("LEFT button pressed");

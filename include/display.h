@@ -38,6 +38,7 @@ enum ScreenMode {
     SCREEN_HOURLY,
     SCREEN_CLOCK,
     SCREEN_LUNAR_VI,
+    SCREEN_LUNAR_LUCK,
     SCREEN_NOAA_ALERT,
     SCREEN_COUNT
 };
@@ -91,6 +92,7 @@ void displayWeatherData();
 void fetchWeatherFromOWM();
 void createScrollingText();
 void drawLunarScreenVi();
+void drawLunarLuckScreen();
 // display.h
 void requestScrollRebuild();     // mark that the marquee text must be rebuilt
 void notifyUnitsMaybeChanged();  // compare unit signature; request rebuild if changed
@@ -107,6 +109,10 @@ void drawWeatherConditionScene(WeatherSceneKind kind);
 void drawWeatherConditionScene(const String &condition);
 void tickConditionSceneMarquee();
 void tickLunarMarquee();
+void tickLunarLuckMarquee();
+void adjustLunarLuckSpeed(int delta);
+void resetLunarLuckSectionRotation();
+bool handleLunarLuckInput(uint32_t code);
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);

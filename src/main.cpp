@@ -45,6 +45,7 @@
 const ScreenMode InfoScreenModes[] = {
     SCREEN_CLOCK,
     SCREEN_LUNAR_VI,
+    SCREEN_LUNAR_LUCK,
     SCREEN_OWM,
     SCREEN_UDP_DATA,
     SCREEN_UDP_FORECAST,
@@ -344,6 +345,9 @@ static void renderScreenContents(ScreenMode mode)
     case SCREEN_LUNAR_VI:
         drawLunarScreenVi();
         break;
+    case SCREEN_LUNAR_LUCK:
+        drawLunarLuckScreen();
+        break;
     default:
         break;
     }
@@ -479,6 +483,12 @@ void rotateScreen(int direction)
         break;
     case SCREEN_PREDICT:
         drawPredictionScreen();
+        break;
+    case SCREEN_LUNAR_VI:
+        drawLunarScreenVi();
+        break;
+    case SCREEN_LUNAR_LUCK:
+        drawLunarLuckScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -902,6 +912,8 @@ void loop()
     {
         needsClear = true;
         lastScreen = currentScreen;
+        if (currentScreen == SCREEN_LUNAR_LUCK)
+            resetLunarLuckSectionRotation();
     }
 
     // === [1] --- Always-on background tasks --- ===
@@ -1284,7 +1296,16 @@ void loop()
         return;
     }
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
-    uint32_t code = getIRCodeDebounced();
+    uint32_t code = (currentScreen == SCREEN_LUNAR_LUCK)
+                        ? getIRCodeNonBlocking()
+                        : getIRCodeDebounced();
+    if (currentScreen == SCREEN_LUNAR_LUCK)
+    {
+        if (handleLunarLuckInput(code))
+        {
+            return;
+        }
+    }
     // Pause/resume Next 24h scroll with Down/Up when on prediction screen
     if (code == IR_DOWN && currentScreen == SCREEN_PREDICT)
     {
@@ -1431,6 +1452,44 @@ void loop()
             drawLunarScreenVi();
         }
         tickLunarMarquee();
+    }
+
+    if (currentScreen == SCREEN_LUNAR_LUCK)
+    {
+        static unsigned long lastLunarLuckRedraw = 0;
+        static int lastLunarLuckDay = -1;
+        static int lastLunarLuckMonth = -1;
+        static int lastLunarLuckYear = -1;
+        bool lunarLuckDateChanged = false;
+        if (haveAlarmTime)
+        {
+            int curDay = alarmNow.day();
+            int curMonth = alarmNow.month();
+            int curYear = alarmNow.year();
+            if (curDay != lastLunarLuckDay || curMonth != lastLunarLuckMonth || curYear != lastLunarLuckYear)
+            {
+                lastLunarLuckDay = curDay;
+                lastLunarLuckMonth = curMonth;
+                lastLunarLuckYear = curYear;
+                lunarLuckDateChanged = true;
+            }
+        }
+        if (needsClear)
+        {
+            dma_display->fillScreen(0);
+            needsClear = false;
+            lastLunarLuckRedraw = 0;
+        }
+        if (lunarLuckDateChanged)
+        {
+            lastLunarLuckRedraw = 0;
+        }
+        if (lunarLuckDateChanged || (now - lastLunarLuckRedraw >= 60000))
+        {
+            lastLunarLuckRedraw = now;
+            drawLunarLuckScreen();
+        }
+        tickLunarLuckMarquee();
     }
 
     if (currentScreen == SCREEN_CONDITION_SCENE)

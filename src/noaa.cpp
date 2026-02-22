@@ -54,7 +54,7 @@ static bool isJsonArray(JSONVar value)
     return JSON.typeof_(value) == "array";
 }
 
-static String cleanRawExtract(String raw)
+static void cleanRawExtractInPlace(String &raw)
 {
     raw.trim();
     if (raw.length() >= 2 && raw[0] == '"' && raw[raw.length() - 1] == '"')
@@ -69,7 +69,6 @@ static String cleanRawExtract(String raw)
         raw.replace("  ", " ");
     }
     raw.trim();
-    return raw;
 }
 
 static String extractRawField(const String &payload, const String &key)
@@ -107,6 +106,17 @@ static String extractRawField(const String &payload, const String &key)
 
 static bool tryRawFallback(const String &payload)
 {
+    // Raw fallback is only for small JSON-ish text payloads.
+    // Avoid processing compressed/binary or very large bodies to prevent heap churn.
+    if (payload.length() == 0 || payload.length() > 24576)
+        return false;
+    if (payload.length() >= 2 &&
+        static_cast<uint8_t>(payload[0]) == 0x1F &&
+        static_cast<uint8_t>(payload[1]) == 0x8B)
+    {
+        return false;
+    }
+
     clearAlertFields();
 
     String rawEvent = extractRawField(payload, "event");
@@ -117,12 +127,16 @@ static bool tryRawFallback(const String &payload)
     if (!(rawEvent.length() || rawSeverity.length() || rawDesc.length() || rawInstr.length()))
         return false;
 
-    s_event = cleanRawExtract(rawEvent);
+    s_event = rawEvent;
+    cleanRawExtractInPlace(s_event);
     if (s_event.length() == 0)
         s_event = "NOAA Alert";
-    s_severity = cleanRawExtract(rawSeverity);
-    s_description = cleanRawExtract(rawDesc);
-    s_instruction = cleanRawExtract(rawInstr);
+    s_severity = rawSeverity;
+    cleanRawExtractInPlace(s_severity);
+    s_description = rawDesc;
+    cleanRawExtractInPlace(s_description);
+    s_instruction = rawInstr;
+    cleanRawExtractInPlace(s_instruction);
     if (s_description.length() == 0)
         s_description = "No description provided.";
     s_hasAlert = true;
@@ -348,6 +362,8 @@ static void fetchNoaaAlert()
         if (payload.startsWith("\x1f\x8b"))
         {
             Serial.println("[NOAA] Warning: gzip payload received; forcing identity failed");
+            http.end();
+            return;
         }
         handleNoaaPayload(payload);
     }

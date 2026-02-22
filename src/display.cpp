@@ -1,4 +1,4 @@
-#include <Arduino.h>
+﻿#include <Arduino.h>
 #include <ctype.h>
 #include "display.h"
 #include "icons.h"
@@ -6,19 +6,21 @@
 #include "RTClib.h" // For RTC DateTime
 #include "sensors.h"
 // #include "fonts/FreeSans9pt7b.h"
-// #include "fonts/tahomabd7pt7b.h"
-// #include "fonts/tahomabd8pt7b.h"
 #include "fonts/verdanab8pt7b.h"
 #include "datetimesettings.h"
 #include "units.h"
 #include "env_quality.h"
 #include "alarm.h"
+#include <U8g2_for_Adafruit_GFX.h>
 
 #include "tempest.h"
 #include "weather_countries.h"
 #include "InfoModal.h"
 #include <math.h>
 #include "ScrollLine.h"
+#include "fortune_headline.h"
+#include "fortune_phrase_picker.h"
+#include "ir_codes.h"
 
 extern float aht20_temp;
 extern float SCD40_temp;
@@ -253,9 +255,9 @@ static void buildLunarYearNames(int lunarYear,
                                 String &animalVi,
                                 String &animalEn)
 {
-    const char *stemsVi[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
-    const char *branchesVi[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
-    const char *animalsVi[12] = {"Chuot", "Trau", "Ho", "Meo", "Rong", "Ran", "Ngua", "De", "Khi", "Ga", "Cho", "Heo"};
+    const char *stemsVi[10] = {"Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ", "Canh", "Tân", "Nhâm", "Quý"};
+    const char *branchesVi[12] = {"Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ", "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
+    const char *animalsVi[12] = {"Chuột", "Trâu", "Hổ", "Mèo", "Rồng", "Rắn", "Ngựa", "Dê", "Khỉ", "Gà", "Chó", "Heo"};
     const char *animalsEn[12] = {"Rat", "Ox", "Tiger", "Cat", "Dragon", "Snake", "Horse", "Goat", "Monkey", "Rooster", "Dog", "Pig"};
 
     const char *elementsEn[5] = {"Wood", "Fire", "Earth", "Metal", "Water"};
@@ -264,7 +266,7 @@ static void buildLunarYearNames(int lunarYear,
     int branchIndex = (lunarYear + 8) % 12;
 
     stemBranchVi = String(stemsVi[stemIndex]) + " " + branchesVi[branchIndex];
-    zodiacVi = String("Nam con ") + animalsVi[branchIndex];
+    zodiacVi = String("Năm con ") + animalsVi[branchIndex];
     animalVi = String(animalsVi[branchIndex]);
 
     int elementIndex = stemIndex / 2;
@@ -290,11 +292,11 @@ static String formatConditionSceneTimeTag();
 
 static String formatLunarHourTag()
 {
-    // Map local hour (0–23) to Vietnamese lunar hour name
+    // Map local hour (0â€“23) to Vietnamese lunar hour name
     static const char *names[12] = {
-        "Gio Ty",  "Gio Suu",  "Gio Dan",  "Gio Mao",
-        "Gio Thin","Gio Ty",   "Gio Ngo",  "Gio Mui",
-        "Gio Than","Gio Dau",  "Gio Tuat", "Gio Hoi"};
+        "Giờ Tý",  "Giờ Sửu",  "Giờ Dần",  "Giờ Mão",
+        "Giờ Thìn","Giờ Tỵ",   "Giờ Ngọ",  "Giờ Mùi",
+        "Giờ Thân","Giờ Dậu",  "Giờ Tuất", "Giờ Hợi"};
 
     int hour = t_hour;
     if (hour < 0 || hour > 23)
@@ -352,12 +354,48 @@ static String formatSolarTermTag()
     }
 }
 
+static String formatSolarTermTagVi()
+{
+    int m = d_month;
+    int d = d_day;
+
+    switch (m)
+    {
+    case 1:
+        return (d <= 15) ? String("Tiểu Hàn") : String("Đại Hàn");
+    case 2:
+        return (d <= 15) ? String("Lập Xuân") : String("Vũ Thủy");
+    case 3:
+        return (d <= 15) ? String("Kinh Trập") : String("Xuân Phân");
+    case 4:
+        return (d <= 15) ? String("Thanh Minh") : String("Cốc Vũ");
+    case 5:
+        return (d <= 15) ? String("Lập Hạ") : String("Tiểu Mãn");
+    case 6:
+        return (d <= 15) ? String("Mang Chủng") : String("Hạ Chí");
+    case 7:
+        return (d <= 15) ? String("Tiểu Thử") : String("Đại Thử");
+    case 8:
+        return (d <= 15) ? String("Lập Thu") : String("Xử Thử");
+    case 9:
+        return (d <= 15) ? String("Bạch Lộ") : String("Thu Phân");
+    case 10:
+        return (d <= 15) ? String("Hàn Lộ") : String("Sương Giáng");
+    case 11:
+        return (d <= 15) ? String("Lập Đông") : String("Tiểu Tuyết");
+    case 12:
+        return (d <= 15) ? String("Đại Tuyết") : String("Đông Chí");
+    default:
+        return String("");
+    }
+}
+
 static String formatLunarDayName(int dd, int mm, int yy)
 {
     long jd = jdFromDate(dd, mm, yy);
 
-    static const char *stemsVi[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
-    static const char *branchesVi[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+    static const char *stemsVi[10] = {"Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ", "Canh", "Tân", "Nhâm", "Quý"};
+    static const char *branchesVi[12] = {"Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ", "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
 
     int stemIndex = (int)((jd + 9) % 10);
     int branchIndex = (int)((jd + 1) % 12);
@@ -369,12 +407,898 @@ static String formatLunarDayName(int dd, int mm, int yy)
     return String(stemsVi[stemIndex]) + " " + branchesVi[branchIndex];
 }
 
+static String formatCanChiDayAscii(int dd, int mm, int yy)
+{
+    long jd = jdFromDate(dd, mm, yy);
+    static const char *stems[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
+    static const char *branches[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+    int stemIndex = static_cast<int>((jd + 9) % 10);
+    int branchIndex = static_cast<int>((jd + 1) % 12);
+    if (stemIndex < 0)
+        stemIndex += 10;
+    if (branchIndex < 0)
+        branchIndex += 12;
+    return String(stems[stemIndex]) + " " + branches[branchIndex];
+}
+
+static String formatCanChiYearAscii(int lunarYear)
+{
+    static const char *stems[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
+    static const char *branches[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+    int stemIndex = (lunarYear + 6) % 10;
+    int branchIndex = (lunarYear + 8) % 12;
+    return String(stems[stemIndex]) + " " + branches[branchIndex];
+}
+
+static String formatCanChiYearVi(int lunarYear)
+{
+    static const char *stems[10] = {"Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ", "Canh", "Tân", "Nhâm", "Quý"};
+    static const char *branches[12] = {"Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ", "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
+    int stemIndex = (lunarYear + 6) % 10;
+    int branchIndex = (lunarYear + 8) % 12;
+    return String(stems[stemIndex]) + " " + branches[branchIndex];
+}
+
+static String formatCanChiMonthAscii(int lunarYear, int lunarMonth)
+{
+    static const char *stems[10] = {"Giap", "At", "Binh", "Dinh", "Mau", "Ky", "Canh", "Tan", "Nham", "Quy"};
+    static const char *branches[12] = {"Ty", "Suu", "Dan", "Mao", "Thin", "Ty", "Ngo", "Mui", "Than", "Dau", "Tuat", "Hoi"};
+
+    // Month 1 is Dần. Stem of month 1 depends on year stem.
+    // Giáp/Kỷ->Bính, Ất/Canh->Mậu, Bính/Tân->Canh, Đinh/Nhâm->Nhâm, Mậu/Quý->Giáp.
+    const int month1StemByYearStem[10] = {2, 4, 6, 8, 0, 2, 4, 6, 8, 0};
+    int yearStemIndex = (lunarYear + 6) % 10;
+    int stemIndex = (month1StemByYearStem[yearStemIndex] + (lunarMonth - 1)) % 10;
+    int branchIndex = (lunarMonth + 1) % 12; // lunar month 1 -> Dần
+    return String(stems[stemIndex]) + " " + branches[branchIndex];
+}
+
+static String formatCanChiMonthVi(int lunarYear, int lunarMonth)
+{
+    static const char *stems[10] = {"Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ", "Canh", "Tân", "Nhâm", "Quý"};
+    static const char *branches[12] = {"Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ", "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
+
+    const int month1StemByYearStem[10] = {2, 4, 6, 8, 0, 2, 4, 6, 8, 0};
+    int yearStemIndex = (lunarYear + 6) % 10;
+    int stemIndex = (month1StemByYearStem[yearStemIndex] + (lunarMonth - 1)) % 10;
+    int branchIndex = (lunarMonth + 1) % 12;
+    return String(stems[stemIndex]) + " " + branches[branchIndex];
+}
+
 // Lunar marquee state (merged screen)
 static String lunarLines[3];
 static uint16_t lunarWidths[3] = {0, 0, 0};
 static int lunarOffsets[3] = {0, 0, 0};
 static unsigned long lastLunarTick = 0;
 static bool lunarInitialized = false;
+static bool lunarLuckInitialized = false;
+static int lunarLuckBuiltDay = -1;
+static int lunarLuckBuiltMonth = -1;
+static int lunarLuckBuiltYear = -1;
+static int lunarLuckScore = 0;
+static float lunarLuckSpeedScale = 1.0f; // runtime scale vs global speed (1.0 = global)
+static U8G2_FOR_ADAFRUIT_GFX lunarLuckUtf8;
+static bool lunarLuckUtf8Ready = false;
+
+static void ensureLunarLuckUtf8()
+{
+    if (lunarLuckUtf8Ready || !dma_display)
+        return;
+    lunarLuckUtf8.begin(*dma_display);
+    lunarLuckUtf8.setFontMode(1);
+    lunarLuckUtf8.setFontDirection(0);
+    lunarLuckUtf8Ready = true;
+}
+
+static void setLunarLuckUtf8Font()
+{
+    ensureLunarLuckUtf8();
+    if (!lunarLuckUtf8Ready)
+        return;
+    lunarLuckUtf8.setFont(u8g2_font_unifont_t_vietnamese1);
+}
+
+#define MAX_SECTIONS 10
+#define TITLE_MAX 48
+#define CONTENT_MAX 420
+#define GOIY_CONTENT_MAX 800
+#define SEP " * "
+
+static const char *const PHRASES_CADAO_TOT[] PROGMEM = {
+    "Thiên thời, địa lợi, nhân hòa.",
+    "Trời không phụ lòng người.",
+    "Ở hiền gặp lành.",
+    "Đức năng thắng số.",
+    "Hữu xạ tự nhiên hương.",
+    "Có công mài sắt, có ngày nên kim.",
+    "Nước chảy đá mòn.",
+    "Kiến tha lâu cũng đầy tổ.",
+    "Tích tiểu thành đại.",
+    "Góp gió thành bão."
+};
+
+static const char *const PHRASES_CADAO_BINH[] PROGMEM = {
+    "Chậm mà chắc.",
+    "Cẩn tắc vô áy náy.",
+    "Liệu cơm gắp mắm.",
+    "Lời nói chẳng mất tiền mua.",
+    "Ăn quả nhớ kẻ trồng cây.",
+    "Uống nước nhớ nguồn.",
+    "Kính trên nhường dưới.",
+    "Giấy rách phải giữ lấy lề.",
+    "Khôn ngoan đối đáp người ngoài.",
+    "Một cây làm chẳng nên non."
+};
+
+static const char *const PHRASES_CADAO_XAU[] PROGMEM = {
+    "Dục tốc bất đạt.",
+    "Tham thì thâm.",
+    "Thấy lợi đừng vội mừng.",
+    "Một điều nhịn, chín điều lành.",
+    "Người tính không bằng trời tính.",
+    "Mưu sự tại nhân, thành sự tại thiên.",
+    "Lửa gần rơm lâu ngày cũng bén.",
+    "Đánh kẻ chạy đi, không ai đánh người chạy lại.",
+    "Có thờ có thiêng, có kiêng có lành.",
+    "Cẩn tắc vô áy náy."
+};
+
+#define CADAO_TOT_COUNT (sizeof(PHRASES_CADAO_TOT) / sizeof(PHRASES_CADAO_TOT[0]))
+#define CADAO_BINH_COUNT (sizeof(PHRASES_CADAO_BINH) / sizeof(PHRASES_CADAO_BINH[0]))
+#define CADAO_XAU_COUNT (sizeof(PHRASES_CADAO_XAU) / sizeof(PHRASES_CADAO_XAU[0]))
+
+struct LuckSection
+{
+    const char *title;
+    char *content;
+    uint16_t contentCap;
+    uint16_t contentLen;
+    bool marquee;
+    int16_t contentWidthPx;
+};
+
+enum LuckTone : int8_t
+{
+    TONE_XAU = -1,
+    TONE_BINH = 0,
+    TONE_TOT = 1
+};
+
+struct XuatHanhInfo
+{
+    const char *name;
+    LuckTone tone;
+};
+
+static const char *toneLabelVN(LuckTone t)
+{
+    if (t > 0)
+        return "Tốt";
+    if (t < 0)
+        return "Xấu";
+    return "Bình";
+}
+
+static LuckSection g_sections[MAX_SECTIONS];
+static char g_sectionContent[MAX_SECTIONS][CONTENT_MAX];
+static char g_goiyContent[GOIY_CONTENT_MAX];
+static uint8_t g_sectionCount = 0;
+static char g_titleTopic[TITLE_MAX];
+
+static uint8_t currentSectionIndex = 0;
+static int16_t marqueeOffsetPx = 0;
+static uint32_t lastScrollMs = 0;
+static uint32_t sectionStartMs = 0;
+static bool marqueeActive = false;
+static bool lunarPreviewMode = false;
+static int16_t lunarDayOffset = 0; // 0=today, +N future day, -N past day
+static constexpr int16_t LUNAR_OFFSET_MIN = -30;
+static constexpr int16_t LUNAR_OFFSET_MAX = 30;
+static uint32_t upLastPressMs = 0;
+static uint32_t downLastPressMs = 0;
+static constexpr uint16_t DBL_MS = 320;
+enum HeaderAnimState
+{
+    HDR_IDLE = 0,
+    HDR_DOOR
+};
+static HeaderAnimState hdrState = HDR_IDLE;
+static char hdrOld[TITLE_MAX];
+static char hdrNew[TITLE_MAX];
+static int16_t hdrDoorPx = 0;
+static bool hdrDrawNew = false;
+static bool hdrReverse = false;
+static bool hdrBrightnessPulsed = false;
+static uint8_t hdrBrightnessSaved = 0;
+static uint32_t hdrAnimStartMs = 0;
+static uint32_t hdrLastFrameMs = 0;
+static uint32_t hdrDelayStartMs = 0;
+static bool hdrDelayActive = false;
+static constexpr uint16_t HDR_ANIM_MS = 160;
+static constexpr uint16_t HDR_FRAME_MS = 16;
+static constexpr int16_t HEADER_Y = 0;
+static constexpr int16_t HEADER_H = 16;
+static constexpr int16_t HEADER_W = PANEL_RES_X;
+static constexpr int16_t HEADER_PAD_X = 2;
+static constexpr uint8_t HDR_PULSE_DELTA = 18;
+static constexpr uint16_t HDR_PULSE_START_MS = 0;
+static constexpr uint16_t HDR_PULSE_END_MS = HDR_ANIM_MS;
+static constexpr bool HDR_EDGE_HIGHLIGHT = true;
+static constexpr uint16_t HDR_START_DELAY_MS = 50;
+
+static constexpr uint32_t STATIC_DWELL_MS = 4500ul;
+static constexpr uint32_t SCROLL_INTERVAL_MS = 40ul;
+static constexpr int16_t SCROLL_STEP_PX = 1;
+static constexpr int16_t GAP_PX = 16;
+static constexpr int LINE1_Y = 14;
+static constexpr int LINE2_Y = 30;
+static constexpr int LINE2_CLEAR_Y = 18;
+static constexpr int LINE2_CLEAR_H = 14;
+// Clear full lower band to avoid residue on Vietnamese glyph extents.
+static constexpr int LINE2_CLEAR_Y_SAFE = 16;
+static constexpr int LINE2_CLEAR_H_SAFE = 16;
+
+static inline float easeInOutCubic(float t)
+{
+    if (t < 0.5f)
+        return 4.0f * t * t * t;
+    const float u = -2.0f * t + 2.0f;
+    return 1.0f - ((u * u * u) / 2.0f);
+}
+
+static bool isLeapYearGregorian(int year)
+{
+    if ((year % 400) == 0)
+        return true;
+    if ((year % 100) == 0)
+        return false;
+    return (year % 4) == 0;
+}
+
+static int daysInMonthGregorian(int year, int month)
+{
+    static const uint8_t kDays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    if (month < 1 || month > 12)
+        return 30;
+    if (month == 2 && isLeapYearGregorian(year))
+        return 29;
+    return kDays[month - 1];
+}
+
+static void addDaysToDate(int &year, int &month, int &day, int deltaDays)
+{
+    while (deltaDays > 0)
+    {
+        int dim = daysInMonthGregorian(year, month);
+        if (day < dim)
+        {
+            ++day;
+            --deltaDays;
+            continue;
+        }
+        day = 1;
+        ++month;
+        if (month > 12)
+        {
+            month = 1;
+            ++year;
+        }
+        --deltaDays;
+    }
+    while (deltaDays < 0)
+    {
+        if (day > 1)
+        {
+            --day;
+            ++deltaDays;
+            continue;
+        }
+        --month;
+        if (month < 1)
+        {
+            month = 12;
+            --year;
+        }
+        day = daysInMonthGregorian(year, month);
+        ++deltaDays;
+    }
+}
+
+static bool isDoublePress(uint32_t &lastMs)
+{
+    const uint32_t now = millis();
+    if (lastMs != 0 && (now - lastMs) <= DBL_MS)
+    {
+        lastMs = 0;
+        return true;
+    }
+    lastMs = now;
+    return false;
+}
+
+static size_t boundedLen(const char *s, size_t cap)
+{
+    if (!s || cap == 0)
+        return 0;
+    size_t i = 0;
+    while (i < cap && s[i] != '\0')
+        ++i;
+    return i;
+}
+
+static size_t safeAppendN(char *dst, size_t cap, const char *src, size_t srcLen)
+{
+    if (!dst || cap == 0 || !src)
+        return 0;
+    size_t len = boundedLen(dst, cap - 1);
+    if (len >= cap - 1)
+    {
+        dst[cap - 1] = '\0';
+        return cap - 1;
+    }
+    size_t room = (cap - 1) - len;
+    size_t copyLen = (srcLen < room) ? srcLen : room;
+    if (copyLen > 0)
+        memcpy(dst + len, src, copyLen);
+    dst[len + copyLen] = '\0';
+    return len + copyLen;
+}
+
+static size_t safeAppend(char *dst, size_t cap, const char *text)
+{
+    if (!text)
+        return boundedLen(dst, cap);
+    return safeAppendN(dst, cap, text, strlen(text));
+}
+
+static size_t appendSeparator(char *dst, size_t cap)
+{
+    size_t len = boundedLen(dst, cap - 1);
+    while (len > 0 && dst[len - 1] == ' ')
+    {
+        dst[len - 1] = '\0';
+        --len;
+    }
+    if (len == 0)
+        return 0;
+    return safeAppend(dst, cap, SEP);
+}
+
+size_t buildNormalized(char *dst, size_t dstCap, const char *src)
+{
+    if (!dst || dstCap == 0)
+        return 0;
+    dst[0] = '\0';
+    if (!src)
+        return 0;
+
+    bool prevSpace = false;
+    const size_t sepLen = strlen(SEP);
+    auto appendChunk = [&](const char *chunk, size_t chunkLen)
+    {
+        if (chunkLen == 0)
+            return;
+        size_t curLen = strlen(dst);
+        if (curLen + chunkLen > dstCap - 1)
+            return;
+        safeAppendN(dst, dstCap, chunk, chunkLen);
+    };
+    const uint8_t *p = reinterpret_cast<const uint8_t *>(src);
+    while (*p != 0)
+    {
+        if (p[0] == '\r')
+        {
+            ++p;
+            continue;
+        }
+
+        const bool isBullet = (p[0] == 0xE2 && p[1] == 0x80 && p[2] == 0xA2);
+        if (*p == '\n' || isBullet)
+        {
+            appendChunk(SEP, sepLen);
+            prevSpace = false;
+            p += isBullet ? 3 : 1;
+            continue;
+        }
+
+        const char c = static_cast<char>(*p);
+        if (isspace(static_cast<unsigned char>(c)))
+        {
+            if (!prevSpace)
+            {
+                appendChunk(" ", 1);
+                prevSpace = true;
+            }
+            ++p;
+            continue;
+        }
+
+        appendChunk(reinterpret_cast<const char *>(p), 1);
+        prevSpace = false;
+        ++p;
+    }
+
+    size_t len = boundedLen(dst, dstCap - 1);
+    while (len > 0 && dst[len - 1] == ' ')
+    {
+        dst[len - 1] = '\0';
+        --len;
+    }
+    return len;
+}
+
+static bool isTokenSeparator(char c)
+{
+    return (c == ';' || c == ',' || c == '\n' || c == '\r' || c == '\0');
+}
+
+size_t summarizeListToBullets(char *dst, size_t cap, const char *src, int maxItems)
+{
+    if (!dst || cap == 0)
+        return 0;
+    dst[0] = '\0';
+    if (!src || maxItems <= 0)
+        return 0;
+
+    char token[96];
+    size_t tokLen = 0;
+    int added = 0;
+
+    for (size_t i = 0;; ++i)
+    {
+        const char c = src[i];
+        if (!isTokenSeparator(c))
+        {
+            if (tokLen < sizeof(token) - 1)
+                token[tokLen++] = c;
+            continue;
+        }
+
+        token[tokLen] = '\0';
+        size_t start = 0;
+        while (token[start] != '\0' && isspace(static_cast<unsigned char>(token[start])))
+            ++start;
+        size_t end = strlen(token);
+        while (end > start && isspace(static_cast<unsigned char>(token[end - 1])))
+            --end;
+
+        if (end > start)
+        {
+            if (added > 0)
+                safeAppend(dst, cap, SEP);
+            safeAppendN(dst, cap, token + start, end - start);
+            ++added;
+            if (added >= maxItems)
+                break;
+        }
+
+        tokLen = 0;
+        if (c == '\0')
+            break;
+    }
+
+    return boundedLen(dst, cap - 1);
+}
+
+static void safeAppendClauseBoundary(char *dst, size_t cap, const char *clause)
+{
+    if (!dst || cap == 0 || !clause || clause[0] == '\0')
+        return;
+
+    const size_t len = boundedLen(dst, cap - 1);
+    const size_t clauseLen = strlen(clause);
+    const size_t sepLen = (len > 0) ? strlen(SEP) : 0;
+
+    if (len + sepLen + clauseLen <= cap - 1)
+    {
+        if (len > 0)
+            safeAppend(dst, cap, SEP);
+        safeAppend(dst, cap, clause);
+        return;
+    }
+
+    char *lastSep = nullptr;
+    for (char *p = strstr(dst, SEP); p != nullptr; p = strstr(p + 1, SEP))
+        lastSep = p;
+
+    if (lastSep)
+    {
+        *lastSep = '\0';
+    }
+    else
+    {
+        if (cap < 4)
+            return;
+        dst[cap - 4] = '\0';
+    }
+
+    size_t cutLen = boundedLen(dst, cap - 1);
+    while (cutLen > 0 && dst[cutLen - 1] == ' ')
+    {
+        dst[cutLen - 1] = '\0';
+        --cutLen;
+    }
+    safeAppend(dst, cap, "...");
+}
+
+static int scoreToneSign(int score)
+{
+    if (score >= 2)
+        return 1;
+    if (score <= -1)
+        return -1;
+    return 0;
+}
+
+static void buildCaDaoPhrase(char *dst, size_t cap,
+                             int score, int lunarDay, int lunarMonth, int lunarYear,
+                             const LunarDayDetail &dayInfo)
+{
+    if (!dst || cap == 0)
+        return;
+    dst[0] = '\0';
+
+    const int tone = scoreToneSign(score);
+    const char *const *pool = PHRASES_CADAO_BINH;
+    uint16_t poolCount = static_cast<uint16_t>(CADAO_BINH_COUNT);
+    if (tone > 0)
+    {
+        pool = PHRASES_CADAO_TOT;
+        poolCount = static_cast<uint16_t>(CADAO_TOT_COUNT);
+    }
+    else if (tone < 0)
+    {
+        pool = PHRASES_CADAO_XAU;
+        poolCount = static_cast<uint16_t>(CADAO_XAU_COUNT);
+    }
+
+    if (poolCount == 0)
+        return;
+
+    const uint32_t seed = dailySeed(lunarYear, lunarMonth, lunarDay, score, dayInfo.branch);
+    const uint32_t salted = seed ^ 0xCADA0123u;
+    const uint16_t idx = static_cast<uint16_t>(salted % poolCount);
+    const char *phrase = reinterpret_cast<const char *>(pgm_read_ptr(&pool[idx]));
+    safeAppend(dst, cap, phrase ? phrase : "");
+}
+
+int measureTextWidthPx(const char *s, uint16_t len)
+{
+    if (!s || len == 0)
+        return 0;
+
+    setLunarLuckUtf8Font();
+    if (lunarLuckUtf8Ready)
+    {
+        int w = static_cast<int>(lunarLuckUtf8.getUTF8Width(s));
+        if (w > 0)
+            return w;
+    }
+
+    int glyphs = 0;
+    for (uint16_t i = 0; i < len; ++i)
+    {
+        const uint8_t b = static_cast<uint8_t>(s[i]);
+        if ((b & 0xC0) != 0x80)
+            ++glyphs;
+    }
+    return glyphs * 6;
+}
+
+static void addSection(const char *title, const char *contentSrc, bool normalize, bool summarize, int maxItems,
+                       char *contentBuf = nullptr, size_t contentCap = 0)
+{
+    if (g_sectionCount >= MAX_SECTIONS)
+        return;
+
+    LuckSection &sec = g_sections[g_sectionCount];
+    sec.title = title ? title : "";
+    if (!contentBuf || contentCap == 0)
+    {
+        contentBuf = g_sectionContent[g_sectionCount];
+        contentCap = CONTENT_MAX;
+    }
+    sec.content = contentBuf;
+    sec.contentCap = static_cast<uint16_t>(contentCap);
+    sec.content[0] = '\0';
+
+    if (summarize)
+        summarizeListToBullets(sec.content, sec.contentCap, contentSrc, maxItems);
+    else if (normalize)
+        buildNormalized(sec.content, sec.contentCap, contentSrc);
+    else if (contentSrc)
+        safeAppend(sec.content, sec.contentCap, contentSrc);
+
+    sec.contentLen = static_cast<uint16_t>(strlen(sec.content));
+    sec.contentWidthPx = static_cast<int16_t>(measureTextWidthPx(sec.content, sec.contentLen));
+    sec.marquee = (sec.contentWidthPx > PANEL_RES_X);
+    ++g_sectionCount;
+}
+
+enum ViToneMarkBits : uint16_t
+{
+    VI_TONE_NONE = 0,
+    VI_TONE_ACUTE = 1 << 0,
+    VI_TONE_GRAVE = 1 << 1,
+    VI_TONE_HOOK = 1 << 2,
+    VI_TONE_TILDE = 1 << 3,
+    VI_TONE_DOT = 1 << 4,
+    VI_SHAPE_CIRC = 1 << 5,
+    VI_SHAPE_BREVE = 1 << 6,
+    VI_SHAPE_HORN = 1 << 7,
+    VI_SHAPE_DBAR = 1 << 8
+};
+
+struct ViGlyphTiny
+{
+    char base;
+    uint16_t marks;
+};
+
+static bool decodeUtf8Tiny(const String &text, int &i, uint32_t &cp)
+{
+    if (i >= text.length())
+        return false;
+    const uint8_t c0 = static_cast<uint8_t>(text[i++]);
+    if ((c0 & 0x80) == 0)
+    {
+        cp = c0;
+        return true;
+    }
+    if ((c0 & 0xE0) == 0xC0 && i < text.length())
+    {
+        const uint8_t c1 = static_cast<uint8_t>(text[i++]);
+        cp = ((c0 & 0x1F) << 6) | (c1 & 0x3F);
+        return true;
+    }
+    if ((c0 & 0xF0) == 0xE0 && (i + 1) < text.length())
+    {
+        const uint8_t c1 = static_cast<uint8_t>(text[i++]);
+        const uint8_t c2 = static_cast<uint8_t>(text[i++]);
+        cp = ((c0 & 0x0F) << 12) | ((c1 & 0x3F) << 6) | (c2 & 0x3F);
+        return true;
+    }
+    cp = '?';
+    return true;
+}
+
+static ViGlyphTiny mapVietnameseTiny(uint32_t cp)
+{
+    ViGlyphTiny g = {'?', VI_TONE_NONE};
+    if (cp < 128)
+    {
+        g.base = static_cast<char>(cp);
+        return g;
+    }
+
+    switch (cp)
+    {
+    case 0x0110: g = {'D', VI_SHAPE_DBAR}; break; // Đ
+    case 0x0111: g = {'d', VI_SHAPE_DBAR}; break; // đ
+
+    case 0x00C0: g = {'A', VI_TONE_GRAVE}; break; // À
+    case 0x00C1: g = {'A', VI_TONE_ACUTE}; break; // Á
+    case 0x1EA2: g = {'A', VI_TONE_HOOK}; break;  // Ả
+    case 0x00C3: g = {'A', VI_TONE_TILDE}; break; // Ã
+    case 0x1EA0: g = {'A', VI_TONE_DOT}; break;   // Ạ
+    case 0x0102: g = {'A', VI_SHAPE_BREVE}; break; // Ă
+    case 0x1EAE: g = {'A', VI_SHAPE_BREVE | VI_TONE_ACUTE}; break; // Ắ
+    case 0x1EB0: g = {'A', VI_SHAPE_BREVE | VI_TONE_GRAVE}; break; // Ằ
+    case 0x1EB2: g = {'A', VI_SHAPE_BREVE | VI_TONE_HOOK}; break;  // Ẳ
+    case 0x1EB4: g = {'A', VI_SHAPE_BREVE | VI_TONE_TILDE}; break; // Ẵ
+    case 0x1EB6: g = {'A', VI_SHAPE_BREVE | VI_TONE_DOT}; break;   // Ặ
+    case 0x00C2: g = {'A', VI_SHAPE_CIRC}; break; // Â
+    case 0x1EA4: g = {'A', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // Ấ
+    case 0x1EA6: g = {'A', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // Ầ
+    case 0x1EA8: g = {'A', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // Ẩ
+    case 0x1EAA: g = {'A', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // Ẫ
+    case 0x1EAC: g = {'A', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // Ậ
+
+    case 0x00C8: g = {'E', VI_TONE_GRAVE}; break; // È
+    case 0x00C9: g = {'E', VI_TONE_ACUTE}; break; // É
+    case 0x1EBA: g = {'E', VI_TONE_HOOK}; break;  // Ẻ
+    case 0x1EBC: g = {'E', VI_TONE_TILDE}; break; // Ẽ
+    case 0x1EB8: g = {'E', VI_TONE_DOT}; break;   // Ẹ
+    case 0x00CA: g = {'E', VI_SHAPE_CIRC}; break; // Ê
+    case 0x1EBE: g = {'E', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // Ế
+    case 0x1EC0: g = {'E', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // Ề
+    case 0x1EC2: g = {'E', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // Ể
+    case 0x1EC4: g = {'E', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // Ễ
+    case 0x1EC6: g = {'E', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // Ệ
+
+    case 0x00CC: g = {'I', VI_TONE_GRAVE}; break; // Ì
+    case 0x00CD: g = {'I', VI_TONE_ACUTE}; break; // Í
+    case 0x1EC8: g = {'I', VI_TONE_HOOK}; break;  // Ỉ
+    case 0x0128: g = {'I', VI_TONE_TILDE}; break; // Ĩ
+    case 0x1ECA: g = {'I', VI_TONE_DOT}; break;   // Ị
+
+    case 0x00D2: g = {'O', VI_TONE_GRAVE}; break; // Ò
+    case 0x00D3: g = {'O', VI_TONE_ACUTE}; break; // Ó
+    case 0x1ECE: g = {'O', VI_TONE_HOOK}; break;  // Ỏ
+    case 0x00D5: g = {'O', VI_TONE_TILDE}; break; // Õ
+    case 0x1ECC: g = {'O', VI_TONE_DOT}; break;   // Ọ
+    case 0x00D4: g = {'O', VI_SHAPE_CIRC}; break; // Ô
+    case 0x1ED0: g = {'O', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // Ố
+    case 0x1ED2: g = {'O', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // Ồ
+    case 0x1ED4: g = {'O', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // Ổ
+    case 0x1ED6: g = {'O', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // Ỗ
+    case 0x1ED8: g = {'O', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // Ộ
+    case 0x01A0: g = {'O', VI_SHAPE_HORN}; break; // Ơ
+    case 0x1EDA: g = {'O', VI_SHAPE_HORN | VI_TONE_ACUTE}; break; // Ớ
+    case 0x1EDC: g = {'O', VI_SHAPE_HORN | VI_TONE_GRAVE}; break; // Ờ
+    case 0x1EDE: g = {'O', VI_SHAPE_HORN | VI_TONE_HOOK}; break;  // Ở
+    case 0x1EE0: g = {'O', VI_SHAPE_HORN | VI_TONE_TILDE}; break; // Ỡ
+    case 0x1EE2: g = {'O', VI_SHAPE_HORN | VI_TONE_DOT}; break;   // Ợ
+
+    case 0x00D9: g = {'U', VI_TONE_GRAVE}; break; // Ù
+    case 0x00DA: g = {'U', VI_TONE_ACUTE}; break; // Ú
+    case 0x1EE6: g = {'U', VI_TONE_HOOK}; break;  // Ủ
+    case 0x0168: g = {'U', VI_TONE_TILDE}; break; // Ũ
+    case 0x1EE4: g = {'U', VI_TONE_DOT}; break;   // Ụ
+    case 0x01AF: g = {'U', VI_SHAPE_HORN}; break; // Ư
+    case 0x1EE8: g = {'U', VI_SHAPE_HORN | VI_TONE_ACUTE}; break; // Ứ
+    case 0x1EEA: g = {'U', VI_SHAPE_HORN | VI_TONE_GRAVE}; break; // Ừ
+    case 0x1EEC: g = {'U', VI_SHAPE_HORN | VI_TONE_HOOK}; break;  // Ử
+    case 0x1EEE: g = {'U', VI_SHAPE_HORN | VI_TONE_TILDE}; break; // Ữ
+    case 0x1EF0: g = {'U', VI_SHAPE_HORN | VI_TONE_DOT}; break;   // Ự
+
+    case 0x00E0: g = {'a', VI_TONE_GRAVE}; break; // à
+    case 0x00E1: g = {'a', VI_TONE_ACUTE}; break; // á
+    case 0x1EA3: g = {'a', VI_TONE_HOOK}; break;  // ả
+    case 0x00E3: g = {'a', VI_TONE_TILDE}; break; // ã
+    case 0x1EA1: g = {'a', VI_TONE_DOT}; break;   // ạ
+    case 0x0103: g = {'a', VI_SHAPE_BREVE}; break; // ă
+    case 0x1EAF: g = {'a', VI_SHAPE_BREVE | VI_TONE_ACUTE}; break; // ắ
+    case 0x1EB1: g = {'a', VI_SHAPE_BREVE | VI_TONE_GRAVE}; break; // ằ
+    case 0x1EB3: g = {'a', VI_SHAPE_BREVE | VI_TONE_HOOK}; break;  // ẳ
+    case 0x1EB5: g = {'a', VI_SHAPE_BREVE | VI_TONE_TILDE}; break; // ẵ
+    case 0x1EB7: g = {'a', VI_SHAPE_BREVE | VI_TONE_DOT}; break;   // ặ
+    case 0x00E2: g = {'a', VI_SHAPE_CIRC}; break; // â
+    case 0x1EA5: g = {'a', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // ấ
+    case 0x1EA7: g = {'a', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // ầ
+    case 0x1EA9: g = {'a', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // ẩ
+    case 0x1EAB: g = {'a', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // ẫ
+    case 0x1EAD: g = {'a', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // ậ
+
+    case 0x00E8: g = {'e', VI_TONE_GRAVE}; break; // è
+    case 0x00E9: g = {'e', VI_TONE_ACUTE}; break; // é
+    case 0x1EBB: g = {'e', VI_TONE_HOOK}; break;  // ẻ
+    case 0x1EBD: g = {'e', VI_TONE_TILDE}; break; // ẽ
+    case 0x1EB9: g = {'e', VI_TONE_DOT}; break;   // ẹ
+    case 0x00EA: g = {'e', VI_SHAPE_CIRC}; break; // ê
+    case 0x1EBF: g = {'e', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // ế
+    case 0x1EC1: g = {'e', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // ề
+    case 0x1EC3: g = {'e', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // ể
+    case 0x1EC5: g = {'e', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // ễ
+    case 0x1EC7: g = {'e', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // ệ
+
+    case 0x00EC: g = {'i', VI_TONE_GRAVE}; break; // ì
+    case 0x00ED: g = {'i', VI_TONE_ACUTE}; break; // í
+    case 0x1EC9: g = {'i', VI_TONE_HOOK}; break;  // ỉ
+    case 0x0129: g = {'i', VI_TONE_TILDE}; break; // ĩ
+    case 0x1ECB: g = {'i', VI_TONE_DOT}; break;   // ị
+
+    case 0x00F2: g = {'o', VI_TONE_GRAVE}; break; // ò
+    case 0x00F3: g = {'o', VI_TONE_ACUTE}; break; // ó
+    case 0x1ECF: g = {'o', VI_TONE_HOOK}; break;  // ỏ
+    case 0x00F5: g = {'o', VI_TONE_TILDE}; break; // õ
+    case 0x1ECD: g = {'o', VI_TONE_DOT}; break;   // ọ
+    case 0x00F4: g = {'o', VI_SHAPE_CIRC}; break; // ô
+    case 0x1ED1: g = {'o', VI_SHAPE_CIRC | VI_TONE_ACUTE}; break; // ố
+    case 0x1ED3: g = {'o', VI_SHAPE_CIRC | VI_TONE_GRAVE}; break; // ồ
+    case 0x1ED5: g = {'o', VI_SHAPE_CIRC | VI_TONE_HOOK}; break;  // ổ
+    case 0x1ED7: g = {'o', VI_SHAPE_CIRC | VI_TONE_TILDE}; break; // ỗ
+    case 0x1ED9: g = {'o', VI_SHAPE_CIRC | VI_TONE_DOT}; break;   // ộ
+    case 0x01A1: g = {'o', VI_SHAPE_HORN}; break; // ơ
+    case 0x1EDB: g = {'o', VI_SHAPE_HORN | VI_TONE_ACUTE}; break; // ớ
+    case 0x1EDD: g = {'o', VI_SHAPE_HORN | VI_TONE_GRAVE}; break; // ờ
+    case 0x1EDF: g = {'o', VI_SHAPE_HORN | VI_TONE_HOOK}; break;  // ở
+    case 0x1EE1: g = {'o', VI_SHAPE_HORN | VI_TONE_TILDE}; break; // ỡ
+    case 0x1EE3: g = {'o', VI_SHAPE_HORN | VI_TONE_DOT}; break;   // ợ
+
+    case 0x00F9: g = {'u', VI_TONE_GRAVE}; break; // ù
+    case 0x00FA: g = {'u', VI_TONE_ACUTE}; break; // ú
+    case 0x1EE7: g = {'u', VI_TONE_HOOK}; break;  // ủ
+    case 0x0169: g = {'u', VI_TONE_TILDE}; break; // ũ
+    case 0x1EE5: g = {'u', VI_TONE_DOT}; break;   // ụ
+    case 0x01B0: g = {'u', VI_SHAPE_HORN}; break; // ư
+    case 0x1EE9: g = {'u', VI_SHAPE_HORN | VI_TONE_ACUTE}; break; // ứ
+    case 0x1EEB: g = {'u', VI_SHAPE_HORN | VI_TONE_GRAVE}; break; // ừ
+    case 0x1EED: g = {'u', VI_SHAPE_HORN | VI_TONE_HOOK}; break;  // ử
+    case 0x1EEF: g = {'u', VI_SHAPE_HORN | VI_TONE_TILDE}; break; // ữ
+    case 0x1EF1: g = {'u', VI_SHAPE_HORN | VI_TONE_DOT}; break;   // ự
+    default: break;
+    }
+    return g;
+}
+
+static void drawTinyVietnameseMarks(int x, int yTop, uint16_t marks, uint16_t color)
+{
+    if (marks & VI_SHAPE_CIRC)
+    {
+        dma_display->drawPixel(x + 1, yTop - 1, color);
+        dma_display->drawPixel(x + 2, yTop - 2, color);
+        dma_display->drawPixel(x + 3, yTop - 1, color);
+    }
+    if (marks & VI_SHAPE_BREVE)
+    {
+        dma_display->drawPixel(x + 1, yTop - 2, color);
+        dma_display->drawPixel(x + 2, yTop - 1, color);
+        dma_display->drawPixel(x + 3, yTop - 2, color);
+    }
+    if (marks & VI_SHAPE_HORN)
+    {
+        dma_display->drawPixel(x + 4, yTop, color);
+        dma_display->drawPixel(x + 5, yTop - 1, color);
+    }
+    if (marks & VI_TONE_ACUTE)
+    {
+        dma_display->drawPixel(x + 3, yTop - 2, color);
+        dma_display->drawPixel(x + 4, yTop - 3, color);
+    }
+    if (marks & VI_TONE_GRAVE)
+    {
+        dma_display->drawPixel(x + 1, yTop - 3, color);
+        dma_display->drawPixel(x + 2, yTop - 2, color);
+    }
+    if (marks & VI_TONE_HOOK)
+    {
+        dma_display->drawPixel(x + 2, yTop - 3, color);
+        dma_display->drawPixel(x + 3, yTop - 3, color);
+        dma_display->drawPixel(x + 3, yTop - 2, color);
+    }
+    if (marks & VI_TONE_TILDE)
+    {
+        dma_display->drawPixel(x + 1, yTop - 3, color);
+        dma_display->drawPixel(x + 2, yTop - 2, color);
+        dma_display->drawPixel(x + 3, yTop - 3, color);
+        dma_display->drawPixel(x + 4, yTop - 2, color);
+    }
+    if (marks & VI_TONE_DOT)
+    {
+        dma_display->drawPixel(x + 2, yTop + 7, color);
+    }
+    if (marks & VI_SHAPE_DBAR)
+    {
+        dma_display->drawPixel(x + 1, yTop + 3, color);
+        dma_display->drawPixel(x + 2, yTop + 3, color);
+        dma_display->drawPixel(x + 3, yTop + 3, color);
+    }
+}
+
+static int drawTinyVietnameseText(int x, int yTop, const String &text, uint16_t color)
+{
+    dma_display->setFont(nullptr);
+    dma_display->setTextWrap(false);
+    int cursorX = x;
+    int i = 0;
+    while (i < text.length())
+    {
+        uint32_t cp = '?';
+        if (!decodeUtf8Tiny(text, i, cp))
+            break;
+        ViGlyphTiny glyph = mapVietnameseTiny(cp);
+        dma_display->drawChar(cursorX, yTop, static_cast<unsigned char>(glyph.base), color, myBLACK, 1);
+        if (glyph.marks != VI_TONE_NONE)
+            drawTinyVietnameseMarks(cursorX, yTop, glyph.marks, color);
+        cursorX += 6;
+    }
+    return cursorX - x;
+}
+
+static uint16_t tinyVietnameseTextWidth(const String &text)
+{
+    int count = 0;
+    int i = 0;
+    while (i < text.length())
+    {
+        uint32_t cp = '?';
+        if (!decodeUtf8Tiny(text, i, cp))
+            break;
+        count++;
+    }
+    return static_cast<uint16_t>(max(1, count * 6));
+}
 
 static void renderLunarLines(const String lines[3], const uint16_t widths[3], const int offsets[3])
 {
@@ -485,7 +1409,7 @@ static void buildLunarLinesMerged()
     String hourDetail = lunarHour + "  / " + clockTag;
 
     // Line 3: combined marquee
-    // Ngay 28/10 Nam At Ty ¦ The year of Wood Snake ¦ Gio Hoi  / 11:24 PM
+    // Ngay 28/10 Nam At Ty Â¦ The year of Wood Snake Â¦ Gio Hoi  / 11:24 PM
     lunarLines[2] = viDetail + " \xC2\xA6  " + enDetail + "  \xC2\xA6  " + hourDetail;
 
     for (int i = 0; i < 3; ++i)
@@ -498,6 +1422,1361 @@ static void buildLunarLinesMerged()
         lunarOffsets[i] = 0;
     lastLunarTick = millis();
     lunarInitialized = true;
+}
+
+static XuatHanhInfo calcXuatHanhKhongMinh(int lunarMonth, int lunarDay)
+{
+    if (lunarMonth < 1)
+        lunarMonth = 1;
+    if (lunarDay < 1)
+        lunarDay = 1;
+
+    // Group 1: months 1,4,7,10 (6-day cycle)
+    if (lunarMonth == 1 || lunarMonth == 4 || lunarMonth == 7 || lunarMonth == 10)
+    {
+        const int m = lunarDay % 6;
+        switch (m)
+        {
+        case 1: return {"Đường Phong", TONE_TOT};
+        case 2: return {"Kim Thổ", TONE_XAU};
+        case 3: return {"Kim Dương", TONE_TOT};
+        case 4: return {"Thuần Dương", TONE_BINH};
+        case 5: return {"Đạo Tặc", TONE_XAU};
+        case 0:
+        default: return {"Hảo Thương", TONE_TOT};
+        }
+    }
+
+    // Group 2: months 2,5,8,11 (8-day cycle)
+    if (lunarMonth == 2 || lunarMonth == 5 || lunarMonth == 8 || lunarMonth == 11)
+    {
+        const int m = lunarDay % 8;
+        switch (m)
+        {
+        case 0: return {"Thiên Đạo", TONE_XAU};
+        case 1: return {"Thiên Môn", TONE_TOT};
+        case 2: return {"Thiên Đường", TONE_TOT};
+        case 3: return {"Thiên Tài", TONE_TOT};
+        case 4: return {"Thiên Tặc", TONE_XAU};
+        case 5: return {"Thiên Dương", TONE_BINH};
+        case 6: return {"Thiên Hầu", TONE_XAU};
+        case 7:
+        default: return {"Thiên Thương", TONE_BINH};
+        }
+    }
+
+    // Group 3: months 3,6,9,12 (8-day cycle)
+    const int m = lunarDay % 8;
+    switch (m)
+    {
+    case 0: return {"Chu Tước", TONE_XAU};
+    case 1: return {"Bạch Hổ Đầu", TONE_TOT};
+    case 2: return {"Bạch Hổ Kiếp", TONE_BINH};
+    case 3: return {"Bạch Hổ Túc", TONE_XAU};
+    case 4: return {"Huyền Vũ", TONE_XAU};
+    case 5: return {"Thanh Long Đầu", TONE_TOT};
+    case 6: return {"Thanh Long Kiếp", TONE_BINH};
+    case 7:
+    default: return {"Thanh Long Túc", TONE_XAU};
+    }
+}
+
+static int computeLunarLuckScore(const LunarDate &ld)
+{
+    int score = 0;
+
+    const int luckyDays[] = {1, 6, 8, 11, 15, 18, 24, 28};
+    const int cautiousDays[] = {3, 5, 7, 13, 14, 22, 23, 27, 29};
+
+    for (int day : luckyDays)
+    {
+        if (ld.day == day)
+        {
+            score += 2;
+            break;
+        }
+    }
+    for (int day : cautiousDays)
+    {
+        if (ld.day == day)
+        {
+            score -= 2;
+            break;
+        }
+    }
+
+    if (ld.month == 1 || ld.month == 6 || ld.month == 8 || ld.month == 12)
+        score += 1;
+    if (ld.month == 4 || ld.month == 7 || ld.month == 10)
+        score -= 1;
+
+    if (ld.leap)
+        score -= 1;
+
+    if ((ld.day % 2) == 0)
+        score += 1;
+    else
+        score -= 1;
+
+    return score;
+}
+
+bool isTamNuongDay(int lunarDay)
+{
+    return (lunarDay == 3 || lunarDay == 7 || lunarDay == 13 ||
+            lunarDay == 18 || lunarDay == 22 || lunarDay == 27);
+}
+
+bool isNguyetKyDay(int lunarDay)
+{
+    return (lunarDay == 5 || lunarDay == 14 || lunarDay == 23);
+}
+
+static void appendAdviceClause(String &target, const String &clause)
+{
+    if (clause.length() == 0)
+        return;
+    if (target.length() > 0)
+        target += "; ";
+    target += clause;
+}
+
+static String elementToVietnamese(const String &elementAscii)
+{
+    if (elementAscii == "Moc")
+        return "Mộc";
+    if (elementAscii == "Hoa")
+        return "Hỏa";
+    if (elementAscii == "Tho")
+        return "Thổ";
+    if (elementAscii == "Kim")
+        return "Kim";
+    if (elementAscii == "Thuy")
+        return "Thủy";
+    return elementAscii;
+}
+
+static LunarDayDetail buildLunarDayDetail(int dd, int mm, int yy)
+{
+    static const char *stems[10] = {"Giáp", "Ất", "Bính", "Đinh", "Mậu", "Kỷ", "Canh", "Tân", "Nhâm", "Quý"};
+    static const char *branches[12] = {"Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ", "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
+    static const char *elementsByStem[10] = {"Moc", "Moc", "Hoa", "Hoa", "Tho", "Tho", "Kim", "Kim", "Thuy", "Thuy"};
+
+    long jd = jdFromDate(dd, mm, yy);
+    int stemIndex = static_cast<int>((jd + 9) % 10);
+    int branchIndex = static_cast<int>((jd + 1) % 12);
+    if (stemIndex < 0)
+        stemIndex += 10;
+    if (branchIndex < 0)
+        branchIndex += 12;
+
+    LunarDayDetail out;
+    out.stem = String(stems[stemIndex]);
+    out.branch = String(branches[branchIndex]);
+    out.stemBranch = out.stem + " " + out.branch;
+    out.element = String(elementsByStem[stemIndex]);
+    out.branchIndex = branchIndex;
+    return out;
+}
+
+void zodiacCompatByBranch(int branchIndex, String &hop1, String &hop2, String &ky)
+{
+    static const char *hopA[12] = {
+        "Thân",  // Tý
+        "Tý",    // Sửu
+        "Ngọ",   // Dần
+        "Hợi",   // Mão
+        "Tý",    // Thìn
+        "Dậu",   // Tỵ
+        "Dần",   // Ngọ
+        "Hợi",   // Mùi
+        "Tý",    // Thân
+        "Tý",    // Dậu
+        "Ngọ",   // Tuất
+        "Mão"    // Hợi
+    };
+
+    static const char *hopB[12] = {
+        "Thìn",  // Tý
+        "Dậu",   // Sửu
+        "Tuất",  // Dần
+        "Mùi",   // Mão
+        "Thân",  // Thìn
+        "Sửu",   // Tỵ
+        "Tuất",  // Ngọ
+        "Mão",   // Mùi
+        "Thìn",  // Thân
+        "Sửu",   // Dậu
+        "Dần",   // Tuất
+        "Mùi"    // Hợi
+    };
+
+    static const char *kyArr[12] = {
+        "Ngọ",   // Tý
+        "Mùi",   // Sửu
+        "Thân",  // Dần
+        "Dậu",   // Mão
+        "Tuất",  // Thìn
+        "Hợi",   // Tỵ
+        "Tý",    // Ngọ
+        "Sửu",   // Mùi
+        "Dần",   // Thân
+        "Mão",   // Dậu
+        "Thìn",  // Tuất
+        "Tỵ"     // Hợi
+    };
+
+    if (branchIndex < 0 || branchIndex > 11)
+        branchIndex = 0;
+
+    hop1 = String(hopA[branchIndex]);
+    hop2 = String(hopB[branchIndex]);
+    ky   = String(kyArr[branchIndex]);
+}
+
+static String buildHoangDaoHoursTag(int dayBranchIndex)
+{
+    static const char *chiLabels[12] = {
+        "Giờ Tý (23:00-01:00)",
+        "Giờ Sửu (01:00-03:00)",
+        "Giờ Dần (03:00-05:00)",
+        "Giờ Mão (05:00-07:00)",
+        "Giờ Thìn (07:00-09:00)",
+        "Giờ Tỵ (09:00-11:00)",
+        "Giờ Ngọ (11:00-13:00)",
+        "Giờ Mùi (13:00-15:00)",
+        "Giờ Thân (15:00-17:00)",
+        "Giờ Dậu (17:00-19:00)",
+        "Giờ Tuất (19:00-21:00)",
+        "Giờ Hợi (21:00-23:00)"};
+
+    // Opposite day branches share the same set of auspicious hours.
+    static const int setA[6] = {0, 1, 3, 6, 8, 9};
+    static const int setB[6] = {2, 3, 5, 8, 10, 11};
+    static const int setC[6] = {0, 1, 4, 5, 7, 10};
+    static const int setD[6] = {2, 3, 6, 7, 9, 0};
+    static const int setE[6] = {4, 5, 8, 9, 11, 2};
+    static const int setF[6] = {6, 7, 10, 11, 1, 4};
+
+    if (dayBranchIndex < 0 || dayBranchIndex > 11)
+        dayBranchIndex = 0;
+
+    const int *selected = setA;
+    switch (dayBranchIndex)
+    {
+    case 0:
+    case 6:
+        selected = setA;
+        break;
+    case 1:
+    case 7:
+        selected = setB;
+        break;
+    case 2:
+    case 8:
+        selected = setC;
+        break;
+    case 3:
+    case 9:
+        selected = setD;
+        break;
+    case 4:
+    case 10:
+        selected = setE;
+        break;
+    case 5:
+    case 11:
+    default:
+        selected = setF;
+        break;
+    }
+
+    String out;
+    for (int i = 0; i < 6; ++i)
+    {
+        if (i > 0)
+            out += ", ";
+        out += chiLabels[selected[i]];
+    }
+    return out;
+}
+
+static uint32_t adviceSeed(
+    int score, int lunarDay, int lunarMonth, bool lunarLeap,
+    const LunarDayDetail &dayInfo)
+{
+  // Deterministic seed (no random(), no RTC needed)
+  // Branch + element influence: lightweight rolling hash
+  uint32_t h = 2166136261u;
+  auto mix = [&](uint8_t v) { h ^= v; h *= 16777619u; };
+
+  mix((uint8_t)(score + 10));
+  mix((uint8_t)lunarDay);
+  mix((uint8_t)lunarMonth);
+  mix((uint8_t)(lunarLeap ? 1 : 0));
+
+  // Mix a few bytes from strings (safe + fast)
+  for (int i = 0; i < dayInfo.branch.length(); i++) mix((uint8_t)dayInfo.branch[i]);
+  for (int i = 0; i < dayInfo.element.length(); i++) mix((uint8_t)dayInfo.element[i]);
+
+  return h;
+}
+
+static const char* pickOne(const char* const* arr, int n, uint32_t seed, uint32_t salt)
+{
+  if (!arr || n <= 0) return "";
+  uint32_t idx = (seed ^ (salt * 2654435761u)) % (uint32_t)n;
+  return arr[idx];
+}
+
+
+// More natural Vietnamese phrasing + consistent style.
+// Keeps your logic structure, only improves wording + avoids mixing commas/semicolons.
+// Assumes appendAdviceClause(out, "phrase") adds "; " separator safely.
+static void buildLunarActionAdvice(
+    int score,
+    int lunarDay,
+    int lunarMonth,
+    bool lunarLeap,
+    const LunarDayDetail &dayInfo,
+    String &nenLam,
+    String &nenTranh)
+{
+    const bool tamNuong = isTamNuongDay(lunarDay);
+    const bool nguyetKy = isNguyetKyDay(lunarDay);
+
+    // 1) Base advice by score + element (more variety, no repeating)
+    const uint32_t seed = adviceSeed(score, lunarDay, lunarMonth, lunarLeap, dayInfo);
+
+    if (score >= 2)
+    {
+        // nenLam pools by element
+        static const char* const MOC_LAM[] = {
+            "Khởi động việc mới, kết nối hợp tác, phác thảo kế hoạch",
+            "Mở đầu gọn gàng, chốt hướng đi, tạo đà cho việc mới",
+            "Gặp người phù hợp, gieo ý tưởng, bắt tay việc quan trọng",
+            "Dọn đường cho kế hoạch, ưu tiên bước đầu rõ ràng",
+            "Thuận thời khai mở, gieo hạt hôm nay gặt quả mai sau",
+            "Hợp khởi sự hanh thông, việc nhỏ thành lớn",
+            "Mở lối mới, dốc lòng vun trồng nền tảng",
+            "Thuận gió xuôi chèo, mạnh dạn triển khai ý tưởng",
+            "Gieo nhân đúng lúc, dựng nền cho bước tiến dài"
+
+        };
+        static const char* const KIM_LAM[] = {
+            "Rà soát tài chính, xử lý giấy tờ, chuẩn hóa quy trình",
+            "Chốt hồ sơ, kiểm tra số liệu, làm mọi thứ đúng chuẩn",
+            "Tối ưu quy trình, sửa lỗi tồn, sắp xếp lại ưu tiên",
+            "Gọn sổ sách, rà điều khoản, hoàn thiện thủ tục",
+            "Chỉnh lý sổ sách, việc rõ ràng thì lòng an",
+            "Giữ nguyên tắc vững vàng, việc đâu vào đó",
+            "Lấy kỷ cương làm gốc, lấy rõ ràng làm trọng",
+            "Rà soát từng bước, chặt chẽ mới bền lâu",
+            "Sửa việc cũ cho ngay, mở đường mới cho sáng"
+
+        };
+        static const char* const THUY_LAM[] = {
+            "Giao tiếp, mở rộng quan hệ, xử lý linh hoạt các việc phát sinh",
+            "Trao đổi thẳng, kết nối nhanh, tháo gỡ vướng mắc",
+            "Đàm phán mềm, lắng nghe nhiều, xoay chuyển tình huống",
+            "Mở rộng liên hệ, cập nhật thông tin, phản ứng linh hoạt",
+            "Thuận lời nói phải, lòng người dễ mở",
+            "Mềm như nước chảy, thấu tình đạt lý",
+            "Lắng nghe trước khi quyết, nói ít hiểu nhiều",
+            "Kết giao chân thành, việc ắt hanh thông",
+            "Dùng lời ôn hòa, hóa giải việc khó"
+        };
+        static const char* const HOA_LAM[] = {
+            "Thuyết trình, quảng bá, học kỹ năng mới, tạo động lực cho đội nhóm",
+            "Đẩy năng lượng, lan tỏa ý tưởng, dẫn dắt tinh thần",
+            "Tập trung thể hiện, truyền cảm hứng, thử cách làm mới",
+            "Quảng bá nhẹ nhàng, học nhanh một kỹ năng, khơi động lực",
+            "Lửa nhỏ cũng đủ sưởi ấm lòng người",
+            "Đúng thời phát sáng, việc lớn thành công",
+            "Khơi nguồn cảm hứng, dẫn dắt tinh thần",
+            "Chủ động tỏa sáng nhưng giữ lòng khiêm",
+            "Truyền nhiệt huyết đúng lúc, lan động lực đúng nơi"
+        };
+        static const char* const THO_LAM[] = {
+            "Ổn định nhịp làm việc, củng cố nền tảng, hoàn thiện kế hoạch dài hạn",
+            "Gia cố việc nền, làm chắc từng bước, tính đường dài",
+            "Chậm mà chắc, hoàn thiện cấu trúc, dọn các điểm yếu",
+            "Củng cố nền tảng, sắp xếp lại trật tự, chốt kế hoạch dài hơi",
+            "Chậm mà chắc, từng bước vững vàng",
+            "Xây nền kiên cố, gốc rễ bền lâu",
+            "Lấy ổn định làm trọng, lấy bền lâu làm mục tiêu",
+            "Gia cố nền móng, việc sau mới vững",
+            "Lo xa một bước, tránh rối trăm phần"
+        };
+
+        // nenTranh pool (shared)
+        static const char* const TR_HIGH[] = {
+            "Tránh chủ quan, hứa vội, và chi tiêu theo cảm xúc",
+            "Tránh quá tự tin, quyết nhanh, và mua sắm bốc đồng",
+            "Tránh ôm đồm, nói quá tay, và tiêu tiền theo hứng",
+            "Tránh làm quá tốc độ, cam kết vội, và chi tiêu thiếu kiểm soát",
+            "Tránh tự mãn khi việc đang thuận",
+            "Tránh lời hứa vượt khả năng thực hiện",
+            "Tránh tham nhanh mà bỏ gốc",
+            "Tránh phô trương quá mức",
+            "Tránh nóng vội khi thời vận đang tốt"
+        };
+
+        if (dayInfo.element == "Moc")
+            nenLam = pickOne(MOC_LAM, (int)(sizeof(MOC_LAM)/sizeof(MOC_LAM[0])), seed, 11);
+        else if (dayInfo.element == "Kim")
+            nenLam = pickOne(KIM_LAM, (int)(sizeof(KIM_LAM)/sizeof(KIM_LAM[0])), seed, 12);
+        else if (dayInfo.element == "Thuy")
+            nenLam = pickOne(THUY_LAM, (int)(sizeof(THUY_LAM)/sizeof(THUY_LAM[0])), seed, 13);
+        else if (dayInfo.element == "Hoa")
+            nenLam = pickOne(HOA_LAM, (int)(sizeof(HOA_LAM)/sizeof(HOA_LAM[0])), seed, 14);
+        else
+            nenLam = pickOne(THO_LAM, (int)(sizeof(THO_LAM)/sizeof(THO_LAM[0])), seed, 15);
+
+        nenTranh = pickOne(TR_HIGH, (int)(sizeof(TR_HIGH)/sizeof(TR_HIGH[0])), seed, 21);
+    }
+    else if (score <= -1)
+    {
+        static const char* const LAM_LOW[] = {
+            "Ưu tiên việc nhẹ: dọn dẹp, sắp xếp, hoàn thiện việc còn dang dở",
+            "Giảm tốc độ: dọn tồn, chỉnh sửa, làm lại cho gọn",
+            "Làm việc vừa sức: rà lỗi, dọn backlog, hoàn tất phần còn thiếu",
+            "Tập trung việc nhỏ: thu gọn, kiểm tra, hoàn thiện nốt việc dang dở",
+            "An tĩnh xử việc nhỏ, chờ thời thuận lợi",
+            "Thu mình dưỡng sức, chỉnh lại điều chưa ổn",
+            "Làm ít nhưng làm kỹ, sửa sai cho sạch",
+            "Dọn việc cũ cho xong, giữ lòng cho nhẹ",
+            "Giảm tốc một nhịp, tránh sai một bước"
+        };
+
+        static const char* const TR_LOW_KH[] = {
+            "Tránh ký kết lớn, đầu tư mạo hiểm, và xung đột căng thẳng",
+            "Tránh quyết định lớn, tranh cãi gay, và liều tài chính",
+            "Tránh chốt hợp đồng lớn, đầu tư vội, và căng thẳng đôi co",
+            "Tránh va chạm, tránh mạo hiểm tiền bạc, và ký kết quan trọng",
+            "Tránh đối đầu trực diện khi chưa đủ lực",
+            "Tránh quyết lớn khi vận chưa thông",
+            "Tránh dấn thân mạo hiểm vì nóng lòng",
+            "Tránh đầu tư khi lòng còn phân vân",
+            "Tránh căng thẳng kéo dài không cần thiết"
+
+        };
+
+        static const char* const TR_LOW_OTHER[] = {
+            "Tránh đi xa, vay mượn, và quyết định gấp",
+            "Tránh hứa hẹn lớn, vay mượn, và xử lý vội",
+            "Tránh bốc đồng, tránh đi xa, và quyết định khi mệt",
+            "Tránh hành động gấp, vay mượn, và thay đổi lớn",
+            "Tránh di chuyển xa khi chưa thật cần",
+            "Tránh cam kết dài hạn lúc tâm chưa yên",
+            "Tránh vội vàng vì áp lực bên ngoài",
+            "Tránh mở việc mới khi việc cũ chưa xong",
+            "Tránh quyết định khi còn nhiều nghi ngại"
+        };
+
+        nenLam = pickOne(LAM_LOW, (int)(sizeof(LAM_LOW)/sizeof(LAM_LOW[0])), seed, 31);
+
+        if (dayInfo.element == "Kim" || dayInfo.element == "Hoa")
+            nenTranh = pickOne(TR_LOW_KH, (int)(sizeof(TR_LOW_KH)/sizeof(TR_LOW_KH[0])), seed, 32);
+        else
+            nenTranh = pickOne(TR_LOW_OTHER, (int)(sizeof(TR_LOW_OTHER)/sizeof(TR_LOW_OTHER[0])), seed, 33);
+    }
+    else
+    {
+        static const char* const LAM_MID[] = {
+            "Giữ nhịp ổn định, làm việc theo kế hoạch, ưu tiên việc trong tầm kiểm soát",
+            "Đi đều: làm theo kế hoạch, kiểm tra tiến độ, giữ nhịp ổn định",
+            "Chọn việc chắc tay, làm từng bước, ưu tiên phần quan trọng",
+            "Giữ nhịp vừa phải, ưu tiên việc rõ ràng, tránh lan man",
+            "Đi từng bước chắc tay, tránh dao động",
+            "Lấy ổn định làm trọng, tiến vừa đủ nhịp",
+            "Làm việc trong khả năng, tránh quá tầm",
+            "Giữ cân bằng giữa tiến và thủ",
+            "Thuận theo kế hoạch, hạn chế biến động"
+        };
+
+        static const char* const TR_MID[] = {
+            "Tránh khởi sự rủi ro cao hoặc quyết khi chưa đủ dữ liệu",
+            "Tránh quyết vội, tránh rủi ro lớn, và đừng thiếu dữ liệu",
+            "Tránh mở việc khó khi chưa sẵn sàng và chưa đủ thông tin",
+            "Tránh liều lĩnh, tránh đoán mò, và đừng chốt khi còn thiếu dữ liệu",
+            "Tránh thay đổi chiến lược đột ngột",
+            "Tránh tin lời đồn chưa kiểm chứng",
+            "Tránh làm việc theo cảm tính",
+            "Tránh mở rộng khi nền chưa vững",
+            "Tránh quyết nhanh khi chưa cân nhắc đủ"
+        };
+
+        nenLam   = pickOne(LAM_MID, (int)(sizeof(LAM_MID)/sizeof(LAM_MID[0])), seed, 41);
+        nenTranh = pickOne(TR_MID,  (int)(sizeof(TR_MID)/sizeof(TR_MID[0])),  seed, 42);
+    }
+
+    // 2) Lunar-cycle: early/mid/late month (phrases feel like guidance, not technical)
+    if (lunarDay <= 10)
+    {
+        appendAdviceClause(nenLam, "hợp bắt đầu gọn gàng, đặt mục tiêu ngắn hạn");
+        appendAdviceClause(nenTranh, "tránh ôm quá nhiều việc ngay đầu tháng âm lịch");
+    }
+    else if (lunarDay <= 20)
+    {
+        appendAdviceClause(nenLam, "hợp đẩy tiến độ, chốt các hạng mục đang chạy");
+        appendAdviceClause(nenTranh, "tránh đổi mục tiêu liên tục khi việc đã vào nhịp");
+    }
+    else
+    {
+        appendAdviceClause(nenLam, "hợp tổng kết, nghiệm thu, dọn việc tồn");
+        appendAdviceClause(nenTranh, "tránh mở thêm việc lớn sát cuối tháng âm lịch");
+    }
+
+    // 3) Seasonal-ish month buckets (keep your mapping, improve language)
+    if (lunarMonth == 1 || lunarMonth == 2 || lunarMonth == 3)
+    {
+        appendAdviceClause(nenLam, "hợp mở rộng quan hệ, học kỹ năng mới");
+    }
+    else if (lunarMonth == 4 || lunarMonth == 5 || lunarMonth == 6)
+    {
+        appendAdviceClause(nenLam, "hợp chuẩn hóa quy trình, siết kế hoạch tài chính");
+        appendAdviceClause(nenTranh, "tránh chi tiêu theo hứng");
+    }
+    else if (lunarMonth == 7 || lunarMonth == 8 || lunarMonth == 9)
+    {
+        appendAdviceClause(nenLam, "hợp rà soát rủi ro, củng cố phương án dự phòng");
+        appendAdviceClause(nenTranh, "tránh quyết vội khi thiếu dữ liệu");
+    }
+    else
+    {
+        appendAdviceClause(nenLam, "hợp chốt kế hoạch dài hạn, gia cố việc nền tảng");
+        appendAdviceClause(nenTranh, "tránh thay đổi lớn vào phút cuối");
+    }
+
+    // 4) Leap month nuance
+    if (lunarLeap)
+    {
+        appendAdviceClause(nenLam, "ưu tiên kiểm chứng thông tin, rà soát điều khoản");
+        appendAdviceClause(nenTranh, "hạn chế cam kết dài hạn khi chưa thật cần");
+    }
+
+    // 5) Folk flags
+    if (tamNuong)
+    {
+        appendAdviceClause(nenLam, "ưu tiên việc nội bộ, kiểm tra và chỉnh sửa");
+        appendAdviceClause(nenTranh, "hạn chế khai trương, cưới hỏi, động thổ, ký hợp đồng lớn");
+    }
+    if (nguyetKy)
+    {
+        appendAdviceClause(nenLam, "dành thời gian rà soát kế hoạch, quản trị rủi ro");
+        appendAdviceClause(nenTranh, "tránh đầu tư lớn, đi xa, và tranh chấp");
+    }
+
+    // 6) Branch tuning (index-based to avoid UTF-8 compare mismatch)
+    int bi = dayInfo.branchIndex;
+    if (bi < 0 || bi > 11)
+        bi = 0;
+
+    switch (bi)
+    {
+    case 0:  // Tý
+    case 11: // Hợi
+        appendAdviceClause(nenLam, "hợp học tập, nghiên cứu, lập kế hoạch");
+        appendAdviceClause(nenTranh, "tránh quyết định nóng theo cảm xúc");
+        break;
+
+    case 2: // Dần
+    case 3: // Mão
+        appendAdviceClause(nenLam, "hợp gặp gỡ, trao đổi ý tưởng");
+        appendAdviceClause(nenTranh, "tránh tranh luận căng thẳng");
+        break;
+
+    case 4: // Thìn
+    case 5: // Tỵ
+        appendAdviceClause(nenLam, "hợp xử lý hồ sơ, chuẩn hóa quy trình");
+        appendAdviceClause(nenTranh, "tránh ôm đồm nhiều việc cùng lúc");
+        break;
+
+    case 6: // Ngọ
+    case 7: // Mùi
+        appendAdviceClause(nenLam, "hợp chăm sóc gia đình, củng cố hậu cần");
+        appendAdviceClause(nenTranh, "tránh chi tiêu theo hứng");
+        break;
+
+    case 8: // Thân
+    case 9: // Dậu
+        appendAdviceClause(nenLam, "hợp chốt việc ngắn hạn, dọn backlog");
+        appendAdviceClause(nenTranh, "tránh ký cam kết dài hạn khi chưa đủ dữ liệu");
+        break;
+
+    case 1:  // Sửu
+    case 10: // Tuất
+        appendAdviceClause(nenLam, "hợp việc bền vững, gia cố kế hoạch dài hạn");
+        appendAdviceClause(nenTranh, "tránh thay đổi lớn vào phút cuối");
+        break;
+
+    default:
+        break;
+    }
+}
+static void buildHoangDaoHoursCompact(int dayBranchIndex, char *dst, size_t cap)
+{
+    static const char *chiNames[12] = {
+        "Tý", "Sửu", "Dần", "Mão", "Thìn", "Tỵ",
+        "Ngọ", "Mùi", "Thân", "Dậu", "Tuất", "Hợi"};
+    static const char *hourRanges[12] = {
+        "23-01", "01-03", "03-05", "05-07", "07-09", "09-11",
+        "11-13", "13-15", "15-17", "17-19", "19-21", "21-23"};
+
+    static const int setA[6] = {0, 1, 3, 6, 8, 9};
+    static const int setB[6] = {2, 3, 5, 8, 10, 11};
+    static const int setC[6] = {0, 1, 4, 5, 7, 10};
+    static const int setD[6] = {2, 3, 6, 7, 9, 0};
+    static const int setE[6] = {4, 5, 8, 9, 11, 2};
+    static const int setF[6] = {6, 7, 10, 11, 1, 4};
+
+    if (!dst || cap == 0)
+        return;
+    dst[0] = '\0';
+
+    if (dayBranchIndex < 0 || dayBranchIndex > 11)
+        dayBranchIndex = 0;
+
+    const int *selected = setA;
+    switch (dayBranchIndex)
+    {
+    case 0:
+    case 6:
+        selected = setA;
+        break;
+    case 1:
+    case 7:
+        selected = setB;
+        break;
+    case 2:
+    case 8:
+        selected = setC;
+        break;
+    case 3:
+    case 9:
+        selected = setD;
+        break;
+    case 4:
+    case 10:
+        selected = setE;
+        break;
+    case 5:
+    case 11:
+    default:
+        selected = setF;
+        break;
+    }
+
+    for (int i = 0; i < 6; ++i)
+    {
+        if (i > 0)
+            safeAppend(dst, cap, SEP);
+        const int idx = selected[i];
+        safeAppend(dst, cap, chiNames[idx]);
+        safeAppend(dst, cap, " ");
+        safeAppend(dst, cap, hourRanges[idx]);
+    }
+}
+
+static void setSectionStartState()
+{
+    if (g_sectionCount == 0)
+        return;
+    marqueeActive = g_sections[currentSectionIndex].marquee;
+    marqueeOffsetPx = PANEL_RES_X;
+    sectionStartMs = millis();
+    lastScrollMs = sectionStartMs;
+}
+
+static void startHeaderDoor(const char *oldTitle, const char *newTitle)
+{
+    if (!oldTitle)
+        oldTitle = "";
+    if (!newTitle)
+        newTitle = "";
+    strncpy(hdrOld, oldTitle, TITLE_MAX - 1);
+    hdrOld[TITLE_MAX - 1] = '\0';
+    strncpy(hdrNew, newTitle, TITLE_MAX - 1);
+    hdrNew[TITLE_MAX - 1] = '\0';
+    hdrState = HDR_DOOR;
+    hdrAnimStartMs = 0;
+    hdrLastFrameMs = 0;
+    hdrDoorPx = 0;
+    hdrDrawNew = false;
+    hdrDelayActive = true;
+    hdrDelayStartMs = millis();
+
+    if (!autoBrightness)
+    {
+        if (hdrBrightnessPulsed)
+        {
+            setPanelBrightness(hdrBrightnessSaved);
+            hdrBrightnessPulsed = false;
+        }
+        hdrBrightnessSaved = (currentPanelBrightness > 0)
+                                 ? currentPanelBrightness
+                                 : static_cast<uint8_t>(map(brightness, 1, 100, 3, 255));
+        const uint8_t dimmed = (hdrBrightnessSaved > HDR_PULSE_DELTA)
+                                   ? static_cast<uint8_t>(hdrBrightnessSaved - HDR_PULSE_DELTA)
+                                   : 1;
+        setPanelBrightness(dimmed);
+        hdrBrightnessPulsed = true;
+    }
+}
+
+static void updateHeaderAnim()
+{
+    if (hdrState != HDR_DOOR)
+        return;
+
+    const uint32_t now = millis();
+    if (hdrDelayActive)
+    {
+        if (now - hdrDelayStartMs < HDR_START_DELAY_MS)
+            return;
+        hdrDelayActive = false;
+        hdrAnimStartMs = now;
+        hdrLastFrameMs = 0;
+    }
+
+    if (hdrLastFrameMs != 0 && (now - hdrLastFrameMs < HDR_FRAME_MS))
+        return;
+    hdrLastFrameMs = now;
+
+    const uint32_t elapsed = now - hdrAnimStartMs;
+    const int16_t halfW = PANEL_RES_X / 2;
+    if (elapsed >= HDR_ANIM_MS)
+    {
+        hdrState = HDR_IDLE;
+        hdrDoorPx = halfW;
+        hdrDrawNew = true;
+        if (hdrBrightnessPulsed)
+        {
+            setPanelBrightness(hdrBrightnessSaved);
+            hdrBrightnessPulsed = false;
+        }
+        return;
+    }
+    float t = static_cast<float>(elapsed) / static_cast<float>(HDR_ANIM_MS);
+    if (t < 0.0f)
+        t = 0.0f;
+    if (t > 1.0f)
+        t = 1.0f;
+    const float te = easeInOutCubic(t);
+    hdrDoorPx = static_cast<int16_t>(te * static_cast<float>(halfW));
+    hdrDrawNew = (t >= 0.5f);
+}
+
+static void renderHeaderLine1(const char *currentTitle, uint16_t headerFgColor, uint16_t headerBgColor, uint16_t headerDividerColor)
+{
+    auto drawPreviewIndicator = [&](int16_t offset)
+    {
+        const int16_t x = 61;
+        const int16_t y = 0;
+        const uint16_t indicatorColor = (theme == 1)
+                                            ? dma_display->color565(120, 220, 255)
+                                            : dma_display->color565(80, 255, 160);
+        dma_display->fillRect(x, y, 3, 3, headerBgColor);
+        if (offset == 0)
+            return;
+        if (offset > 0)
+        {
+            // .#.
+            // ###
+            // .#.
+            dma_display->drawPixel(x + 1, y + 0, indicatorColor);
+            dma_display->drawPixel(x + 0, y + 1, indicatorColor);
+            dma_display->drawPixel(x + 1, y + 1, indicatorColor);
+            dma_display->drawPixel(x + 2, y + 1, indicatorColor);
+            dma_display->drawPixel(x + 1, y + 2, indicatorColor);
+        }
+        else
+        {
+            // ...
+            // ###
+            // ...
+            dma_display->drawPixel(x + 0, y + 1, indicatorColor);
+            dma_display->drawPixel(x + 1, y + 1, indicatorColor);
+            dma_display->drawPixel(x + 2, y + 1, indicatorColor);
+        }
+    };
+
+    dma_display->fillRect(0, HEADER_Y, HEADER_W, HEADER_H, headerBgColor);
+    dma_display->drawFastHLine(0, HEADER_Y + HEADER_H - 1, HEADER_W, headerDividerColor);
+    updateHeaderAnim();
+    const int16_t cx = PANEL_RES_X / 2;
+    const int16_t textX = HEADER_PAD_X;
+
+    if (lunarLuckUtf8Ready)
+    {
+        // Opaque glyph draw on header band so gaps/inner counters use headerBgColor.
+        lunarLuckUtf8.setFontMode(0);
+        lunarLuckUtf8.setBackgroundColor(headerBgColor);
+        lunarLuckUtf8.setForegroundColor(headerFgColor);
+        if (hdrState == HDR_DOOR)
+        {
+            const char *activeTitle = hdrDrawNew ? hdrNew : hdrOld;
+            lunarLuckUtf8.drawUTF8(textX, LINE1_Y, activeTitle);
+            const int16_t door = constrain(hdrDoorPx, 0, cx);
+            if (!hdrReverse)
+            {
+                const int16_t leftX = cx - door;
+                const int16_t rightX = cx;
+                if (door > 0)
+                {
+                    dma_display->fillRect(leftX, HEADER_Y, door, HEADER_H, headerBgColor);
+                    dma_display->fillRect(rightX, HEADER_Y, door, HEADER_H, headerBgColor);
+                }
+                if (HDR_EDGE_HIGHLIGHT)
+                {
+                    dma_display->drawFastVLine(constrain(leftX, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                    dma_display->drawFastVLine(constrain(rightX + door - 1, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                }
+            }
+            else
+            {
+                const int16_t cover = cx - door;
+                const int16_t leftW = cx - cover;
+                const int16_t rightX = cx + cover;
+                const int16_t rightW = PANEL_RES_X - rightX;
+                if (leftW > 0)
+                    dma_display->fillRect(0, HEADER_Y, leftW, HEADER_H, headerBgColor);
+                if (rightW > 0)
+                    dma_display->fillRect(rightX, HEADER_Y, rightW, HEADER_H, headerBgColor);
+                if (HDR_EDGE_HIGHLIGHT)
+                {
+                    dma_display->drawFastVLine(constrain(leftW, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                    dma_display->drawFastVLine(constrain(rightX, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                }
+            }
+        }
+        else
+        {
+            lunarLuckUtf8.drawUTF8(textX, LINE1_Y, currentTitle);
+        }
+        // Restore transparent mode for non-header lines.
+        lunarLuckUtf8.setFontMode(1);
+    }
+    else
+    {
+        // Opaque text fallback so inter-letter background stays consistent.
+        dma_display->setTextColor(headerFgColor, headerBgColor);
+        if (hdrState == HDR_DOOR)
+        {
+            const char *activeTitle = hdrDrawNew ? hdrNew : hdrOld;
+            dma_display->setCursor(textX, LINE1_Y);
+            dma_display->print(activeTitle);
+            const int16_t door = constrain(hdrDoorPx, 0, cx);
+            if (!hdrReverse)
+            {
+                const int16_t leftX = cx - door;
+                const int16_t rightX = cx;
+                if (door > 0)
+                {
+                    dma_display->fillRect(leftX, HEADER_Y, door, HEADER_H, headerBgColor);
+                    dma_display->fillRect(rightX, HEADER_Y, door, HEADER_H, headerBgColor);
+                }
+                if (HDR_EDGE_HIGHLIGHT)
+                {
+                    dma_display->drawFastVLine(constrain(leftX, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                    dma_display->drawFastVLine(constrain(rightX + door - 1, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                }
+            }
+            else
+            {
+                const int16_t cover = cx - door;
+                const int16_t leftW = cx - cover;
+                const int16_t rightX = cx + cover;
+                const int16_t rightW = PANEL_RES_X - rightX;
+                if (leftW > 0)
+                    dma_display->fillRect(0, HEADER_Y, leftW, HEADER_H, headerBgColor);
+                if (rightW > 0)
+                    dma_display->fillRect(rightX, HEADER_Y, rightW, HEADER_H, headerBgColor);
+                if (HDR_EDGE_HIGHLIGHT)
+                {
+                    dma_display->drawFastVLine(constrain(leftW, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                    dma_display->drawFastVLine(constrain(rightX, 0, PANEL_RES_X - 1), HEADER_Y, HEADER_H, headerFgColor);
+                }
+            }
+        }
+        else
+        {
+            dma_display->setCursor(textX, LINE1_Y);
+            dma_display->print(currentTitle);
+        }
+    }
+    drawPreviewIndicator(lunarDayOffset);
+}
+
+static void advanceSection()
+{
+    if (g_sectionCount == 0)
+        return;
+    const uint8_t oldIndex = currentSectionIndex;
+    const uint8_t nextIndex = static_cast<uint8_t>((currentSectionIndex + 1) % g_sectionCount);
+    hdrReverse = ((oldIndex & 1u) != 0u);
+    startHeaderDoor(g_sections[oldIndex].title, g_sections[nextIndex].title);
+    currentSectionIndex = nextIndex;
+    setSectionStartState();
+}
+
+static size_t copyTrimmedToken(char *dst, size_t cap, const char *start, size_t len)
+{
+    if (!dst || cap == 0)
+        return 0;
+    dst[0] = '\0';
+    if (!start || len == 0)
+        return 0;
+
+    size_t s = 0;
+    while (s < len && isspace(static_cast<unsigned char>(start[s])))
+        ++s;
+    size_t e = len;
+    while (e > s && isspace(static_cast<unsigned char>(start[e - 1])))
+        --e;
+    if (e <= s)
+        return 0;
+    return safeAppendN(dst, cap, start + s, e - s);
+}
+
+static bool startsWithTopicPrefix(const char *src, size_t &prefixLen)
+{
+    prefixLen = 0;
+    if (!src)
+        return false;
+
+    static const char *kPrefix1 = "Chủ đề:";
+    static const char *kPrefix2 = "Chu de:";
+    static const char *kPrefix3 = "Chủ Đề:";
+    const size_t n1 = strlen(kPrefix1);
+    const size_t n2 = strlen(kPrefix2);
+    const size_t n3 = strlen(kPrefix3);
+
+    if (strncmp(src, kPrefix1, n1) == 0)
+    {
+        prefixLen = n1;
+        return true;
+    }
+    if (strncmp(src, kPrefix2, n2) == 0)
+    {
+        prefixLen = n2;
+        return true;
+    }
+    if (strncmp(src, kPrefix3, n3) == 0)
+    {
+        prefixLen = n3;
+        return true;
+    }
+    return false;
+}
+
+static const char *skipTopicLeadForGoiY(const char *headlineRaw)
+{
+    if (!headlineRaw)
+        return "";
+
+    const char *p = headlineRaw;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')
+        ++p;
+
+    size_t prefixLen = 0;
+    bool hasPrefix = startsWithTopicPrefix(p, prefixLen);
+    if (!hasPrefix)
+    {
+        // Non-accent fallback variants.
+        if (strncmp(p, "Chu De:", 7) == 0 || strncmp(p, "chu de:", 7) == 0)
+        {
+            hasPrefix = true;
+            prefixLen = 7;
+        }
+    }
+    if (!hasPrefix)
+        return p;
+
+    p += prefixLen;
+    while (*p != '\0' && *p != '.')
+        ++p;
+    if (*p == '.')
+        ++p;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')
+        ++p;
+    return p;
+}
+
+static const char *skipFocusLeadForGoiY(const char *goiYRaw, const char *focusPhrase)
+{
+    if (!goiYRaw)
+        return "";
+    const char *p = goiYRaw;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t')
+        ++p;
+
+    if (!focusPhrase || focusPhrase[0] == '\0')
+        return p;
+
+    size_t focusLen = strlen(focusPhrase);
+    if (strncmp(p, focusPhrase, focusLen) != 0)
+        return p;
+
+    p += focusLen;
+    while (*p == ' ' || *p == '\n' || *p == '\r' || *p == '\t' || *p == '.' || *p == ';' || *p == ':')
+        ++p;
+    return p;
+}
+
+static void extractFocusPhraseFromHeadline(
+    char *focusDst, size_t focusCap,
+    const char *headlineRaw,
+    const char *fallbackTopic)
+{
+    if (focusDst && focusCap > 0)
+        focusDst[0] = '\0';
+
+    if (!headlineRaw)
+    {
+        if (focusDst && focusCap > 0)
+            safeAppend(focusDst, focusCap, fallbackTopic ? fallbackTopic : "");
+        return;
+    }
+
+    size_t prefixLen = 0;
+    if (!startsWithTopicPrefix(headlineRaw, prefixLen))
+    {
+        if (focusDst && focusCap > 0)
+            safeAppend(focusDst, focusCap, fallbackTopic ? fallbackTopic : "");
+        return;
+    }
+
+    const char *p = headlineRaw + prefixLen;
+    while (*p == ' ')
+        ++p;
+
+    // Skip category name sentence: "Chủ đề: <CategoryName>."
+    while (*p != '\0' && *p != '.')
+        ++p;
+    if (*p == '.')
+        ++p;
+    while (*p == ' ' || *p == '\n' || *p == '\r')
+        ++p;
+
+    const char *focusEnd = p;
+    while (*focusEnd != '\0' && *focusEnd != '.' && *focusEnd != ';' && *focusEnd != '\n' && *focusEnd != '\r')
+        ++focusEnd;
+
+    if (focusDst && focusCap > 0)
+        copyTrimmedToken(focusDst, focusCap, p, static_cast<size_t>(focusEnd - p));
+    if (focusDst && focusCap > 0 && focusDst[0] == '\0')
+        safeAppend(focusDst, focusCap, fallbackTopic ? fallbackTopic : "");
+}
+
+void buildLuckSections(
+    int lunarDay, int lunarMonth, int lunarYear,
+    const char *canChiDay, const char *canChiMonth, const char *solarTerm, const char *canChiYear,
+    const char *hop1, const char *hop2, const char *ky,
+    const char *gioTotRawOrPreformatted,
+    int score,
+    const char *categoryName,
+    const char *focusPhrase,
+    const char *headlineRaw,
+    const char *nenLamRaw,
+    const char *nenTranhRaw,
+    const char *xuatHanhLine,
+    int xuatHanhTone,
+    const char *xuatHanhName,
+    const char *caDaoLine)
+{
+    g_sectionCount = 0;
+
+    char buf[CONTENT_MAX];
+
+    snprintf(buf, sizeof(buf), "%02d/%02d/%04d" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
+             lunarDay, lunarMonth, lunarYear,
+             canChiDay ? canChiDay : "",
+             canChiMonth ? canChiMonth : "",
+             solarTerm ? solarTerm : "",
+             canChiYear ? canChiYear : "");
+    addSection("Âm Lịch", buf, false, false, 0);
+
+    const char *scoreLabel = "Bình";
+    if (score >= 2)
+        scoreLabel = "Tốt";
+    else if (score <= -1)
+        scoreLabel = "Xấu";
+    snprintf(buf, sizeof(buf), "Ngày: %s * X.Hành: %s", scoreLabel, xuatHanhLine ? xuatHanhLine : "");
+    buf[sizeof(buf) - 1] = '\0';
+    addSection("Vận Khí", buf, false, false, 0);
+
+    buf[0] = '\0';
+    safeAppend(buf, sizeof(buf), hop1 ? hop1 : "");
+    if (hop2 && hop2[0] != '\0')
+    {
+        safeAppend(buf, sizeof(buf), SEP);
+        safeAppend(buf, sizeof(buf), hop2);
+    }
+    addSection("Hợp Tuổi", buf, false, false, 0);
+
+    addSection("Kỵ Tuổi", ky ? ky : "", false, false, 0);
+    addSection("Giờ Tốt", gioTotRawOrPreformatted ? gioTotRawOrPreformatted : "", false, false, 0);
+
+    addSection("Chủ Đề", focusPhrase ? focusPhrase : "", false, false, 0);
+
+    const char *goiYNoTopic = skipTopicLeadForGoiY(headlineRaw);
+    const char *goiYBody = skipFocusLeadForGoiY(goiYNoTopic, focusPhrase);
+    char goiyBuilt[GOIY_CONTENT_MAX];
+    buildNormalized(goiyBuilt, sizeof(goiyBuilt), goiYBody ? goiYBody : "");
+    if (xuatHanhName && xuatHanhName[0] != '\0')
+    {
+        const char *clause = "Xuất hành vừa: đi được nhưng chọn việc chắc, tránh vội";
+        if (xuatHanhTone > 0)
+            clause = "Xuất hành thuận: dễ gặp trợ lực, việc đối ngoại hanh thông";
+        else if (xuatHanhTone < 0)
+            clause = "Xuất hành kém: nên giữ an toàn, hạn chế đi xa và chốt lớn";
+        safeAppendClauseBoundary(goiyBuilt, sizeof(goiyBuilt), clause);
+    }
+    addSection("Lời Bàn", goiyBuilt, false, false, 0, g_goiyContent, GOIY_CONTENT_MAX);
+
+    char nenBuilt[CONTENT_MAX];
+    char tranhBuilt[CONTENT_MAX];
+    summarizeListToBullets(nenBuilt, sizeof(nenBuilt), nenLamRaw ? nenLamRaw : "", 5);
+    summarizeListToBullets(tranhBuilt, sizeof(tranhBuilt), nenTranhRaw ? nenTranhRaw : "", 5);
+    if (xuatHanhName && xuatHanhName[0] != '\0')
+    {
+        const char *nenClause = "đi lại vừa phải, chọn việc đơn giản và chắc chắn";
+        const char *tranhClause = "tránh mở việc quá lớn khi chưa sẵn sàng";
+        if (xuatHanhTone > 0)
+        {
+            nenClause = "hợp đi lại, gặp gỡ, xử lý việc đối ngoại";
+            tranhClause = "tránh chần chừ bỏ lỡ thời điểm";
+        }
+        else if (xuatHanhTone < 0)
+        {
+            nenClause = "ưu tiên việc gần, việc nội bộ, rà soát và chỉnh sửa";
+            tranhClause = "hạn chế đi xa, khai trương, ký kết lớn";
+        }
+        safeAppendClauseBoundary(nenBuilt, sizeof(nenBuilt), nenClause);
+        safeAppendClauseBoundary(tranhBuilt, sizeof(tranhBuilt), tranhClause);
+    }
+    addSection("Nên", nenBuilt, false, false, 0);
+    addSection("Tránh", tranhBuilt, false, false, 0);
+    addSection("Ca Dao", caDaoLine ? caDaoLine : "", false, false, 0);
+
+    for (uint8_t i = 0; i < g_sectionCount; ++i)
+    {
+        g_sections[i].contentLen = static_cast<uint16_t>(strlen(g_sections[i].content));
+        g_sections[i].contentWidthPx = static_cast<int16_t>(measureTextWidthPx(g_sections[i].content, g_sections[i].contentLen));
+        g_sections[i].marquee = (g_sections[i].contentWidthPx > PANEL_RES_X);
+    }
+
+    currentSectionIndex = 0;
+    hdrState = HDR_IDLE;
+    hdrDoorPx = PANEL_RES_X / 2;
+    hdrDrawNew = true;
+    hdrDelayActive = false;
+    if (hdrBrightnessPulsed)
+    {
+        setPanelBrightness(hdrBrightnessSaved);
+        hdrBrightnessPulsed = false;
+    }
+    hdrOld[0] = '\0';
+    strncpy(hdrNew, g_sections[0].title ? g_sections[0].title : "", TITLE_MAX - 1);
+    hdrNew[TITLE_MAX - 1] = '\0';
+    setSectionStartState();
+}
+
+static void renderCurrentLunarLuckSection()
+{
+    if (!dma_display || g_sectionCount == 0)
+        return;
+
+    const bool mono = (theme == 1);
+    const uint16_t headerFgColor = mono ? dma_display->color565(245, 245, 245)
+                                        : dma_display->color565(255, 235, 180);
+    const uint16_t headerBgColor = dma_display->color565(12, 22, 45);
+    const uint16_t headerDividerColor = mono ? dma_display->color565(80, 80, 90)
+                                             : dma_display->color565(55, 80, 120);
+    const uint16_t contentColorDefault = mono ? dma_display->color565(180, 205, 230)
+                                              : dma_display->color565(120, 210, 255);
+    const uint16_t toneGoodColor = dma_display->color565(70, 235, 110); // green
+    const uint16_t toneBadColor = dma_display->color565(255, 70, 70);   // red
+    const uint16_t toneMidColor = dma_display->color565(90, 170, 255);  // blue
+
+    const LuckSection &sec = g_sections[currentSectionIndex];
+    const bool isVanKhi = (sec.title && strcmp(sec.title, "Vận Khí") == 0);
+
+    setLunarLuckUtf8Font();
+    renderHeaderLine1(sec.title, headerFgColor, headerBgColor, headerDividerColor);
+    dma_display->fillRect(0, LINE2_CLEAR_Y_SAFE, PANEL_RES_X, LINE2_CLEAR_H_SAFE, myBLACK);
+
+    if (isVanKhi)
+    {
+        const char *sepPtr = strstr(sec.content, SEP);
+        if (!sepPtr)
+        {
+            // Fallback if format changes unexpectedly.
+            if (lunarLuckUtf8Ready)
+            {
+                lunarLuckUtf8.setForegroundColor(contentColorDefault);
+                const int x = marqueeActive ? marqueeOffsetPx : 0;
+                lunarLuckUtf8.drawUTF8(x, LINE2_Y, sec.content);
+            }
+            else
+            {
+                dma_display->setTextColor(contentColorDefault);
+                dma_display->setCursor(marqueeActive ? marqueeOffsetPx : 0, LINE2_Y);
+                dma_display->print(sec.content);
+            }
+            return;
+        }
+
+        char ngayPart[CONTENT_MAX];
+        char xhPart[CONTENT_MAX];
+        const size_t ngayLen = static_cast<size_t>(sepPtr - sec.content);
+        const size_t copyNgay = (ngayLen < (CONTENT_MAX - 1)) ? ngayLen : (CONTENT_MAX - 1);
+        memcpy(ngayPart, sec.content, copyNgay);
+        ngayPart[copyNgay] = '\0';
+        safeAppend(xhPart, sizeof(xhPart), sepPtr + strlen(SEP));
+
+        uint16_t ngayColor = toneMidColor;
+        if (strstr(ngayPart, "Tốt") != nullptr)
+            ngayColor = toneGoodColor;
+        else if (strstr(ngayPart, "Xấu") != nullptr)
+            ngayColor = toneBadColor;
+
+        uint16_t xhColor = toneMidColor;
+        if (strstr(xhPart, "(Tốt)") != nullptr)
+            xhColor = toneGoodColor;
+        else if (strstr(xhPart, "(Xấu)") != nullptr)
+            xhColor = toneBadColor;
+
+        const int baseX = marqueeActive ? marqueeOffsetPx : 0;
+        if (lunarLuckUtf8Ready)
+        {
+            lunarLuckUtf8.setForegroundColor(ngayColor);
+            lunarLuckUtf8.drawUTF8(baseX, LINE2_Y, ngayPart);
+            int nextX = baseX + static_cast<int>(lunarLuckUtf8.getUTF8Width(ngayPart));
+
+            lunarLuckUtf8.setForegroundColor(contentColorDefault);
+            lunarLuckUtf8.drawUTF8(nextX, LINE2_Y, SEP);
+            nextX += static_cast<int>(lunarLuckUtf8.getUTF8Width(SEP));
+
+            lunarLuckUtf8.setForegroundColor(xhColor);
+            lunarLuckUtf8.drawUTF8(nextX, LINE2_Y, xhPart);
+        }
+        else
+        {
+            dma_display->setTextColor(ngayColor);
+            dma_display->setCursor(baseX, LINE2_Y);
+            dma_display->print(ngayPart);
+            int nextX = baseX + measureTextWidthPx(ngayPart, static_cast<uint16_t>(strlen(ngayPart)));
+
+            dma_display->setTextColor(contentColorDefault);
+            dma_display->setCursor(nextX, LINE2_Y);
+            dma_display->print(SEP);
+            nextX += measureTextWidthPx(SEP, static_cast<uint16_t>(strlen(SEP)));
+
+            dma_display->setTextColor(xhColor);
+            dma_display->setCursor(nextX, LINE2_Y);
+            dma_display->print(xhPart);
+        }
+    }
+    else
+    {
+        if (lunarLuckUtf8Ready)
+        {
+            lunarLuckUtf8.setForegroundColor(contentColorDefault);
+            const int x = marqueeActive ? marqueeOffsetPx : 0;
+            lunarLuckUtf8.drawUTF8(x, LINE2_Y, sec.content);
+        }
+        else
+        {
+            dma_display->setTextColor(contentColorDefault);
+            dma_display->setCursor(marqueeActive ? marqueeOffsetPx : 0, LINE2_Y);
+            dma_display->print(sec.content);
+        }
+    }
+}
+
+static void buildLunarLuckLinesForDate(int dd, int mm, int yy)
+{
+    const int savedDay = d_day;
+    const int savedMonth = d_month;
+    const int savedYear = d_year;
+
+    // Some existing formatters use global date fields, so temporarily bind them.
+    d_day = static_cast<byte>(dd);
+    d_month = static_cast<byte>(mm);
+    d_year = yy;
+
+    const int tzMinutes = tzOffset;
+    LunarDate ld = convertSolar2Lunar(dd, mm, yy, tzMinutes);
+    LunarDayDetail dayInfo = buildLunarDayDetail(dd, mm, yy);
+    const XuatHanhInfo xh = calcXuatHanhKhongMinh(ld.month, ld.day);
+
+    lunarLuckScore = computeLunarLuckScore(ld);
+    lunarLuckScore += static_cast<int>(xh.tone);
+
+    String hop1, hop2, ky;
+    zodiacCompatByBranch(dayInfo.branchIndex, hop1, hop2, ky);
+
+    String nenLam, nenTranh;
+    buildLunarActionAdvice(lunarLuckScore, ld.day, ld.month, ld.leap, dayInfo, nenLam, nenTranh);
+    String headline = buildContextHeadline(lunarLuckScore, ld.day, ld.month, ld.year, ld.leap, dayInfo);
+    char focusPhrase[CONTENT_MAX];
+    String categoryNameVi = elementToVietnamese(dayInfo.element);
+    extractFocusPhraseFromHeadline(focusPhrase, sizeof(focusPhrase), headline.c_str(), categoryNameVi.c_str());
+
+    String dayCanChi = formatLunarDayName(dd, mm, yy);
+    String monthCanChi = formatCanChiMonthVi(ld.year, ld.month);
+    String yearCanChi = formatCanChiYearVi(ld.year);
+    String tietKhi = formatSolarTermTagVi();
+
+    char gioTotCompact[CONTENT_MAX];
+    buildHoangDaoHoursCompact(dayInfo.branchIndex, gioTotCompact, sizeof(gioTotCompact));
+    char xuatHanhLine[CONTENT_MAX];
+    snprintf(xuatHanhLine, sizeof(xuatHanhLine), "%s (%s)", xh.name ? xh.name : "", toneLabelVN(xh.tone));
+    xuatHanhLine[CONTENT_MAX - 1] = '\0';
+    char caDaoLine[CONTENT_MAX];
+    buildCaDaoPhrase(caDaoLine, sizeof(caDaoLine), lunarLuckScore, ld.day, ld.month, ld.year, dayInfo);
+
+    buildLuckSections(
+        ld.day, ld.month, ld.year,
+        dayCanChi.c_str(), monthCanChi.c_str(), tietKhi.c_str(), yearCanChi.c_str(),
+        hop1.c_str(), hop2.c_str(), ky.c_str(),
+        gioTotCompact,
+        lunarLuckScore,
+        categoryNameVi.c_str(),
+        focusPhrase,
+        headline.c_str(),
+        nenLam.c_str(),
+        nenTranh.c_str(),
+        xuatHanhLine,
+        static_cast<int>(xh.tone),
+        xh.name,
+        caDaoLine);
+
+    d_day = static_cast<byte>(savedDay);
+    d_month = static_cast<byte>(savedMonth);
+    d_year = savedYear;
+    lunarLuckInitialized = true;
+}
+
+static void rebuildLunarForOffset()
+{
+    getTimeFromRTC();
+    int baseDay = d_day;
+    int baseMonth = d_month;
+    int baseYear = d_year;
+    lunarLuckBuiltDay = baseDay;
+    lunarLuckBuiltMonth = baseMonth;
+    lunarLuckBuiltYear = baseYear;
+
+    lunarDayOffset = constrain(lunarDayOffset, LUNAR_OFFSET_MIN, LUNAR_OFFSET_MAX);
+    lunarPreviewMode = (lunarDayOffset != 0);
+    if (lunarPreviewMode)
+        addDaysToDate(baseYear, baseMonth, baseDay, lunarDayOffset);
+
+    buildLunarLuckLinesForDate(baseDay, baseMonth, baseYear);
 }
 
 static int envScoreForBand(EnvBand band)
@@ -1921,7 +4200,7 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
     (void)status;
     (void)step;
     (void)total;
-    // Static splash – no animation required.
+    // Static splash â€“ no animation required.
 }
 
 void splashEnd()
@@ -2084,6 +4363,44 @@ void drawLunarScreenVi()
     renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
 }
 
+void drawLunarLuckScreen()
+{
+    if (!lunarLuckInitialized)
+    {
+        rebuildLunarForOffset();
+    }
+    else
+    {
+        // Rebuild only when calendar date changes; preserve offsets across frames.
+        getTimeFromRTC();
+        if (d_day != lunarLuckBuiltDay || d_month != lunarLuckBuiltMonth || d_year != lunarLuckBuiltYear)
+            rebuildLunarForOffset();
+    }
+    renderCurrentLunarLuckSection();
+}
+
+void resetLunarLuckSectionRotation()
+{
+    if (g_sectionCount == 0)
+        return;
+    upLastPressMs = 0;
+    downLastPressMs = 0;
+    currentSectionIndex = 0;
+    hdrState = HDR_IDLE;
+    hdrDoorPx = PANEL_RES_X / 2;
+    hdrDrawNew = true;
+    hdrDelayActive = false;
+    if (hdrBrightnessPulsed)
+    {
+        setPanelBrightness(hdrBrightnessSaved);
+        hdrBrightnessPulsed = false;
+    }
+    hdrOld[0] = '\0';
+    strncpy(hdrNew, g_sections[0].title ? g_sections[0].title : "", TITLE_MAX - 1);
+    hdrNew[TITLE_MAX - 1] = '\0';
+    setSectionStartState();
+}
+
 // OWS Weather /////////////////////////////////////////////////////////////////////////////////////////
 
 // === WiFi & API Config ===
@@ -2237,6 +4554,136 @@ void tickLunarMarquee()
             renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
         }
     }
+}
+
+void tickLunarLuckMarquee()
+{
+    if (!dma_display)
+        return;
+
+    unsigned long nowMs = millis();
+    if (currentScreen != SCREEN_LUNAR_LUCK)
+        return;
+
+    if (!lunarLuckInitialized)
+        rebuildLunarForOffset();
+    else
+    {
+        getTimeFromRTC();
+        if (d_day != lunarLuckBuiltDay || d_month != lunarLuckBuiltMonth || d_year != lunarLuckBuiltYear)
+        {
+            rebuildLunarForOffset();
+            renderCurrentLunarLuckSection();
+            return;
+        }
+    }
+
+    if (g_sectionCount == 0)
+        return;
+
+    // Keep header door animation progressing even on static line-2 sections.
+    if (hdrState == HDR_DOOR)
+        renderCurrentLunarLuckSection();
+
+    uint32_t intervalMs = SCROLL_INTERVAL_MS;
+    if (lunarLuckSpeedScale != 1.0f)
+    {
+        float scaled = static_cast<float>(SCROLL_INTERVAL_MS) * lunarLuckSpeedScale;
+        intervalMs = static_cast<uint32_t>(constrain(static_cast<int>(scaled), 8, 1200));
+    }
+
+    if (marqueeActive)
+    {
+        if (nowMs - lastScrollMs >= intervalMs)
+        {
+            marqueeOffsetPx -= SCROLL_STEP_PX;
+            lastScrollMs = nowMs;
+            renderCurrentLunarLuckSection();
+        }
+
+        const LuckSection &sec = g_sections[currentSectionIndex];
+        if (marqueeOffsetPx <= -(sec.contentWidthPx + GAP_PX))
+        {
+            advanceSection();
+            renderCurrentLunarLuckSection();
+        }
+    }
+    else
+    {
+        if (nowMs - sectionStartMs >= STATIC_DWELL_MS)
+        {
+            advanceSection();
+            renderCurrentLunarLuckSection();
+        }
+    }
+}
+
+void adjustLunarLuckSpeed(int delta)
+{
+    if (delta == 0)
+        return;
+
+    constexpr float kFasterPerClick = 0.92f;
+    constexpr float kSlowerPerClick = 1.08f;
+    if (delta > 0)
+        lunarLuckSpeedScale *= kFasterPerClick;
+    else
+        lunarLuckSpeedScale *= kSlowerPerClick;
+
+    lunarLuckSpeedScale = constrain(lunarLuckSpeedScale, 0.08f, 20.0f);
+    float rawAdjustedMs = static_cast<float>(SCROLL_INTERVAL_MS) * lunarLuckSpeedScale;
+    int effectiveMs = constrain(static_cast<int>(rawAdjustedMs), 8, 1200);
+    Serial.printf("[LUNAR_LUCK] Speed effective=%dms raw=%.2fms (global=%lums, scale=%.3f)\n",
+                  effectiveMs, rawAdjustedMs, static_cast<unsigned long>(SCROLL_INTERVAL_MS), lunarLuckSpeedScale);
+}
+
+bool handleLunarLuckInput(uint32_t code)
+{
+    if (currentScreen != SCREEN_LUNAR_LUCK)
+        return false;
+
+    if (code == IR_UP)
+    {
+        if (lunarDayOffset < LUNAR_OFFSET_MAX)
+            ++lunarDayOffset;
+        lunarPreviewMode = (lunarDayOffset != 0);
+        rebuildLunarForOffset();
+        renderCurrentLunarLuckSection();
+        return true;
+    }
+
+    if (code == IR_DOWN)
+    {
+        if (lunarDayOffset > LUNAR_OFFSET_MIN)
+            --lunarDayOffset;
+        lunarPreviewMode = (lunarDayOffset != 0);
+        rebuildLunarForOffset();
+        renderCurrentLunarLuckSection();
+        return true;
+    }
+
+    if (code == IR_OK && lunarPreviewMode)
+    {
+        lunarLuckSpeedScale = 1.0f;
+        lunarDayOffset = 0;
+        lunarPreviewMode = false;
+        rebuildLunarForOffset();
+        resetLunarLuckSectionRotation();
+        renderCurrentLunarLuckSection();
+        return true;
+    }
+
+    if (code == IR_OK)
+    {
+        lunarLuckSpeedScale = 1.0f;
+        resetLunarLuckSectionRotation();
+        Serial.printf("[LUNAR_LUCK] Speed reset to default (%lums, scale=%.3f)\n",
+                      static_cast<unsigned long>(SCROLL_INTERVAL_MS), lunarLuckSpeedScale);
+        renderCurrentLunarLuckSection();
+        return true;
+    }
+
+    return false;
 }
 
 void fetchWeatherFromOWM()
@@ -2473,16 +4920,16 @@ void createScrollingText()
         return;
     }
 
-//   String unitT = useImperial ? " °F" : " °C";
+//   String unitT = useImperial ? " Â°F" : " Â°C";
     //   String unitW = useImperial ? "mph" : "m/s";
 
     scrolling_Text =
-        "City: " + str_City + " ¦ " +
-        "Weather: " + str_Weather_Conditions_Des + " ¦ " +
-        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) + " ¦ " +
-        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) + "  ¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) + " ¦ " +
-        "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " ¦ " +
-        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) + " ¦ ";
+        "City: " + str_City + " Â¦ " +
+        "Weather: " + str_Weather_Conditions_Des + " Â¦ " +
+        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) + " Â¦ " +
+        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) + "  Â¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) + " Â¦ " +
+        "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " Â¦ " +
+        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) + " Â¦ ";
 
     scrolling_Text_Color = (theme == 1) ? dma_display->color565(60, 60, 120) : myGREEN;
     text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
@@ -2499,7 +4946,7 @@ void scrollWeatherDetails()
 
     if (!start_Scroll_Text)
     {
-        String unitT = useImperial ? "°F" : "°C";
+        String unitT = useImperial ? "Â°F" : "Â°C";
         String unitW = useImperial ? "mph" : "m/s";
         scrollOffset = 0;
         start_Scroll_Text = true;
@@ -2569,7 +5016,7 @@ static String buildConditionMarqueeText(const String &label)
         if (field.length() == 0)
             return;
         if (combined.length() > 0)
-            combined += " ¦ ";
+            combined += " Â¦ ";
         combined += field;
     };
 
