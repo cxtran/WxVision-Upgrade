@@ -2,26 +2,21 @@
 #include <Preferences.h>
 #include "settings.h"
 #include "display.h"
+#include "notifications.h"
 
 extern Preferences prefs;
 extern int brightness;
 
 void startOTA() {
     Serial.println("[SYSTEM] Starting OTA...");
-    dma_display->clearScreen();
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,0,0));
-    dma_display->print("OTA Update...");
+    wxv::notify::showNotification(wxv::notify::NotifyId::OtaUpdate, dma_display->color565(255, 0, 0));
     // Actually call ElegantOTA here
     // ElegantOTA.begin(&server); if using in web.cpp
 }
 
 void quickRestore() {
     Serial.println("[SYSTEM] Quick Restore to Defaults...");
-    dma_display->clearScreen();
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,0,0));
-    dma_display->print("Restoring...");
+    wxv::notify::showNotification(wxv::notify::NotifyId::Restoring, dma_display->color565(255, 0, 0));
     // Reset config keys but keep logs/history
     prefs.begin("visionwx", false);
     prefs.clear(); // clears all keys in namespace
@@ -32,10 +27,7 @@ void quickRestore() {
 
 void factoryReset() {
     Serial.println("[SYSTEM] Factory Reset EVERYTHING...");
-    dma_display->clearScreen();
-    dma_display->setCursor(0, 0);
-    dma_display->setTextColor(dma_display->color565(255,0,0));
-    dma_display->print("FACTORY RESET...");
+    wxv::notify::showNotification(wxv::notify::NotifyId::FactoryReset, dma_display->color565(255, 0, 0));
     delay(500);
     prefs.begin("visionwx", false);
     prefs.clear();

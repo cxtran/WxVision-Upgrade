@@ -53,6 +53,8 @@ public:
     void setShowNumberArrows(bool enable);
     void setShowChooserArrows(bool enable);
     void setShowForwardArrow(bool enable);
+    void setForwardArrowOnlyIndex(int idx);
+    void setKeepOpenOnSelect(bool enable);
     void show();
     // Redraw without resetting scroll/selection state
     void redraw();
@@ -61,6 +63,7 @@ public:
     void tick();
     void handleIR(uint32_t code);
     int getSelIndex() const;
+    void setSelIndex(int idx);
 
     // Optional: direct text set (e.g. to preload buffer)
     void setTextValue(int idx, const char* value);
@@ -125,5 +128,7 @@ private:
         // --- PATCH: Scrolling pause state ---
     unsigned long scrollPauseTime = 0;   // --- PATCH
     bool scrollPaused = false;           // --- PATCH
+    int forwardArrowOnlyIndex = -1;
+    bool keepOpenOnSelect = false;
 
 };

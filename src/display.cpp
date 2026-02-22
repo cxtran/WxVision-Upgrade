@@ -21,6 +21,7 @@
 #include "fortune_headline.h"
 #include "fortune_phrase_picker.h"
 #include "ir_codes.h"
+#include "worldtime.h"
 
 extern float aht20_temp;
 extern float SCD40_temp;
@@ -62,6 +63,14 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
+
+// --- BEGIN WORLD TIME FEATURE ---
+static bool s_clockWorldHeaderEnabled = false;
+static String s_clockWorldHeaderText;
+static ScrollLine s_clockWorldHeaderScroll(PANEL_RES_X, 60);
+static bool s_clockWorldHeaderNeedsRedraw = false;
+static unsigned long s_clockWorldHeaderLastStepMs = 0;
+// --- END WORLD TIME FEATURE ---
 
 // ---------- Vietnamese lunar calendar helpers ----------
 struct LunarDate
@@ -5227,24 +5236,94 @@ void drawAlarmIcon(int x, int y, uint16_t color)
     dma_display->drawLine(x + 2, y + 5, x + 3, y + 5, color);
 }
 
+// --- BEGIN WORLD TIME FEATURE ---
+static String buildWorldTimeHeaderText()
+{
+    return worldTimeBuildCurrentHeaderText();
+}
+
+static bool worldHeaderNeedsScroll()
+{
+    // ScrollLine currently assumes fixed-width small font (~6 px/char).
+    return (static_cast<int>(s_clockWorldHeaderText.length()) * 6) > PANEL_RES_X;
+}
+
+static void drawClockWorldHeaderLine(bool forceDraw = false)
+{
+    if (!s_clockWorldHeaderEnabled)
+        return;
+
+    const bool needsScroll = worldHeaderNeedsScroll();
+    const unsigned long nowMs = millis();
+    unsigned long stepMs = (scrollSpeed > 0) ? static_cast<unsigned long>(scrollSpeed) : 40UL;
+    if (stepMs < 20UL)
+        stepMs = 20UL;
+
+    bool shouldDraw = forceDraw || s_clockWorldHeaderNeedsRedraw;
+    if (needsScroll && (nowMs - s_clockWorldHeaderLastStepMs >= stepMs))
+    {
+        s_clockWorldHeaderScroll.update();
+        s_clockWorldHeaderLastStepMs = nowMs;
+        shouldDraw = true;
+    }
+
+    // For static text, avoid continuous redraw to reduce flicker/banding.
+    if (!shouldDraw)
+        return;
+
+    uint16_t lineColor = (theme == 1) ? dma_display->color565(120, 120, 180)
+                                       : dma_display->color565(180, 220, 255);
+    s_clockWorldHeaderScroll.setScrollSpeed(scrollSpeed);
+    uint16_t textColors[] = {lineColor};
+    uint16_t bgColors[] = {myBLACK};
+    s_clockWorldHeaderScroll.setLineColors(textColors, bgColors, 1);
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    s_clockWorldHeaderScroll.draw(0, 0, lineColor);
+    s_clockWorldHeaderNeedsRedraw = false;
+}
+
+void tickClockWorldTimeMarquee()
+{
+    if (!s_clockWorldHeaderEnabled)
+        return;
+    drawClockWorldHeaderLine();
+}
+// --- END WORLD TIME FEATURE ---
+
 void drawClockScreen()
 {
 
     dma_display->fillScreen(0);
 
-    DateTime now;
+    DateTime systemNow;
     if (rtcReady)
     {
         DateTime utcNow = rtc.now();
         int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utcNow);
-        now = utcToLocal(utcNow, offsetMinutes);
+        systemNow = utcToLocal(utcNow, offsetMinutes);
         updateTimezoneOffsetWithUtc(utcNow);
     }
-    else if (!getLocalDateTime(now))
+    else if (!getLocalDateTime(systemNow))
     {
-        now = DateTime(2000, 1, 1, 0, 0, 0);
+        systemNow = DateTime(2000, 1, 1, 0, 0, 0);
     }
-    tickAlarmState(now);
+    tickAlarmState(systemNow);
+
+    // --- BEGIN WORLD TIME FEATURE ---
+    DateTime now = systemNow;
+    bool worldView = false;
+    if (worldTimeIsWorldView())
+    {
+        DateTime worldNow;
+        if (worldTimeGetCurrentDateTime(worldNow))
+        {
+            now = worldNow;
+            worldView = true;
+        }
+    }
+    // --- END WORLD TIME FEATURE ---
     int hour = now.hour(), minute = now.minute(), second = now.second();
 
     // 12h/24h handling
@@ -5431,54 +5510,85 @@ void drawClockScreen()
         indoorTempC = aht20_temp + tempOffset;
     String localTempStr = fmtTemp(indoorTempC, 0);        // Inside
 
-    dma_display->fillRect(0, 0, 32, 7, myBLACK);
-
-    if (showOutdoor)
+    // --- BEGIN WORLD TIME FEATURE ---
+    if (worldView)
     {
-        const int iconWidth = 7;
-        const int padding = 1;
-        int sunX = 0;
-        int sunY = 0;
-        uint16_t sunColor = (theme == 1)
-            ? dma_display->color565(100, 100, 140)
-            : dma_display->color565(255, 200, 60);
-        drawSunIcon(sunX, sunY, sunColor);
-
-        int tempX = sunX + iconWidth + padding;
-        dma_display->setCursor(tempX, 0);
-        dma_display->print(outdoorTempStr);
+        String worldHeader = buildWorldTimeHeaderText();
+        if (!s_clockWorldHeaderEnabled)
+        {
+            s_clockWorldHeaderEnabled = true;
+            s_clockWorldHeaderNeedsRedraw = true;
+            s_clockWorldHeaderLastStepMs = millis();
+        }
+        if (worldHeader != s_clockWorldHeaderText)
+        {
+            s_clockWorldHeaderText = worldHeader;
+            String lines[] = {s_clockWorldHeaderText};
+            s_clockWorldHeaderScroll.setLines(lines, 1, true);
+            s_clockWorldHeaderNeedsRedraw = true;
+            s_clockWorldHeaderLastStepMs = millis();
+        }
+        drawClockWorldHeaderLine(true);
     }
-    else if (showIndoorHumidity)
+    else
     {
-        String humidityDisplay = indoorHumidityStr + "%";
-        const int iconWidth = 7;
-        const int padding = 1;
-        int dropX = 0;
-        int dropY = 0;
-        uint16_t dropColor = (theme == 1)
-                                 ? dma_display->color565(100, 100, 160)
-                                 : dma_display->color565(100, 200, 255);
-        drawHumidityIcon(dropX, dropY, dropColor);
+        s_clockWorldHeaderEnabled = false;
+        s_clockWorldHeaderNeedsRedraw = false;
+        dma_display->fillRect(0, 0, 64, 7, myBLACK);
 
-        int humidityX = dropX + iconWidth + padding;
-        dma_display->setCursor(humidityX, 0);
-        dma_display->print(humidityDisplay);
+        dma_display->fillRect(0, 0, 32, 7, myBLACK);
+
+        if (showOutdoor)
+        {
+            const int iconWidth = 7;
+            const int padding = 1;
+            int sunX = 0;
+            int sunY = 0;
+            uint16_t sunColor = (theme == 1)
+                ? dma_display->color565(100, 100, 140)
+                : dma_display->color565(255, 200, 60);
+            drawSunIcon(sunX, sunY, sunColor);
+
+            int tempX = sunX + iconWidth + padding;
+            dma_display->setCursor(tempX, 0);
+            dma_display->print(outdoorTempStr);
+        }
+        else if (showIndoorHumidity)
+        {
+            String humidityDisplay = indoorHumidityStr + "%";
+            const int iconWidth = 7;
+            const int padding = 1;
+            int dropX = 0;
+            int dropY = 0;
+            uint16_t dropColor = (theme == 1)
+                                     ? dma_display->color565(100, 100, 160)
+                                     : dma_display->color565(100, 200, 255);
+            drawHumidityIcon(dropX, dropY, dropColor);
+
+            int humidityX = dropX + iconWidth + padding;
+            dma_display->setCursor(humidityX, 0);
+            dma_display->print(humidityDisplay);
+        }
     }
+    // --- END WORLD TIME FEATURE ---
 
-    // Draw house icon to the left of inside temperature
-    dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-    int localX = 64 - w;
-    int localY = 0;
-    int houseX = localX - 9;
-    int houseY = 0;
-    // --- Indoor (House) color ---
-    uint16_t houseColor = (theme == 1)
-        ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
-        : dma_display->color565(100, 180, 255);   // cool sky blue for indoor comfort
-    drawHouseIcon(houseX, houseY, houseColor);
+    if (!worldView)
+    {
+        // Draw house icon to the left of inside temperature
+        dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int localX = 64 - w;
+        int localY = 0;
+        int houseX = localX - 9;
+        int houseY = 0;
+        // --- Indoor (House) color ---
+        uint16_t houseColor = (theme == 1)
+            ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
+            : dma_display->color565(100, 180, 255);   // cool sky blue for indoor comfort
+        drawHouseIcon(houseX, houseY, houseColor);
 
-    dma_display->setCursor(localX, localY);
-    dma_display->print(localTempStr);
+        dma_display->setCursor(localX, localY);
+        dma_display->print(localTempStr);
+    }
 
     // ---- Environmental status bars ----
     const int dotRadius = 1;

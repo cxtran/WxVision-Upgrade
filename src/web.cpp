@@ -19,6 +19,8 @@
 #include "sensors.h"
 #include "ir_codes.h"
 #include "wifisettings.h"
+#include "default_values.h"
+#include "notifications.h"
 
 // ---- externs ----
 extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
@@ -938,7 +940,7 @@ void setupWebServer() {
             incoming = atof(v.as<const char*>());
           }
           float offsetC = static_cast<float>(tempOffsetToC(incoming));
-          tempOffset = constrain(offsetC, -10.0f, 10.0f);
+          tempOffset = constrain(offsetC, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
         }
         if (!doc["humOffset"].isNull()) {
           JsonVariant v = doc["humOffset"];
@@ -948,9 +950,9 @@ void setupWebServer() {
           JsonVariant v = doc["lightGain"];
           lightGain = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
         }
-        tempOffset = constrain(tempOffset, -10.0f, 10.0f);
-        humOffset  = constrain(humOffset, -20, 20);
-        lightGain  = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
+        tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
+        humOffset  = constrain(humOffset, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
+        lightGain  = constrain(lightGain, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
 
         // Alarms
         if (!doc["alarms"].isNull() && doc["alarms"].is<JsonArray>())
@@ -1229,10 +1231,7 @@ void setupWebServer() {
         otaInProgress = true;
         // Show upgrade message on display
         if (dma_display) {
-          dma_display->fillScreen(0);
-          dma_display->setTextColor(dma_display->color565(0, 255, 255));
-          dma_display->setCursor(2, 8);
-          dma_display->print("Upgrading...");
+          wxv::notify::showNotification(wxv::notify::NotifyId::Upgrading, dma_display->color565(0, 255, 255));
         }
       }
       if (Update.write(data, len) != len) { Serial.println("OTA Write Fail!"); }

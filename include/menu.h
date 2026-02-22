@@ -34,6 +34,7 @@ void showCalibrationModal();
 void showSystemModal();
 void showScenePreviewModal();
 void showUnitSettingsModal();
+void showWorldTimeModal();
 void showInitialSetupPrompt();
 void showWiFiSettingsModal();
 bool isWeatherScenePreviewActive();
@@ -67,6 +68,7 @@ enum MenuLevel {
     MENU_TEMPEST,
     MENU_CALIBRATION,
     MENU_SYSTEM,
+    MENU_WORLDTIME,
     MENU_SCENE_PREVIEW,
     MENU_INITIAL_SETUP,
     MENU_SYSINFO,
@@ -145,6 +147,8 @@ extern InfoModal wifiSettingsModal;
 extern InfoModal unitSettingsModal;
 extern InfoModal alarmModal;
 extern InfoModal noaaModal;
+extern InfoModal worldTimeModal;
+extern InfoModal manageTzModal;
 
 extern int alarmSlotSelection;
 extern int alarmSlotShown;

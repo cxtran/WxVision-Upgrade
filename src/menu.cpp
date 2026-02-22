@@ -20,7 +20,10 @@
 #include "tempest.h"
 #include "alarm.h"
 #include "noaa.h"
+#include "wifisettings.h"
 #include "config.h"
+#include "worldtime.h"
+#include "notifications.h"
 #include <cstring>
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
@@ -67,6 +70,8 @@ InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
 InfoModal alarmModal("Alarm");
 InfoModal noaaModal("NOAA Alerts");
+InfoModal worldTimeModal("World Time");
+InfoModal manageTzModal("Manage TZ");
 
 int alarmSlotSelection = 0;
 int alarmSlotShown = 0;
@@ -135,6 +140,7 @@ bool wifiSelectNeedsScan = false;
 static int wifiHScrollIndex = -1;
 static int wifiHScrollOffset = 0;
 static unsigned long wifiHScrollLast = 0;
+static unsigned long s_onboardingWifiOkGuardUntilMs = 0;
 
 extern String wifiSSID;
 extern String wifiPass;
@@ -184,7 +190,7 @@ int dtNtpPreset;
 int dtAutoDst;
 int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
 
-const char *mainMenu[] = {"Device", "WiFi", "Display", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
+const char *mainMenu[] = {"Device", "WiFi", "Display", "OW Map", "WF Tempest", "Calibration", "System", "World Time", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);
 
 const char *deviceMenu[] = {"WiFi SSID", "WiFi Pass", "Day Format", "Data Source", "Manual Screen", "< Back"};
@@ -297,6 +303,16 @@ void handleIR(uint32_t code)
         systemModal.handleIR(code);
         return;
     }
+    if (worldTimeModal.isActive())
+    {
+        worldTimeModal.handleIR(code);
+        return;
+    }
+    if (manageTzModal.isActive())
+    {
+        manageTzModal.handleIR(code);
+        return;
+    }
 
     // WiFi select (not modal, custom menu)
     if (currentMenuLevel == MENU_WIFI_SELECT)
@@ -320,6 +336,11 @@ void handleIR(uint32_t code)
         }
         else if (code == IR_OK)
         {
+            if (initialSetupAwaitingWifi && millis() < s_onboardingWifiOkGuardUntilMs)
+            {
+                // Ignore the carried-over OK press from onboarding "Yes".
+                return;
+            }
             if (wifiSelectIndex == wifiScanCount - 1)
             { // <Back>
                 wifiSelecting = false;
@@ -368,6 +389,7 @@ void handleIR(uint32_t code)
                 if (result && *result) {
                     wifiPass = String(result);
                     saveDeviceSettings();
+                    wifiMarkManualConnect();
                     connectToWiFi();
                     wifiSelectReturnToSettings = false;
                 } else {
@@ -496,26 +518,33 @@ void showInitialSetupPrompt()
     menuActive = true;
     currentMenuLevel = MENU_INITIAL_SETUP;
 
-    String lines[] = { "Connect to WiFi?"};
-    InfoFieldType types[] = {InfoLabel};
-    setupPromptModal.setLines(lines, types, 1);
+    // Add a leading spacer line so the question sits closer to vertical center.
+    String lines[] = {"", "Setup Wifi?"};
+    InfoFieldType types[] = {InfoLabel, InfoLabel};
+    setupPromptModal.setLines(lines, types, 2);
 
-    String buttons[] = {"Connect", "Skip"};
+    String buttons[] = {"Yes", "No"};
     setupPromptModal.setButtons(buttons, 2);
 
     setupPromptModal.setCallback([](bool accepted, int btnIdx)
                                  {
         setupPromptModal.hide();
         menuStack.clear();
-        if (!accepted)
+        if (btnIdx != 0)
         {
             handleInitialSetupDecision(false);
             return;
         }
-        handleInitialSetupDecision(btnIdx == 0);
+        // Prevent the same OK press from auto-selecting SSID #1 in WiFi list.
+        s_onboardingWifiOkGuardUntilMs = millis() + 1000UL;
+        handleInitialSetupDecision(true);
     });
 
     setupPromptModal.show();
+    // Setup prompt must only navigate between Yes/No buttons.
+    setupPromptModal.inButtonBar = true;
+    setupPromptModal.btnSel = 0;
+    setupPromptModal.redraw();
 }
 
 void showMainMenuModal()
@@ -526,12 +555,12 @@ void showMainMenuModal()
     menuActive = true;
 
     String items[] = {
-        "Device", "WiFi", "Display", "Alarm",
+        "Device", "WiFi", "Display", "World Time", "Alarm",
         "NOAA Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 10);
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 11);
     mainMenuModal.setShowForwardArrow(true);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
@@ -547,13 +576,14 @@ void showMainMenuModal()
             case 0: showDeviceSettingsModal(); return;
             case 1: showWiFiSettingsModal(); return;
             case 2: showDisplaySettingsModal(); return;
-            case 3: showAlarmSettingsModal(); return;
-            case 4: showNoaaSettingsModal(); return;
-            case 5: showWeatherSettingsModal(); return;
-            case 6: showWfTempestModal(); return;
-            case 7: showCalibrationModal(); return;
-            case 8: showSystemModal(); return;
-            case 9: // Exit Menu
+            case 3: showWorldTimeModal(); return;
+            case 4: showAlarmSettingsModal(); return;
+            case 5: showNoaaSettingsModal(); return;
+            case 6: showWeatherSettingsModal(); return;
+            case 7: showWfTempestModal(); return;
+            case 8: showCalibrationModal(); return;
+            case 9: showSystemModal(); return;
+            case 10: // Exit Menu
                 mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
                 exitToHomeScreen();
                 return;
@@ -755,6 +785,221 @@ void showDisplaySettingsModal()
     });
     displayModal.show();
 }
+
+// --- BEGIN WORLD TIME FEATURE ---
+static void showManageTzModal();
+static void queueWorldTimeModal(void (*fn)());
+static int manageTzPage = 0;
+static int manageTzRestoreSel = -1;
+
+static void queueWorldTimeModal(void (*fn)())
+{
+    pendingModalFn = fn;
+    pendingModalTime = millis() + 10;
+}
+
+void showWorldTimeModal()
+{
+    if (currentMenuLevel != MENU_NONE)
+    {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_WORLDTIME;
+    menuActive = true;
+
+    loadWorldTimeSettings();
+
+    const size_t selectedCount = worldTimeSelectionCount();
+    String lines[6];
+    InfoFieldType types[6];
+
+    lines[0] = "Manage TZ";
+    types[0] = InfoLabel;
+    lines[1] = "Selected TZ:";
+    types[1] = InfoLabel;
+
+    for (int i = 0; i < 3; ++i)
+    {
+        if (static_cast<size_t>(i) < selectedCount)
+        {
+            int tzIndex = worldTimeSelectionAt(static_cast<size_t>(i));
+            if (tzIndex >= 0 && tzIndex < static_cast<int>(timezoneCount()))
+            {
+                lines[2 + i] = "- " + String(timezoneLabelAt(static_cast<size_t>(tzIndex)));
+            }
+            else
+            {
+                lines[2 + i] = "-";
+            }
+        }
+        else
+        {
+            lines[2 + i] = "-";
+        }
+        types[2 + i] = InfoLabel;
+    }
+
+    lines[5] = (selectedCount > 3) ? "- More selected timezone" : "-";
+    types[5] = InfoLabel;
+
+    worldTimeModal.setLines(lines, types, 6);
+    worldTimeModal.setShowForwardArrow(true);
+    worldTimeModal.setForwardArrowOnlyIndex(0);
+    worldTimeModal.setKeepOpenOnSelect(false);
+    worldTimeModal.setCallback([](bool accepted, int) {
+        if (!accepted)
+        {
+            worldTimeModal.hide();
+            currentMenuLevel = MENU_MAIN;
+            showMainMenuModal();
+            return;
+        }
+
+        int sel = worldTimeModal.getSelIndex();
+        if (sel == 0)
+        {
+            queueWorldTimeModal(showManageTzModal);
+            return;
+        }
+
+        // Display-only rows: no action.
+        queueWorldTimeModal(showWorldTimeModal);
+    });
+    worldTimeModal.show();
+}
+
+static void showManageTzModal()
+{
+    currentMenuLevel = MENU_WORLDTIME;
+    menuActive = true;
+    loadWorldTimeSettings();
+
+    const int rowsPerPage = InfoModal::MAX_LINES - 1; // line 1 is "Page X/Y"
+    const int tzCount = static_cast<int>(timezoneCount());
+    int totalPages = (tzCount + rowsPerPage - 1) / rowsPerPage;
+    if (totalPages < 1)
+        totalPages = 1;
+    manageTzPage = constrain(manageTzPage, 0, totalPages - 1);
+
+    int start = manageTzPage * rowsPerPage;
+    int end = start + rowsPerPage;
+    if (end > tzCount)
+        end = tzCount;
+
+    String lines[InfoModal::MAX_LINES];
+    InfoFieldType types[InfoModal::MAX_LINES];
+    int lineCount = 0;
+
+    lines[lineCount] = "Page " + String(manageTzPage + 1) + "/" + String(totalPages);
+    types[lineCount++] = InfoLabel;
+
+    for (int i = start; i < end && lineCount < InfoModal::MAX_LINES; ++i)
+    {
+        bool selected = worldTimeIsSelected(i);
+        lines[lineCount] = String(selected ? "[x] " : "[ ] ") + String(timezoneLabelAt(static_cast<size_t>(i)));
+        types[lineCount++] = InfoLabel;
+    }
+
+    manageTzModal.setLines(lines, types, lineCount);
+    manageTzModal.setShowForwardArrow(false);
+    manageTzModal.setForwardArrowOnlyIndex(-1);
+    manageTzModal.setKeepOpenOnSelect(true);
+    manageTzModal.setCallback([](bool accepted, int) {
+        if (!accepted)
+        {
+            queueWorldTimeModal(showWorldTimeModal);
+            return;
+        }
+
+        int sel = manageTzModal.getSelIndex();
+        if (sel == 0)
+        {
+            const int rowsPerPage = InfoModal::MAX_LINES - 1;
+            const int tzCountNow = static_cast<int>(timezoneCount());
+            int totalPagesNow = (tzCountNow + rowsPerPage - 1) / rowsPerPage;
+            if (totalPagesNow < 1)
+                totalPagesNow = 1;
+
+            manageTzPage = (manageTzPage + 1) % totalPagesNow;
+            int startNow = manageTzPage * rowsPerPage;
+            int endNow = startNow + rowsPerPage;
+            if (endNow > tzCountNow)
+                endNow = tzCountNow;
+
+            String refreshLines[InfoModal::MAX_LINES];
+            InfoFieldType refreshTypes[InfoModal::MAX_LINES];
+            int refreshCount = 0;
+
+            refreshLines[refreshCount] = "Page " + String(manageTzPage + 1) + "/" + String(totalPagesNow);
+            refreshTypes[refreshCount++] = InfoLabel;
+
+            for (int i = startNow; i < endNow && refreshCount < InfoModal::MAX_LINES; ++i)
+            {
+                bool selectedNow = worldTimeIsSelected(i);
+                refreshLines[refreshCount] = String(selectedNow ? "[x] " : "[ ] ") + String(timezoneLabelAt(static_cast<size_t>(i)));
+                refreshTypes[refreshCount++] = InfoLabel;
+            }
+
+            manageTzModal.setLines(refreshLines, refreshTypes, refreshCount);
+            manageTzModal.setShowForwardArrow(false);
+            manageTzModal.setForwardArrowOnlyIndex(-1);
+            manageTzModal.setKeepOpenOnSelect(true);
+            manageTzModal.setSelIndex(0);
+            manageTzModal.redraw();
+            return;
+        }
+
+        const int rowsPerPage = InfoModal::MAX_LINES - 1;
+        int start = manageTzPage * rowsPerPage;
+        int tzIndex = start + (sel - 1);
+        if (tzIndex >= 0 && tzIndex < static_cast<int>(timezoneCount()))
+        {
+            worldTimeToggleTimezone(tzIndex);
+            saveWorldTimeSettings();
+            const int tzCountNow = static_cast<int>(timezoneCount());
+            int totalPagesNow = (tzCountNow + rowsPerPage - 1) / rowsPerPage;
+            if (totalPagesNow < 1)
+                totalPagesNow = 1;
+            manageTzPage = constrain(manageTzPage, 0, totalPagesNow - 1);
+
+            int startNow = manageTzPage * rowsPerPage;
+            int endNow = startNow + rowsPerPage;
+            if (endNow > tzCountNow)
+                endNow = tzCountNow;
+
+            String refreshLines[InfoModal::MAX_LINES];
+            InfoFieldType refreshTypes[InfoModal::MAX_LINES];
+            int refreshCount = 0;
+
+            refreshLines[refreshCount] = "Page " + String(manageTzPage + 1) + "/" + String(totalPagesNow);
+            refreshTypes[refreshCount++] = InfoLabel;
+
+            for (int i = startNow; i < endNow && refreshCount < InfoModal::MAX_LINES; ++i)
+            {
+                bool selectedNow = worldTimeIsSelected(i);
+                refreshLines[refreshCount] = String(selectedNow ? "[x] " : "[ ] ") + String(timezoneLabelAt(static_cast<size_t>(i)));
+                refreshTypes[refreshCount++] = InfoLabel;
+            }
+
+            manageTzModal.setLines(refreshLines, refreshTypes, refreshCount);
+            manageTzModal.setShowForwardArrow(false);
+            manageTzModal.setForwardArrowOnlyIndex(-1);
+            manageTzModal.setKeepOpenOnSelect(true);
+            manageTzModal.setSelIndex(sel);
+            manageTzModal.redraw();
+            return;
+        }
+        manageTzModal.redraw();
+    });
+    manageTzModal.show();
+    if (manageTzRestoreSel >= 0)
+    {
+        manageTzModal.setSelIndex(manageTzRestoreSel);
+        manageTzModal.redraw();
+        manageTzRestoreSel = -1;
+    }
+}
+// --- END WORLD TIME FEATURE ---
 
 void showAlarmSettingsModal()
 {
@@ -1661,14 +1906,14 @@ void drawWiFiMenu()
     dma_display->fillRect(0, 0, screenW, 8, headerBg);
     dma_display->setTextColor(headerFg);
     dma_display->setCursor(1, 0);
-    dma_display->print("Select WiFi:");
+    dma_display->print("WIFI LIST");
 
     // --- Handle no networks ---
     if (wifiScanCount == 0)
     {
         dma_display->setTextColor(dma_display->color565(255, 80, 80));
         dma_display->setCursor(0, 10);
-        dma_display->print("No WiFi found.");
+        dma_display->print("NO NET");
         return;
     }
 
@@ -1994,13 +2239,38 @@ void showDateTimeModal()
     {
         int sel = dateModal.getSelIndex();
         constexpr int kSyncButtonIndex = 14;
+        // --- BEGIN FIX ---
+        auto applyCurrentTimezoneSelectionForSync = []() {
+            int tzCountInt = static_cast<int>(timezoneCount());
+            if (tzCountInt > 31)
+                tzCountInt = 31;
+
+            dtManualOffset = constrain(dtManualOffset, -720, 840);
+            dtTimezoneIndex = constrain(dtTimezoneIndex, 0, tzCountInt);
+            bool useCustomTz = (dtTimezoneIndex == tzCountInt);
+
+            if (useCustomTz)
+            {
+                setCustomTimezoneOffset(dtManualOffset);
+                dtAutoDst = 0;
+            }
+            else
+            {
+                selectTimezoneByIndex(dtTimezoneIndex);
+                setTimezoneAutoDst(dtAutoDst != 0);
+                dtManualOffset = tzStandardOffset;
+                dtAutoDst = tzAutoDst ? 1 : 0;
+            }
+        };
+        // --- END FIX ---
 
         if (sel == kSyncButtonIndex) {
+            // --- BEGIN FIX ---
+            // Apply current in-memory timezone choice before NTP sync.
+            applyCurrentTimezoneSelectionForSync();
+            // --- END FIX ---
             dateModal.hide();
-            dma_display->fillScreen(0);
-            dma_display->setCursor(8, 12);
-            dma_display->setTextColor(myWHITE);
-            dma_display->print("Syncing NTP...");
+            wxv::notify::showNotification(wxv::notify::NotifyId::NtpSync, myWHITE);
             String chosenHost;
             if (dtNtpPreset == NTP_PRESET_CUSTOM) {
                 chosenHost = String(ntpServerBuf);
@@ -2014,10 +2284,8 @@ void showDateTimeModal()
             ntpServerBuf[sizeof(ntpServerBuf) - 1] = '\0';
 
             bool ok = syncTimeFromNTP();
-            dma_display->fillScreen(0);
-            dma_display->setCursor(4, 12);
-            dma_display->setTextColor(ok ? myGREEN : myRED);
-            dma_display->print(ok ? "NTP sync OK" : "NTP sync failed");
+            wxv::notify::showNotification(ok ? wxv::notify::NotifyId::NtpOk : wxv::notify::NotifyId::NtpFail,
+                                          ok ? myGREEN : myRED);
             if (ok)
             {
                 getTimeFromRTC();
@@ -2338,17 +2606,7 @@ void showWiFiSettingsModal()
                 wifiSettingsModal.hide();
 
                 // Visual feedback while scanning
-                dma_display->fillScreen(0);
-                dma_display->setTextColor(dma_display->color565(0, 255, 255));
-                dma_display->setCursor(1, 8);
-                dma_display->println("Scanning");
-           //     dma_display->setTextColor(dma_display->color565(180, 180, 180));
-                dma_display->setCursor(25, 18);
-                dma_display->println("WiFi...");
-           //     dma_display->setCursor(1, 16);
-           //     dma_display->println("Please wait...");
-            //    dma_display->setTextColor(dma_display->color565(255, 255, 255));
-                dma_display->setCursor(0, 28);
+                wxv::notify::showNotification(wxv::notify::NotifyId::WifiScan, dma_display->color565(0, 255, 255));
 
                 int found = scanWiFiNetworks();
                 Serial.printf("[WiFiSettings] Scan complete: %d networks\n", found);
@@ -2371,13 +2629,10 @@ void showWiFiSettingsModal()
                     wifiMenuScroll = 0;
 
                     // Show "No networks found" briefly
-                    dma_display->fillScreen(0);
-                    dma_display->setCursor(5, 10);
-                    dma_display->setTextColor(dma_display->color565(255, 100, 100));
-                    dma_display->println("No WiFi found");
-                    dma_display->setCursor(5, 20);
-                    dma_display->setTextColor(dma_display->color565(200, 200, 200));
-                    dma_display->println("Try again...");
+                    wxv::notify::showNotification(wxv::notify::NotifyId::WifiNoNet,
+                                                  dma_display->color565(255, 100, 100),
+                                                  dma_display->color565(200, 200, 200),
+                                                  "TRY AGAIN");
                     delay(1500);
                     showWiFiSettingsModal();
                 }
@@ -2407,13 +2662,10 @@ void showWiFiSettingsModal()
             case 2:
             {
                 saveDeviceSettings();
-                dma_display->fillScreen(0);
-                dma_display->setCursor(2, 8);
-                dma_display->setTextColor(dma_display->color565(255, 255, 0));
-                dma_display->println("Connecting...");
-                dma_display->setCursor(2, 16);
-                dma_display->setTextColor(dma_display->color565(0, 200, 255));
-                dma_display->println(wifiSSID);
+                wxv::notify::showNotification(wxv::notify::NotifyId::WifiConnecting,
+                                              dma_display->color565(255, 255, 0),
+                                              dma_display->color565(0, 200, 255));
+                wifiMarkManualConnect();
                 connectToWiFi();
                 return;
             }

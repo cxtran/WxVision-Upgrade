@@ -12,8 +12,10 @@
 #include <ctype.h>
 #include <math.h>
 #include "system.h"
+#include "default_values.h"
 
 extern InfoModal alarmModal;
+extern InfoModal setupPromptModal;
 extern void handleAlarmSlotChangedInModal();
 
 extern bool autoBrightness;
@@ -284,6 +286,16 @@ void InfoModal::setShowForwardArrow(bool enable)
     showForwardArrow = enable;
 }
 
+void InfoModal::setForwardArrowOnlyIndex(int idx)
+{
+    forwardArrowOnlyIndex = idx;
+}
+
+void InfoModal::setKeepOpenOnSelect(bool enable)
+{
+    keepOpenOnSelect = enable;
+}
+
 void InfoModal::show()
 {
     selIndex = 0;
@@ -296,7 +308,7 @@ void InfoModal::show()
     inEdit = false;
     editIndex = -1;
     btnSel = 0;
-    inButtonBar = false;
+    inButtonBar = (this == &setupPromptModal && btnCount > 0);
     active = true;
     draw();
 }
@@ -495,7 +507,8 @@ void InfoModal::draw()
         bool brightnessLine = (fieldTypes[idx] == InfoNumber) && (lines[idx] == "Brightness");
         bool arrowLine = (showChooserArrows && fieldTypes[idx] == InfoChooser) ||
                          (showNumberArrows && fieldTypes[idx] == InfoNumber) || scheduleNumber || brightnessLine;
-        bool forwardIndicator = showForwardArrow && !arrowLine &&
+        bool forwardAllowedOnLine = (forwardArrowOnlyIndex < 0) || (forwardArrowOnlyIndex == idx);
+        bool forwardIndicator = showForwardArrow && forwardAllowedOnLine && !arrowLine &&
                                 (fieldTypes[idx] == InfoLabel || fieldTypes[idx] == InfoButton);
         const int arrowBoxW = kChooserArrowWidth + 1;
         int reservedWidth = 0;
@@ -508,11 +521,28 @@ void InfoModal::draw()
             availableWidth = SCREEN_WIDTH;
 
         int rowY = drawLineIndex * CHARH;
+        // Keep initial setup prompt text visually centered above the Yes/No buttons.
+        if (this == &setupPromptModal)
+        {
+            rowY -= 4;
+            // Font glyphs extend above baseline; keep baseline low enough to avoid header overlap.
+            if (rowY < (CHARH + 6))
+                rowY = CHARH + 6;
+        }
         bool extendUp = (drawLineIndex > 1);
         int rowHighlightY = extendUp ? rowY - 1 : rowY;
         int rowHighlightH = extendUp ? (CHARH + 1) : CHARH;
         if (rowHighlightY < 0)
             rowHighlightY = 0;
+        // Never paint selection/background into the header band.
+        if (rowHighlightY < CHARH)
+        {
+            int overlap = CHARH - rowHighlightY;
+            rowHighlightY = CHARH;
+            rowHighlightH -= overlap;
+            if (rowHighlightH < 0)
+                rowHighlightH = 0;
+        }
         int displayHeight = dma_display->height();
         if (rowHighlightY + rowHighlightH > displayHeight)
             rowHighlightH = displayHeight - rowHighlightY;
@@ -675,6 +705,23 @@ if (btnCount > 0)
 int InfoModal::getSelIndex() const
 {
     return atClose ? -1 : selIndex;
+}
+
+void InfoModal::setSelIndex(int idx)
+{
+    if (lineCount <= 0)
+        return;
+    if (idx < 0)
+        idx = 0;
+    if (idx >= lineCount)
+        idx = lineCount - 1;
+    selIndex = idx;
+    atClose = false;
+    if (scrollY > selIndex)
+        scrollY = selIndex;
+    int visibleRows = (btnCount > 0) ? DATA_ROWS : DATA_ROWS_FULL;
+    if (selIndex >= scrollY + visibleRows)
+        scrollY = selIndex - visibleRows + 1;
 }
 
 void InfoModal::tick()
@@ -848,6 +895,33 @@ void InfoModal::handleIR(uint32_t code)
 
     if (btnCount > 0 && inButtonBar)
     {
+        if (this == &setupPromptModal)
+        {
+            if (code == IR_LEFT || code == IR_UP)
+            {
+                btnSel = (btnSel - 1 + btnCount) % btnCount;
+                beep(900);
+            }
+            else if (code == IR_RIGHT || code == IR_DOWN)
+            {
+                btnSel = (btnSel + 1) % btnCount;
+                beep(1800);
+            }
+            else if (code == IR_OK)
+            {
+                if (callback)
+                    callback(btnSel == 0, btnSel);
+                if (btnSel == 1)
+                {
+                    hide();
+                    drawMenu();
+                }
+                beep(2200);
+            }
+            draw();
+            return;
+        }
+
         if (code == IR_UP)
         {
             inButtonBar = false;
@@ -1055,12 +1129,12 @@ void InfoModal::handleIR(uint32_t code)
                         *ptr = constrain(*ptr, -limit, limit);
                         float displayVal = static_cast<float>(*ptr) / 10.0f;
                         float newOffsetC = static_cast<float>(tempOffsetToC(displayVal));
-                        tempOffset = constrain(newOffsetC, -10.0f, 10.0f);
+                        tempOffset = constrain(newOffsetC, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
                         float normalizedDisplay = static_cast<float>(dispTempOffset(tempOffset));
                         *ptr = static_cast<int>(lroundf(normalizedDisplay * 10.0f));
                     }
-                    else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, -20, 20);
-                    else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
+                    else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
+                    else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
 
                     // Save to NVS right away
                     saveCalibrationSettings();
@@ -1307,8 +1381,15 @@ void InfoModal::handleIR(uint32_t code)
         {
             // Only call callback and hide if there are no buttons and field is not Text or Chooser
             callback(true, selIndex);
-            hide();
-            drawMenu();
+            if (!keepOpenOnSelect)
+            {
+                hide();
+                drawMenu();
+            }
+            else
+            {
+                draw();
+            }
         }
         beep(2200);
         return;

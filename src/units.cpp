@@ -1,6 +1,7 @@
 #include "units.h"
 #include <Preferences.h>
 #include "display.h"
+#include "default_values.h"
 
 UnitPrefs units;                 // the global
 static Preferences u_prefs;
@@ -15,11 +16,11 @@ static const char* K_24H   = "u_24h";
 
 void loadUnits() {
   if (!u_prefs.begin(NS, /*readOnly*/ true)) return;
-  units.temp    = static_cast<TempUnit>(   u_prefs.getUChar(K_TEMP,  static_cast<uint8_t>(TempUnit::C)));
+  units.temp    = static_cast<TempUnit>(   u_prefs.getUChar(K_TEMP,  static_cast<uint8_t>(wxv::defaults::kDefaults.tempUnit == wxv::defaults::TempUnit::F ? TempUnit::F : TempUnit::C)));
   units.wind    = static_cast<WindUnit>(   u_prefs.getUChar(K_WIND,  static_cast<uint8_t>(WindUnit::MPS)));
   units.press   = static_cast<PressUnit>(  u_prefs.getUChar(K_PRESS, static_cast<uint8_t>(PressUnit::HPA)));
   units.precip  = static_cast<PrecipUnit>( u_prefs.getUChar(K_PREC,  static_cast<uint8_t>(PrecipUnit::MM)));
-  units.clock24h= u_prefs.getBool(K_24H, true);
+  units.clock24h= u_prefs.getBool(K_24H, wxv::defaults::kDefaults.timeFormat == wxv::defaults::TimeFormat::H24);
   u_prefs.end();
 }
 

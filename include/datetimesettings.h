@@ -34,6 +34,8 @@ struct TimezoneInfo
     const char *country;  // Country/region label
     int offsetMinutes;    // Standard offset from UTC (minutes)
     DstRule dstRule;      // DST behaviour
+    float latitude;       // Representative city latitude
+    float longitude;      // Representative city longitude
 };
 
 extern const int NTP_PRESET_COUNT;
@@ -69,6 +71,7 @@ void selectTimezoneByIndex(int index);
 void setCustomTimezoneOffset(int offsetMinutes);
 void setTimezoneAutoDst(bool enable);
 int timezoneOffsetForUtc(const DateTime& utc);
+int timezoneOffsetForUtcAtIndex(int index, const DateTime& utc);
 int timezoneOffsetForLocal(const DateTime& local);
 void updateTimezoneOffset();
 void updateTimezoneOffsetWithUtc(const DateTime& utc);

@@ -3,17 +3,18 @@
 #include "sensors.h"
 #include "units.h"   // <-- add this
 #include "display.h"
+#include "default_values.h"
 
 // Preferences storage object
 Preferences prefs;
 
 // ==== Global settings ====
 // --- Device ---
-int dayFormat = 0;        // 0 = MM/DD, 1 = DD/MM
-int dataSource = DATA_SOURCE_OWM; // 0 = OpenWeather, 1 = WeatherFlow, 2 = None
-int autoRotate = 1;       // 1 = on, 0 = off
-int autoRotateInterval = 15; // seconds between screen rotations
-int manualScreen = 0;     // 0 = Main, 1 = Weather, etc.
+int dayFormat = wxv::defaults::kDefaults.dayFormat;        // 0 = MM/DD, 1 = DD/MM
+int dataSource = static_cast<int>(wxv::defaults::toStorage(wxv::defaults::kDefaults.provider)); // 0 = OpenWeather, 1 = WeatherFlow, 2 = None
+int autoRotate = wxv::defaults::kDefaults.autoRotate;       // 1 = on, 0 = off
+int autoRotateInterval = wxv::defaults::kDefaults.autoRotateIntervalSec; // seconds between screen rotations
+int manualScreen = wxv::defaults::kDefaults.manualScreen;     // 0 = Main, 1 = Weather, etc.
 String wifiSSID = "";
 String wifiPass = "";
 bool alarmEnabled[3] = {false, false, false};
@@ -22,36 +23,40 @@ int alarmMinute[3] = {0, 0, 0};
 AlarmRepeatMode alarmRepeatMode[3] = {ALARM_REPEAT_NONE, ALARM_REPEAT_NONE, ALARM_REPEAT_NONE};
 int alarmWeeklyDay[3] = {1, 1, 1};
 bool alarmOneShotPending[3] = {false, false, false};
-bool noaaAlertsEnabled = false;
-float noaaLatitude = 0.0f;
-float noaaLongitude = 0.0f;
+bool noaaAlertsEnabled = wxv::defaults::kDefaults.noaaAlertsEnabled;
+float noaaLatitude = wxv::defaults::kDefaults.noaaLatitude;
+float noaaLongitude = wxv::defaults::kDefaults.noaaLongitude;
 
 bool setupComplete = false;
 bool initialSetupRequired = false;
 
 // --- Display ---
-int theme = 0;            // 0 = Day, 1 = Night
-bool autoThemeSchedule = false;
+int theme = wxv::defaults::kDefaults.themeIndex;            // 0 = Day, 1 = Night
+bool autoThemeSchedule = wxv::defaults::kDefaults.autoThemeScheduleLegacy;
 bool autoThemeAmbient = false;
-int autoThemeLightThreshold = 20;
-int dayThemeStartMinutes = 6 * 60;
-int nightThemeStartMinutes = 20 * 60;
-int brightness = 10;      // 1???100
+int autoThemeLightThreshold = wxv::defaults::kDefaults.autoThemeLuxThreshold;
+int dayThemeStartMinutes = wxv::defaults::kDefaults.dayThemeStartMinutes;
+int nightThemeStartMinutes = wxv::defaults::kDefaults.nightThemeStartMinutes;
+int brightness = wxv::defaults::kDefaults.brightness;      // 1???100
 int scrollSpeed = 150;    // derived from scrollLevel
 int verticalScrollSpeed = 150; // independent vertical scroll speed
-int scrollLevel = 7;      // 0 (slow) to 9 (fast)
-int verticalScrollLevel = 7;
+int scrollLevel = wxv::defaults::kDefaults.scrollLevel;      // 0 (slow) to 9 (fast)
+int verticalScrollLevel = wxv::defaults::kDefaults.scrollLevel;
 String customMsg = "";
-const int scrollDelays[] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
-bool autoBrightness = true;
-int splashDurationSec = 3;
+const int scrollDelays[] = {
+    wxv::defaults::kScrollDelays[0], wxv::defaults::kScrollDelays[1], wxv::defaults::kScrollDelays[2],
+    wxv::defaults::kScrollDelays[3], wxv::defaults::kScrollDelays[4], wxv::defaults::kScrollDelays[5],
+    wxv::defaults::kScrollDelays[6], wxv::defaults::kScrollDelays[7], wxv::defaults::kScrollDelays[8],
+    wxv::defaults::kScrollDelays[9]};
+bool autoBrightness = wxv::defaults::kDefaults.autoBrightnessEnabled;
+int splashDurationSec = wxv::defaults::kDefaults.splashDurationSec;
 bool themeRefreshPending = false;
-int buzzerVolume = 100;
-int buzzerToneSet = 0; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse,5=Warm,6=Melody
-int alarmSoundMode = 0; // 0=Tone,1=FurElise,2=SwanLake,3=TurkeyMarch,4=Moonlight
-int forecastLinesPerDay = 3;
-int forecastPauseMs = 3000;
-int forecastIconSize = 16;
+int buzzerVolume = wxv::defaults::kDefaults.buzzerVolume;
+int buzzerToneSet = wxv::defaults::kDefaults.buzzerToneSet; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse,5=Warm,6=Melody
+int alarmSoundMode = wxv::defaults::kDefaults.alarmSoundMode; // 0=Tone,1=FurElise,2=SwanLake,3=TurkeyMarch,4=Moonlight
+int forecastLinesPerDay = wxv::defaults::kDefaults.forecastLinesPerDay;
+int forecastPauseMs = wxv::defaults::kDefaults.forecastPauseMs;
+int forecastIconSize = wxv::defaults::kDefaults.forecastIconSize;
 
 static constexpr int MINUTES_PER_DAY = 24 * 60;
 int normalizeThemeScheduleMinutes(int value)
@@ -102,15 +107,15 @@ int owmCountryIndex = 0;
 String owmCountryCustom = "";
 
 // --- Calibration ---
-float tempOffset = 0.0f;   // degrees C
-int humOffset = 0;    // %
-int lightGain = 100;  // %
+float tempOffset = wxv::defaults::kTempOffsetDefaultC;   // degrees C
+int humOffset = wxv::defaults::kHumOffsetDefault;    // %
+int lightGain = wxv::defaults::kLightGainDefaultPercent;  // %
 
 // --- Date/Time/Timezone ---
 int dstAuto = 0;
 int timeZoneOffsetMinutes = 0;
-int dateFormat = 0;
-int timeFormat24h = 1;
+int dateFormat = wxv::defaults::kDefaults.dateFormatStorage;
+int timeFormat24h = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
 
 void loadSettings() {
     prefs.begin("visionwx", true);
@@ -118,16 +123,16 @@ void loadSettings() {
     // Device
     wifiSSID     = prefs.getString("wifiSSID", "");
     wifiPass     = prefs.getString("wifiPass", "");
-    dayFormat    = prefs.getInt("dayFmt", 0);
-    int storedSource = prefs.getInt("forecast", DATA_SOURCE_OWM);
+    dayFormat    = prefs.getInt("dayFmt", wxv::defaults::kDefaults.dayFormat);
+    int storedSource = prefs.getInt("forecast", static_cast<int>(wxv::defaults::toStorage(wxv::defaults::kDefaults.provider)));
     setDataSource(storedSource);
-    autoRotate   = prefs.getInt("autoRotate", 1);
-    autoRotateInterval = prefs.getInt("autoRotInt", 15);
+    autoRotate   = prefs.getInt("autoRotate", wxv::defaults::kDefaults.autoRotate);
+    autoRotateInterval = prefs.getInt("autoRotInt", wxv::defaults::kDefaults.autoRotateIntervalSec);
     autoRotateInterval = constrain(autoRotateInterval, 5, 300);
-    manualScreen = prefs.getInt("manualScreen", 0);
-    noaaAlertsEnabled = prefs.getBool("noaaEnabled", false);
-    noaaLatitude = prefs.getFloat("noaaLat", 0.0f);
-    noaaLongitude = prefs.getFloat("noaaLon", 0.0f);
+    manualScreen = prefs.getInt("manualScreen", wxv::defaults::kDefaults.manualScreen);
+    noaaAlertsEnabled = prefs.getBool("noaaEnabled", wxv::defaults::kDefaults.noaaAlertsEnabled);
+    noaaLatitude = prefs.getFloat("noaaLat", wxv::defaults::kDefaults.noaaLatitude);
+    noaaLongitude = prefs.getFloat("noaaLon", wxv::defaults::kDefaults.noaaLongitude);
     for (int i = 0; i < 3; ++i)
     {
         String idx = String(i);
@@ -147,33 +152,33 @@ void loadSettings() {
     initialSetupRequired = !setupComplete;
 
     // Display
-    theme        = prefs.getInt("theme", 0);
+    theme        = prefs.getInt("theme", wxv::defaults::kDefaults.themeIndex);
     theme        = constrain(theme, 0, 1);
     int storedAutoThemeMode = prefs.getInt("autoThemeMode", -1);
-    bool legacyAutoTheme = prefs.getBool("autoThemeSched", false);
+    bool legacyAutoTheme = prefs.getBool("autoThemeSched", wxv::defaults::kDefaults.autoThemeScheduleLegacy);
     autoThemeSchedule = (storedAutoThemeMode == 1) || (storedAutoThemeMode < 0 && legacyAutoTheme);
     autoThemeAmbient = (storedAutoThemeMode == 2);
-    autoThemeLightThreshold = prefs.getInt("autoThemeLux", 20);
+    autoThemeLightThreshold = prefs.getInt("autoThemeLux", wxv::defaults::kDefaults.autoThemeLuxThreshold);
     autoThemeLightThreshold = constrain(autoThemeLightThreshold, 1, 5000);
-    dayThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("dayThemeStart", 6 * 60));
-    nightThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("nightThemeStart", 20 * 60));
-    brightness   = prefs.getInt("brightness", 10);
-    scrollLevel  = prefs.getInt("scrollLevel", 7); // default to 7 (fast)
+    dayThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("dayThemeStart", wxv::defaults::kDefaults.dayThemeStartMinutes));
+    nightThemeStartMinutes = normalizeThemeScheduleMinutes(prefs.getInt("nightThemeStart", wxv::defaults::kDefaults.nightThemeStartMinutes));
+    brightness   = prefs.getInt("brightness", wxv::defaults::kDefaults.brightness);
+    scrollLevel  = prefs.getInt("scrollLevel", wxv::defaults::kDefaults.scrollLevel); // default to 7 (fast)
     scrollLevel  = constrain(scrollLevel, 0, 9);
     scrollSpeed  = scrollDelays[scrollLevel];
     verticalScrollLevel = prefs.getInt("vScrollLevel", scrollLevel);
     verticalScrollLevel = constrain(verticalScrollLevel, 0, 9);
     verticalScrollSpeed = scrollDelays[verticalScrollLevel];
     customMsg    = prefs.getString("customMsg", "");
-    autoBrightness = prefs.getBool("autoBrightness", true);
-      splashDurationSec = prefs.getInt("splashDur", 3);
+    autoBrightness = prefs.getBool("autoBrightness", wxv::defaults::kDefaults.autoBrightnessEnabled);
+      splashDurationSec = prefs.getInt("splashDur", wxv::defaults::kDefaults.splashDurationSec);
       splashDurationSec = constrain(splashDurationSec, 1, 10);
-      buzzerVolume = constrain(prefs.getInt("buzzVol", 100), 0, 100);
-      buzzerToneSet = constrain(prefs.getInt("buzzTone", 0), 0, 6);
-      alarmSoundMode = constrain(prefs.getInt("alarmSound", 0), 0, 4);
-      forecastLinesPerDay = constrain(prefs.getInt("fcLines", 3), 2, 3);
-      forecastPauseMs = constrain(prefs.getInt("fcPause", 3000), 0, 10000);
-      forecastIconSize = prefs.getInt("fcIcon", 16);
+      buzzerVolume = constrain(prefs.getInt("buzzVol", wxv::defaults::kDefaults.buzzerVolume), 0, 100);
+      buzzerToneSet = constrain(prefs.getInt("buzzTone", wxv::defaults::kDefaults.buzzerToneSet), 0, 6);
+      alarmSoundMode = constrain(prefs.getInt("alarmSound", wxv::defaults::kDefaults.alarmSoundMode), 0, 4);
+      forecastLinesPerDay = constrain(prefs.getInt("fcLines", wxv::defaults::kDefaults.forecastLinesPerDay), 2, 3);
+      forecastPauseMs = constrain(prefs.getInt("fcPause", wxv::defaults::kDefaults.forecastPauseMs), 0, 10000);
+      forecastIconSize = prefs.getInt("fcIcon", wxv::defaults::kDefaults.forecastIconSize);
       if (forecastIconSize != 0 && forecastIconSize != 16)
           forecastIconSize = 16;
 
@@ -187,13 +192,13 @@ void loadSettings() {
 
     // Calibration
     if (prefs.isKey("tempOffsetF")) {
-        tempOffset = prefs.getFloat("tempOffsetF", 0.0f);
+        tempOffset = prefs.getFloat("tempOffsetF", wxv::defaults::kTempOffsetDefaultC);
     } else {
-        tempOffset = static_cast<float>(prefs.getInt("tempOffset", 0));
+        tempOffset = static_cast<float>(prefs.getInt("tempOffset", static_cast<int>(wxv::defaults::kTempOffsetDefaultC)));
     }
-    tempOffset = constrain(tempOffset, -10.0f, 10.0f);
-    humOffset    = prefs.getInt("humOffset", 0);
-    lightGain    = constrain(prefs.getInt("lightGain", 100), LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
+    tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
+    humOffset    = prefs.getInt("humOffset", wxv::defaults::kHumOffsetDefault);
+    lightGain    = constrain(prefs.getInt("lightGain", wxv::defaults::kLightGainDefaultPercent), wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
 
     loadDateTimeSettings();
 
@@ -267,7 +272,7 @@ void saveCalibrationSettings() {
         prefs.remove("tempOffset");
     }
     prefs.putInt("humOffset", humOffset);
-    lightGain = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
+    lightGain = constrain(lightGain, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
     prefs.putInt("lightGain", lightGain);
     prefs.end();
 }
@@ -386,17 +391,17 @@ void adjustBrightness(int dir) {
 }
 
 void adjustTempOffset(int dir) {
-    float step = (units.temp == TempUnit::F) ? (5.0f / 9.0f * 0.1f) : 0.1f;
-    tempOffset = constrain(tempOffset + dir * step, -10.0f, 10.0f);
+    float step = (units.temp == TempUnit::F) ? (5.0f / 9.0f * wxv::defaults::kTempOffsetStepC) : wxv::defaults::kTempOffsetStepC;
+    tempOffset = constrain(tempOffset + dir * step, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
 }
 
 void adjustHumOffset(int dir) {
-    humOffset = constrain(humOffset + dir, -20, 20);
+    humOffset = constrain(humOffset + dir * wxv::defaults::kHumOffsetStep, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
 }
 
 void adjustLightGain(int dir) {
-    lightGain += dir * 5;
-    lightGain = constrain(lightGain, LIGHT_GAIN_MIN, LIGHT_GAIN_MAX);
+    lightGain += dir * wxv::defaults::kLightGainStepPercent;
+    lightGain = constrain(lightGain, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
     float lux = readBrightnessSensor();
     setDisplayBrightnessFromLux(lux);
 }

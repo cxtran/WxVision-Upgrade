@@ -85,6 +85,7 @@ void scrollWeatherDetails();
 void drawOWMScreen();
 void drawClockScreen(); 
 void drawClockPulseDot(int second);
+void tickClockWorldTimeMarquee();
 void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();

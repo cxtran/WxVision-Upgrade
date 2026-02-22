@@ -10,17 +10,18 @@
 #include <strings.h>
 #include <algorithm>
 #include "display.h"
+#include "default_values.h"
 
 
 int tzOffset = 0;      // Effective offset (minutes)
 int tzStandardOffset = 0; // Base offset without DST (minutes)
 bool tzAutoDst = false;
-int fmt24 = 1;
-int dateFmt = 0;
+int fmt24 = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
+int dateFmt = wxv::defaults::kDefaults.dateFormatStorage;
 extern RTC_DS3231 rtc;
 char tzName[TZ_NAME_MAX] = "UTC";
-char ntpServerHost[64] = "pool.ntp.org";
-int ntpServerPreset = 1; // default to pool.ntp.org
+char ntpServerHost[64] = "";
+int ntpServerPreset = wxv::defaults::kDefaults.defaultNtpPreset; // default to pool.ntp.org
 static int tzSelectedIndex = -1;
 
 static const char *const kNtpPresetHosts[] = {
@@ -37,39 +38,47 @@ static void applySystemTimezone();
 static void updateTimezoneOffsetInternal(const DateTime* referenceUtc);
 static bool getUtcNow(DateTime &out);
 
+struct DateTimeDefaultsInit {
+    DateTimeDefaultsInit() {
+        strncpy(ntpServerHost, wxv::defaults::kDefaults.ntpServer2, sizeof(ntpServerHost) - 1);
+        ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
+    }
+};
+static DateTimeDefaultsInit s_dateTimeDefaultsInit;
+
 struct TimezoneLabelBuffer
 {
     char text[48];
 };
 
 static const TimezoneInfo kTimezones[] = {
-    {"Pacific/Honolulu",        "Honolulu",        "USA",        -600, DstRule::None},
-    {"America/Anchorage",       "Anchorage",       "USA",        -540, DstRule::NorthAmerica},
-    {"America/Los_Angeles",     "Los Angeles",     "USA",        -480, DstRule::NorthAmerica},
-    {"America/Denver",          "Denver",          "USA",        -420, DstRule::NorthAmerica},
-    {"America/Chicago",         "Chicago",         "USA",        -360, DstRule::NorthAmerica},
-    {"America/New_York",        "New York",        "USA",        -300, DstRule::NorthAmerica},
-    {"America/Halifax",         "Halifax",         "Canada",     -240, DstRule::NorthAmerica},
-    {"America/St_Johns",        "St. John's",      "Canada",     -210, DstRule::Newfoundland},
-    {"America/Sao_Paulo",       "Sao Paulo",       "Brazil",     -180, DstRule::None},
-    {"Atlantic/Azores",         "Azores",          "Portugal",   -60,  DstRule::Azores},
-    {"UTC",                     "UTC",             "-",          0,    DstRule::None},
-    {"Europe/London",           "London",          "United Kingdom", 0,    DstRule::Europe},
-    {"Europe/Berlin",           "Berlin",          "Germany",    60,   DstRule::Europe},
-    {"Europe/Athens",           "Athens",          "Greece",     120,  DstRule::Europe},
-    {"Europe/Moscow",           "Moscow",          "Russia",     180,  DstRule::None},
-    {"Asia/Dubai",              "Dubai",           "UAE",        240,  DstRule::None},
-    {"Asia/Karachi",            "Karachi",         "Pakistan",   300,  DstRule::None},
-    {"Asia/Kolkata",            "Mumbai/Delhi",    "India",      330,  DstRule::None},
-    {"Asia/Dhaka",              "Dhaka",           "Bangladesh", 360,  DstRule::None},
-    {"Asia/Bangkok",            "Bangkok",         "Thailand",   420,  DstRule::None},
-    {"Asia/Ho_Chi_Minh",        "Hanoi",           "Vietnam",    420,  DstRule::None},
-    {"Asia/Hong_Kong",          "Hong Kong",       "China",      480,  DstRule::None},
-    {"Asia/Tokyo",              "Tokyo",           "Japan",      540,  DstRule::None},
-    {"Australia/Adelaide",      "Adelaide",        "Australia",  570,  DstRule::Australia},
-    {"Australia/Sydney",        "Sydney",          "Australia",  600,  DstRule::Australia},
-    {"Pacific/Noumea",          "Noumea",          "New Caledonia", 660, DstRule::None},
-    {"Pacific/Auckland",        "Auckland",        "New Zealand",720, DstRule::NewZealand}
+    {"Pacific/Honolulu",        "Honolulu",        "USA",        -600, DstRule::None,         21.3069f,  -157.8583f},
+    {"America/Anchorage",       "Anchorage",       "USA",        -540, DstRule::NorthAmerica, 61.2181f,  -149.9003f},
+    {"America/Los_Angeles",     "Los Angeles",     "USA",        -480, DstRule::NorthAmerica, 34.0522f,  -118.2437f},
+    {"America/Denver",          "Denver",          "USA",        -420, DstRule::NorthAmerica, 39.7392f,  -104.9903f},
+    {"America/Chicago",         "Chicago",         "USA",        -360, DstRule::NorthAmerica, 41.8781f,   -87.6298f},
+    {"America/New_York",        "New York",        "USA",        -300, DstRule::NorthAmerica, 40.7128f,   -74.0060f},
+    {"America/Halifax",         "Halifax",         "Canada",     -240, DstRule::NorthAmerica, 44.6488f,   -63.5752f},
+    {"America/St_Johns",        "St. John's",      "Canada",     -210, DstRule::Newfoundland, 47.5615f,   -52.7126f},
+    {"America/Sao_Paulo",       "Sao Paulo",       "Brazil",     -180, DstRule::None,        -23.5505f,   -46.6333f},
+    {"Atlantic/Azores",         "Azores",          "Portugal",    -60, DstRule::Azores,       37.7412f,   -25.6756f},
+    {"UTC",                     "UTC",             "-",             0, DstRule::None,          51.4769f,     0.0005f},
+    {"Europe/London",           "London",          "United Kingdom", 0, DstRule::Europe,       51.5074f,    -0.1278f},
+    {"Europe/Berlin",           "Berlin",          "Germany",      60, DstRule::Europe,       52.5200f,    13.4050f},
+    {"Europe/Athens",           "Athens",          "Greece",      120, DstRule::Europe,       37.9838f,    23.7275f},
+    {"Europe/Moscow",           "Moscow",          "Russia",      180, DstRule::None,         55.7558f,    37.6173f},
+    {"Asia/Dubai",              "Dubai",           "UAE",         240, DstRule::None,         25.2048f,    55.2708f},
+    {"Asia/Karachi",            "Karachi",         "Pakistan",    300, DstRule::None,         24.8607f,    67.0011f},
+    {"Asia/Kolkata",            "Mumbai/Delhi",    "India",       330, DstRule::None,         19.0760f,    72.8777f},
+    {"Asia/Dhaka",              "Dhaka",           "Bangladesh",  360, DstRule::None,         23.8103f,    90.4125f},
+    {"Asia/Bangkok",            "Bangkok",         "Thailand",    420, DstRule::None,         13.7563f,   100.5018f},
+    {"Asia/Ho_Chi_Minh",        "Hanoi",           "Vietnam",     420, DstRule::None,         21.0278f,   105.8342f},
+    {"Asia/Hong_Kong",          "Hong Kong",       "China",       480, DstRule::None,         22.3193f,   114.1694f},
+    {"Asia/Tokyo",              "Tokyo",           "Japan",       540, DstRule::None,         35.6762f,   139.6503f},
+    {"Australia/Adelaide",      "Adelaide",        "Australia",   570, DstRule::Australia,   -34.9285f,   138.6007f},
+    {"Australia/Sydney",        "Sydney",          "Australia",   600, DstRule::Australia,   -33.8688f,   151.2093f},
+    {"Pacific/Noumea",          "Noumea",          "New Caledonia", 660, DstRule::None,      -22.2558f,   166.4505f},
+    {"Pacific/Auckland",        "Auckland",        "New Zealand", 720, DstRule::NewZealand,  -36.8509f,   174.7645f}
 };
 
 static const size_t kTimezoneCount = sizeof(kTimezones) / sizeof(kTimezones[0]);
@@ -368,6 +377,20 @@ int timezoneOffsetForUtc(const DateTime& utc)
     return offset;
 }
 
+int timezoneOffsetForUtcAtIndex(int index, const DateTime& utc)
+{
+    if (index < 0 || index >= static_cast<int>(kTimezoneCount))
+        return 0;
+
+    const TimezoneInfo &info = kTimezones[index];
+    int offset = info.offsetMinutes;
+    if (info.dstRule != DstRule::None && isDstActiveUtc(info, utc))
+    {
+        offset += 60;
+    }
+    return offset;
+}
+
 int timezoneOffsetForLocal(const DateTime& local)
 {
     int offset = tzStandardOffset;
@@ -587,11 +610,11 @@ void loadDateTimeSettings()
 
     int storedOffset = prefs.getInt("tz_offset", 0);
     int storedStd = prefs.getInt("tz_std", storedOffset);
-    dateFmt = prefs.getInt("date_fmt", 0);
-    fmt24 = prefs.getInt("time_24h", 1);
+    dateFmt = prefs.getInt("date_fmt", wxv::defaults::kDefaults.dateFormatStorage);
+    fmt24 = prefs.getInt("time_24h", wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat));
     bool storedAutoDst = prefs.getBool("tz_dst_auto", false);
     ntpServerPreset = prefs.getInt("ntp_preset", -1);
-    String savedHost = prefs.getString("ntp_host", "pool.ntp.org");
+    String savedHost = prefs.getString("ntp_host", wxv::defaults::kDefaults.ntpServer2);
     String storedName = prefs.getString("tz_name", "");
     prefs.end();
 

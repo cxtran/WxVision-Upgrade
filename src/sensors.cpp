@@ -184,6 +184,9 @@ float getLastRawLux()
 static uint32_t s_lastIrCode = 0;
 static unsigned long s_lastIrTimestamp = 0;
 static bool s_lastIrWasVirtual = false;
+static uint32_t s_lastPhysicalDeliveredCode = 0;
+static unsigned long s_lastPhysicalDeliveredAt = 0;
+static const unsigned long IR_PHYSICAL_REPEAT_BLOCK_MS = 180UL;
 // While alarm is firing, any IR key cancels/snoozes it.
 static inline bool isAlarmCancelCode(uint32_t /*code*/) { return true; }
 
@@ -215,6 +218,7 @@ uint32_t getIRCodeNonBlocking()
   if (irrecv.decode(&results))
   {
     uint32_t code = results.value;
+    const bool isRepeatFrame = results.repeat;
     if (results.repeat)
     {
       code = s_lastIrCode;
@@ -228,6 +232,29 @@ uint32_t getIRCodeNonBlocking()
     irrecv.resume();
     if (code != 0)
     {
+      unsigned long now = millis();
+      bool blockRepeat = false;
+
+      // Global physical-IR repeat filter:
+      // suppress short-interval duplicate frames (including protocol repeat frames).
+      if (code == s_lastPhysicalDeliveredCode &&
+          (now - s_lastPhysicalDeliveredAt) < IR_PHYSICAL_REPEAT_BLOCK_MS)
+      {
+        blockRepeat = true;
+      }
+      else if (isRepeatFrame &&
+               (now - s_lastPhysicalDeliveredAt) < IR_PHYSICAL_REPEAT_BLOCK_MS)
+      {
+        blockRepeat = true;
+      }
+
+      if (blockRepeat)
+      {
+        return 0;
+      }
+
+      s_lastPhysicalDeliveredCode = code;
+      s_lastPhysicalDeliveredAt = now;
       PRINT_IR_CODE(code);
       if (!menuActive && (code == IR_UP || code == IR_DOWN || code == IR_LEFT || code == IR_RIGHT || code == IR_OK || code == IR_CANCEL))
       {
@@ -249,6 +276,7 @@ uint32_t getIRCodeNonBlocking()
   if (s_lastIrCode != 0 && millis() - s_lastIrTimestamp > 500)
   {
     s_lastIrCode = 0;
+    s_lastPhysicalDeliveredCode = 0;
   }
 
   return 0;

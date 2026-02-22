@@ -40,6 +40,7 @@
 #include "datalogger.h"
 #include "graph.h"
 #include "graph.h"
+#include "worldtime.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -66,7 +67,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 // --- Modal objects ---
-extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal, alarmModal;
+extern InfoModal wifiSettingsModal, sysInfoModal, wifiInfoModal, dateModal, mainMenuModal, deviceModal, displayModal, weatherModal, tempestModal, calibrationModal, systemModal, scenePreviewModal, unitSettingsModal, alarmModal, worldTimeModal, manageTzModal;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
 InfoScreen forecastScreen("Next 10 Days", SCREEN_UDP_FORECAST);
@@ -334,6 +335,8 @@ static bool isRotationBlocked()
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
            systemModal.isActive() ||
+           worldTimeModal.isActive() ||
+           manageTzModal.isActive() ||
            scenePreviewModal.isActive() ||
            isWeatherScenePreviewActive();
 }
@@ -580,18 +583,55 @@ void handleResetButton()
     static bool buttonWasDown = false;
     static unsigned long buttonDownMillis = 0;
     static bool resetLongPressHandled = false;
+    static bool resetArmReady = false;
+    static unsigned long resetGuardUntilMs = 0;
     const unsigned long resetHoldTime = 3000;
+    const unsigned long resetStartupGuardMs = 5000;
+    const unsigned long releaseArmMs = 300;
+    unsigned long now = millis();
+
+    if (resetGuardUntilMs == 0)
+    {
+        // Ignore reset key early after boot to avoid startup pin transients/reset loops.
+        resetGuardUntilMs = now + resetStartupGuardMs;
+    }
+    if (now < resetGuardUntilMs)
+    {
+        buttonWasDown = false;
+        resetLongPressHandled = false;
+        return;
+    }
+
     bool buttonDown = (digitalRead(BTN_SEL) == LOW);
+    static unsigned long releasedSinceMs = 0;
+
+    // Arm long-press reset only after button has been released stably.
+    if (!resetArmReady)
+    {
+        if (!buttonDown)
+        {
+            if (releasedSinceMs == 0)
+                releasedSinceMs = now;
+            if ((now - releasedSinceMs) >= releaseArmMs)
+                resetArmReady = true;
+        }
+        else
+        {
+            releasedSinceMs = 0;
+        }
+        buttonWasDown = buttonDown;
+        return;
+    }
 
     if (buttonDown && !buttonWasDown)
     {
-        buttonDownMillis = millis();
+        buttonDownMillis = now;
         resetLongPressHandled = false;
         buttonWasDown = true;
     }
     if (buttonDown && !resetLongPressHandled)
     {
-        if (millis() - buttonDownMillis > resetHoldTime)
+        if (now - buttonDownMillis > resetHoldTime)
         {
             resetLongPressHandled = true;
             triggerPhysicalReset();
@@ -753,6 +793,9 @@ void setup()
     deviceHostname = buildDefaultHostname();
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
     loadSettings();
+    // --- BEGIN WORLD TIME FEATURE ---
+    loadWorldTimeSettings();
+    // --- END WORLD TIME FEATURE ---
     initAlarmModule();
     delay(500);
     setupDisplay();
@@ -804,6 +847,7 @@ void setup()
 
     // Ensure TCP/IP stack is initialised even if we stay offline
     WiFi.mode(WIFI_STA);
+    wifiInitStateMachine();
     splashUpdate("WiFi Prep", 5, 6);
 
     if (initialSetupRequired)
@@ -815,7 +859,7 @@ void setup()
         return;
     }
 
-    if (wifiSSID.isEmpty() || wifiPass.isEmpty())
+    if (!wifiHasCredentials())
     {
         Serial.println("[WiFi] No credentials, starting offline mode.");
         initialSetupAwaitingWifi = false;
@@ -825,19 +869,9 @@ void setup()
         return;
     }
 
-    if (!isSavedSsidAvailable())
-    {
-        Serial.printf("[WiFi] Saved SSID \"%s\" is not in range; starting offline without prompts.\n", wifiSSID.c_str());
-        autoWifiReconnectSuppressed = true;
-        initialSetupAwaitingWifi = false;
-        splashUpdate("Offline", 6, 6);
-        completeStartupAfterWiFi(true);
-        return;
-    }
-
     Serial.println("Connecting WiFi...");
     splashUpdate("WiFi Link", 6, 6);
-    connectToWiFi();
+    wifiStartBootConnect(false);
 
     if (wifiSelecting)
     {
@@ -846,7 +880,7 @@ void setup()
     }
 
     // --- BEGIN NEW CODE ---
-    if (isWiFiConnectionInProgress())
+    if (wifiIsConnecting())
     {
         initialSetupAwaitingWifi = true;
         return;
@@ -907,19 +941,11 @@ void loop()
         tickAlarmState(alarmNow);
     }
 
-    // --- BEGIN NEW CODE ---
-    serviceWiFiConnection();
-    if ((initialSetupAwaitingWifi || !startupCompleted) && consumeWiFiConnectionFailure())
-    {
-        Serial.println("[WiFi] Startup connect failed; continuing offline mode.");
-        autoWifiReconnectSuppressed = true;
-        initialSetupAwaitingWifi = false;
-        completeStartupAfterWiFi(true);
-    }
-    // --- END NEW CODE ---
-
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
     bool apActive = isAccessPointActive();
+    wifiLoop(apActive);
+    wifiConnected = (WiFi.status() == WL_CONNECTED);
+    apActive = isAccessPointActive();
 
     if (wifiConnected && apActive)
     {
@@ -931,53 +957,29 @@ void loop()
     {
         completeStartupAfterWiFi(initialSetupAwaitingWifi);
     }
+    else if ((initialSetupAwaitingWifi || !startupCompleted) &&
+             !wifiConnected &&
+             !wifiIsConnecting() &&
+             !(wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT))
+    {
+        Serial.printf("[WiFi] Startup offline (%s/%s), continuing normal operation.\n",
+                      wifiStatusCodeText(), wifiStatusReasonText());
+        initialSetupAwaitingWifi = false;
+        completeStartupAfterWiFi(true);
+    }
     else if (!wifiConnected && udpListening)
     {
         udp.stop();
         udpListening = false;
     }
 
-    static unsigned long wifiDownSince = 0;
-    static unsigned long lastWifiReconnectAttempt = 0;
-    if (!wifiConnected)
+    if (!wifiConnected && wifiHasCredentials() && !apActive && !wifiSelecting &&
+        wifiGetStatusCode() != WifiStatusCode::AUTH_FAILED)
     {
-        if (wifiDownSince == 0)
-            wifiDownSince = now;
-
-        if (!autoWifiReconnectSuppressed &&
-            !apActive &&
-            !wifiSelecting &&
-            (now - wifiDownSince) >= WIFI_RETRY_TIMEOUT)
+        if (startAccessPoint())
         {
-            if (startAccessPoint())
-            {
-                apActive = true;
-            }
+            apActive = true;
         }
-
-        if (!autoWifiReconnectSuppressed &&
-            !isWiFiConnectionInProgress() &&
-            !wifiSelecting &&
-            (lastWifiReconnectAttempt == 0 || (now - lastWifiReconnectAttempt) >= WIFI_RETRY_TIMEOUT))
-        {
-            lastWifiReconnectAttempt = now;
-            if (!isSavedSsidAvailable())
-            {
-                autoWifiReconnectSuppressed = true;
-                Serial.printf("[WiFi] Saved SSID \"%s\" is unavailable; auto reconnect suppressed.\n", wifiSSID.c_str());
-            }
-            else
-            {
-                Serial.println("[WiFi] Reconnect attempt...");
-                attemptWifiReconnect(apActive);
-            }
-        }
-    }
-    else
-    {
-        autoWifiReconnectSuppressed = false;
-        wifiDownSince = 0;
-        lastWifiReconnectAttempt = 0;
     }
 
     if (wifiConnected != lastWifiState || apActive != lastApState)
@@ -1024,6 +1026,9 @@ void loop()
     {
         fetchTempestData();
     }
+    // --- BEGIN WORLD TIME WEATHER ---
+    worldTimeWeatherTick();
+    // --- END WORLD TIME WEATHER ---
 
     // --- Physical button handling (active low) ---
     if (now - lastButtonCheck >= buttonInterval)
@@ -1107,6 +1112,7 @@ void loop()
 
     // Only check physical reset if NO modal, NO keyboard, and NOT in WiFi select
     if (
+        startupCompleted &&
         !inKeyboardMode &&
         !setupPromptModal.isActive() &&
         !sysInfoModal.isActive() &&
@@ -1121,6 +1127,8 @@ void loop()
         !tempestModal.isActive() &&
         !calibrationModal.isActive() &&
         !systemModal.isActive() &&
+        !worldTimeModal.isActive() &&
+        !manageTzModal.isActive() &&
         !scenePreviewModal.isActive() &&
         !isWeatherScenePreviewActive() &&
         !(wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT))
@@ -1251,6 +1259,22 @@ void loop()
         delay(40);
         return;
     }
+    // --- BEGIN WORLD TIME FEATURE ---
+    if (worldTimeModal.isActive())
+    {
+        worldTimeModal.tick();
+        worldTimeModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    if (manageTzModal.isActive())
+    {
+        manageTzModal.tick();
+        manageTzModal.handleIR(getIRCodeNonBlocking());
+        delay(40);
+        return;
+    }
+    // --- END WORLD TIME FEATURE ---
     if (alarmModal.isActive())
     {
         alarmModal.tick();
@@ -1407,6 +1431,24 @@ void loop()
         handlePredictionUpPress();
         return;
     }
+    // --- BEGIN WORLD TIME FEATURE ---
+    if (currentScreen == SCREEN_CLOCK &&
+        worldTimeHasSelections() &&
+        (code == IR_UP || code == IR_DOWN))
+    {
+        worldTimeCycleView((code == IR_UP) ? -1 : 1);
+        drawClockScreen();
+        return;
+    }
+    if (currentScreen == SCREEN_CLOCK &&
+        code == IR_OK &&
+        worldTimeIsWorldView())
+    {
+        worldTimeResetView();
+        drawClockScreen();
+        return;
+    }
+    // --- END WORLD TIME FEATURE ---
 
     if (code == IR_LEFT)
     {
@@ -1441,6 +1483,8 @@ void loop()
         alarmModal.isActive() ||
         noaaModal.isActive() ||
         systemModal.isActive() ||
+        worldTimeModal.isActive() ||
+        manageTzModal.isActive() ||
         inKeyboardMode ||
         udpScreen.isActive() ||
         forecastScreen.isActive() ||
@@ -1525,6 +1569,9 @@ void loop()
             int pulseSecond = haveAlarmTime ? alarmNow.second() : static_cast<int>((now / 1000UL) % 60UL);
             drawClockPulseDot(pulseSecond);
         }
+        // --- BEGIN WORLD TIME FEATURE ---
+        tickClockWorldTimeMarquee();
+        // --- END WORLD TIME FEATURE ---
     }
 
     if (currentScreen == SCREEN_LUNAR_VI)
