@@ -181,29 +181,29 @@ static const char *screenModeLabel(ScreenMode mode)
   }
 }
 
-static uint32_t irCodeForButton(String btn)
+static IRCodes::WxKey irKeyForButton(String btn)
 {
   btn.trim();
   btn.toLowerCase();
   if (btn.length() == 0)
-    return 0;
+    return IRCodes::WxKey::Unknown;
 
   if (btn == "up")
-    return IR_UP;
+    return IRCodes::WxKey::Up;
   if (btn == "down")
-    return IR_DOWN;
+    return IRCodes::WxKey::Down;
   if (btn == "left")
-    return IR_LEFT;
+    return IRCodes::WxKey::Left;
   if (btn == "right")
-    return IR_RIGHT;
+    return IRCodes::WxKey::Right;
   if (btn == "select" || btn == "enter" || btn == "ok")
-    return IR_OK;
+    return IRCodes::WxKey::Ok;
   if (btn == "menu" || btn == "setup" || btn == "cancel")
-    return IR_MENU;
+    return IRCodes::WxKey::Cancel;
   if (btn == "screen" || btn == "shutdown" || btn == "power")
-    return IR_SCREEN;
+    return IRCodes::WxKey::Screen;
   if (btn == "theme" || btn == "color")
-    return IR_THEME;
+    return IRCodes::WxKey::Theme;
 
   // allow raw hex codes prefixed with 0x or without
   if (btn.startsWith("0x"))
@@ -213,10 +213,10 @@ static uint32_t irCodeForButton(String btn)
     char *endptr = nullptr;
     uint32_t code = strtoul(btn.c_str(), &endptr, 16);
     if (endptr && *endptr == '\0')
-      return code;
+      return IRCodes::mapLegacyCodeToKey(code);
   }
 
-  return 0;
+  return IRCodes::WxKey::Unknown;
 }
 
 static const char *wifiAuthLabel(wifi_auth_mode_t mode)
@@ -557,14 +557,14 @@ void setupWebServer() {
     }
 
     String btn = req->getParam("btn")->value();
-    uint32_t code = irCodeForButton(btn);
-    if (code == 0)
+    IRCodes::WxKey key = irKeyForButton(btn);
+    if (key == IRCodes::WxKey::Unknown)
     {
       req->send(400, "text/plain", "unknown button");
       return;
     }
 
-    if (!enqueueVirtualIRCode(code))
+    if (!enqueueVirtualIRKey(key))
     {
       req->send(503, "text/plain", "busy");
       return;

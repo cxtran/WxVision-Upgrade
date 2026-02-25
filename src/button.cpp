@@ -6,7 +6,7 @@
 #include "settings.h"
 #include "menu.h"
 #include "ir_codes.h"
-#include "sensors.h" // for enqueueVirtualIRCode
+#include "sensors.h" // for enqueueVirtualIRKey
 #include "buzzer.h"
 #include "alarm.h"
 #include "notifications.h"
@@ -68,7 +68,7 @@ void getButton(){
     if (currentScreen == SCREEN_LUNAR_LUCK) {
       adjustLunarLuckSpeed(+1);
     } else {
-      enqueueVirtualIRCode(IR_UP);
+      enqueueVirtualIRKey(IRCodes::WxKey::Up);
     }
   
   }
@@ -80,7 +80,7 @@ void getButton(){
     if (currentScreen == SCREEN_LUNAR_LUCK) {
       adjustLunarLuckSpeed(-1);
     } else {
-      enqueueVirtualIRCode(IR_DOWN);
+      enqueueVirtualIRKey(IRCodes::WxKey::Down);
     }
   }
   if (lastLeft == HIGH && left == LOW && (now - lastLeftEdgeMs) >= debounceMs) {
@@ -88,14 +88,14 @@ void getButton(){
     Serial.println("LEFT button pressed");
     playBuzzerTone(900, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRCode(IR_LEFT);
+    enqueueVirtualIRKey(IRCodes::WxKey::Left);
   }
   if (lastRight == HIGH && right == LOW && (now - lastRightEdgeMs) >= debounceMs) {
     lastRightEdgeMs = now;
     Serial.println("RIGHT button pressed");
     playBuzzerTone(1800, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRCode(IR_RIGHT);
+    enqueueVirtualIRKey(IRCodes::WxKey::Right);
   }
   if (lastCtr == HIGH && ctr == LOW && (now - lastCtrEdgeMs) >= debounceMs) {
     lastCtrEdgeMs = now;
@@ -112,7 +112,7 @@ void getButton(){
     }
     else
     {
-      enqueueVirtualIRCode(IR_OK);
+      enqueueVirtualIRKey(IRCodes::WxKey::Ok);
     }
   }
 

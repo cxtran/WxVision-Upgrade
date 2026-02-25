@@ -39,8 +39,8 @@
 #include "system.h"
 #include "datalogger.h"
 #include "graph.h"
-#include "graph.h"
 #include "worldtime.h"
+#include "ir_learn.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -85,7 +85,7 @@ ScrollLine windInfo(64, 40);
 extern void (*pendingModalFn)();
 extern unsigned long pendingModalTime;
 extern bool isWeatherScenePreviewActive();
-extern void handleWeatherScenePreviewIR(uint32_t code);
+extern void handleWeatherScenePreviewIR(IRCodes::WxKey key);
 extern int alarmSlotSelection;
 extern int alarmSlotShown;
 
@@ -174,6 +174,97 @@ static void ensureCurrentScreenAllowed();
 static void applyDataSourcePolicies(bool wifiConnected);
 
 static unsigned long lastAutoRotateMillis = 0;
+
+namespace
+{
+    enum class RenderSlot : uint8_t
+    {
+        ClockMain,
+        ClockPulse,
+        ClockMarquee,
+        LunarViMain,
+        LunarViMarquee,
+        LunarLuckMain,
+        LunarLuckMarquee,
+        ConditionMain,
+        ConditionMarquee,
+        TempHistoryMain,
+        TempHistoryMarquee,
+        HumHistoryMain,
+        HumHistoryMarquee,
+        Co2HistoryMain,
+        Co2HistoryMarquee,
+        PredictMain,
+        PredictMarquee,
+        BaroHistoryMain,
+        BaroHistoryMarquee,
+        WindMain,
+        OwmMain,
+        OwmScroll,
+        Count
+    };
+
+    struct RenderScheduler
+    {
+        unsigned long last[(size_t)RenderSlot::Count] = {};
+    };
+
+    static RenderScheduler s_render;
+
+    static inline bool renderDue(RenderSlot slot, unsigned long now, unsigned long intervalMs, bool force = false)
+    {
+        unsigned long &last = s_render.last[(size_t)slot];
+        if (force || intervalMs == 0 || (now - last) >= intervalMs)
+        {
+            last = now;
+            return true;
+        }
+        return false;
+    }
+
+    static inline void markRendered(RenderSlot slot, unsigned long now)
+    {
+        s_render.last[(size_t)slot] = now;
+    }
+
+#ifdef WXV_RENDER_STATS
+    struct RenderStats
+    {
+        uint32_t frames = 0;
+        uint32_t fullClears = 0;
+        unsigned long lastReportMs = 0;
+    };
+    static RenderStats s_renderStats;
+
+    static inline void noteFrameDraw(unsigned long now)
+    {
+        s_renderStats.frames++;
+        if (now - s_renderStats.lastReportMs >= 10000UL)
+        {
+            Serial.printf("[Render] fps=%.2f fullClears=%lu\n",
+                          s_renderStats.frames / 10.0f,
+                          static_cast<unsigned long>(s_renderStats.fullClears));
+            s_renderStats.frames = 0;
+            s_renderStats.fullClears = 0;
+            s_renderStats.lastReportMs = now;
+        }
+    }
+
+    static inline void noteFullClear()
+    {
+        s_renderStats.fullClears++;
+    }
+#else
+    static inline void noteFrameDraw(unsigned long) {}
+    static inline void noteFullClear() {}
+#endif
+
+    constexpr unsigned long kRenderMarqueeMs = 40UL;        // 25 FPS
+    constexpr unsigned long kRenderChartMs = 15000UL;       // preserve existing behavior
+    constexpr unsigned long kRenderConditionMs = 5000UL;    // preserve existing behavior
+    constexpr unsigned long kRenderWindMs = 40UL;           // 25 FPS
+    constexpr unsigned long kRenderOwmMainMs = 1000UL;      // preserve existing behavior
+}
 
 static String buildDefaultHostname()
 {
@@ -1082,13 +1173,6 @@ void loop()
         tickAutoThemeAmbient(lux);
     }
 
-    /*
-    if( now - lastReadDHT > DHTreadInterval){
-        lastReadDHT = now;
-        readDHTSensor();
-    }
-    */
-
     // --- Read SCD40 ---
     if (now - lastReadSCD40 > SCD40ReadInterval)
     {
@@ -1139,6 +1223,22 @@ void loop()
     handleAutoRotate(now);
     tickAutoThemeSchedule();
     tickNoaaAlerts(now);
+    wxv::irlearn::tick();
+
+    if (wxv::irlearn::consumeReturnToSystemMenuRequest())
+    {
+        showSystemModal();
+        delay(40);
+        return;
+    }
+
+    if (wxv::irlearn::isActive())
+    {
+        // Keep decoding IR frames while learn mode is active; routing happens in sensors.cpp.
+        getIRCodeNonBlocking();
+        delay(40);
+        return;
+    }
 
     if (themeRefreshPending)
     {
@@ -1152,9 +1252,9 @@ void loop()
     // --- 1. Keyboard always has focus if active ---
     if (inKeyboardMode)
     {
-        uint32_t code = getIRCodeNonBlocking();
-        if (code)
-            handleKeyboardIR(code);
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key != IRCodes::WxKey::Unknown)
+            handleKeyboardIR(IRCodes::legacyCodeForKey(key));
 
         if (now - lastBlink >= blinkInterval)
         {
@@ -1170,7 +1270,7 @@ void loop()
     if (setupPromptModal.isActive())
     {
         setupPromptModal.tick();
-        setupPromptModal.handleIR(getIRCodeNonBlocking());
+        setupPromptModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
@@ -1178,84 +1278,84 @@ void loop()
     if (sysInfoModal.isActive())
     {
         sysInfoModal.tick();
-        sysInfoModal.handleIR(getIRCodeNonBlocking());
+        sysInfoModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (wifiInfoModal.isActive())
     {
         wifiInfoModal.tick();
-        wifiInfoModal.handleIR(getIRCodeNonBlocking());
+        wifiInfoModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (dateModal.isActive())
     {
         dateModal.tick();
-        dateModal.handleIR(getIRCodeNonBlocking());
+        dateModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (mainMenuModal.isActive())
     {
         mainMenuModal.tick();
-        mainMenuModal.handleIR(getIRCodeNonBlocking());
+        mainMenuModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (deviceModal.isActive())
     {
         deviceModal.tick();
-        deviceModal.handleIR(getIRCodeNonBlocking());
+        deviceModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (wifiSettingsModal.isActive())
     {
         wifiSettingsModal.tick();
-        wifiSettingsModal.handleIR(getIRCodeNonBlocking());
+        wifiSettingsModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (displayModal.isActive())
     {
         displayModal.tick();
-        displayModal.handleIR(getIRCodeNonBlocking());
+        displayModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (unitSettingsModal.isActive())
     {
         unitSettingsModal.tick();
-        unitSettingsModal.handleIR(getIRCodeNonBlocking());
+        unitSettingsModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (weatherModal.isActive())
     {
         weatherModal.tick();
-        weatherModal.handleIR(getIRCodeNonBlocking());
+        weatherModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (tempestModal.isActive())
     {
         tempestModal.tick();
-        tempestModal.handleIR(getIRCodeNonBlocking());
+        tempestModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (calibrationModal.isActive())
     {
         calibrationModal.tick();
-        calibrationModal.handleIR(getIRCodeNonBlocking());
+        calibrationModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (systemModal.isActive())
     {
         systemModal.tick();
-        systemModal.handleIR(getIRCodeNonBlocking());
+        systemModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
@@ -1263,14 +1363,14 @@ void loop()
     if (worldTimeModal.isActive())
     {
         worldTimeModal.tick();
-        worldTimeModal.handleIR(getIRCodeNonBlocking());
+        worldTimeModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (manageTzModal.isActive())
     {
         manageTzModal.tick();
-        manageTzModal.handleIR(getIRCodeNonBlocking());
+        manageTzModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
@@ -1278,7 +1378,7 @@ void loop()
     if (alarmModal.isActive())
     {
         alarmModal.tick();
-        alarmModal.handleIR(getIRCodeNonBlocking());
+        alarmModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         if (alarmSlotSelection != alarmSlotShown)
         {
             alarmModal.hide();
@@ -1290,23 +1390,23 @@ void loop()
     if (noaaModal.isActive())
     {
         noaaModal.tick();
-        noaaModal.handleIR(getIRCodeNonBlocking());
+        noaaModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
     if (scenePreviewModal.isActive())
     {
         scenePreviewModal.tick();
-        scenePreviewModal.handleIR(getIRCodeNonBlocking());
+        scenePreviewModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(40);
         return;
     }
 
     if (isWeatherScenePreviewActive())
     {
-        uint32_t code = getIRCodeDebounced();
-        if (code)
-            handleWeatherScenePreviewIR(code);
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key != IRCodes::WxKey::Unknown)
+            handleWeatherScenePreviewIR(key);
         delay(40);
         return;
     }
@@ -1314,9 +1414,9 @@ void loop()
     // --- 3. Handle WiFi SSID selection menu ---
     if (wifiSelecting && currentMenuLevel == MENU_WIFI_SELECT)
     {
-        uint32_t code = getIRCodeNonBlocking();
-        if (code)
-            handleIR(code); // Route IR to menu.cpp WiFi handler
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key != IRCodes::WxKey::Unknown)
+            handleIRKey(key); // Route IR to menu.cpp WiFi handler
 
         // If WiFi selection exited (e.g. keyboard opened), skip drawing list again.
         if (!wifiSelecting || currentMenuLevel != MENU_WIFI_SELECT || inKeyboardMode)
@@ -1348,8 +1448,8 @@ void loop()
             showUdpScreen();
             newTempestData = false;
         }
-        uint32_t code = getIRCodeDebounced();
-        if (code == IR_CANCEL)
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             hideAllInfoScreens();
             showMainMenuModal();
@@ -1357,15 +1457,15 @@ void loop()
             return;
         }
         udpScreen.tick();
-        udpScreen.handleIR(code);
+        udpScreen.handleIR(IRCodes::legacyCodeForKey(key));
         delay(40);
         return;
     }
 
     if (forecastScreen.isActive())
     {
-        uint32_t code = getIRCodeDebounced();
-        if (code == IR_CANCEL)
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             hideAllInfoScreens();
             showMainMenuModal();
@@ -1373,15 +1473,15 @@ void loop()
             return;
         }
         forecastScreen.tick();
-        forecastScreen.handleIR(code);
+        forecastScreen.handleIR(IRCodes::legacyCodeForKey(key));
         delay(40);
         return;
     }
 
     if (currentCondScreen.isActive())
     {
-        uint32_t code = getIRCodeDebounced();
-        if (code == IR_CANCEL)
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             hideAllInfoScreens();
             showMainMenuModal();
@@ -1389,15 +1489,15 @@ void loop()
             return;
         }
         currentCondScreen.tick();
-        currentCondScreen.handleIR(code);
+        currentCondScreen.handleIR(IRCodes::legacyCodeForKey(key));
         delay(40);
         return;
     }
 
     if (hourlyScreen.isActive())
     {
-        uint32_t code = getIRCodeDebounced();
-        if (code == IR_CANCEL)
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             hideAllInfoScreens();
             showMainMenuModal();
@@ -1405,14 +1505,15 @@ void loop()
             return;
         }
         hourlyScreen.tick();
-        hourlyScreen.handleIR(code);
+        hourlyScreen.handleIR(IRCodes::legacyCodeForKey(key));
         delay(40);
         return;
     }
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
-    uint32_t code = (currentScreen == SCREEN_LUNAR_LUCK)
-                        ? getIRCodeNonBlocking()
-                        : getIRCodeDebounced();
+    IRCodes::WxKey key = (currentScreen == SCREEN_LUNAR_LUCK)
+                             ? getIRCodeNonBlocking()
+                             : getIRCodeDebounced();
+    uint32_t code = IRCodes::legacyCodeForKey(key);
     if (currentScreen == SCREEN_LUNAR_LUCK)
     {
         if (handleLunarLuckInput(code))
@@ -1421,12 +1522,12 @@ void loop()
         }
     }
     // Pause/resume Next 24h scroll with Down/Up when on prediction screen
-    if (code == IR_DOWN && currentScreen == SCREEN_PREDICT)
+    if (key == IRCodes::WxKey::Down && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionDownPress();
         return;
     }
-    if (code == IR_UP && currentScreen == SCREEN_PREDICT)
+    if (key == IRCodes::WxKey::Up && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionUpPress();
         return;
@@ -1434,14 +1535,14 @@ void loop()
     // --- BEGIN WORLD TIME FEATURE ---
     if (currentScreen == SCREEN_CLOCK &&
         worldTimeHasSelections() &&
-        (code == IR_UP || code == IR_DOWN))
+        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
     {
-        worldTimeCycleView((code == IR_UP) ? -1 : 1);
+        worldTimeCycleView((key == IRCodes::WxKey::Up) ? -1 : 1);
         drawClockScreen();
         return;
     }
     if (currentScreen == SCREEN_CLOCK &&
-        code == IR_OK &&
+        key == IRCodes::WxKey::Ok &&
         worldTimeIsWorldView())
     {
         worldTimeResetView();
@@ -1450,17 +1551,17 @@ void loop()
     }
     // --- END WORLD TIME FEATURE ---
 
-    if (code == IR_LEFT)
+    if (key == IRCodes::WxKey::Left)
     {
         rotateScreen(-1);
         return;
     }
-    if (code == IR_RIGHT)
+    if (key == IRCodes::WxKey::Right)
     {
         rotateScreen(+1);
         return;
     }
-    if (code == IR_CANCEL)
+    if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
     {
         showMainMenuModal();
         playBuzzerTone(3000, 100);
@@ -1530,11 +1631,9 @@ void loop()
 // Screens not use InfoScreen class   
     if (currentScreen == SCREEN_CLOCK)
     {
-        static unsigned long lastClockUpdate = 0;
         static int lastClockMinute = -1;
         static int lastClockHour = -1;
         static int lastClockDay = -1;
-        static unsigned long lastPulseUpdate = 0;
 
         bool alarmActive = isAlarmCurrentlyActive();
         bool timeChanged = false;
@@ -1554,46 +1653,54 @@ void loop()
 
         unsigned long interval = alarmActive ? 400 : 10000;
         bool forceRefresh = needsClear;
-        if (forceRefresh || timeChanged || clockSensorUpdatePending || (now - lastClockUpdate >= interval))
+        if (forceRefresh || timeChanged || clockSensorUpdatePending ||
+            renderDue(RenderSlot::ClockMain, now, interval))
         {
-            lastClockUpdate = now;
             drawClockScreen();
+            markRendered(RenderSlot::ClockMain, now);
+            noteFrameDraw(now);
             needsClear = false;
             clockSensorUpdatePending = false;
         }
 
         // Keep the pulse dot blinking every second without full redraw.
-        if (now - lastPulseUpdate >= 1000)
+        if (renderDue(RenderSlot::ClockPulse, now, 1000UL))
         {
-            lastPulseUpdate = now;
             int pulseSecond = haveAlarmTime ? alarmNow.second() : static_cast<int>((now / 1000UL) % 60UL);
             drawClockPulseDot(pulseSecond);
+            markRendered(RenderSlot::ClockPulse, now);
+            noteFrameDraw(now);
         }
         // --- BEGIN WORLD TIME FEATURE ---
-        tickClockWorldTimeMarquee();
+        if (renderDue(RenderSlot::ClockMarquee, now, kRenderMarqueeMs))
+        {
+            tickClockWorldTimeMarquee();
+            markRendered(RenderSlot::ClockMarquee, now);
+            noteFrameDraw(now);
+        }
         // --- END WORLD TIME FEATURE ---
     }
 
     if (currentScreen == SCREEN_LUNAR_VI)
     {
-        static unsigned long lastLunarRedraw = 0;
-        if (needsClear)
+        bool forceRefresh = needsClear;
+        if (forceRefresh || renderDue(RenderSlot::LunarViMain, now, 60000UL))
         {
-            dma_display->fillScreen(0);
             needsClear = false;
-            lastLunarRedraw = 0;
-        }
-        if (now - lastLunarRedraw >= 60000)
-        {
-            lastLunarRedraw = now;
             drawLunarScreenVi();
+            markRendered(RenderSlot::LunarViMain, now);
+            noteFrameDraw(now);
         }
-        tickLunarMarquee();
+        if (renderDue(RenderSlot::LunarViMarquee, now, kRenderMarqueeMs))
+        {
+            tickLunarMarquee();
+            markRendered(RenderSlot::LunarViMarquee, now);
+            noteFrameDraw(now);
+        }
     }
 
     if (currentScreen == SCREEN_LUNAR_LUCK)
     {
-        static unsigned long lastLunarLuckRedraw = 0;
         static int lastLunarLuckDay = -1;
         static int lastLunarLuckMonth = -1;
         static int lastLunarLuckYear = -1;
@@ -1611,126 +1718,133 @@ void loop()
                 lunarLuckDateChanged = true;
             }
         }
-        if (needsClear)
+        bool forceRefresh = needsClear || lunarLuckDateChanged;
+        if (forceRefresh || renderDue(RenderSlot::LunarLuckMain, now, 60000UL))
         {
-            dma_display->fillScreen(0);
-            needsClear = false;
-            lastLunarLuckRedraw = 0;
-        }
-        if (lunarLuckDateChanged)
-        {
-            lastLunarLuckRedraw = 0;
-        }
-        if (lunarLuckDateChanged || (now - lastLunarLuckRedraw >= 60000))
-        {
-            lastLunarLuckRedraw = now;
             drawLunarLuckScreen();
+            markRendered(RenderSlot::LunarLuckMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
         }
-        tickLunarLuckMarquee();
+        if (renderDue(RenderSlot::LunarLuckMarquee, now, kRenderMarqueeMs))
+        {
+            tickLunarLuckMarquee();
+            markRendered(RenderSlot::LunarLuckMarquee, now);
+            noteFrameDraw(now);
+        }
     }
 
     if (currentScreen == SCREEN_CONDITION_SCENE)
     {
-        static unsigned long lastConditionSceneUpdate = 0;
-        const unsigned long conditionSceneInterval = 5000;
-
-        bool shouldRedraw = needsClear || (now - lastConditionSceneUpdate) >= conditionSceneInterval;
+        bool shouldRedraw = needsClear || renderDue(RenderSlot::ConditionMain, now, kRenderConditionMs);
         if (shouldRedraw)
         {
-            if (needsClear)
-            {
-                dma_display->fillScreen(0);
-                needsClear = false;
-            }
             drawConditionSceneScreen();
-            lastConditionSceneUpdate = now;
+            markRendered(RenderSlot::ConditionMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
         }
-        tickConditionSceneMarquee();
+        if (renderDue(RenderSlot::ConditionMarquee, now, kRenderMarqueeMs))
+        {
+            tickConditionSceneMarquee();
+            markRendered(RenderSlot::ConditionMarquee, now);
+            noteFrameDraw(now);
+        }
     }
 
     if (currentScreen == SCREEN_TEMP_HISTORY)
     {
-        static unsigned long lastTempHistoryRedraw = 0;
-        const unsigned long redrawInterval = 15000;
         if (!anyModalOrInfoScreenActive &&
-            (needsClear || (now - lastTempHistoryRedraw) >= redrawInterval))
+            (needsClear || renderDue(RenderSlot::TempHistoryMain, now, kRenderChartMs)))
         {
             drawTemperatureHistoryScreen();
+            markRendered(RenderSlot::TempHistoryMain, now);
+            noteFrameDraw(now);
             needsClear = false;
-            lastTempHistoryRedraw = now;
         }
-        if (!needsClear && !anyModalOrInfoScreenActive)
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::TempHistoryMarquee, now, kRenderMarqueeMs))
         {
             tickTemperatureHistoryMarquee();
+            markRendered(RenderSlot::TempHistoryMarquee, now);
+            noteFrameDraw(now);
         }
     }
 
     if (currentScreen == SCREEN_HUM_HISTORY)
     {
-        static unsigned long lastHumHistoryRedraw = 0;
-        const unsigned long redrawInterval = 15000;
         if (!anyModalOrInfoScreenActive &&
-            (needsClear || (now - lastHumHistoryRedraw) >= redrawInterval))
+            (needsClear || renderDue(RenderSlot::HumHistoryMain, now, kRenderChartMs)))
         {
             drawHumidityHistoryScreen();
+            markRendered(RenderSlot::HumHistoryMain, now);
+            noteFrameDraw(now);
             needsClear = false;
-            lastHumHistoryRedraw = now;
         }
-        if (!needsClear && !anyModalOrInfoScreenActive)
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::HumHistoryMarquee, now, kRenderMarqueeMs))
         {
             tickHumidityHistoryMarquee();
+            markRendered(RenderSlot::HumHistoryMarquee, now);
+            noteFrameDraw(now);
         }
     }
 
     if (currentScreen == SCREEN_CO2_HISTORY)
     {
-        static unsigned long lastCo2HistoryRedraw = 0;
-        const unsigned long redrawInterval = 15000;
         if (!anyModalOrInfoScreenActive &&
-            (needsClear || (now - lastCo2HistoryRedraw) >= redrawInterval))
+            (needsClear || renderDue(RenderSlot::Co2HistoryMain, now, kRenderChartMs)))
         {
             drawCo2HistoryScreen();
+            markRendered(RenderSlot::Co2HistoryMain, now);
+            noteFrameDraw(now);
             needsClear = false;
-            lastCo2HistoryRedraw = now;
         }
-        if (!needsClear && !anyModalOrInfoScreenActive)
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::Co2HistoryMarquee, now, kRenderMarqueeMs))
         {
             tickCo2HistoryMarquee();
+            markRendered(RenderSlot::Co2HistoryMarquee, now);
+            noteFrameDraw(now);
         }
     }
 
     if (currentScreen == SCREEN_PREDICT)
     {
-        static unsigned long lastPredictRedraw = 0;
-        const unsigned long redrawInterval = 15000;
         if (!anyModalOrInfoScreenActive &&
-            (needsClear || (now - lastPredictRedraw) >= redrawInterval))
+            (needsClear || renderDue(RenderSlot::PredictMain, now, kRenderChartMs)))
         {
             drawPredictionScreen();
+            markRendered(RenderSlot::PredictMain, now);
+            noteFrameDraw(now);
             needsClear = false;
-            lastPredictRedraw = now;
         }
-        if (!needsClear && !anyModalOrInfoScreenActive)
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::PredictMarquee, now, kRenderMarqueeMs))
         {
             tickPredictionScreen();
+            markRendered(RenderSlot::PredictMarquee, now);
+            noteFrameDraw(now);
         }
         delay(40); // align tick cadence with other scrolling screens
     }
 
     if (currentScreen == SCREEN_BARO_HISTORY)
     {
-        static unsigned long lastBaroHistoryRedraw = 0;
-        const unsigned long redrawInterval = 15000;
         if (!anyModalOrInfoScreenActive &&
-            (needsClear || (now - lastBaroHistoryRedraw) >= redrawInterval))
+            (needsClear || renderDue(RenderSlot::BaroHistoryMain, now, kRenderChartMs)))
         {
             drawBaroHistoryScreen();
+            markRendered(RenderSlot::BaroHistoryMain, now);
+            noteFrameDraw(now);
             needsClear = false;
-            lastBaroHistoryRedraw = now;
         }
-        if (!needsClear && !anyModalOrInfoScreenActive)
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::BaroHistoryMarquee, now, kRenderMarqueeMs))
         {
             tickBaroHistoryMarquee();
+            markRendered(RenderSlot::BaroHistoryMarquee, now);
+            noteFrameDraw(now);
         }
     }
 
@@ -1742,8 +1856,8 @@ void loop()
             newAirQualityData = false;
             newAHT20_BMP280Data = false;
         }
-        uint32_t code = getIRCodeNonBlocking();
-        if (code == IR_CANCEL)
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             hideAllInfoScreens();
             showMainMenuModal();
@@ -1751,7 +1865,7 @@ void loop()
             return;
         }
         envQualityScreen.tick();
-        envQualityScreen.handleIR(code);
+        envQualityScreen.handleIR(IRCodes::legacyCodeForKey(key));
         delay(40);
         return;
     }
@@ -1762,16 +1876,16 @@ void loop()
         bool exitScreen = false;
         for (int i = 0; i < 4; ++i)
         {
-            uint32_t code = getIRCodeNonBlocking();
-            if (code == 0)
+            IRCodes::WxKey key = getIRCodeNonBlocking();
+            if (key == IRCodes::WxKey::Unknown)
                 break;
-            if (code == IR_CANCEL)
+            if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
             {
                 exitScreen = true;
                 break;
             }
             // Apply input before ticking so pause/step actions take effect immediately
-            noaaAlertScreen.handleIR(code);
+            noaaAlertScreen.handleIR(IRCodes::legacyCodeForKey(key));
         }
         if (exitScreen)
         {
@@ -1788,9 +1902,7 @@ void loop()
     if (currentScreen == SCREEN_WIND_DIR)
     {
         static unsigned long lastDataUpdate = 0;
-        static unsigned long lastFrameUpdate = 0;
         const unsigned long dataUpdateInterval = 3000; // 3 seconds
-        const unsigned long frameUpdateInterval = 40;  // 20 FPS
         unsigned long now = millis();
 
         // Update data every 3 seconds or when new rapid wind data arrives
@@ -1801,26 +1913,27 @@ void loop()
             lastDataUpdate = now;
         }
         // Animate and redraw frame every ~50 ms
-        if (now - lastFrameUpdate > frameUpdateInterval)
+        if (renderDue(RenderSlot::WindMain, now, kRenderWindMs))
         {
             showWindDirectionScreen(); // Draw frame with animation
-            lastFrameUpdate = now;
+            markRendered(RenderSlot::WindMain, now);
+            noteFrameDraw(now);
         }
         // IR input handling for this screen
-        uint32_t code = getIRCodeDebounced();
-        if (code)
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key != IRCodes::WxKey::Unknown)
         {
-            if (code == IR_LEFT)
+            if (key == IRCodes::WxKey::Left)
             {
                 rotateScreen(-1);
                 return;
             }
-            if (code == IR_RIGHT)
+            if (key == IRCodes::WxKey::Right)
             {
                 rotateScreen(+1);
                 return;
             }
-            if (code == IR_CANCEL)
+            if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
             {
                 showMainMenuModal();
                 return;
@@ -1852,7 +1965,12 @@ void loop()
             serviceScrollRebuild();
 
             // 3) Animate at fixed cadence independent of the 1s clock redraw
-            scrollWeatherTick();
+            if (renderDue(RenderSlot::OwmScroll, now, kRenderMarqueeMs))
+            {
+                scrollWeatherTick();
+                markRendered(RenderSlot::OwmScroll, now);
+                noteFrameDraw(now);
+            }
 
             if (reset_Time_and_Date_Display)
             {
@@ -1862,17 +1980,18 @@ void loop()
                 displayWeatherData();
             }
 
-            static unsigned long prevMillis_ShowTimeDate = 0;
-            if (now - prevMillis_ShowTimeDate >= 1000)
+            if (renderDue(RenderSlot::OwmMain, now, kRenderOwmMainMs))
             {
                 reset_Time_and_Date_Display = true;
-                prevMillis_ShowTimeDate = now;
                 if (needsClear)
                 {
                     dma_display->fillScreen(0);
+                    noteFullClear();
                     needsClear = false;
                 }
                 drawOWMScreen(); // <- no createScrollingText() call inside this anymore
+                markRendered(RenderSlot::OwmMain, now);
+                noteFrameDraw(now);
             }
         }
     }

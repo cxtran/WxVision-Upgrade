@@ -207,17 +207,17 @@ const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Setting
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 
-bool handleGlobalIRCode(uint32_t code)
+bool handleGlobalIRKey(IRCodes::WxKey key)
 {
-    if (code == 0)
+    if (key == IRCodes::WxKey::Unknown)
         return false;
 
-    if (code == IR_SCREEN)
+    if (key == IRCodes::WxKey::Screen)
     {
         toggleScreenPower();
         return true;
     }
-    if (code == IR_THEME)
+    if (key == IRCodes::WxKey::Theme)
     {
         if (autoThemeSchedule)
         {
@@ -232,85 +232,94 @@ bool handleGlobalIRCode(uint32_t code)
     return false;
 }
 
-void handleIR(uint32_t code)
+bool handleGlobalIRCode(uint32_t code)
 {
-    Serial.printf("IR Code: 0x%X\n", code);
+    return handleGlobalIRKey(IRCodes::mapLegacyCodeToKey(code));
+}
 
-    if (handleGlobalIRCode(code))
+void handleIRKey(IRCodes::WxKey key)
+{
+    if (key == IRCodes::WxKey::Unknown)
+        return;
+
+    Serial.printf("IR Key: %s\n", IRCodes::keyName(key));
+
+    if (handleGlobalIRKey(key))
     {
         return;
     }
     if (isScreenOff())
         return;
 
+    const uint32_t legacyCode = IRCodes::legacyCodeForKey(key);
     if (inKeyboardMode)
     {
-        handleKeyboardIR(code);
+        handleKeyboardIR(legacyCode);
         return;
     }
     if (sysInfoModal.isActive())
     {
-        sysInfoModal.handleIR(code);
+        sysInfoModal.handleIR(legacyCode);
         return;
     }
     if (wifiInfoModal.isActive())
     {
-        wifiInfoModal.handleIR(code);
+        wifiInfoModal.handleIR(legacyCode);
         return;
     }
     if (dateModal.isActive())
     {
-        dateModal.handleIR(code);
+        dateModal.handleIR(legacyCode);
         return;
     }
     if (unitSettingsModal.isActive())
     {
-        unitSettingsModal.handleIR(code);
+        unitSettingsModal.handleIR(legacyCode);
         return;
     }
     if (mainMenuModal.isActive())
     {
-        mainMenuModal.handleIR(code);
+        mainMenuModal.handleIR(legacyCode);
         return;
     }
     if (deviceModal.isActive())
     {
-        deviceModal.handleIR(code);
+        deviceModal.handleIR(legacyCode);
         return;
     }
     if (displayModal.isActive())
     {
-        displayModal.handleIR(code);
+        displayModal.handleIR(legacyCode);
         return;
     }
     if (weatherModal.isActive())
     {
-        weatherModal.handleIR(code);
+        weatherModal.handleIR(legacyCode);
         return;
     }
     if (tempestModal.isActive())
     {
-        tempestModal.handleIR(code);
+        tempestModal.handleIR(legacyCode);
         return;
     }
     if (calibrationModal.isActive())
     {
-        calibrationModal.handleIR(code);
+        calibrationModal.handleIR(legacyCode);
         return;
     }
     if (systemModal.isActive())
     {
-        systemModal.handleIR(code);
+        systemModal.handleIR(legacyCode);
         return;
     }
     if (worldTimeModal.isActive())
     {
-        worldTimeModal.handleIR(code);
+        worldTimeModal.handleIR(legacyCode);
         return;
     }
     if (manageTzModal.isActive())
     {
-        manageTzModal.handleIR(code);
+        manageTzModal.handleIR(legacyCode);
         return;
     }
 
@@ -324,17 +333,17 @@ void handleIR(uint32_t code)
             drawMenu();
             return;
         }
-        if (code == IR_UP)
+        if (key == IRCodes::WxKey::Up)
         {
             handleUp();
             playBuzzerTone(1000, 60);
         }
-        else if (code == IR_DOWN)
+        else if (key == IRCodes::WxKey::Down)
         {
             handleDown();
             playBuzzerTone(1300, 60);
         }
-        else if (code == IR_OK)
+        else if (key == IRCodes::WxKey::Ok)
         {
             if (initialSetupAwaitingWifi && millis() < s_onboardingWifiOkGuardUntilMs)
             {
@@ -407,7 +416,7 @@ void handleIR(uint32_t code)
             playBuzzerTone(2200, 120);
             return;
         }
-        else if (code == IR_CANCEL)
+        else if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
         {
             bool onboardingCancel = initialSetupAwaitingWifi;
             wifiSelecting = false;
@@ -448,17 +457,17 @@ void handleIR(uint32_t code)
     {
         // Always provide audible feedback when not in a menu
         playBuzzerTone(1200, 80);
-        if (code == IR_LEFT)
+        if (key == IRCodes::WxKey::Left)
         {
             handleScreenSwitch(-1);
             return;
         }
-        if (code == IR_RIGHT)
+        if (key == IRCodes::WxKey::Right)
         {
             handleScreenSwitch(+1);
             return;
         }
-        if (code == IR_CANCEL || code == IR_OK)
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu || key == IRCodes::WxKey::Ok)
         {
             if (millis() - lastMenuToggle < 500)
                 return;
@@ -474,39 +483,45 @@ void handleIR(uint32_t code)
         return;
     }
 
-    switch (code)
+    switch (key)
     {
-    case IR_CANCEL:
+    case IRCodes::WxKey::Cancel:
+    case IRCodes::WxKey::Menu:
         exitToHomeScreen();
         lastMenuToggle = millis();
         break;
-    case IR_UP:
+    case IRCodes::WxKey::Up:
         handleUp();
         playBuzzerTone(1500, 100);
         break;
-    case IR_DOWN:
+    case IRCodes::WxKey::Down:
         handleDown();
         playBuzzerTone(1200, 100);
         break;
-    case IR_RIGHT:
+    case IRCodes::WxKey::Right:
         handleRight();
         playBuzzerTone(1800, 100);
         break;
-    case IR_LEFT:
+    case IRCodes::WxKey::Left:
         handleLeft();
         playBuzzerTone(900, 100);
         break;
-    case IR_OK:
+    case IRCodes::WxKey::Ok:
         handleSelect();
         playBuzzerTone(2200, 100);
         break;
     default:
-        Serial.printf("Unknown code: 0x%X\n", code);
+        Serial.printf("Unknown key: %s\n", IRCodes::keyName(key));
         playBuzzerTone(500, 100);
         delay(100);
         playBuzzerTone(500, 100);
         break;
     }
+}
+
+void handleIR(uint32_t code)
+{
+    handleIRKey(IRCodes::mapLegacyCodeToKey(code));
 }
 
 // --- Modal-based Menu Functions --- //
@@ -1353,8 +1368,8 @@ static void showSplashUntilButton()
     getIRCodeNonBlocking(); // clear any pending input
     while (true)
     {
-        uint32_t code = getIRCodeNonBlocking();
-        if (code != 0)
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key != IRCodes::WxKey::Unknown)
         {
             break;
         }
@@ -1484,23 +1499,24 @@ bool isWeatherScenePreviewActive()
     return weatherScenePreviewActive;
 }
 
-void handleWeatherScenePreviewIR(uint32_t code)
+void handleWeatherScenePreviewIR(IRCodes::WxKey key)
 {
     if (!weatherScenePreviewActive)
         return;
 
-    switch (code)
+    switch (key)
     {
-    case IR_LEFT:
-    case IR_UP:
+    case IRCodes::WxKey::Left:
+    case IRCodes::WxKey::Up:
         cycleWeatherScenePreview(-1);
         break;
-    case IR_RIGHT:
-    case IR_DOWN:
+    case IRCodes::WxKey::Right:
+    case IRCodes::WxKey::Down:
         cycleWeatherScenePreview(+1);
         break;
-    case IR_OK:
-    case IR_CANCEL: // IR_MENU aliases IR_CANCEL
+    case IRCodes::WxKey::Ok:
+    case IRCodes::WxKey::Cancel:
+    case IRCodes::WxKey::Menu:
         weatherScenePreviewActive = false;
         showScenePreviewModal();
         break;
@@ -1526,20 +1542,22 @@ void showSystemModal()
         "Show System Info",
         "WiFi Signal Test",
         "Preview Screens",
+        "Learn Remote",
+        "Clear Learned Remote",
         "Quick Restore",
         "Factory Reset",
         "Reboot"};
 
     InfoFieldType types[] = {
         InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton,
-        InfoButton, InfoButton, InfoButton, InfoButton};
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     int *numberRefs[] = {&buzzerVolume};
     int *chooserRefs[] = {&buzzerToneSet};
     static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse", "Warm", "Melody"};
     const char *const *chooserOpts[] = {toneOpts};
     int chooserCounts[] = {7};
 
-    systemModal.setLines(labels, types, 10);
+    systemModal.setLines(labels, types, 12);
     systemModal.setValueRefs(numberRefs, 1, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
     systemModal.setShowNumberArrows(true);
     systemModal.setShowChooserArrows(true);
@@ -1592,13 +1610,21 @@ void showSystemModal()
                 return;
             case 7:
                 systemModal.hide();
+                startUniversalRemoteLearning();
+                return;
+            case 8:
+                systemModal.hide();
+                clearUniversalRemoteLearning();
+                return;
+            case 9:
+                systemModal.hide();
                 quickRestore();
                 break;
-            case 8:
+            case 10:
                 systemModal.hide();
                 factoryReset();
                 break;
-            case 9:
+            case 11:
                 systemModal.hide();
                 ESP.restart();
                 return;

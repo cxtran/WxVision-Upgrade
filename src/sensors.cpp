@@ -1,5 +1,4 @@
 #include <Arduino.h>
-#include <DHT.h>
 #include <IRrecv.h>
 #include <pins.h>
 #include "sensors.h"
@@ -11,6 +10,7 @@
 #include "units.h"
 #include "system.h"
 #include "buzzer.h"
+#include "ir_learn.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 
@@ -58,12 +58,12 @@ static float computeCalibratedLux(float rawLux)
 namespace
 {
   constexpr uint8_t kVirtualIrQueueSize = 8;
-  volatile uint32_t s_virtualIrQueue[kVirtualIrQueueSize] = {};
+  volatile IRCodes::WxKey s_virtualIrQueue[kVirtualIrQueueSize] = {};
   volatile uint8_t s_virtualIrHead = 0;
   volatile uint8_t s_virtualIrTail = 0;
   portMUX_TYPE s_virtualIrMux = portMUX_INITIALIZER_UNLOCKED;
 
-  bool popVirtualIR(uint32_t &out)
+  bool popVirtualIR(IRCodes::WxKey &out)
   {
     bool has = false;
     portENTER_CRITICAL(&s_virtualIrMux);
@@ -81,32 +81,46 @@ namespace
 void setupIRSensor()
 {
   irrecv.enableIRIn(); // Start the receiver
-  Serial.println("VS1838B IR receiver test. Press buttons on your remote...");
+  Serial.println(F("VS1838B IR receiver test. Press buttons on your remote..."));
 }
 
 // Forward declaration for use in readIRSensor
-static inline bool isAlarmCancelCode(uint32_t code);
+static inline bool isAlarmCancelCode(IRCodes::WxKey key);
+static inline bool isNavKey(IRCodes::WxKey key);
 
 void readIRSensor()
 {
   if (irrecv.decode(&results))
   {
-    if (isAlarmCurrentlyActive() && isAlarmCancelCode(results.value))
+    if (wxv::irlearn::isActive())
+    {
+      wxv::irlearn::onDecodedFrame(results);
+      irrecv.resume();
+      return;
+    }
+    IRCodes::WxKey key = IRCodes::WxKey::Unknown;
+    if (!IRCodes::matchAnyProfile(results, key))
+    {
+      irrecv.resume();
+      return;
+    }
+    if (isAlarmCurrentlyActive() && isAlarmCancelCode(key))
     {
         cancelActiveAlarm();
         irrecv.resume();
         return; // Swallow input while alarm is sounding
     }
-    handleIR(results.value);
+    handleIRKey(key);
     irrecv.resume(); // Receive the next value
-    PRINT_IR_CODE(results.value);
+    IRCodes::printCode(results.decode_type, results.value, results.bits, results.repeat);
+    Serial.printf("IR Key: %s (Profile: %s)\n", IRCodes::keyName(key), IRCodes::activeProfileName());
   }
 }
 
 void setupBrightnessSensor()
 {
   analogReadResolution(12); // ESP32 default is 12 bits (0-4095)
-  Serial.println("GL5528 Brightness Sensor Test");
+  Serial.println(F("GL5528 Brightness Sensor Test"));
 }
 
 float readBrightnessSensor()
@@ -118,14 +132,14 @@ float readBrightnessSensor()
   float lux = 500 * pow(ldr_kOhm, -1.4);
   s_lastRawLux = lux;
 
-  Serial.print("ADC: ");
+  Serial.print(F("ADC: "));
   Serial.print(adcValue);
-  Serial.print("  V: ");
+  Serial.print(F("  V: "));
   Serial.print(voltage, 2);
-  Serial.print("  R_LDR: ");
+  Serial.print(F("  R_LDR: "));
   Serial.print(ldrResistance, 0);
-  Serial.print(" Ω");
-  Serial.print("  Lux: ");
+  Serial.print(F(" Ω"));
+  Serial.print(F("  Lux: "));
   Serial.println(lux, 1);
 
   return lux;
@@ -181,63 +195,106 @@ float getLastRawLux()
   return s_lastRawLux;
 }
 
-static uint32_t s_lastIrCode = 0;
+static IRCodes::WxKey s_lastIrKey = IRCodes::WxKey::Unknown;
 static unsigned long s_lastIrTimestamp = 0;
 static bool s_lastIrWasVirtual = false;
-static uint32_t s_lastPhysicalDeliveredCode = 0;
+static IRCodes::WxKey s_lastPhysicalDeliveredKey = IRCodes::WxKey::Unknown;
 static unsigned long s_lastPhysicalDeliveredAt = 0;
 static const unsigned long IR_PHYSICAL_REPEAT_BLOCK_MS = 180UL;
 // While alarm is firing, any IR key cancels/snoozes it.
-static inline bool isAlarmCancelCode(uint32_t /*code*/) { return true; }
+static inline bool isAlarmCancelCode(IRCodes::WxKey /*key*/) { return true; }
 
-uint32_t getIRCodeNonBlocking()
+static inline bool isNavKey(IRCodes::WxKey key)
 {
-  uint32_t queuedCode = 0;
-  if (popVirtualIR(queuedCode))
+  return key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down ||
+         key == IRCodes::WxKey::Left || key == IRCodes::WxKey::Right ||
+         key == IRCodes::WxKey::Ok || key == IRCodes::WxKey::Cancel;
+}
+
+bool startUniversalRemoteLearning()
+{
+  return wxv::irlearn::start();
+}
+
+bool clearUniversalRemoteLearning()
+{
+  return wxv::irlearn::clearLearnedRemote();
+}
+
+IRCodes::WxKey getIRCodeNonBlocking()
+{
+  IRCodes::WxKey queuedKey = IRCodes::WxKey::Unknown;
+  if (popVirtualIR(queuedKey))
   {
-    PRINT_IR_CODE(queuedCode);
-    if (!menuActive && (queuedCode == IR_UP || queuedCode == IR_DOWN || queuedCode == IR_LEFT || queuedCode == IR_RIGHT || queuedCode == IR_OK || queuedCode == IR_CANCEL))
+    if (wxv::irlearn::isActive())
+    {
+      if (queuedKey == IRCodes::WxKey::Cancel || queuedKey == IRCodes::WxKey::Menu)
+      {
+        wxv::irlearn::cancel();
+      }
+      return IRCodes::WxKey::Unknown;
+    }
+    Serial.printf("Virtual IR Key: %s\n", IRCodes::keyName(queuedKey));
+    if (!menuActive && isNavKey(queuedKey))
     {
       playBuzzerTone(1200, 80);
     }
-    if (isAlarmCurrentlyActive() && isAlarmCancelCode(queuedCode))
+    if (isAlarmCurrentlyActive() && isAlarmCancelCode(queuedKey))
     {
         cancelActiveAlarm();
-        s_lastIrCode = 0;
-        return 0; // Swallow input while alarm is snoozed
+        s_lastIrKey = IRCodes::WxKey::Unknown;
+        return IRCodes::WxKey::Unknown; // Swallow input while alarm is snoozed
     }
-    if (handleGlobalIRCode(queuedCode))
-      return 0;
-    s_lastIrCode = queuedCode;
+    if (handleGlobalIRKey(queuedKey))
+      return IRCodes::WxKey::Unknown;
+    s_lastIrKey = queuedKey;
     s_lastIrTimestamp = millis();
     s_lastIrWasVirtual = true;
-    return queuedCode;
+    return queuedKey;
   }
 
   static decode_results results;
   if (irrecv.decode(&results))
   {
-    uint32_t code = results.value;
-    const bool isRepeatFrame = results.repeat;
-    if (results.repeat)
+    if (isAlarmCurrentlyActive())
     {
-      code = s_lastIrCode;
+      cancelActiveAlarm();
+      irrecv.resume();
+      return IRCodes::WxKey::Unknown;
+    }
+
+    if (wxv::irlearn::isActive())
+    {
+      wxv::irlearn::onDecodedFrame(results);
+      irrecv.resume();
+      return IRCodes::WxKey::Unknown;
+    }
+
+    IRCodes::WxKey key = IRCodes::WxKey::Unknown;
+    const bool isRepeatFrame = results.repeat;
+    if (isRepeatFrame)
+    {
+      key = s_lastIrKey;
     }
     else
     {
-      s_lastIrCode = code;
+      if (IRCodes::matchAnyProfile(results, key))
+      {
+        s_lastIrKey = key;
+      }
     }
     s_lastIrTimestamp = millis();
     s_lastIrWasVirtual = false;
     irrecv.resume();
-    if (code != 0)
+
+    if (key != IRCodes::WxKey::Unknown)
     {
       unsigned long now = millis();
       bool blockRepeat = false;
 
       // Global physical-IR repeat filter:
       // suppress short-interval duplicate frames (including protocol repeat frames).
-      if (code == s_lastPhysicalDeliveredCode &&
+      if (key == s_lastPhysicalDeliveredKey &&
           (now - s_lastPhysicalDeliveredAt) < IR_PHYSICAL_REPEAT_BLOCK_MS)
       {
         blockRepeat = true;
@@ -250,75 +307,76 @@ uint32_t getIRCodeNonBlocking()
 
       if (blockRepeat)
       {
-        return 0;
+        return IRCodes::WxKey::Unknown;
       }
 
-      s_lastPhysicalDeliveredCode = code;
+      s_lastPhysicalDeliveredKey = key;
       s_lastPhysicalDeliveredAt = now;
-      PRINT_IR_CODE(code);
-      if (!menuActive && (code == IR_UP || code == IR_DOWN || code == IR_LEFT || code == IR_RIGHT || code == IR_OK || code == IR_CANCEL))
+      IRCodes::printCode(results.decode_type, results.value, results.bits, results.repeat);
+      Serial.printf("IR Key: %s (Profile: %s)\n", IRCodes::keyName(key), IRCodes::activeProfileName());
+      if (!menuActive && isNavKey(key))
       {
           playBuzzerTone(1200, 80);
       }
-      if (isAlarmCurrentlyActive() && isAlarmCancelCode(code))
+      if (isAlarmCurrentlyActive() && isAlarmCancelCode(key))
       {
           cancelActiveAlarm();
-          s_lastIrCode = 0;
-          return 0; // Consume the input; don't perform any action beyond snooze
+          s_lastIrKey = IRCodes::WxKey::Unknown;
+          return IRCodes::WxKey::Unknown; // Consume the input; don't perform any action beyond snooze
       }
-      if (handleGlobalIRCode(code))
-        return 0;
+      if (handleGlobalIRKey(key))
+        return IRCodes::WxKey::Unknown;
     }
-    return code;
+    return key;
   }
 
   // Clear last code if we've been idle for a while to avoid stale repeats.
-  if (s_lastIrCode != 0 && millis() - s_lastIrTimestamp > 500)
+  if (s_lastIrKey != IRCodes::WxKey::Unknown && millis() - s_lastIrTimestamp > 500)
   {
-    s_lastIrCode = 0;
-    s_lastPhysicalDeliveredCode = 0;
+    s_lastIrKey = IRCodes::WxKey::Unknown;
+    s_lastPhysicalDeliveredKey = IRCodes::WxKey::Unknown;
   }
 
-  return 0;
+  return IRCodes::WxKey::Unknown;
 }
 
-uint32_t getIRCodeDebounced(uint16_t debounceMs)
+IRCodes::WxKey getIRCodeDebounced(uint16_t debounceMs)
 {
-  static uint32_t lastCode = 0;
+  static IRCodes::WxKey lastKey = IRCodes::WxKey::Unknown;
   static unsigned long lastTime = 0;
 
-  uint32_t code = getIRCodeNonBlocking();
-  if (code == 0)
+  IRCodes::WxKey key = getIRCodeNonBlocking();
+  if (key == IRCodes::WxKey::Unknown)
   {
-    return 0;
+    return IRCodes::WxKey::Unknown;
   }
 
   // Virtual IR is injected by WebUI/buttons and should be handled immediately.
   if (s_lastIrWasVirtual)
   {
-    return code;
+    return key;
   }
 
   unsigned long now = millis();
-  if (code == lastCode && (now - lastTime) < debounceMs)
+  if (key == lastKey && (now - lastTime) < debounceMs)
   {
     // Ignore rapid repeats of the same key for navigation-style input.
-    return 0;
+    return IRCodes::WxKey::Unknown;
   }
 
-  lastCode = code;
+  lastKey = key;
   lastTime = now;
-  return code;
+  return key;
 }
 
-bool enqueueVirtualIRCode(uint32_t code)
+bool enqueueVirtualIRKey(IRCodes::WxKey key)
 {
   bool ok = false;
   portENTER_CRITICAL(&s_virtualIrMux);
   uint8_t nextTail = (s_virtualIrTail + 1) % kVirtualIrQueueSize;
   if (nextTail != s_virtualIrHead)
   {
-    s_virtualIrQueue[s_virtualIrTail] = code;
+    s_virtualIrQueue[s_virtualIrTail] = key;
     s_virtualIrTail = nextTail;
     ok = true;
   }
@@ -326,37 +384,53 @@ bool enqueueVirtualIRCode(uint32_t code)
   return ok;
 }
 
+IRCodes::WxKey mapLegacyCodeToKey(uint32_t legacy)
+{
+  return IRCodes::mapLegacyCodeToKey(legacy);
+}
+
+bool enqueueVirtualIRCode(uint32_t code)
+{
+  IRCodes::WxKey key = mapLegacyCodeToKey(code);
+  if (key == IRCodes::WxKey::Unknown)
+  {
+    return false;
+  }
+  return enqueueVirtualIRKey(key);
+}
+
 void setupSensors()
 {
   Wire.begin();
+  IRCodes::loadLearnedProfile();
 
   // --- SCD40 ---
   scd4x.begin(Wire, 0x62);
   scd4x.startPeriodicMeasurement();
-  Serial.println("SCD40 initialized");
+  Serial.println(F("SCD40 initialized"));
 
   // --- AHT20 ---
   if (aht20.begin())
   {
-    Serial.println("AHT20 found");
+    Serial.println(F("AHT20 found"));
   }
   else
   {
-    Serial.println("Could not find AHT20!");
+    Serial.println(F("Could not find AHT20!"));
   }
 
   // --- BMP280 (try both addresses) ---
   if (bmp280.begin(0x76))
   {
-    Serial.println("BMP280 found at 0x76");
+    Serial.println(F("BMP280 found at 0x76"));
   }
   else if (bmp280.begin(0x77))
   {
-    Serial.println("BMP280 found at 0x77");
+    Serial.println(F("BMP280 found at 0x77"));
   }
   else
   {
-    Serial.println("Could not find BMP280!");
+    Serial.println(F("Could not find BMP280!"));
   }
 }
 
@@ -370,7 +444,7 @@ void readSCD40()
   }
   else
   {
-    Serial.println("SCD40 data not ready");
+    Serial.println(F("SCD40 data not ready"));
   }
 }
 

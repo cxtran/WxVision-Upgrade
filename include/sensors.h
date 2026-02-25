@@ -16,10 +16,6 @@ extern float bmp280_pressure;
 extern bool newAirQualityData;
 extern bool newAHT20_BMP280Data;
 
-void setupDHTSensor();
-
-void readDHTSensor();
-
 void setupIRSensor();
 
 void readIRSensor();
@@ -35,12 +31,16 @@ float getLastRawLux();
 
 void setDisplayBrightnessFromLux(float lux);
 
-uint32_t getIRCodeNonBlocking();
+IRCodes::WxKey getIRCodeNonBlocking();
 // Debounced IR read: suppresses rapid repeats of the same code.
 // Used for general navigation so that only value adjustments (which call
 // getIRCodeNonBlocking directly) remain highly responsive.
-uint32_t getIRCodeDebounced(uint16_t debounceMs = 200);
+IRCodes::WxKey getIRCodeDebounced(uint16_t debounceMs = 200);
+bool enqueueVirtualIRKey(IRCodes::WxKey key);
 bool enqueueVirtualIRCode(uint32_t code);
+IRCodes::WxKey mapLegacyCodeToKey(uint32_t legacy);
+bool startUniversalRemoteLearning();
+bool clearUniversalRemoteLearning();
 
 
 void setupSensors();

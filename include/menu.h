@@ -6,7 +6,9 @@
 #include "settings.h"
 
 // --- Menu Core Functions ---
+void handleIRKey(IRCodes::WxKey key);
 void handleIR(uint32_t code);
+bool handleGlobalIRKey(IRCodes::WxKey key);
 bool handleGlobalIRCode(uint32_t code);
 void connectToWiFi();
 void drawWiFiMenu();
@@ -38,7 +40,7 @@ void showWorldTimeModal();
 void showInitialSetupPrompt();
 void showWiFiSettingsModal();
 bool isWeatherScenePreviewActive();
-void handleWeatherScenePreviewIR(uint32_t code);
+void handleWeatherScenePreviewIR(IRCodes::WxKey key);
 
 int scanWiFiNetworks();
 void handleScreenSwitch(int dir);
