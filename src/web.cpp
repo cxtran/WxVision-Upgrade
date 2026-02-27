@@ -156,6 +156,8 @@ static const char *screenModeLabel(ScreenMode mode)
   {
   case SCREEN_CLOCK:
     return "Clock";
+  case SCREEN_WORLD_CLOCK:
+    return "World Clock";
   case SCREEN_OWM:
     return "Forecast (OWM)";
   case SCREEN_UDP_DATA:

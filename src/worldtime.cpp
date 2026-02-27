@@ -19,6 +19,8 @@ static constexpr uint16_t kWorldWeatherPort = 80;
 static constexpr unsigned long kWorldWeatherRefreshMs = 15UL * 60UL * 1000UL;
 static constexpr unsigned long kWorldWeatherRetryMs = 60UL * 1000UL;
 static constexpr unsigned long kWorldWeatherTimeoutMs = 6500UL;
+static constexpr unsigned long kWorldWeatherConnectTimeoutMs = 1200UL;
+static constexpr unsigned long kWorldWeatherStartGapMs = 5000UL;
 static constexpr size_t kWorldWeatherMaxPayload = 2300;
 
 enum class WorldWeatherFetchState : uint8_t
@@ -41,6 +43,7 @@ static std::vector<WorldWeather> s_worldWeatherByTz;
 static std::vector<unsigned long> s_worldWeatherRetryAfter;
 static WorldWeatherRequest s_worldWeatherReq;
 static int s_worldWeatherRoundRobin = 0;
+static unsigned long s_worldWeatherNextStartMs = 0;
 
 static void ensureWorldWeatherSlots()
 {
@@ -211,9 +214,10 @@ static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
     const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(tzIndex));
     s_worldWeatherReq.client.stop();
     s_worldWeatherReq.client.setTimeout(20);
-    if (!s_worldWeatherReq.client.connect(kWorldWeatherHost, kWorldWeatherPort))
+    if (!s_worldWeatherReq.client.connect(kWorldWeatherHost, kWorldWeatherPort, kWorldWeatherConnectTimeoutMs))
     {
         s_worldWeatherRetryAfter[static_cast<size_t>(tzIndex)] = nowMs + kWorldWeatherRetryMs;
+        s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
         return false;
     }
 
@@ -236,6 +240,8 @@ static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
     s_worldWeatherReq.startedAt = nowMs;
     s_worldWeatherReq.lastRxAt = nowMs;
     s_worldWeatherReq.response = "";
+    s_worldWeatherReq.response.reserve(kWorldWeatherMaxPayload + 16);
+    s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
     return true;
 }
 
@@ -250,6 +256,7 @@ static void failWorldWeatherRequest(unsigned long nowMs)
     s_worldWeatherReq.state = WorldWeatherFetchState::Idle;
     s_worldWeatherReq.tzIndex = -1;
     s_worldWeatherReq.response = "";
+    s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
 }
 
 static bool parseOpenMeteoPayload(const String &raw, String &outCondition, float &outTemp)
@@ -313,6 +320,7 @@ static void completeWorldWeatherRequest(unsigned long nowMs)
     s_worldWeatherReq.state = WorldWeatherFetchState::Idle;
     s_worldWeatherReq.tzIndex = -1;
     s_worldWeatherReq.response = "";
+    s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
 }
 
 static void sortSelectionsByTimezoneIndex()
@@ -579,7 +587,32 @@ bool worldTimeGetCurrentDateTime(DateTime &outLocal)
     return true;
 }
 
-void worldTimeWeatherTick()
+String worldTimeSelectionCityLabel(size_t selectionIndex)
+{
+    int tzIndex = worldTimeSelectionAt(selectionIndex);
+    if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+        return "";
+    return String(timezoneInfoAt(static_cast<size_t>(tzIndex)).city);
+}
+
+bool worldTimeGetSelectionDateTime(size_t selectionIndex, DateTime &outLocal)
+{
+    int tzIndex = worldTimeSelectionAt(selectionIndex);
+    if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+        return false;
+
+    DateTime baseLocal;
+    if (!getLocalDateTime(baseLocal))
+        return false;
+
+    int baseOffset = timezoneOffsetForLocal(baseLocal);
+    DateTime referenceUtc = localToUtc(baseLocal, baseOffset);
+    int worldOffset = timezoneOffsetForUtcAtIndex(tzIndex, referenceUtc);
+    outLocal = utcToLocal(referenceUtc, worldOffset);
+    return true;
+}
+
+void worldTimeWeatherTick(bool allowStart)
 {
     ensureWorldWeatherSlots();
 
@@ -595,6 +628,9 @@ void worldTimeWeatherTick()
 
     if (s_worldWeatherReq.state == WorldWeatherFetchState::Idle)
     {
+        if (!allowStart || nowMs < s_worldWeatherNextStartMs)
+            return;
+
         int tzIndex = pickNextTimezoneToRefresh(nowMs);
         if (tzIndex >= 0)
         {
@@ -648,6 +684,20 @@ bool worldTimeCurrentWeather(WorldWeather &out)
 {
     ensureWorldWeatherSlots();
     int tzIndex = currentWorldTzIndex();
+    if (tzIndex < 0 || tzIndex >= static_cast<int>(s_worldWeatherByTz.size()))
+        return false;
+
+    const WorldWeather &slot = s_worldWeatherByTz[static_cast<size_t>(tzIndex)];
+    if (!slot.valid)
+        return false;
+    out = slot;
+    return true;
+}
+
+bool worldTimeGetSelectionWeather(size_t selectionIndex, WorldWeather &out)
+{
+    ensureWorldWeatherSlots();
+    int tzIndex = worldTimeSelectionAt(selectionIndex);
     if (tzIndex < 0 || tzIndex >= static_cast<int>(s_worldWeatherByTz.size()))
         return false;
 

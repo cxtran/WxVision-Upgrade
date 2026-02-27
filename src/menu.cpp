@@ -1364,18 +1364,17 @@ void showCalibrationModal()
 
 static void showSplashUntilButton()
 {
-    splashBegin(0);
+    // Do not reuse startup splash visuals at runtime.
+    // Keep this as a short non-blocking-style pause preview instead.
     getIRCodeNonBlocking(); // clear any pending input
-    while (true)
+    const unsigned long startMs = millis();
+    while ((millis() - startMs) < 1000UL)
     {
         IRCodes::WxKey key = getIRCodeNonBlocking();
         if (key != IRCodes::WxKey::Unknown)
-        {
             break;
-        }
         delay(20);
     }
-    splashEnd();
     delay(120);
 }
 

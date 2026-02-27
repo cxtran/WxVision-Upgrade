@@ -396,6 +396,9 @@ static String formatScheduleTime(int minutes)
 
 void InfoModal::draw()
 {
+    if (!active)
+        return;
+
     currentPalette = makePalette();
     const ModalPalette &palette = currentPalette;
 
@@ -918,7 +921,8 @@ void InfoModal::handleIR(uint32_t code)
                 }
                 beep(2200);
             }
-            draw();
+            if (active)
+                draw();
             return;
         }
 

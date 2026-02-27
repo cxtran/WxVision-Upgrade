@@ -55,7 +55,9 @@ void loadLog() {
     if (startOffset > 0) f.seek(startOffset, SeekSet);
 
     s_log.clear();
-    s_log.reserve(kRamMaxSamples);
+    if (s_log.capacity() < kRamMaxSamples) {
+        s_log.reserve(kRamMaxSamples);
+    }
     if (!legacyV1) {
         SensorSample s;
         for (size_t i = startIdx; i < count && f.readBytes(reinterpret_cast<char*>(&s), sizeof(SensorSample)) == sizeof(SensorSample); ++i) {
@@ -84,14 +86,23 @@ void saveLog() {
 } // namespace
 
 void initSensorLog() {
+    // Reserve once up front while heap is least fragmented.
+    if (s_log.capacity() < kRamMaxSamples) {
+        s_log.reserve(kRamMaxSamples);
+    }
     loadLog();
 }
 
 void appendSensorSample(const SensorSample &s) {
-    s_log.push_back(s);
-    // Keep RAM bounded while persisting full history to flash
-    if (s_log.size() > kRamMaxSamples) {
-        s_log.erase(s_log.begin());
+    if (s_log.size() < kRamMaxSamples) {
+        // With upfront reserve, this path should not reallocate at runtime.
+        s_log.push_back(s);
+    } else if (!s_log.empty()) {
+        // Avoid vector growth/reallocation by overwriting the oldest entry.
+        for (size_t i = 1; i < s_log.size(); ++i) {
+            s_log[i - 1] = s_log[i];
+        }
+        s_log[s_log.size() - 1] = s;
     }
     saveLog();
 }

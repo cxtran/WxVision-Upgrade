@@ -3988,6 +3988,8 @@ static void drawWeatherFlowIcon()
     dma_display->drawBitmap(0, 0, icon, 16, 16, color);
 }
 static bool splashActive = false;
+static bool splashShownThisBoot = false;
+static bool splashLockedOut = false;
 static uint16_t splashAccent = 0;
 static uint16_t splashShadow = 0;
 static uint16_t splashHighlight = 0;
@@ -4167,6 +4169,10 @@ void splashBegin(uint16_t minimumMs)
 {
     if (!dma_display)
         return;
+    if (splashLockedOut)
+        return;
+    if (splashShownThisBoot)
+        return;
 
     splashActive = true;
     splashMinimumMs = minimumMs;
@@ -4203,7 +4209,7 @@ void splashBegin(uint16_t minimumMs)
 
 void splashUpdate(const char *status, uint8_t step, uint8_t total)
 {
-    if (!dma_display || !splashActive)
+    if (!dma_display || !splashActive || splashLockedOut)
         return;
 
     (void)status;
@@ -4214,8 +4220,20 @@ void splashUpdate(const char *status, uint8_t step, uint8_t total)
 
 void splashEnd()
 {
-    if (!dma_display || !splashActive)
+    if (!dma_display)
         return;
+    if (splashLockedOut)
+    {
+        splashActive = false;
+        splashMinimumMs = 0;
+        splashShownThisBoot = true;
+        return;
+    }
+    if (!splashActive)
+    {
+        splashShownThisBoot = true;
+        return;
+    }
 
     while ((uint32_t)(millis() - splashStartMs) < splashMinimumMs)
     {
@@ -4234,6 +4252,7 @@ void splashEnd()
     dma_display->fillScreen(0);
     splashTextIntensity = 1.0f;
     splashActive = false;
+    splashShownThisBoot = true;
     splashMinimumMs = 0;
     dma_display->setTextColor(myWHITE);
     dma_display->setTextSize(1);
@@ -4242,6 +4261,17 @@ void splashEnd()
 bool isSplashActive()
 {
     return splashActive;
+}
+
+void splashLockout(bool locked)
+{
+    splashLockedOut = locked;
+    if (locked)
+    {
+        splashActive = false;
+        splashMinimumMs = 0;
+        splashShownThisBoot = true;
+    }
 }
 
 int getTextWidth(const char *text)
@@ -5292,6 +5322,154 @@ void tickClockWorldTimeMarquee()
 }
 // --- END WORLD TIME FEATURE ---
 
+void drawClockTimeLine(const DateTime &now, bool alarmActive)
+{
+    int hour = now.hour();
+    int minute = now.minute();
+
+    // 12h/24h handling
+    bool isPM = false;
+    if (!units.clock24h)
+    {
+        if (hour == 0)
+            hour = 12;
+        else if (hour >= 12)
+        {
+            if (hour > 12)
+                hour -= 12;
+            isPM = true;
+        }
+    }
+
+    char timeStr[6]; // "HH:MM"
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+    bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
+
+    // ---- TIME (big Verdana Bold)
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setTextSize(1);
+    uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                      : dma_display->color565(255, 255, 80);
+    if (alarmActive)
+        timeColor = dma_display->color565(255, 80, 80);
+    dma_display->setTextColor(timeColor);
+
+    int timeW = getTextWidth(timeStr);
+    int16_t x1, y1;
+    uint16_t w, h;
+    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+    int timeH = h;
+
+    int ampmW = 0;
+    if (!units.clock24h)
+        ampmW = getTextWidth(isPM ? "PM" : "AM");
+    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
+    int boxX = (64 - totalW) / 2;
+
+    // Shift slightly left when 24-hour mode (to balance space)
+    if (units.clock24h)
+        boxX -= 3;
+
+    if (boxX < 0)
+        boxX = 0;
+
+    int boxY = (32 - timeH) / 2;
+
+    if (showTimeDigits)
+    {
+        dma_display->setCursor(boxX, boxY + timeH - 1);
+        dma_display->print(timeStr);
+
+        // --- draw AM/PM inline
+        if (!units.clock24h)
+        {
+            String ampmStr = isPM ? "PM" : "AM";
+            dma_display->setFont(&Font5x7Uts);
+            dma_display->setTextSize(1);
+
+            dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+            int digitH = h;
+            dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+            int ampmWidth = w;
+            int ampmH = h;
+            int ampmX = 64 - ampmWidth - 1;
+            int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+            ampmY -= 1;
+
+            uint16_t ampmColor, bgColor;
+            if (theme == 1)
+            {
+                ampmColor = dma_display->color565(100, 100, 140);
+                bgColor = dma_display->color565(20, 20, 40);
+            }
+            else
+            {
+                if (isPM)
+                {
+                    ampmColor = dma_display->color565(255, 170, 60);
+                    bgColor = dma_display->color565(50, 30, 0);
+                }
+                else
+                {
+                    ampmColor = dma_display->color565(100, 200, 255);
+                    bgColor = dma_display->color565(10, 30, 50);
+                }
+            }
+
+            dma_display->setTextColor(ampmColor);
+            dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmWidth + 2, ampmH + 2, bgColor);
+            dma_display->setCursor(ampmX, ampmY);
+            dma_display->print(ampmStr);
+        }
+    }
+}
+
+void drawClockDateLine(const DateTime &now)
+{
+    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+    const char *dayStr = days[now.dayOfTheWeek()];
+    char dateSuffix[10];
+    snprintf(dateSuffix, sizeof(dateSuffix), " %02d/%02d", now.month(), now.day());
+    char dateStr[14];
+    snprintf(dateStr, sizeof(dateStr), "%s%s", dayStr, dateSuffix);
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    uint16_t dateColor = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                      : dma_display->color565(150, 200, 255);
+    uint16_t sundayColor = (theme == 1) ? dma_display->color565(180, 80, 120)
+                                        : dma_display->color565(255, 80, 120);
+    uint16_t saturdayColor = (theme == 1) ? dma_display->color565(80, 140, 200)
+                                          : dma_display->color565(80, 180, 255);
+
+    int16_t x1, y1;
+    uint16_t w, h;
+    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
+    int dateX = (64 - static_cast<int>(w)) / 2;
+    int dateY = 25;
+    dma_display->setCursor(dateX, dateY);
+
+    if (now.dayOfTheWeek() == 0)
+    {
+        dma_display->setTextColor(sundayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else if (now.dayOfTheWeek() == 6)
+    {
+        dma_display->setTextColor(saturdayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else
+    {
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateStr);
+    }
+}
+
 void drawClockScreen()
 {
 
@@ -5324,111 +5502,9 @@ void drawClockScreen()
         }
     }
     // --- END WORLD TIME FEATURE ---
-    int hour = now.hour(), minute = now.minute(), second = now.second();
-
-    // 12h/24h handling
-    bool isPM = false;
-    if (!units.clock24h)
-    {
-        if (hour == 0)
-            hour = 12;
-        else if (hour >= 12)
-        {
-            if (hour > 12)
-                hour -= 12;
-            isPM = true;
-        }
-    }
-
-    char timeStr[6]; // "HH:MM"
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
+    int second = now.second();
     bool alarmActive = isAlarmCurrentlyActive();
-    bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
-
-    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    const char *dayStr = days[now.dayOfTheWeek()];
-    char dateSuffix[10];
-    snprintf(dateSuffix, sizeof(dateSuffix), " %02d/%02d", now.month(), now.day());
-    char dateStr[14];
-    snprintf(dateStr, sizeof(dateStr), "%s%s", dayStr, dateSuffix);
-
-    // ---- TIME (big Verdana Bold)
-    dma_display->setFont(&verdanab8pt7b);
-    dma_display->setTextSize(1);
-    uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                      : dma_display->color565(255, 255, 80);
-    if (alarmActive)
-        timeColor = dma_display->color565(255, 80, 80);
-    dma_display->setTextColor(timeColor);
-
-    int timeW = getTextWidth(timeStr);
-    int16_t x1, y1;
-    uint16_t w, h;
-    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-    int timeH = h;
-
-    int ampmW = 0;
-    if (!units.clock24h)
-        ampmW = getTextWidth(isPM ? "PM" : "AM");
-    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
-    int boxX = (64 - totalW) / 2;
-
-    // Shift slightly left when 24-hour mode (to balance space)
-    if (units.clock24h)
-        boxX -= 3;
-
-    if (boxX < 0)
-        boxX = 0;
-
-    int boxY = (32 - timeH) / 2;
-
-
-    if (showTimeDigits)
-    {
-        dma_display->setCursor(boxX, boxY + timeH - 1);
-        dma_display->print(timeStr);
-
-        // --- draw AM/PM inline
-        if (!units.clock24h)
-        {
-            String ampmStr = isPM ? "PM" : "AM";
-            dma_display->setFont(&Font5x7Uts);
-            dma_display->setTextSize(1);
-
-            int16_t x1, y1;
-            uint16_t w, h;
-            dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-            int digitH = h;
-            dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-            int ampmW = w;
-            int ampmH = h;
-            int ampmX = 64 - ampmW - 1;
-            int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-            ampmY -= 1;
-
-            uint16_t ampmColor, bgColor;
-
-            if (theme == 1) {
-                ampmColor = dma_display->color565(100, 100, 140);
-                bgColor   = dma_display->color565(20, 20, 40);
-            }
-            else {
-                if (isPM) {
-                    ampmColor = dma_display->color565(255, 170, 60);
-                    bgColor   = dma_display->color565(50, 30, 0);
-                } else {
-                    ampmColor = dma_display->color565(100, 200, 255);
-                    bgColor   = dma_display->color565(10, 30, 50);
-                }
-            }
-
-            dma_display->setTextColor(ampmColor);
-            dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmW + 2, ampmH + 2, bgColor);
-
-            dma_display->setCursor(ampmX, ampmY);
-            dma_display->print(ampmStr);
-        }
-    }
+    drawClockTimeLine(now, alarmActive);
     int wifiX = 57;
     int wifiY = 7;
     int alarmX = units.clock24h ? wifiX : 51;
@@ -5461,37 +5537,7 @@ void drawClockScreen()
         drawAlarmIcon(alarmX, alarmY, alarmColor);
     }
     // ---- DATE ----
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    uint16_t dateColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                      : dma_display->color565(150, 200, 255);
-    uint16_t sundayColor = (theme == 1) ? dma_display->color565(180, 80, 120)
-                                        : dma_display->color565(255, 80, 120);
-    uint16_t saturdayColor = (theme == 1) ? dma_display->color565(80, 140, 200)
-                                          : dma_display->color565(80, 180, 255);
-    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
-    int dateX = (64 - (int)w) / 2;
-    int dateY = 25;
-    dma_display->setCursor(dateX, dateY);
-    if (now.dayOfTheWeek() == 0)
-    {
-        dma_display->setTextColor(sundayColor);
-        dma_display->print(dayStr);
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateSuffix);
-    }
-    else if (now.dayOfTheWeek() == 6)
-    {
-        dma_display->setTextColor(saturdayColor);
-        dma_display->print(dayStr);
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateSuffix);
-    }
-    else
-    {
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateStr);
-    }
+    drawClockDateLine(now);
 
     // ---- TEMPERATURES ----
     dma_display->setFont(&Font5x7Uts);
@@ -5499,6 +5545,8 @@ void drawClockScreen()
     uint16_t tempColor = (theme == 1) ? dma_display->color565(60, 60, 120)
                                       : dma_display->color565(200, 200, 255);
     dma_display->setTextColor(tempColor);
+    int16_t x1, y1;
+    uint16_t w, h;
     String outdoorTempStr = formatOutdoorTemperature();
     bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
     String indoorHumidityStr = formatIndoorHumidity();

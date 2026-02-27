@@ -11,6 +11,7 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include "time.h"
+#include <RTClib.h>
 
 // === Panel Config ===
 #define PANEL_RES_X 64
@@ -37,6 +38,7 @@ enum ScreenMode {
     SCREEN_CURRENT,
     SCREEN_HOURLY,
     SCREEN_CLOCK,
+    SCREEN_WORLD_CLOCK,
     SCREEN_LUNAR_VI,
     SCREEN_LUNAR_LUCK,
     SCREEN_NOAA_ALERT,
@@ -84,6 +86,8 @@ void scrollWeatherDetails();
 
 void drawOWMScreen();
 void drawClockScreen(); 
+void drawClockTimeLine(const DateTime &now, bool alarmActive);
+void drawClockDateLine(const DateTime &now);
 void drawClockPulseDot(int second);
 void tickClockWorldTimeMarquee();
 void drawWeatherScreen();
@@ -120,3 +124,4 @@ void splashBegin(uint16_t minimumMs);
 void splashUpdate(const char* status, uint8_t step, uint8_t total);
 void splashEnd();
 bool isSplashActive();
+void splashLockout(bool locked = true);

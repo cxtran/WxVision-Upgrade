@@ -35,6 +35,11 @@ struct WorldWeather
     bool valid;
 };
 
-void worldTimeWeatherTick();
+void worldTimeWeatherTick(bool allowStart = true);
 bool worldTimeCurrentWeather(WorldWeather &out);
 String worldTimeBuildCurrentHeaderText();
+
+// Selection-index helpers for dedicated world clock screen
+String worldTimeSelectionCityLabel(size_t selectionIndex);
+bool worldTimeGetSelectionDateTime(size_t selectionIndex, DateTime &outLocal);
+bool worldTimeGetSelectionWeather(size_t selectionIndex, WorldWeather &out);

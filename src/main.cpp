@@ -40,11 +40,13 @@
 #include "datalogger.h"
 #include "graph.h"
 #include "worldtime.h"
+#include "WorldClockScreen.h"
 #include "ir_learn.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
     SCREEN_CLOCK,
+    SCREEN_WORLD_CLOCK,
     SCREEN_LUNAR_VI,
     SCREEN_LUNAR_LUCK,
     SCREEN_OWM,
@@ -182,6 +184,7 @@ namespace
         ClockMain,
         ClockPulse,
         ClockMarquee,
+        WorldClockMain,
         LunarViMain,
         LunarViMarquee,
         LunarLuckMain,
@@ -260,6 +263,7 @@ namespace
 #endif
 
     constexpr unsigned long kRenderMarqueeMs = 40UL;        // 25 FPS
+    constexpr unsigned long kRenderWorldClockMs = 40UL;     // 25 FPS for long-run stability
     constexpr unsigned long kRenderChartMs = 15000UL;       // preserve existing behavior
     constexpr unsigned long kRenderConditionMs = 5000UL;    // preserve existing behavior
     constexpr unsigned long kRenderWindMs = 40UL;           // 25 FPS
@@ -481,6 +485,9 @@ static void renderScreenContents(ScreenMode mode)
     case SCREEN_CLOCK:
         drawClockScreen();
         break;
+    case SCREEN_WORLD_CLOCK:
+        drawWorldClockScreen();
+        break;
     case SCREEN_LUNAR_VI:
         drawLunarScreenVi();
         break;
@@ -595,6 +602,9 @@ void rotateScreen(int direction)
     {
     case SCREEN_CLOCK:
         drawClockScreen();
+        break;
+    case SCREEN_WORLD_CLOCK:
+        drawWorldClockScreen();
         break;
     case SCREEN_UDP_DATA:
         showUdpScreen();
@@ -813,6 +823,7 @@ static void completeStartupAfterWiFi(bool force)
 
     // All data ready; now fade out the splash before drawing the main UI.
     splashEnd();
+    splashLockout(true);
 
     displayWeatherData();
     displayClock();
@@ -895,6 +906,7 @@ void setup()
     uint16_t splashMs = static_cast<uint16_t>(clampedSplashSec * 1000);
     if (splashMs < 3000)
         splashMs = 3000;
+    splashLockout(false);
     splashBegin(splashMs);
     splashUpdate("Display On", 1, 6);
     Serial.println("Display setup done.");
@@ -946,6 +958,7 @@ void setup()
         Serial.println("[Setup] Initial configuration required.");
         splashUpdate("Startup", 6, 6);
         splashEnd();
+        splashLockout(true);
         showInitialSetupPrompt();
         return;
     }
@@ -967,6 +980,7 @@ void setup()
     if (wifiSelecting)
     {
         splashEnd();
+        splashLockout(true);
         return;
     }
 
@@ -1089,6 +1103,15 @@ void loop()
 
     applyDataSourcePolicies(wifiConnected);
 
+    // Keep startup splash visually exclusive until it has fully ended.
+    // This prevents the clock from rendering first and then being briefly
+    // overdrawn by a late splash fade.
+    if (isSplashActive())
+    {
+        delay(20);
+        return;
+    }
+
     static ScreenMode lastScreen = SCREEN_CLOCK; // or whatever your default is
     static bool needsClear = false;
     if (currentScreen != lastScreen)
@@ -1097,6 +1120,8 @@ void loop()
         lastScreen = currentScreen;
         if (currentScreen == SCREEN_LUNAR_LUCK)
             resetLunarLuckSectionRotation();
+        if (currentScreen == SCREEN_WORLD_CLOCK)
+            resetWorldClockScreenState();
     }
 
     // === [1] --- Always-on background tasks --- ===
@@ -1118,7 +1143,7 @@ void loop()
         fetchTempestData();
     }
     // --- BEGIN WORLD TIME WEATHER ---
-    worldTimeWeatherTick();
+    worldTimeWeatherTick(currentScreen != SCREEN_WORLD_CLOCK);
     // --- END WORLD TIME WEATHER ---
 
     // --- Physical button handling (active low) ---
@@ -1533,20 +1558,12 @@ void loop()
         return;
     }
     // --- BEGIN WORLD TIME FEATURE ---
-    if (currentScreen == SCREEN_CLOCK &&
+    if (currentScreen == SCREEN_WORLD_CLOCK &&
         worldTimeHasSelections() &&
         (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
     {
-        worldTimeCycleView((key == IRCodes::WxKey::Up) ? -1 : 1);
-        drawClockScreen();
-        return;
-    }
-    if (currentScreen == SCREEN_CLOCK &&
-        key == IRCodes::WxKey::Ok &&
-        worldTimeIsWorldView())
-    {
-        worldTimeResetView();
-        drawClockScreen();
+        worldClockHandleStep((key == IRCodes::WxKey::Up) ? -1 : 1);
+        drawWorldClockScreen();
         return;
     }
     // --- END WORLD TIME FEATURE ---
@@ -1679,6 +1696,18 @@ void loop()
             noteFrameDraw(now);
         }
         // --- END WORLD TIME FEATURE ---
+    }
+
+    if (currentScreen == SCREEN_WORLD_CLOCK)
+    {
+        bool forceRefresh = needsClear;
+        if (forceRefresh || renderDue(RenderSlot::WorldClockMain, now, kRenderWorldClockMs))
+        {
+            drawWorldClockScreen();
+            markRendered(RenderSlot::WorldClockMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
+        }
     }
 
     if (currentScreen == SCREEN_LUNAR_VI)
