@@ -7,6 +7,7 @@
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <math.h>
+#include <time.h>
 #include "ScrollLine.h"
 #include "units.h"
 #include "settings.h"
@@ -48,6 +49,9 @@ bool newRapidWindData = false;
 
 // --------- Tempest UDP JSON Parsing ----------
 void updateTempestFromUDP(const char* jsonStr) {
+    if (!isDataSourceWeatherFlow()) {
+        return;
+    }
     JSONVar doc = JSON.parse(jsonStr);
     if (JSON.typeof_(doc) == "undefined") return;
     String type = (const char*)doc["type"];
@@ -320,6 +324,18 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
         f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
         f.monthNum   = (JSON.typeof_(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
+        f.yearNum    = (JSON.typeof_(d["year_num"])   == "number") ? (int)d["year_num"]   : 0;
+        if (f.yearNum <= 0)
+        {
+            uint32_t dayEpoch = (JSON.typeof_(d["time"]) == "number") ? (uint32_t)(double)d["time"] : 0;
+            if (dayEpoch > 0)
+            {
+                time_t tt = static_cast<time_t>(dayEpoch);
+                struct tm *ti = localtime(&tt);
+                if (ti)
+                    f.yearNum = ti->tm_year + 1900;
+            }
+        }
         parsed[i] = f;
         parsedDays++;
     }
@@ -478,6 +494,9 @@ void updateForecastFromJson(const String& jsonStr) {
 
 // --------- UDP Listener ----------
 void fetchTempestData() {
+    if (!isDataSourceWeatherFlow()) {
+        return;
+    }
     int packetSize = udp.parsePacket();
     if (packetSize > 0) {
         char packet[1024];
@@ -489,8 +508,326 @@ void fetchTempestData() {
     }
 }
 
+static String openMeteoConditionFromCode(int code) {
+    switch (code) {
+    case 0: return "Clear";
+    case 1: return "Mostly Clear";
+    case 2: return "Partly Cloudy";
+    case 3: return "Overcast";
+    case 45:
+    case 48: return "Fog";
+    case 51:
+    case 53:
+    case 55: return "Drizzle";
+    case 56:
+    case 57: return "Freezing Drizzle";
+    case 61:
+    case 63:
+    case 65: return "Rain";
+    case 66:
+    case 67: return "Freezing Rain";
+    case 71:
+    case 73:
+    case 75:
+    case 77: return "Snow";
+    case 80:
+    case 81:
+    case 82: return "Rain Showers";
+    case 85:
+    case 86: return "Snow Showers";
+    case 95:
+    case 96:
+    case 99: return "Thunderstorm";
+    default: return "Weather";
+    }
+}
+
+static String windCardinalFromDegrees(double deg) {
+    if (isnan(deg)) return "";
+    static const char* labels[8] = {"N","NE","E","SE","S","SW","W","NW"};
+    double normalized = fmod(deg, 360.0);
+    if (normalized < 0) normalized += 360.0;
+    int idx = static_cast<int>(floor((normalized + 22.5) / 45.0)) % 8;
+    return String(labels[idx]);
+}
+
+static bool resolveOpenMeteoCoordinates(double &lat, double &lon) {
+    // Prefer user-configured device location first (shared with NOAA).
+    if (noaaLatitude >= -90.0f && noaaLatitude <= 90.0f &&
+        noaaLongitude >= -180.0f && noaaLongitude <= 180.0f &&
+        (fabs(noaaLatitude) > 0.001f || fabs(noaaLongitude) > 0.001f)) {
+        lat = static_cast<double>(noaaLatitude);
+        lon = static_cast<double>(noaaLongitude);
+        return true;
+    }
+
+    int tzIdx = timezoneCurrentIndex();
+    if (tzIdx >= 0 && tzIdx < static_cast<int>(timezoneCount())) {
+        const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(tzIdx));
+        if (tz.latitude >= -90.0f && tz.latitude <= 90.0f &&
+            tz.longitude >= -180.0f && tz.longitude <= 180.0f) {
+            lat = static_cast<double>(tz.latitude);
+            lon = static_cast<double>(tz.longitude);
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool parseOpenMeteoForecastPayload(const String &payload) {
+    JSONVar doc = JSON.parse(payload);
+    if (JSON.typeof_(doc) != "object") {
+        Serial.println("[Open-Meteo] JSON parse failed");
+        return false;
+    }
+
+    auto toNumber = [](JSONVar obj, const char *key) -> double {
+        if (JSON.typeof_(obj) != "object") return NAN;
+        JSONVar v = obj[key];
+        return (JSON.typeof_(v) == "number") ? static_cast<double>(v) : NAN;
+    };
+    auto toInt = [](JSONVar obj, const char *key, int fallback) -> int {
+        if (JSON.typeof_(obj) != "object") return fallback;
+        JSONVar v = obj[key];
+        return (JSON.typeof_(v) == "number") ? static_cast<int>(static_cast<double>(v)) : fallback;
+    };
+    auto arrLen = [](JSONVar arr) -> int {
+        return (JSON.typeof_(arr) == "array") ? static_cast<int>(arr.length()) : 0;
+    };
+    auto arrNum = [](JSONVar arr, int idx) -> double {
+        if (JSON.typeof_(arr) != "array" || idx < 0 || idx >= static_cast<int>(arr.length())) return NAN;
+        JSONVar v = arr[idx];
+        return (JSON.typeof_(v) == "number") ? static_cast<double>(v) : NAN;
+    };
+    auto arrInt = [&](JSONVar arr, int idx, int fallback) -> int {
+        double n = arrNum(arr, idx);
+        return isnan(n) ? fallback : static_cast<int>(n);
+    };
+
+    // --- Current ---
+    JSONVar current = doc["current"];
+    currentCond = CurrentConditions{};
+    currentCond.humidity = -1;
+    currentCond.uv = -1;
+    currentCond.precipProb = -1;
+
+    if (JSON.typeof_(current) == "object") {
+        currentCond.temp = toNumber(current, "temperature_2m");
+        currentCond.feelsLike = toNumber(current, "apparent_temperature");
+        currentCond.dewPoint = toNumber(current, "dew_point_2m");
+        currentCond.humidity = toInt(current, "relative_humidity_2m", -1);
+        currentCond.pressure = toNumber(current, "pressure_msl");
+        currentCond.windAvg = toNumber(current, "wind_speed_10m");
+        currentCond.windGust = toNumber(current, "wind_gusts_10m");
+        currentCond.windDir = toNumber(current, "wind_direction_10m");
+        currentCond.windCardinal = windCardinalFromDegrees(currentCond.windDir);
+        currentCond.time = static_cast<uint32_t>(toInt(current, "time", 0));
+        int code = toInt(current, "weather_code", -1);
+        currentCond.cond = openMeteoConditionFromCode(code);
+        currentCond.icon = currentCond.cond;
+    }
+
+    // --- Daily forecast (up to 10 days) ---
+    JSONVar daily = doc["daily"];
+    forecast.numDays = 0;
+    if (JSON.typeof_(daily) == "object") {
+        JSONVar tArr = daily["time"];
+        JSONVar hiArr = daily["temperature_2m_max"];
+        JSONVar loArr = daily["temperature_2m_min"];
+        JSONVar pArr = daily["precipitation_probability_max"];
+        JSONVar cArr = daily["weather_code"];
+        JSONVar srArr = daily["sunrise"];
+        JSONVar ssArr = daily["sunset"];
+
+        int days = arrLen(tArr);
+        if (days > MAX_FORECAST_DAYS) days = MAX_FORECAST_DAYS;
+        for (int i = 0; i < days; ++i) {
+            ForecastDay f;
+            uint32_t dayEpoch = static_cast<uint32_t>(arrInt(tArr, i, 0));
+            time_t tt = static_cast<time_t>(dayEpoch);
+            struct tm *ti = localtime(&tt);
+            if (ti) {
+                f.dayNum = ti->tm_mday;
+                f.monthNum = ti->tm_mon + 1;
+                f.yearNum = ti->tm_year + 1900;
+            }
+            f.highTemp = arrNum(hiArr, i);
+            f.lowTemp = arrNum(loArr, i);
+            f.rainChance = arrInt(pArr, i, -1);
+            int code = arrInt(cArr, i, -1);
+            f.conditions = openMeteoConditionFromCode(code);
+            f.icon = f.conditions;
+            f.sunrise = static_cast<uint32_t>(arrInt(srArr, i, 0));
+            f.sunset = static_cast<uint32_t>(arrInt(ssArr, i, 0));
+            forecast.days[forecast.numDays++] = f;
+        }
+    }
+
+    // --- Hourly forecast (next 24h mapped to existing WF shape) ---
+    forecast.numHours = 0;
+    forecast.hourlyKeyPresent = false;
+    JSONVar hourly = doc["hourly"];
+    if (JSON.typeof_(hourly) == "object") {
+        JSONVar tArr = hourly["time"];
+        JSONVar tempArr = hourly["temperature_2m"];
+        JSONVar pArr = hourly["precipitation_probability"];
+        JSONVar cArr = hourly["weather_code"];
+
+        int hours = arrLen(tArr);
+        if (hours > MAX_FORECAST_HOURS) hours = MAX_FORECAST_HOURS;
+        for (int i = 0; i < hours; ++i) {
+            ForecastHour h;
+            h.time = static_cast<uint32_t>(arrInt(tArr, i, 0));
+            h.temp = arrNum(tempArr, i);
+            h.rainChance = arrInt(pArr, i, -1);
+            int code = arrInt(cArr, i, -1);
+            h.conditions = openMeteoConditionFromCode(code);
+            h.icon = h.conditions;
+
+            // Add "night" marker where possible so existing icon mapper picks correct style.
+            bool isNight = false;
+            time_t htt = static_cast<time_t>(h.time);
+            struct tm *hti = localtime(&htt);
+            if (hti) {
+                for (int di = 0; di < forecast.numDays; ++di) {
+                    const ForecastDay &d = forecast.days[di];
+                    if (d.monthNum == (hti->tm_mon + 1) && d.dayNum == hti->tm_mday &&
+                        d.sunrise > 0 && d.sunset > 0) {
+                        isNight = !(h.time >= d.sunrise && h.time < d.sunset);
+                        break;
+                    }
+                }
+                if (forecast.numDays == 0) {
+                    isNight = (hti->tm_hour < 6 || hti->tm_hour >= 18);
+                }
+            }
+            if (isNight && h.icon.length() > 0 && h.icon.indexOf("night") < 0) {
+                h.icon += " night";
+            }
+
+            forecast.hours[forecast.numHours++] = h;
+        }
+        forecast.hourlyKeyPresent = (forecast.numHours > 0);
+    }
+
+    // Map into Tempest live fields so existing "Live Weather" and scene code can reuse it.
+    tempest.temperature = currentCond.temp;
+    tempest.humidity = (currentCond.humidity >= 0) ? static_cast<double>(currentCond.humidity) : NAN;
+    tempest.pressure = currentCond.pressure;
+    tempest.windAvg = currentCond.windAvg;
+    tempest.windGust = currentCond.windGust;
+    tempest.windDir = currentCond.windDir;
+    tempest.obsWindAvg = currentCond.windAvg;
+    tempest.obsWindDir = currentCond.windDir;
+    tempest.obsEpoch = currentCond.time;
+    tempest.epoch = currentCond.time;
+    tempest.lastUpdate = millis();
+
+    forecast.lastUpdate = millis();
+    return (forecast.numDays > 0 || forecast.numHours > 0 || !isnan(currentCond.temp));
+}
+
+static void fetchOpenMeteoForecastData() {
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("[Open-Meteo] Forecast fetch skipped (WiFi offline)");
+        return;
+    }
+
+    double lat = NAN;
+    double lon = NAN;
+    if (!resolveOpenMeteoCoordinates(lat, lon)) {
+        Serial.println("[Open-Meteo] Missing coordinates (set timezone or NOAA lat/lon)");
+        return;
+    }
+
+    String baseQuery = String("api.open-meteo.com/v1/forecast?latitude=") + String(lat, 4) +
+                       "&longitude=" + String(lon, 4) +
+                       "&current=temperature_2m,apparent_temperature,dew_point_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code" +
+                       "&hourly=temperature_2m,precipitation_probability,weather_code" +
+                       "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset";
+
+    String httpPrimary = "http://" + baseQuery + "&forecast_days=10&forecast_hours=24&timezone=auto&timeformat=unixtime";
+    String httpFallback = "http://" + baseQuery + "&forecast_days=10&timezone=auto&timeformat=unixtime";
+    String httpsPrimary = "https://" + baseQuery + "&forecast_days=10&forecast_hours=24&timezone=auto&timeformat=unixtime";
+    String httpsFallback = "https://" + baseQuery + "&forecast_days=10&timezone=auto&timeformat=unixtime";
+
+    auto requestPayload = [&](const String& url, bool useTls, String& payloadOut) -> bool {
+        HTTPClient http;
+        http.useHTTP10(true);
+        http.setTimeout(15000);
+        http.setReuse(false);
+
+        bool began = false;
+        if (useTls) {
+            WiFiClientSecure client;
+            client.setInsecure();
+            began = http.begin(client, url);
+        } else {
+            WiFiClient client;
+            began = http.begin(client, url);
+        }
+
+        if (!began) {
+            Serial.println("[Open-Meteo] HTTP begin failed");
+            return false;
+        }
+
+        http.addHeader("Accept-Encoding", "identity");
+        http.addHeader("Connection", "close");
+
+        int httpCode = http.GET();
+        Serial.print("[Open-Meteo] Forecast status: ");
+        Serial.println(httpCode);
+        if (httpCode != HTTP_CODE_OK) {
+            http.end();
+            return false;
+        }
+
+        payloadOut = http.getString();
+        http.end();
+        return payloadOut.length() > 0;
+    };
+
+    String payload;
+    bool gotPayload = requestPayload(httpPrimary, false, payload);
+    if (!gotPayload) {
+        Serial.println("[Open-Meteo] HTTP primary failed, retrying HTTP fallback URL.");
+        gotPayload = requestPayload(httpFallback, false, payload);
+    }
+    if (!gotPayload) {
+        Serial.println("[Open-Meteo] HTTP failed, retrying HTTPS primary URL.");
+        gotPayload = requestPayload(httpsPrimary, true, payload);
+    }
+    if (!gotPayload) {
+        Serial.println("[Open-Meteo] HTTPS primary failed, retrying HTTPS fallback URL.");
+        gotPayload = requestPayload(httpsFallback, true, payload);
+    }
+    if (!gotPayload) {
+        Serial.println("[Open-Meteo] Forecast fetch failed");
+        return;
+    }
+
+    if (!parseOpenMeteoForecastPayload(payload)) {
+        Serial.println("[Open-Meteo] Forecast parse failed");
+        return;
+    }
+
+    Serial.print("[Open-Meteo] Updated current/daily/hourly: ");
+    Serial.print(forecast.numDays);
+    Serial.print(" days, ");
+    Serial.print(forecast.numHours);
+    Serial.println(" hours");
+}
+
 // --------- WeatherFlow Forecast Fetch ----------
 void fetchForecastData() {
+    if (isDataSourceOpenMeteo()) {
+        fetchOpenMeteoForecastData();
+        requestScrollRebuild();
+        return;
+    }
+
     String stationId = wfStationId;
     String token = wfToken;
     stationId.trim();
@@ -536,6 +873,40 @@ void fetchForecastData() {
     String payload = http.getString();
     http.end();
     updateForecastFromJson(payload);
+    requestScrollRebuild();
+}
+
+void resetForecastModelData() {
+    forecast = ForecastData{};
+    currentCond = CurrentConditions{};
+    currentCond.humidity = -1;
+    currentCond.uv = -1;
+    currentCond.precipProb = -1;
+
+    tempest = TempestData{};
+    tempest.temperature = NAN;
+    tempest.humidity = NAN;
+    tempest.pressure = NAN;
+    tempest.windAvg = NAN;
+    tempest.windGust = NAN;
+    tempest.windDir = NAN;
+    tempest.windLull = NAN;
+    tempest.windSampleInt = NAN;
+    tempest.illuminance = NAN;
+    tempest.uv = NAN;
+    tempest.solar = NAN;
+    tempest.rain = NAN;
+    tempest.strikeDist = NAN;
+    tempest.battery = NAN;
+    tempest.obsWindAvg = NAN;
+    tempest.obsWindDir = NAN;
+    tempest.rapidWindAvg = NAN;
+    tempest.rapidWindDir = NAN;
+    tempest.lastObsTime = "";
+
+    newTempestData = false;
+    newRapidWindData = false;
+    updateWindInfoScroll(true);
 }
 
 // --------- String Helpers ----------
@@ -559,31 +930,131 @@ String getTempestField(const char* field) {
     return "";
 }
 
+static String ageShort(unsigned long ageMs)
+{
+    unsigned long sec = ageMs / 1000UL;
+    if (sec < 60UL)
+        return String(sec) + "s";
+    unsigned long min = sec / 60UL;
+    if (min < 60UL)
+        return String(min) + "m";
+    unsigned long hrs = min / 60UL;
+    if (hrs < 24UL)
+        return String(hrs) + "h";
+    unsigned long days = hrs / 24UL;
+    return String(days) + "d";
+}
+
+static String compactTemp(double tempC)
+{
+    return isnan(tempC) ? String("--") : fmtTemp(tempC, 1);
+}
+
+static String compactHum(int hum)
+{
+    return (hum < 0) ? String("--") : (String(hum) + "%");
+}
+
+static String compactPress(double hpa)
+{
+    return isnan(hpa) ? String("--") : fmtPress(hpa, 1);
+}
+
+static String compactWind(double speed, const String &card)
+{
+    String v = isnan(speed) ? String("--") : fmtWind(speed, 1);
+    if (card.length() == 0)
+        return v;
+    return v + " " + card;
+}
+
+static String deltaTempText(double aC, double bC)
+{
+    if (isnan(aC) || isnan(bC))
+        return String("--");
+    double delta = aC - bC;
+    double disp = (units.temp == TempUnit::F) ? (delta * 9.0 / 5.0) : delta;
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%+.1f%c", disp, (units.temp == TempUnit::F) ? 'F' : 'C');
+    return String(buf);
+}
+
+static String compactCondition(const String &condition)
+{
+    String out = condition.length() ? condition : String("--");
+    if (out.length() > 20)
+        out = out.substring(0, 20);
+    return out;
+}
+
+static String providerShortLabel()
+{
+    if (isDataSourceWeatherFlow())
+        return "WF CLOUD";
+    if (isDataSourceOpenMeteo())
+        return "OPEN-MET";
+    if (isDataSourceOwm())
+        return "OWM";
+    return "UNKNOWN";
+}
+
 
 // --------- InfoScreen Display Functions ----------
 void showUdpScreen() {
-    String lines[9];
-    lines[0] = "Temp:  " + getTempestField("temp");
-    lines[1] = "Hum:   " + getTempestField("hum");
-    lines[2] = "Pres:  " + getTempestField("pres");
-    lines[3] = "Wind:  " + getTempestField("wind");
-    lines[4] = "Dir:   " + getTempestField("winddir");
-    lines[5] = "Rain:  " + getTempestField("rain");
-    lines[6] = "UV:    " + getTempestField("uv");
-    lines[7] = "Solar: " + getTempestField("solar");
-    lines[8] = "Batt:  " + getTempestField("battery");
+    const unsigned long nowMs = millis();
+    const unsigned long udpAgeMs = (tempest.obsLastUpdate > 0 && nowMs >= tempest.obsLastUpdate)
+                                        ? (nowMs - tempest.obsLastUpdate)
+                                        : 0UL;
+    const String windDir = formatWindDirectionLabel(tempest.windDir);
+    const String sourceAge = String("LOCAL ") + ((tempest.obsLastUpdate > 0) ? ageShort(udpAgeMs) : String("--"));
+
+    String lines[8];
+    int lineCount = 0;
+    lines[lineCount++] = "Source: " + sourceAge;
+    lines[lineCount++] = "Temp:   " + compactTemp(tempest.temperature) + " Feels " + compactTemp(currentCond.feelsLike);
+    lines[lineCount++] = "Wind:   " + compactWind(tempest.windAvg, (windDir == "--") ? String("") : windDir) + " G" + (isnan(tempest.windGust) ? String("--") : fmtWind(tempest.windGust, 1));
+    lines[lineCount++] = "Press:  " + compactPress(tempest.pressure);
+    lines[lineCount++] = "Hum:    " + compactHum(isnan(tempest.humidity) ? -1 : static_cast<int>(lround(tempest.humidity)));
+    lines[lineCount++] = "Cond:   " + compactCondition(currentCond.cond);
+    if (isDataSourceWeatherFlow())
+    {
+        lines[lineCount++] = "Delta:  Cld " + deltaTempText(currentCond.temp, tempest.temperature);
+    }
+    udpScreen.setTitle("Live Station");
 
     if (!udpScreen.isActive()) {
-        udpScreen.setLines(lines, 9, true);
+        udpScreen.setLines(lines, lineCount, true);
         udpScreen.show([](){ currentScreen = homeScreenForDataSource(); });
     } else {
-        udpScreen.setLines(lines, 9, false);
+        udpScreen.setLines(lines, lineCount, false);
     }
 }
 
 void showForecastScreen() {
+    auto fallbackForecastYear = []() -> int {
+        // Prefer known-valid weather epoch first.
+        if (currentCond.time >= 1577836800UL) // 2020-01-01 UTC
+        {
+            time_t tt = static_cast<time_t>(currentCond.time);
+            struct tm *ti = localtime(&tt);
+            if (ti)
+                return ti->tm_year + 1900;
+        }
+        // Then use local clock only if plausibly set.
+        time_t nowTs = time(nullptr);
+        if (nowTs >= 1577836800UL)
+        {
+            struct tm *tiNow = localtime(&nowTs);
+            if (tiNow)
+                return tiNow->tm_year + 1900;
+        }
+        // Final fallback: build year from compiler date (e.g. "Mar  2 2026").
+        const char *buildDate = __DATE__;
+        int y = atoi(buildDate + 7);
+        return (y >= 2020) ? y : 2026;
+    };
+
     int num = min(forecast.numDays, 10); // show up to 10 days
-    // was: Serial.printf("Showing %d forecast days\n", num);
     Serial.print("Showing ");
     Serial.print(num);
     Serial.println(" forecast days");
@@ -598,22 +1069,40 @@ void showForecastScreen() {
     for (int i = 0; i < num; ++i) {
         const ForecastDay& f = forecast.days[i];
         String iconKey = f.conditions.length() ? f.conditions : f.icon;
-        auto stripUnits = [](String s) {
-            while (s.length() && !isDigit(s[s.length() - 1]) && s[s.length() - 1] != '.')
-                s.remove(s.length() - 1);
-            return s;
-        };
-        String hi = isnan(f.highTemp) ? String("--") : fmtTemp(f.highTemp, 0);
-        String lo = isnan(f.lowTemp)  ? String("--") : fmtTemp(f.lowTemp,  0);
-        String hiNoUnit = stripUnits(hi);
-        String value = hiNoUnit + "/" + lo + "  " +
-                       f.conditions + " " + String(f.rainChance) + "%";
-        // Add icon hint for renderer; stripped before display
+        String tempUnit = (units.temp == TempUnit::F) ? "F" : "C";
+
+        String hiText = "--";
+        String loText = "--";
+        if (!isnan(f.highTemp))
+        {
+            hiText = String(static_cast<int>(lround(dispTemp(f.highTemp))));
+        }
+        if (!isnan(f.lowTemp))
+        {
+            loText = String(static_cast<int>(lround(dispTemp(f.lowTemp))));
+        }
+
+        String hiLine = "[up] " + hiText + "\xB0 " + tempUnit;
+        String loLine = "[down] " + loText + "\xB0 " + tempUnit;
         if (iconKey.length())
         {
-            value += " [icon=" + iconKey + "]";
+            hiLine += " [icon=" + iconKey + "]";
         }
-        lines[i] = String(f.monthNum) + "/" + String(f.dayNum) + ": " + value;
+
+        String detailLine = f.conditions.length() ? f.conditions : String("No details");
+        if (f.rainChance >= 0)
+        {
+            detailLine += " " + String(f.rainChance) + "%";
+        }
+
+        int year = f.yearNum;
+        if (year <= 0)
+        {
+            year = fallbackForecastYear();
+        }
+        char dateBuf[24];
+        snprintf(dateBuf, sizeof(dateBuf), "%02d/%02d/%04d", f.monthNum, f.dayNum, year);
+        lines[i] = String(dateBuf) + "\n" + hiLine + "\n" + loLine + "\n" + detailLine;
     }
 
     bool reset = !forecastScreen.isActive();
@@ -624,12 +1113,13 @@ void showForecastScreen() {
 void showHourlyForecastScreen() {
     // How many hours to show on the screen (compile-time constant)
     static constexpr uint8_t HOURLY_DISPLAY_COUNT = 24;
+    const bool reset = !hourlyScreen.isActive();
 
     // Case 1: No hourly data parsed at all
     if (forecast.numHours <= 0) {
         String lines[1];
         lines[0] = "No hour data.";
-        hourlyScreen.setLines(lines, 1, true);
+        hourlyScreen.setLines(lines, 1, reset);
         hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
         return;
     }
@@ -646,7 +1136,7 @@ void showHourlyForecastScreen() {
     if (count <= 0) {
         String lines[1];
         lines[0] = "No upcoming hour data.";
-        hourlyScreen.setLines(lines, 1, true);
+        hourlyScreen.setLines(lines, 1, reset);
         hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
         return;
     }
@@ -675,10 +1165,9 @@ void showHourlyForecastScreen() {
             if (hour12 == 0)
                 hour12 = 12;
             const char *suffix = (hh >= 12) ? "PM" : "AM";
-            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d%s", hour12, mm, suffix);
+            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d %s", hour12, mm, suffix);
         }
         String timeLabel(timeBuf);
-        timeLabel += ":";
 
         // Keep hourly entries to a predictable 3-line block.
         // Icon hint is consumed by the renderer and not shown in text.
@@ -707,13 +1196,13 @@ void showHourlyForecastScreen() {
         }
 
         String dataLine;
-        dataLine += (isnan(h.temp) ? String("--") : fmtTemp(h.temp, 1));
+        dataLine += (isnan(h.temp) ? String("--") : fmtTemp(h.temp, 0));
         dataLine += " ";
         String condLine = h.conditions.length() ? h.conditions : String("");
         lines[i] = labelLine + "\n" + dataLine + "\n" + condLine;
     }
 
-    hourlyScreen.setLines(lines, count, true);
+    hourlyScreen.setLines(lines, count, reset);
     hourlyScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 }
 
@@ -782,17 +1271,27 @@ void showWindDirectionScreen() {
 }
 
 void showCurrentConditionsScreen() {
+    const unsigned long nowMs = millis();
+    const unsigned long cloudAgeMs = (forecast.lastUpdate > 0 && nowMs >= forecast.lastUpdate)
+                                          ? (nowMs - forecast.lastUpdate)
+                                          : 0UL;
+    const String sourceAge = providerShortLabel() + " " + ((forecast.lastUpdate > 0) ? ageShort(cloudAgeMs) : String("--"));
+
     String lines[8];
-    lines[0] = "Temp:   " + (isnan(currentCond.temp)      ? String("--") : fmtTemp(currentCond.temp, 1));
-    lines[1] = "Feels:  " + (isnan(currentCond.feelsLike) ? String("--") : fmtTemp(currentCond.feelsLike, 1));
-    lines[2] = "DewPt:  " + (isnan(currentCond.dewPoint)  ? String("--") : fmtTemp(currentCond.dewPoint, 1));
-    lines[3] = "Humid:  " + (currentCond.humidity < 0     ? String("--") : String(currentCond.humidity) + "%");
-    lines[4] = "Press:  " + (isnan(currentCond.pressure)  ? String("--") : fmtPress(currentCond.pressure, 1));
-    lines[5] = "Wind:   " + (isnan(currentCond.windAvg)   ? String("--") : fmtWind(currentCond.windAvg, 1)) + " " + currentCond.windCardinal;
-    lines[6] = "Gust:   " + (isnan(currentCond.windGust)  ? String("--") : fmtWind(currentCond.windGust, 1));
-    lines[7] = "Cond:   " + (String(currentCond.cond).length() == 0 ? String("--") : currentCond.cond);
+    int lineCount = 0;
+    lines[lineCount++] = "Source: " + sourceAge;
+    lines[lineCount++] = "Temp:   " + compactTemp(currentCond.temp) + " Feels " + compactTemp(currentCond.feelsLike);
+    lines[lineCount++] = "Wind:   " + compactWind(currentCond.windAvg, currentCond.windCardinal) + " G" + (isnan(currentCond.windGust) ? String("--") : fmtWind(currentCond.windGust, 1));
+    lines[lineCount++] = "Press:  " + compactPress(currentCond.pressure);
+    lines[lineCount++] = "Hum:    " + compactHum(currentCond.humidity);
+    lines[lineCount++] = "Cond:   " + compactCondition(currentCond.cond);
+    if (isDataSourceWeatherFlow())
+    {
+        lines[lineCount++] = "Delta:  Loc " + deltaTempText(tempest.temperature, currentCond.temp);
+    }
+    currentCondScreen.setTitle("Current WX");
     bool reset = !currentCondScreen.isActive();
-    currentCondScreen.setLines(lines, 8, reset);
+    currentCondScreen.setLines(lines, lineCount, reset);
     currentCondScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 
 }

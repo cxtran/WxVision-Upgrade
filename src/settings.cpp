@@ -318,7 +318,7 @@ void toggleDayFormat(int dir) {
 }
 
 void setDataSource(int source) {
-    if (source < DATA_SOURCE_OWM || source > DATA_SOURCE_NONE) {
+    if (source < DATA_SOURCE_OWM || source > DATA_SOURCE_OPEN_METEO) {
         source = DATA_SOURCE_OWM;
     }
     dataSource = source;
@@ -332,6 +332,14 @@ bool isDataSourceWeatherFlow() {
     return dataSource == DATA_SOURCE_WEATHERFLOW;
 }
 
+bool isDataSourceOpenMeteo() {
+    return dataSource == DATA_SOURCE_OPEN_METEO;
+}
+
+bool isDataSourceForecastModel() {
+    return dataSource == DATA_SOURCE_WEATHERFLOW || dataSource == DATA_SOURCE_OPEN_METEO;
+}
+
 bool isDataSourceNone() {
     return dataSource == DATA_SOURCE_NONE;
 }
@@ -339,10 +347,10 @@ bool isDataSourceNone() {
 void toggleDataSource(int dir) {
     if (dir == 0) return;
     int next = dataSource + (dir > 0 ? 1 : -1);
-    if (next > DATA_SOURCE_NONE) {
+    if (next > DATA_SOURCE_OPEN_METEO) {
         next = DATA_SOURCE_OWM;
     } else if (next < DATA_SOURCE_OWM) {
-        next = DATA_SOURCE_NONE;
+        next = DATA_SOURCE_OPEN_METEO;
     }
     setDataSource(next);
 }

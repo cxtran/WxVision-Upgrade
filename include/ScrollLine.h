@@ -7,6 +7,9 @@ public:
 
     void setLines(const String lines[], int n, bool resetPosition = true);
     void setScrollSpeed(unsigned int ms);
+    void setScrollStepPx(int px);
+    void setStartPauseMs(unsigned int ms);
+    void setContinuousWrap(bool enabled);
 
     void setTitleText(const String& text);
     void setTitleMode(bool enable);
@@ -16,6 +19,9 @@ public:
     void draw(int x, int y, uint16_t defaultColor);
 
     bool isActive() const;
+    bool selectedLineNeedsScroll() const;
+    bool consumeCycleCompleted();
+    bool consumeEnteredFromRight();
 
     // Set colors for lines (arrays must have at least n elements)
     void setLineColors(uint16_t textColors[], uint16_t bgColors[], int n);
@@ -29,6 +35,9 @@ private:
     bool _bounceEnabled;
     int _screenWidth;
     unsigned int _scrollSpeedMs;
+    unsigned int _startPauseMs;
+    int _scrollStepPx;
+    bool _continuousWrap;
 
     static const int MAX_LINES = 16;
     String _lines[MAX_LINES];
@@ -51,6 +60,8 @@ private:
     uint16_t _bgColors[MAX_LINES];
     uint16_t _titleTextColor;
     uint16_t _titleBgColor;
+    bool _cycleCompleted;
+    bool _enteredFromRight;
 
-    int getTextWidth(const char* text);
+    int getTextWidth(const char* text) const;
 };

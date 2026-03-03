@@ -75,6 +75,7 @@ struct ForecastDay {
     uint32_t sunset = 0;
     int dayNum = 0;
     int monthNum = 0;
+    int yearNum = 0;
 };
 
 // ----------- WeatherFlow Hourly Forecast Data -----------
@@ -126,6 +127,7 @@ void updateForecastFromJson(const String& jsonStr);
 
 // Pull and parse from API
 void fetchForecastData();
+void resetForecastModelData();
 
 // (kept for compatibility even if unused)
 String getForecastField(const char* field);

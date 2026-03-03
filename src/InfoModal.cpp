@@ -13,6 +13,7 @@
 #include <math.h>
 #include "system.h"
 #include "default_values.h"
+#include "ui_theme.h"
 
 extern InfoModal alarmModal;
 extern InfoModal setupPromptModal;
@@ -57,19 +58,19 @@ struct ModalPalette {
 ModalPalette makePalette() {
     ModalPalette p{};
     if (theme == 1) {
-        p.headerBg = dma_display->color565(20,20,40);
-        p.headerFg = dma_display->color565(60,60,120);
-        p.underline = dma_display->color565(30,30,70);
-        p.closeBg = dma_display->color565(20,20,40);
-        p.closeSelBg = dma_display->color565(90,90,150);
-        p.closeFg = dma_display->color565(180,180,220);
-        p.lineUnselected = dma_display->color565(40,40,90);
-        p.lineSelected = dma_display->color565(90,90,150);
-        p.lineEditing = dma_display->color565(140,140,200);
-        p.buttonBg = dma_display->color565(25,25,60);
-        p.buttonSelBg = dma_display->color565(90,90,150);
-        p.buttonFg = dma_display->color565(60,60,120);
-        p.buttonSelFg = dma_display->color565(20,20,40);
+        p.headerBg = ui_theme::monoHeaderBg();
+        p.headerFg = ui_theme::monoHeaderFg();
+        p.underline = ui_theme::monoUnderline();
+        p.closeBg = ui_theme::monoHeaderBg();
+        p.closeSelBg = ui_theme::rgb(90, 90, 150);
+        p.closeFg = ui_theme::rgb(180, 180, 220);
+        p.lineUnselected = ui_theme::rgb(40, 40, 90);
+        p.lineSelected = ui_theme::rgb(90, 90, 150);
+        p.lineEditing = ui_theme::rgb(140, 140, 200);
+        p.buttonBg = ui_theme::rgb(25, 25, 60);
+        p.buttonSelBg = ui_theme::rgb(90, 90, 150);
+        p.buttonFg = ui_theme::monoHeaderFg();
+        p.buttonSelFg = ui_theme::monoHeaderBg();
     } else {
         p.headerBg = INFOMODAL_HEADERBG;
         p.headerFg = INFOMODAL_GREEN;
@@ -731,7 +732,93 @@ void InfoModal::tick()
 {
     if (!active)
         return;
-    draw();
+
+    // Event-driven by default (no per-frame redraw), but allow low-rate redraw
+    // when selected text requires horizontal marquee scrolling.
+    if (atClose || inButtonBar || lineCount <= 0 || selIndex < 0 || selIndex >= lineCount)
+        return;
+
+    int idx = selIndex;
+    String s = lines[idx];
+
+    if (fieldTypes[idx] == InfoNumber)
+    {
+        int nidx = numberFieldIndices[idx];
+        if (nidx >= 0 && nidx < MAX_LINES && intRefs[nidx])
+        {
+            int val = *(intRefs[nidx]);
+            if (lines[idx] == "TimeZone")
+                s += ": " + formatUtcOffsetMinutes(val);
+            else if (lines[idx] == "Day Theme Start" || lines[idx] == "Night Theme Start")
+                s += ": " + formatScheduleTime(val);
+            else if (lines[idx].startsWith("Temp Offset"))
+                s += ": " + String(static_cast<float>(val) / 10.0f, 1);
+            else
+                s += ": " + String(val);
+        }
+        else
+        {
+            s += ": ?";
+        }
+    }
+    else if (fieldTypes[idx] == InfoChooser)
+    {
+        int cidx = chooserFieldIndices[idx];
+        if (cidx >= 0 && cidx < MAX_LINES &&
+            chooserRefs[cidx] && chooserOptions[cidx] &&
+            chooserOptionCounts[cidx] > 0)
+            s += ": " + getChooserLabel(idx);
+        else
+            s += ": ?";
+    }
+    else if (fieldTypes[idx] == InfoText)
+    {
+        int tidx = textFieldIndices[idx];
+        if (tidx >= 0 && tidx < MAX_LINES && textRefs[tidx])
+        {
+            s += ": ";
+            s += textRefs[tidx];
+        }
+        else
+        {
+            s += ": ?";
+        }
+    }
+
+    bool scheduleNumber = (fieldTypes[idx] == InfoNumber) &&
+                          (lines[idx] == "Day Theme Start" || lines[idx] == "Night Theme Start");
+    bool brightnessLine = (fieldTypes[idx] == InfoNumber) && (lines[idx] == "Brightness");
+    bool arrowLine = (showChooserArrows && fieldTypes[idx] == InfoChooser) ||
+                     (showNumberArrows && fieldTypes[idx] == InfoNumber) || scheduleNumber || brightnessLine;
+    bool forwardAllowedOnLine = (forwardArrowOnlyIndex < 0) || (forwardArrowOnlyIndex == idx);
+    bool forwardIndicator = showForwardArrow && forwardAllowedOnLine && !arrowLine &&
+                            (fieldTypes[idx] == InfoLabel || fieldTypes[idx] == InfoButton);
+    int reservedWidth = 0;
+    if (arrowLine)
+        reservedWidth = (kChooserArrowWidth + 1) * 2;
+    else if (forwardIndicator)
+        reservedWidth = (kChooserArrowWidth + 1);
+    int availableWidth = SCREEN_WIDTH - reservedWidth;
+    if (availableWidth <= 0)
+        availableWidth = SCREEN_WIDTH;
+
+    bool isAlarmAmPmLine = (this == &alarmModal && lines[idx] == "AM/PM");
+    int textW = getTextWidth(s.c_str());
+    bool needsScroll = isAlarmAmPmLine || (textW > availableWidth);
+
+    if (!needsScroll)
+        return;
+
+    unsigned long now = millis();
+    if (scrollPaused)
+    {
+        if (scrollPauseTime && (now - scrollPauseTime > 1000UL))
+            draw();
+        return;
+    }
+
+    if (now - lastScrollTime >= static_cast<unsigned long>(scrollSpeed))
+        draw();
 }
 
 // Optional direct set (not required for normal usage)
@@ -858,6 +945,9 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_SYSTEM:
                     showSystemModal();
+                    break;
+                case MENU_SYSLOCATION:
+                    showDeviceLocationModal();
                     break;
                 case MENU_INITIAL_SETUP:
                     currentMenuLevel = MENU_NONE;
@@ -1451,6 +1541,9 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_SYSTEM:
                     showSystemModal();
+                    break;
+                case MENU_SYSLOCATION:
+                    showDeviceLocationModal();
                     break;
                 case MENU_INITIAL_SETUP:
                     currentMenuLevel = MENU_NONE;

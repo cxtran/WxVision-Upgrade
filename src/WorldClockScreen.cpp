@@ -21,6 +21,7 @@ constexpr unsigned long SPLIT_MS = 620UL;
 constexpr unsigned long HOLD_MS = 650UL;
 constexpr unsigned long SWEEP_OUT_MS = 180UL;
 constexpr unsigned long SHORT_WEATHER_HOLD_MS = 1700UL;
+constexpr unsigned long SHORT_CITY_HOLD_MS = 1200UL;
 constexpr unsigned long WEATHER_LEADIN_MS = 180UL;
 constexpr unsigned long SCROLL_STEP_MS = 40UL;
 constexpr unsigned long GAP_MS = 60UL;
@@ -36,8 +37,10 @@ unsigned long s_pauseUntilMs = 0;
 int s_scrollX = PANEL_RES_X;
 int s_cityTextWidth = 0;
 int s_weatherTextWidth = 0;
+int s_cityScrollX = 0;
 bool s_weatherLeadIn = false;
 unsigned long s_weatherHoldUntilMs = 0;
+unsigned long s_cityHoldUntilMs = 0;
 char s_cityText[40];
 char s_weatherText[96];
 
@@ -91,11 +94,6 @@ uint16_t weatherTextColor()
                         : dma_display->color565(245, 240, 225);
 }
 
-uint16_t activePageDotColor()
-{
-    return activeAccentColor();
-}
-
 int textWidth(const char *text)
 {
     int16_t x1, y1;
@@ -111,7 +109,7 @@ void setBannerPayloadForCurrentCity()
     s_cityText[0] = '\0';
     s_weatherText[0] = '\0';
 
-    const size_t count = worldTimeSelectionCount();
+    const size_t count = worldTimeDisplayCount();
     if (count == 0)
     {
         strncpy(s_cityText, "No Cities", sizeof(s_cityText) - 1);
@@ -126,20 +124,11 @@ void setBannerPayloadForCurrentCity()
     if (s_cityIndex >= count)
         s_cityIndex = 0;
 
-    int tzIndex = worldTimeSelectionAt(s_cityIndex);
-    if (tzIndex >= 0 && tzIndex < static_cast<int>(timezoneCount()))
+    String city = worldTimeDisplayCityLabel(s_cityIndex);
+    if (city.length() > 0)
     {
-        const char *city = timezoneInfoAt(static_cast<size_t>(tzIndex)).city;
-        if (city && city[0] != '\0')
-        {
-            strncpy(s_cityText, city, sizeof(s_cityText) - 1);
-            s_cityText[sizeof(s_cityText) - 1] = '\0';
-        }
-        else
-        {
-            strncpy(s_cityText, "City", sizeof(s_cityText) - 1);
-            s_cityText[sizeof(s_cityText) - 1] = '\0';
-        }
+        city.toCharArray(s_cityText, sizeof(s_cityText));
+        s_cityText[sizeof(s_cityText) - 1] = '\0';
     }
     else
     {
@@ -148,7 +137,7 @@ void setBannerPayloadForCurrentCity()
     }
 
     WorldWeather weather;
-    if (worldTimeGetSelectionWeather(s_cityIndex, weather))
+    if (worldTimeGetDisplayWeather(s_cityIndex, weather))
     {
         char tempBuf[16];
         if (isnan(weather.temperature))
@@ -183,7 +172,7 @@ void startSplitReveal(unsigned long nowMs)
 
 void stepToCity(int delta, unsigned long nowMs, bool manualPause)
 {
-    const size_t count = worldTimeSelectionCount();
+    const size_t count = worldTimeDisplayCount();
     if (count > 0)
     {
         int next = static_cast<int>(s_cityIndex);
@@ -205,14 +194,16 @@ void stepToCity(int delta, unsigned long nowMs, bool manualPause)
     setBannerPayloadForCurrentCity();
     startSplitReveal(nowMs);
     s_lastScrollStepMs = nowMs;
+    s_cityScrollX = 0;
     s_scrollX = PANEL_RES_X;
+    s_cityHoldUntilMs = nowMs + SHORT_CITY_HOLD_MS;
     if (manualPause)
         s_pauseUntilMs = nowMs + MANUAL_PAUSE_MS;
 }
 
 void updateBannerState(unsigned long nowMs)
 {
-    const size_t count = worldTimeSelectionCount();
+    const size_t count = worldTimeDisplayCount();
     if (!s_initialized)
     {
         s_initialized = true;
@@ -240,13 +231,38 @@ void updateBannerState(unsigned long nowMs)
         {
             s_phase = BannerPhase::Hold;
             s_phaseStartMs = nowMs;
+            s_cityScrollX = 0;
+            s_cityHoldUntilMs = nowMs + SHORT_CITY_HOLD_MS;
+            s_lastScrollStepMs = nowMs;
         }
         break;
     case BannerPhase::Hold:
-        if (nowMs - s_phaseStartMs >= HOLD_MS)
+        if (!worldTimeAutoCycleEnabled() && s_cityTextWidth > PANEL_RES_X)
         {
-            s_phase = BannerPhase::SweepOut;
-            s_phaseStartMs = nowMs;
+            if (nowMs < s_cityHoldUntilMs)
+                break;
+            if (nowMs - s_lastScrollStepMs >= SCROLL_STEP_MS)
+            {
+                unsigned long elapsed = nowMs - s_lastScrollStepMs;
+                int steps = static_cast<int>(elapsed / SCROLL_STEP_MS);
+                if (steps < 1)
+                    steps = 1;
+                s_cityScrollX -= steps;
+                s_lastScrollStepMs += static_cast<unsigned long>(steps) * SCROLL_STEP_MS;
+            }
+            if (s_cityScrollX + s_cityTextWidth < 0)
+            {
+                s_phase = BannerPhase::SweepOut;
+                s_phaseStartMs = nowMs;
+            }
+        }
+        else
+        {
+            if (nowMs - s_phaseStartMs >= HOLD_MS)
+            {
+                s_phase = BannerPhase::SweepOut;
+                s_phaseStartMs = nowMs;
+            }
         }
         break;
     case BannerPhase::SweepOut:
@@ -265,8 +281,16 @@ void updateBannerState(unsigned long nowMs)
         {
             if (nowMs - s_phaseStartMs >= SHORT_WEATHER_HOLD_MS)
             {
-                stepToCity(+1, nowMs, false);
-                s_pauseUntilMs = nowMs + GAP_MS;
+                if (worldTimeAutoCycleEnabled())
+                {
+                    stepToCity(+1, nowMs, false);
+                    s_pauseUntilMs = nowMs + GAP_MS;
+                }
+                else
+                {
+                    startSplitReveal(nowMs);
+                    s_pauseUntilMs = nowMs + GAP_MS;
+                }
             }
             break;
         }
@@ -303,8 +327,16 @@ void updateBannerState(unsigned long nowMs)
         }
         if (s_scrollX + s_weatherTextWidth < 0)
         {
-            stepToCity(+1, nowMs, false);
-            s_pauseUntilMs = nowMs + GAP_MS;
+            if (worldTimeAutoCycleEnabled())
+            {
+                stepToCity(+1, nowMs, false);
+                s_pauseUntilMs = nowMs + GAP_MS;
+            }
+            else
+            {
+                startSplitReveal(nowMs);
+                s_pauseUntilMs = nowMs + GAP_MS;
+            }
         }
         break;
     }
@@ -362,38 +394,23 @@ void drawBannerTopLine(unsigned long nowMs)
 
     dma_display->setTextColor(scaleColor565(cityNameColor(), cityIntensity));
     int cityX = 0;
+    if (!worldTimeAutoCycleEnabled() && s_phase == BannerPhase::Hold && s_cityTextWidth > PANEL_RES_X)
+    {
+        cityX = s_cityScrollX;
+    }
     dma_display->setCursor(cityX, 0);
     dma_display->print(s_cityText);
 }
 
 void drawSegmentedPageBar()
 {
-    const size_t count = worldTimeSelectionCount();
-    const int y = 8;
-    dma_display->drawFastHLine(0, y, PANEL_RES_X, myBLACK);
-    if (count == 0)
-        return;
-
-    const int total = PANEL_RES_X;
-    for (size_t i = 0; i < count; ++i)
-    {
-        int x0 = static_cast<int>((static_cast<uint32_t>(i) * total) / count);
-        int x1 = static_cast<int>((static_cast<uint32_t>(i + 1) * total) / count);
-        int segW = x1 - x0;
-        if (segW <= 0)
-            continue;
-
-        uint16_t color = inactiveDimColor();
-        if (i == s_cityIndex)
-            color = activePageDotColor();
-        dma_display->drawFastHLine(x0, y, segW, color);
-    }
+    // Page indicator intentionally disabled.
 }
 
 DateTime resolveWorldCityNow()
 {
     DateTime out(2000, 1, 1, 0, 0, 0);
-    if (worldTimeGetSelectionDateTime(s_cityIndex, out))
+    if (worldTimeGetDisplayDateTime(s_cityIndex, out))
         return out;
     if (getLocalDateTime(out))
         return out;
@@ -411,10 +428,12 @@ void resetWorldClockScreenState()
     s_lastScrollStepMs = 0;
     s_pauseUntilMs = 0;
     s_scrollX = PANEL_RES_X;
+    s_cityScrollX = 0;
     s_cityTextWidth = 0;
     s_weatherTextWidth = 0;
     s_weatherLeadIn = false;
     s_weatherHoldUntilMs = 0;
+    s_cityHoldUntilMs = 0;
     s_cityText[0] = '\0';
     s_weatherText[0] = '\0';
 }
@@ -423,7 +442,7 @@ bool worldClockHandleStep(int delta)
 {
     if (delta == 0)
         return false;
-    if (!worldTimeHasSelections())
+    if (worldTimeDisplayCount() == 0)
         return false;
     stepToCity(delta, millis(), true);
     return true;
@@ -436,7 +455,6 @@ void drawWorldClockScreen()
 
     dma_display->fillScreen(0);
     drawBannerTopLine(nowMs);
-    drawSegmentedPageBar();
 
     DateTime now = resolveWorldCityNow();
     bool alarmActive = isAlarmCurrentlyActive();

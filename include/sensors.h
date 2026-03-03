@@ -1,6 +1,8 @@
 #pragma once
 #include "display.h"
 #include "ir_codes.h"
+#include <IRrecv.h>
+#include <IRremoteESP8266.h>
 #include <SensirionI2CScd4x.h>
 #include <Adafruit_AHTX0.h>
 #include <Adafruit_BMP280.h>
@@ -15,6 +17,11 @@ extern float bmp280_pressure;
 
 extern bool newAirQualityData;
 extern bool newAHT20_BMP280Data;
+extern IRrecv irrecv;
+extern decode_results results;
+extern SensirionI2cScd4x scd4x;
+extern Adafruit_AHTX0 aht20;
+extern Adafruit_BMP280 bmp280;
 
 void setupIRSensor();
 

@@ -5,9 +5,10 @@ extern int theme;
 
 ScrollLine::ScrollLine(int screenWidth, unsigned int scrollSpeedMs)
     : _screenWidth(screenWidth), _scrollSpeedMs(scrollSpeedMs),
+      _startPauseMs(0), _scrollStepPx(1), _continuousWrap(true),
       _lineCount(0), _selIndex(0), _isTitleMode(false),
       _titleTextWidth(0), _titleScrollOffset(0), _titleLastScrollTime(0),
-      _titleTextColor(0xFFFF), _titleBgColor(0x0000)
+      _titleTextColor(0xFFFF), _titleBgColor(0x0000), _cycleCompleted(false), _enteredFromRight(false)
 {
     reset();
     for (int i = 0; i < MAX_LINES; ++i) {
@@ -42,7 +43,21 @@ void ScrollLine::setScrollSpeed(unsigned int ms) {
     _scrollSpeedMs = ms;
 }
 
+void ScrollLine::setScrollStepPx(int px) {
+    _scrollStepPx = (px < 1) ? 1 : px;
+}
+
+void ScrollLine::setStartPauseMs(unsigned int ms) {
+    _startPauseMs = ms;
+}
+
+void ScrollLine::setContinuousWrap(bool enabled) {
+    _continuousWrap = enabled;
+}
+
 void ScrollLine::reset() {
+    _cycleCompleted = false;
+    _enteredFromRight = false;
     if (_isTitleMode) {
         _titleScrollOffset = 0;
         _titleScrollDirection = 1;
@@ -64,9 +79,19 @@ void ScrollLine::update() {
         if (_titleTextWidth <= _screenWidth) return;
 
         if (now - _titleLastScrollTime >= _scrollSpeedMs) {
-            _titleScrollOffset++;
+            if (_titleScrollOffset == 0 && (now - _titleLastScrollTime) < _startPauseMs) {
+                return;
+            }
+            int prevOffset = _titleScrollOffset;
+            _titleScrollOffset += _scrollStepPx;
+            int entryThreshold = _titleTextWidth + 1 - _screenWidth;
+            if (entryThreshold < 0) entryThreshold = 0;
+            if (prevOffset < entryThreshold && _titleScrollOffset >= entryThreshold) {
+                _enteredFromRight = true;
+            }
             if (_titleScrollOffset > _titleTextWidth) {
                 _titleScrollOffset = 0;  // reset to start smoothly
+                _cycleCompleted = true;
             }
             _titleLastScrollTime = now;
         }
@@ -81,9 +106,19 @@ void ScrollLine::update() {
 
             if (i == _selIndex && lineW > _screenWidth) {
                 if (now - lastScrollTime >= _scrollSpeedMs) {
-                    scrollOffset++;
+                    if (scrollOffset == 0 && (now - lastScrollTime) < _startPauseMs) {
+                        continue;
+                    }
+                    int prevOffset = scrollOffset;
+                    scrollOffset += _scrollStepPx;
+                    int entryThreshold = lineW + 1 - _screenWidth;
+                    if (entryThreshold < 0) entryThreshold = 0;
+                    if (prevOffset < entryThreshold && scrollOffset >= entryThreshold) {
+                        _enteredFromRight = true;
+                    }
                     if (scrollOffset > lineW) {
                         scrollOffset = 0;  // loop continuous marquee
+                        _cycleCompleted = true;
                     }
                     lastScrollTime = now;
                 }
@@ -121,19 +156,21 @@ void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
         uint16_t titleText = monoTheme ? dma_display->color565(60,60,120) : _titleTextColor;
         dma_display->setTextColor(titleText);
 
-        if (_titleTextWidth <= _screenWidth) {
-            dma_display->setCursor(x, y);
-            dma_display->print(_titleText);
-        } else {
-            // Draw first instance of text offset left by _titleScrollOffset
-            int drawX = x - _titleScrollOffset;
-            dma_display->setCursor(drawX, y);
-            dma_display->print(_titleText);
+            if (_titleTextWidth <= _screenWidth) {
+                dma_display->setCursor(x, y);
+                dma_display->print(_titleText);
+            } else {
+                // Draw first instance of text offset left by _titleScrollOffset
+                int drawX = x - _titleScrollOffset;
+                dma_display->setCursor(drawX, y);
+                dma_display->print(_titleText);
 
-            // Draw second instance right after first to fill gap
-            dma_display->setCursor(drawX + _titleTextWidth + 1, y);
-            dma_display->print(_titleText);
-        }
+                if (_continuousWrap) {
+                    // Draw second instance right after first to fill gap
+                    dma_display->setCursor(drawX + _titleTextWidth + 1, y);
+                    dma_display->print(_titleText);
+                }
+            }
     } else {
         // Your existing multi-line drawing code unchanged (or apply similar marquee if desired)
         int lineHeight = 8;
@@ -161,9 +198,11 @@ void ScrollLine::draw(int x, int y, uint16_t defaultColor) {
                 dma_display->setCursor(cursorX, drawY);
                 dma_display->print(line);
 
-                // Draw second instance to fill gap
-                dma_display->setCursor(cursorX + lineW + 1, drawY);
-                dma_display->print(line);
+                if (_continuousWrap) {
+                    // Draw second instance to fill gap
+                    dma_display->setCursor(cursorX + lineW + 1, drawY);
+                    dma_display->print(line);
+                }
             }
         }
     }
@@ -173,7 +212,33 @@ bool ScrollLine::isActive() const {
     return _isTitleMode || (_lineCount > 0);
 }
 
-int ScrollLine::getTextWidth(const char* text) {
+bool ScrollLine::selectedLineNeedsScroll() const {
+    if (_isTitleMode) {
+        return _titleTextWidth > _screenWidth;
+    }
+    if (_lineCount == 0) {
+        return false;
+    }
+    int idx = _selIndex;
+    if (idx < 0 || idx >= _lineCount) {
+        idx = 0;
+    }
+    return getTextWidth(_lines[idx].c_str()) > _screenWidth;
+}
+
+bool ScrollLine::consumeCycleCompleted() {
+    bool done = _cycleCompleted;
+    _cycleCompleted = false;
+    return done;
+}
+
+bool ScrollLine::consumeEnteredFromRight() {
+    bool entered = _enteredFromRight;
+    _enteredFromRight = false;
+    return entered;
+}
+
+int ScrollLine::getTextWidth(const char* text) const {
     int width = 0;
     for (const char* c = text; *c != '\0'; c++) {
         width += 6; // fixed-width font assumption; replace if you have better API

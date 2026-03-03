@@ -2,6 +2,7 @@
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <Arduino_JSON.h>
+#include <time.h>
 #include "settings.h"
 #include "display.h"
 #include "InfoScreen.h"
@@ -12,6 +13,10 @@ static bool s_hasAlert = false;
 static bool s_screenDirty = true;
 static bool s_forceImmediateFetch = false;
 static bool s_prevEnabled = false;
+static constexpr size_t NOAA_MAX_ALERTS = 8;
+static NwsAlert s_alerts[NOAA_MAX_ALERTS];
+static size_t s_alertCount = 0;
+static String s_lastCheckHHMM = "--:--";
 static String s_event;
 static String s_severity;
 static String s_description;
@@ -27,6 +32,30 @@ static String s_ends;
 static unsigned long s_lastFetchAttempt = 0;
 
 static constexpr unsigned long NOAA_FETCH_INTERVAL_MS = 15UL * 60UL * 1000UL;
+
+static void stampLastCheckNow()
+{
+    time_t raw = time(nullptr);
+    if (raw > 0)
+    {
+        struct tm *ti = localtime(&raw);
+        if (ti != nullptr)
+        {
+            char buf[6];
+            snprintf(buf, sizeof(buf), "%02d:%02d", ti->tm_hour, ti->tm_min);
+            s_lastCheckHHMM = String(buf);
+            return;
+        }
+    }
+    s_lastCheckHHMM = "--:--";
+}
+
+static void clearAlertCache()
+{
+    s_alertCount = 0;
+    for (size_t i = 0; i < NOAA_MAX_ALERTS; ++i)
+        s_alerts[i] = NwsAlert{};
+}
 
 static void clearAlertFields()
 {
@@ -139,6 +168,12 @@ static bool tryRawFallback(const String &payload)
     cleanRawExtractInPlace(s_instruction);
     if (s_description.length() == 0)
         s_description = "No description provided.";
+    clearAlertCache();
+    s_alerts[0].event = s_event;
+    s_alerts[0].severity = s_severity;
+    s_alerts[0].description = s_description;
+    s_alerts[0].instruction = s_instruction;
+    s_alertCount = 1;
     s_hasAlert = true;
     s_screenDirty = true;
     return true;
@@ -277,6 +312,7 @@ static void handleNoaaPayload(const String &payload)
 
     JSONVar features = doc["features"];
     clearAlertFields();
+    clearAlertCache();
 
     String featType = JSON.typeof_(features);
     int featLen = (featType == "array" || featType == "object") ? (int)features.length() : 0;
@@ -303,30 +339,52 @@ static void handleNoaaPayload(const String &payload)
         Serial.println("[NOAA] First feature is not an object");
         return;
     }
-    JSONVar props = first["properties"];
-    if (JSON.typeof_(props) != "object")
+    for (int i = 0; i < featLen && s_alertCount < NOAA_MAX_ALERTS; ++i)
     {
+        JSONVar feature = features[i];
+        if (JSON.typeof_(feature) != "object")
+            continue;
+        JSONVar props = feature["properties"];
+        if (JSON.typeof_(props) != "object")
+            continue;
+
+        NwsAlert a;
+        a.event = cleanJsonString(props["event"]);
+        if (a.event.length() == 0)
+            a.event = "NOAA Alert";
+        a.severity = cleanJsonString(props["severity"]);
+        a.urgency = cleanJsonString(props["urgency"]);
+        a.areaDesc = cleanJsonString(props["areaDesc"]);
+        a.headline = cleanJsonString(props["headline"]);
+        a.expires = cleanJsonString(props["expires"]);
+        a.description = cleanJsonString(props["description"]);
+        a.instruction = cleanJsonString(props["instruction"]);
+        if (a.description.length() == 0)
+            a.description = "No description provided.";
+
+        s_alerts[s_alertCount++] = a;
+    }
+
+    if (s_alertCount == 0)
+    {
+        s_hasAlert = false;
+        s_screenDirty = true;
         return;
     }
 
-    s_event = cleanJsonString(props["event"]);
-    if (s_event.length() == 0)
-        s_event = "NOAA Alert";
-
-    s_severity = cleanJsonString(props["severity"]);
-    s_headline = cleanJsonString(props["headline"]);
-    s_areaDesc = cleanJsonString(props["areaDesc"]);
-    s_urgency = cleanJsonString(props["urgency"]);
-    s_certainty = cleanJsonString(props["certainty"]);
-    s_response = cleanJsonString(props["response"]);
-    s_effective = cleanJsonString(props["effective"]);
-    s_expires = cleanJsonString(props["expires"]);
-    s_ends = cleanJsonString(props["ends"]);
-    s_description = cleanJsonString(props["description"]);
-    s_instruction = cleanJsonString(props["instruction"]);
-    if (s_description.length() == 0)
-        s_description = "No description provided.";
-
+    const NwsAlert &a0 = s_alerts[0];
+    s_event = a0.event;
+    s_severity = a0.severity;
+    s_headline = a0.headline;
+    s_areaDesc = a0.areaDesc;
+    s_urgency = a0.urgency;
+    s_expires = a0.expires;
+    s_description = a0.description;
+    s_instruction = a0.instruction;
+    s_certainty = "";
+    s_response = "";
+    s_effective = "";
+    s_ends = "";
     s_hasAlert = true;
     s_screenDirty = true;
 }
@@ -334,6 +392,7 @@ static void handleNoaaPayload(const String &payload)
 static void fetchNoaaAlert()
 {
     s_lastFetchAttempt = millis();
+    stampLastCheckNow();
     bool forced = s_forceImmediateFetch;
     s_forceImmediateFetch = false;
 
@@ -383,6 +442,7 @@ void initNoaaAlerts()
     s_prevEnabled = noaaAlertsEnabled;
     s_screenDirty = true;
     s_hasAlert = false;
+    clearAlertCache();
     clearAlertFields();
     s_lastFetchAttempt = 0;
     s_forceImmediateFetch = noaaAlertsEnabled;
@@ -431,6 +491,7 @@ void notifyNoaaSettingsChanged()
     s_forceImmediateFetch = noaaAlertsEnabled;
     s_screenDirty = true;
     s_hasAlert = false;
+    clearAlertCache();
     clearAlertFields();
     s_lastFetchAttempt = 0;
 }
@@ -445,4 +506,22 @@ uint16_t noaaActiveColor()
     if (!s_hasAlert || !dma_display)
         return 0;
     return severityColor(s_severity);
+}
+
+size_t noaaAlertCount()
+{
+    return s_alertCount;
+}
+
+bool noaaGetAlert(size_t index, NwsAlert &out)
+{
+    if (index >= s_alertCount)
+        return false;
+    out = s_alerts[index];
+    return true;
+}
+
+String noaaLastCheckHHMM()
+{
+    return s_lastCheckHHMM;
 }

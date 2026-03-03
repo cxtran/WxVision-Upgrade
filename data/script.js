@@ -10,6 +10,71 @@ function setMsg(id, text, ok) {
 }
 function pad2(n){ return (n<10?'0':'')+n; }
 
+var pendingDeviceFetches = 0;
+
+function ensureWaitIndicator(){
+  var el = document.getElementById('netWaitIndicator');
+  if (el) return el;
+  el = document.createElement('div');
+  el.id = 'netWaitIndicator';
+  el.className = 'wait-indicator';
+  el.setAttribute('aria-live', 'polite');
+  el.innerHTML = '<span class="spinner" aria-hidden="true"></span><span>Waiting...</span>';
+  document.body.appendChild(el);
+  return el;
+}
+
+function setWaitIndicatorVisible(visible){
+  var el = ensureWaitIndicator();
+  if (!el) return;
+  el.classList.toggle('active', !!visible);
+  if (document.body) {
+    document.body.classList.toggle('is-waiting', !!visible);
+  }
+}
+
+function beginDeviceFetch(){
+  pendingDeviceFetches++;
+  if (pendingDeviceFetches > 0) {
+    setWaitIndicatorVisible(true);
+  }
+}
+
+function endDeviceFetch(){
+  if (pendingDeviceFetches > 0) {
+    pendingDeviceFetches--;
+  }
+  if (pendingDeviceFetches <= 0) {
+    pendingDeviceFetches = 0;
+    setWaitIndicatorVisible(false);
+  }
+}
+
+function shouldTrackDeviceFetch(input){
+  var url = '';
+  if (typeof input === 'string') {
+    url = input;
+  } else if (input && typeof input.url === 'string') {
+    url = input.url;
+  }
+  if (!url) return false;
+  // Track same-origin/device endpoints.
+  return url[0] === '/' || url.indexOf(window.location.origin) === 0;
+}
+
+if (typeof window.fetch === 'function' && !window.__wxvFetchWrapped) {
+  var _nativeFetch = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    var track = shouldTrackDeviceFetch(input);
+    if (track) beginDeviceFetch();
+    return _nativeFetch(input, init)
+      .finally(function(){
+        if (track) endDeviceFetch();
+      });
+  };
+  window.__wxvFetchWrapped = true;
+}
+
 function minutesToTimeString(mins){
   var value = Number(mins);
   if (!isFinite(value)) value = 0;
@@ -114,7 +179,8 @@ function timeStringToMinutes(str, fallback){
   return h * 60 + m;
 }
 
-function sendRemoteCommand(action){
+function sendRemoteCommand(action, attempt){
+  if (attempt === void 0) attempt = 0;
   if (!action) return;
   if (action === 'screen') {
     toggleScreenRemote();
@@ -122,12 +188,21 @@ function sendRemoteCommand(action){
   }
   fetch('/ir?btn=' + encodeURIComponent(action), { cache: 'no-store' })
     .then(function(r){
-      if (!r.ok) throw new Error('Failed');
+      if (!r.ok) {
+        if (r.status === 503) {
+          throw new Error('busy');
+        }
+        throw new Error('Failed');
+      }
     })
     .then(function(){
       setMsg('remoteMsg','Command sent.', true);
     })
-    .catch(function(){
+    .catch(function(err){
+      if (err && err.message === 'busy' && attempt < 1) {
+        setTimeout(function(){ sendRemoteCommand(action, attempt + 1); }, 30);
+        return;
+      }
       setMsg('remoteMsg','Command failed.', false);
     });
 }
@@ -409,8 +484,6 @@ function initWifiScanUI(){
 }
 
 var fullStatusPending = false;
-var fullStatusTimer = null;
-var FULL_STATUS_INTERVAL = 5000;
 
 function formatUptimeLocal(sec){
   sec = Number(sec);
@@ -435,6 +508,12 @@ function renderFullStatus(st){
   var screenLabel = st.screenOff ? "Screen Off" : (st.screenLabel || (st.screen !== undefined ? st.screen : "--"));
   setText("fs-screen", screenLabel);
   setText("fs-uptime", st.uptime || formatUptimeLocal(st.uptimeSec));
+  if (typeof st.locationLat === 'number' && typeof st.locationLon === 'number') {
+    setText("fs-location", st.locationLat.toFixed(4) + ", " + st.locationLon.toFixed(4));
+  } else {
+    setText("fs-location", "--");
+  }
+  setText("fs-weather-updated", st.weatherUpdated || "--");
 
   var heapTotal = st.heapTotal !== undefined ? Number(st.heapTotal) : undefined;
   var heapFree = st.heapFree !== undefined ? Number(st.heapFree) : (st.freeHeap !== undefined ? Number(st.freeHeap) : undefined);
@@ -494,16 +573,19 @@ function loadFullStatus(){
     })
     .finally(function(){
       fullStatusPending = false;
-      if (fullStatusTimer) clearTimeout(fullStatusTimer);
-      fullStatusTimer = setTimeout(loadFullStatus, FULL_STATUS_INTERVAL);
     });
 }
 
 var tzList = [];
+var worldTimeSelectedIds = [];
+var worldTimeCustomCities = [];
 var currentEpoch = 0;
 var tzOffset = 0;
 var tickTimer = null;
 var startMs = Date.now();
+var settingsTabPanels = [];
+var settingsTabButtons = [];
+var activeSettingsTabId = '';
 
 const COUNTRY_OPTIONS = [
   { label: 'Vietnam (VN)', code: 'VN' },
@@ -545,6 +627,86 @@ function applyCountryCustomAvailability() {
   }
 }
 
+function activateSettingsTab(targetId){
+  if (!targetId) return;
+  var panel = document.getElementById(targetId);
+  if (!panel || panel.classList.contains('hidden')) return;
+  activeSettingsTabId = targetId;
+  settingsTabPanels.forEach(function(p){
+    p.classList.toggle('tab-hidden', p.id !== targetId);
+  });
+  settingsTabButtons.forEach(function(btn){
+    var active = btn.getAttribute('data-target') === targetId;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  try { localStorage.setItem('wxv.activeSettingsTab', targetId); } catch (e) {}
+}
+
+function syncSettingsTabsVisibility(){
+  if (!settingsTabButtons.length) return;
+  var firstVisible = '';
+  settingsTabButtons.forEach(function(btn){
+    var targetId = btn.getAttribute('data-target');
+    var panel = document.getElementById(targetId);
+    var unavailable = !panel || panel.classList.contains('hidden');
+    btn.classList.toggle('hidden', unavailable);
+    btn.disabled = unavailable;
+    if (!unavailable && !firstVisible) firstVisible = targetId;
+  });
+  if (activeSettingsTabId) {
+    var activePanel = document.getElementById(activeSettingsTabId);
+    if (activePanel && !activePanel.classList.contains('hidden')) {
+      activateSettingsTab(activeSettingsTabId);
+      return;
+    }
+  }
+  activateSettingsTab(firstVisible);
+}
+
+function initSettingsTabs(){
+  var tabsWrap = document.getElementById('settingsTabs');
+  if (!tabsWrap) return;
+  settingsTabPanels = Array.prototype.filter.call(
+    document.querySelectorAll('main.container > section.card'),
+    function(section){ return !!section; }
+  );
+  if (!settingsTabPanels.length) return;
+
+  tabsWrap.innerHTML = '';
+  settingsTabButtons = [];
+  settingsTabPanels.forEach(function(section, idx){
+    if (!section.id) section.id = 'settings-card-' + idx;
+    section.classList.add('settings-tab-panel');
+    var h2 = section.querySelector('h2');
+    var label = (h2 && h2.textContent) ? h2.textContent.trim() : ('Section ' + (idx + 1));
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'settings-tab-btn';
+    btn.textContent = label;
+    btn.setAttribute('role', 'tab');
+    btn.setAttribute('aria-controls', section.id);
+    btn.setAttribute('data-target', section.id);
+    btn.addEventListener('click', function(){
+      activateSettingsTab(section.id);
+    });
+    tabsWrap.appendChild(btn);
+    settingsTabButtons.push(btn);
+  });
+
+  // Always default Settings page to Device tab when available.
+  activeSettingsTabId = 'card-device';
+  if (!document.getElementById(activeSettingsTabId)) {
+    var preferred = '';
+    try { preferred = localStorage.getItem('wxv.activeSettingsTab') || ''; } catch (e) {}
+    activeSettingsTabId = preferred;
+  }
+  settingsTabPanels.forEach(function(section){
+    section.classList.add('tab-hidden');
+  });
+  syncSettingsTabsVisibility();
+}
+
 function applyDataSourceVisibility() {
   var selectEl = document.getElementById('dataSource');
   if (!selectEl) return;
@@ -552,6 +714,8 @@ function applyDataSourceVisibility() {
   if (!isFinite(value)) value = 0;
   var isOwm = value === 0;
   var isWeatherFlow = value === 1;
+  var isOpenMeteo = value === 3;
+  var isForecastModel = isWeatherFlow || isOpenMeteo;
   var isNone = value === 2;
 
     var owmCard = document.getElementById('card-owmap');
@@ -559,7 +723,7 @@ function applyDataSourceVisibility() {
     var wfCard = document.getElementById('card-tempest');
     if (wfCard) wfCard.classList.toggle('hidden', !isWeatherFlow);
     var forecastUiCard = document.getElementById('card-forecastui');
-    if (forecastUiCard) forecastUiCard.classList.toggle('hidden', !isWeatherFlow);
+    if (forecastUiCard) forecastUiCard.classList.toggle('hidden', !isForecastModel);
 
   var toggleDisable = function(selector, disabled) {
     var nodes = document.querySelectorAll(selector);
@@ -570,11 +734,12 @@ function applyDataSourceVisibility() {
 
     toggleDisable('#card-owmap input, #card-owmap select, #card-owmap button', !isOwm);
     toggleDisable('#card-tempest input, #card-tempest select, #card-tempest button', !isWeatherFlow);
-    toggleDisable('#card-forecastui input, #card-forecastui select, #card-forecastui button', !isWeatherFlow);
+    toggleDisable('#card-forecastui input, #card-forecastui select, #card-forecastui button', !isForecastModel);
 
   if (isOwm) {
     applyCountryCustomAvailability();
   }
+  syncSettingsTabsVisibility();
 }
 
 function fmtUtc(offsetMin){
@@ -679,25 +844,6 @@ function applyAutoDstAvailability(){
 }
 
 var indexStatusPending = false;
-var indexStatusTimer = null;
-var INDEX_REFRESH_VISIBLE_MS = 5000;
-var INDEX_REFRESH_HIDDEN_MS = 15000;
-
-function getIndexRefreshDelay(){
-  return document.hidden ? INDEX_REFRESH_HIDDEN_MS : INDEX_REFRESH_VISIBLE_MS;
-}
-
-function scheduleIndexStatusRefresh(delayMs){
-  if (indexStatusTimer) {
-    clearTimeout(indexStatusTimer);
-    indexStatusTimer = null;
-  }
-  var wait = (typeof delayMs === 'number') ? delayMs : getIndexRefreshDelay();
-  indexStatusTimer = setTimeout(function(){
-    loadIndexStatus();
-    scheduleIndexStatusRefresh();
-  }, wait);
-}
 
 function loadIndexStatus(){
   if (indexStatusPending) return;
@@ -719,6 +865,16 @@ function loadIndexStatus(){
         if (el) el.innerText = formatHumidityValue(st.humidity);
       el = document.getElementById('st-time');
       if (el) el.innerText = st.time || '--';
+      el = document.getElementById('st-loc');
+      if (el) {
+        if (typeof st.locationLat === 'number' && typeof st.locationLon === 'number') {
+          el.innerText = st.locationLat.toFixed(4) + ', ' + st.locationLon.toFixed(4);
+        } else {
+          el.innerText = '--';
+        }
+      }
+      el = document.getElementById('st-updated');
+      if (el) el.innerText = st.weatherUpdated || '--';
       var tzEl = document.getElementById('st-tz');
       if (tzEl) {
         var name = st.tzLabel || st.tzName || '';
@@ -737,15 +893,18 @@ function loadAll(){
   Promise.all([
     fetch('/settings.json').then(function(r){return r.json();}),
     fetch('/time.json').then(function(r){return r.json();}).catch(function(){return {epoch:0,tzOffset:0,tzName:'Custom',dateFmt:0,ntpServer:'pool.ntp.org'};}),
-    fetch('/timezones.json').then(function(r){return r.json();}).catch(function(){return [];})
+    fetch('/timezones.json').then(function(r){return r.json();}).catch(function(){return [];}),
+    fetch('/worldtime.json').then(function(r){return r.json();}).catch(function(){return {ids:[]};})
   ])
   .then(function(results){
-    var s = results[0], t = results[1];
+    var s = results[0], t = results[1], wt = results[3] || {ids:[]};
     tzList = (results[2] || []).map(function(item){
       if (!item) return item;
       item.supportsDst = !!item.supportsDst;
       return item;
     });
+    populateWorldCustomTzSelect();
+    renderWorldTimeSettings(wt);
 
     var wifiSSIDEl = document.getElementById('wifiSSID');
     if (wifiSSIDEl) wifiSSIDEl.value = s.wifiSSID || '';
@@ -760,7 +919,7 @@ function loadAll(){
         : (typeof s.forecastSrc !== 'undefined' ? s.forecastSrc : 0);
       dsValue = parseInt(dsValue, 10);
       if (!isFinite(dsValue)) dsValue = 0;
-      if (dsValue < 0 || dsValue > 2) dsValue = 0;
+      if (dsValue < 0 || dsValue > 3) dsValue = 0;
       dataSourceEl.value = String(dsValue);
       applyDataSourceVisibility();
     }
@@ -904,9 +1063,9 @@ function loadAll(){
     if (s.noaa) {
       var nEn = document.getElementById('noaaEnabled');
       if (nEn) nEn.value = s.noaa.enabled ? '1' : '0';
-      var nLat = document.getElementById('noaaLat');
+      var nLat = document.getElementById('deviceLat');
       if (nLat) nLat.value = (typeof s.noaa.lat === 'number') ? s.noaa.lat : 0;
-      var nLon = document.getElementById('noaaLon');
+      var nLon = document.getElementById('deviceLon');
       if (nLon) nLon.value = (typeof s.noaa.lon === 'number') ? s.noaa.lon : 0;
     }
 
@@ -948,9 +1107,6 @@ function loadAll(){
     if (tickTimer) clearInterval(tickTimer);
     tickTimer = setInterval(renderClock, 1000);
     renderClock();
-
-    // Refresh lux from status shortly after load to display live value
-    setTimeout(refreshCurrentLuxFromStatus, 1000);
 
     // OTA upload handler
     var otaBtn = document.getElementById('btnUploadOta');
@@ -1072,7 +1228,7 @@ function readSettingsForm() {
     dataSource:  (function(){
       var val = parseInt(byId('dataSource')?.value, 10);
       if (!isFinite(val)) val = 0;
-      if (val < 0 || val > 2) val = 0;
+      if (val < 0 || val > 3) val = 0;
       return val;
     })(),
     autoRotate:  +(byId('autoRotate')?.value ?? 1),
@@ -1127,8 +1283,8 @@ function readSettingsForm() {
     }),
       noaa: {
         enabled: +(byId('noaaEnabled')?.value ?? 0) === 1,
-        lat: parseFloat(byId('noaaLat')?.value ?? 0) || 0,
-        lon: parseFloat(byId('noaaLon')?.value ?? 0) || 0
+        lat: parseFloat(byId('deviceLat')?.value ?? 0) || 0,
+        lon: parseFloat(byId('deviceLon')?.value ?? 0) || 0
       },
       forecastUi: {
         linesPerDay: (function(){
@@ -1266,11 +1422,19 @@ async function saveAlarmSettingsWeb(event){
 }
 
 async function saveNoaaSettingsWeb(event){
-    if (event && typeof event.preventDefault === 'function') {
-      event.preventDefault();
-    }
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
   const payload = pickSettings(readSettingsForm(), ['noaa']);
   await submitSettings(payload, 'saveNoaaMsg');
+}
+
+async function saveLocationSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  const payload = pickSettings(readSettingsForm(), ['noaa']);
+  await submitSettings(payload, 'saveLocationMsg');
 }
 
 async function saveForecastUiSettingsWeb(event){
@@ -1279,6 +1443,267 @@ async function saveForecastUiSettingsWeb(event){
   }
   const payload = pickSettings(readSettingsForm(), ['forecastUi']);
   await submitSettings(payload, 'saveForecastUiMsg');
+}
+
+async function saveWorldTimeSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  var checked = Array.prototype.map.call(
+    document.querySelectorAll('input[name="worldTimeTz"]:checked'),
+    function(el){ return (el && el.value) ? String(el.value) : ''; }
+  ).filter(function(v){ return v.length > 0; });
+  var customPayload = (worldTimeCustomCities || []).map(function(c){
+    return {
+      name: c && c.name ? String(c.name) : '',
+      lat: Number(c && c.lat),
+      lon: Number(c && c.lon),
+      tzId: c && c.tzId ? String(c.tzId) : '',
+      enabled: !(c && c.enabled === false)
+    };
+  });
+
+  try {
+    var autoCycleEl = document.getElementById('worldTimeAutoCycle');
+    var autoCycle = autoCycleEl ? (parseInt(autoCycleEl.value, 10) === 1) : true;
+    const res = await fetch('/worldtime', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        ids: checked,
+        autoCycle: autoCycle,
+        customCities: customPayload
+      })
+    });
+    if (!res.ok) {
+      setMsg('saveWorldTimeMsg', 'Save failed.', false);
+      return;
+    }
+    setMsg('saveWorldTimeMsg', 'Saved.', true);
+    loadAll();
+  } catch (err) {
+    setMsg('saveWorldTimeMsg', 'Network error', false);
+  }
+}
+
+function clearWorldTimeSettingsWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  document.querySelectorAll('input[name="worldTimeTz"]').forEach(function(el){
+    el.checked = false;
+  });
+  worldTimeCustomCities = worldTimeCustomCities.map(function(c){
+    c.enabled = false;
+    return c;
+  });
+  renderWorldTimeItems();
+  updateWorldTimeSelectedCount();
+}
+
+function populateWorldCustomTzSelect(){
+  var sel = document.getElementById('worldCustomTz');
+  if (!sel) return;
+  sel.innerHTML = '';
+  if (!Array.isArray(tzList) || tzList.length === 0) {
+    var opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = 'No timezone list';
+    sel.appendChild(opt);
+    return;
+  }
+  tzList.forEach(function(z){
+    var opt = document.createElement('option');
+    opt.value = z.id || '';
+    opt.textContent = z.label || z.city || z.id || '--';
+    sel.appendChild(opt);
+  });
+}
+
+function renderWorldTimeItems(){
+  var listEl = document.getElementById('worldTimeItems');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+
+  if (!Array.isArray(tzList) || tzList.length === 0) {
+    var empty = document.createElement('li');
+    empty.className = 'wifi-scan-empty';
+    empty.textContent = 'No timezone list available.';
+    listEl.appendChild(empty);
+    updateWorldTimeSelectedCount();
+    return;
+  }
+
+  var selectedSet = new Set((worldTimeSelectedIds || []).map(function(v){ return String(v); }));
+
+  tzList.forEach(function(z, idx){
+    var li = document.createElement('li');
+    var id = 'wt-' + idx;
+    var checked = selectedSet.has(String(z.id || ''));
+    var label = z.label || z.city || z.id || '--';
+    li.innerHTML =
+      '<label for="' + id + '" style="display:flex;align-items:center;gap:8px;width:100%;">' +
+      '<input type="checkbox" id="' + id + '" name="worldTimeTz" value="' + (z.id || '') + '"' + (checked ? ' checked' : '') + '>' +
+      '<span>' + label + '</span>' +
+      '</label>';
+    listEl.appendChild(li);
+  });
+
+  if (!Array.isArray(worldTimeCustomCities)) worldTimeCustomCities = [];
+  worldTimeCustomCities.forEach(function(c, idx){
+    var li = document.createElement('li');
+    var id = 'wtc-' + idx;
+    var tzLabel = c.tzLabel || c.tzId || '--';
+    var lat = Number(c.lat);
+    var lon = Number(c.lon);
+    var latTxt = isFinite(lat) ? lat.toFixed(4) : '--';
+    var lonTxt = isFinite(lon) ? lon.toFixed(4) : '--';
+    var checked = !!c.enabled;
+    li.innerHTML =
+      '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;width:100%;">' +
+      '<label for="' + id + '" style="display:flex;align-items:center;gap:8px;flex:1;">' +
+      '<input type="checkbox" id="' + id + '" name="worldTimeCustom" data-world-custom-index="' + idx + '"' + (checked ? ' checked' : '') + '>' +
+      '<span>' + (c.name || 'Custom City') + ' • ' + tzLabel + ' • ' + latTxt + ', ' + lonTxt + '</span>' +
+      '</label>' +
+      '<button class="btn ghost" data-world-custom-rm="' + idx + '">Remove</button>' +
+      '</div>';
+    listEl.appendChild(li);
+  });
+
+  listEl.querySelectorAll('input[name="worldTimeTz"]').forEach(function(el){
+    el.addEventListener('change', updateWorldTimeSelectedCount);
+  });
+  listEl.querySelectorAll('input[name="worldTimeCustom"]').forEach(function(el){
+    el.addEventListener('change', function(){
+      var idx = parseInt(el.getAttribute('data-world-custom-index'), 10);
+      if (!isFinite(idx) || idx < 0 || idx >= worldTimeCustomCities.length) return;
+      worldTimeCustomCities[idx].enabled = !!el.checked;
+      updateWorldTimeSelectedCount();
+    });
+  });
+  listEl.querySelectorAll('button[data-world-custom-rm]').forEach(function(btn){
+    btn.addEventListener('click', function(e){
+      e.preventDefault();
+      var idx = parseInt(btn.getAttribute('data-world-custom-rm'), 10);
+      if (!isFinite(idx)) return;
+      if (idx < 0 || idx >= worldTimeCustomCities.length) return;
+      worldTimeCustomCities.splice(idx, 1);
+      renderWorldTimeItems();
+      updateWorldTimeSelectedCount();
+    });
+  });
+
+  updateWorldTimeSelectedCount();
+}
+
+function renderWorldCustomCities(){
+  var listEl = document.getElementById('worldCustomItems');
+  if (!listEl) return;
+  renderWorldTimeItems();
+}
+
+function addWorldCustomCityWeb(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  var nameEl = document.getElementById('worldCustomName');
+  var latEl = document.getElementById('worldCustomLat');
+  var lonEl = document.getElementById('worldCustomLon');
+  var tzEl = document.getElementById('worldCustomTz');
+  var name = (nameEl && nameEl.value ? nameEl.value : '').trim();
+  var lat = parseFloat(latEl && latEl.value);
+  var lon = parseFloat(lonEl && lonEl.value);
+  var tzId = (tzEl && tzEl.value) ? String(tzEl.value) : '';
+
+  if (!name) {
+    setMsg('saveWorldTimeMsg', 'Custom city name required.', false);
+    return;
+  }
+  if (!isFinite(lat) || lat < -90 || lat > 90 || !isFinite(lon) || lon < -180 || lon > 180) {
+    setMsg('saveWorldTimeMsg', 'Invalid lat/lon.', false);
+    return;
+  }
+  if (!tzId) {
+    setMsg('saveWorldTimeMsg', 'Timezone required.', false);
+    return;
+  }
+
+  var tzLabel = '';
+  for (var i = 0; i < tzList.length; i++) {
+    if ((tzList[i].id || '') === tzId) {
+      tzLabel = tzList[i].label || tzList[i].city || tzId;
+      break;
+    }
+  }
+  worldTimeCustomCities.push({
+    name: name,
+    lat: lat,
+    lon: lon,
+    tzId: tzId,
+    tzLabel: tzLabel,
+    enabled: true
+  });
+  if (nameEl) nameEl.value = '';
+  if (latEl) latEl.value = '';
+  if (lonEl) lonEl.value = '';
+  renderWorldTimeItems();
+}
+
+async function runSystemAction(action, msgId){
+  if (!action) return false;
+  try {
+    const res = await fetch('/action/' + encodeURIComponent(action), { method: 'POST' });
+    let body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (!res.ok || (body && body.ok === false)) {
+      const errMsg = (body && body.error) ? body.error : 'Action failed.';
+      setMsg(msgId, errMsg, false);
+      return false;
+    }
+    const doneMsg = (body && body.message) ? body.message : 'Action started.';
+    setMsg(msgId, doneMsg, true);
+    if (action === 'reboot') {
+      setTimeout(function(){ window.location.reload(); }, 3000);
+    }
+    return true;
+  } catch (err) {
+    setMsg(msgId, 'Network error', false);
+    return false;
+  }
+}
+
+function updateWorldTimeSelectedCount(){
+  var countEl = document.getElementById('worldTimeSelectedCount');
+  if (!countEl) return;
+  var checkedBuiltIn = document.querySelectorAll('input[name="worldTimeTz"]:checked').length;
+  var checkedCustom = document.querySelectorAll('input[name="worldTimeCustom"]:checked').length;
+  countEl.textContent = 'Selected: ' + (checkedBuiltIn + checkedCustom);
+}
+
+function renderWorldTimeSettings(worldTimeData){
+  var selectedSet = new Set();
+  if (worldTimeData && Array.isArray(worldTimeData.ids)) {
+    worldTimeData.ids.forEach(function(id){
+      if (id) selectedSet.add(String(id));
+    });
+  }
+  worldTimeSelectedIds = Array.from(selectedSet);
+  worldTimeCustomCities = Array.isArray(worldTimeData && worldTimeData.customCities) ? worldTimeData.customCities.map(function(c){
+    return {
+      name: c && c.name ? String(c.name) : '',
+      lat: (c && typeof c.lat !== 'undefined') ? Number(c.lat) : NaN,
+      lon: (c && typeof c.lon !== 'undefined') ? Number(c.lon) : NaN,
+      tzId: c && c.tzId ? String(c.tzId) : '',
+      tzLabel: c && c.tzLabel ? String(c.tzLabel) : '',
+      enabled: c && c.enabled === false ? false : true
+    };
+  }) : [];
+  var autoCycleEl = document.getElementById('worldTimeAutoCycle');
+  if (autoCycleEl) {
+    autoCycleEl.value = (worldTimeData && worldTimeData.autoCycle === false) ? '0' : '1';
+  }
+  populateWorldCustomTzSelect();
+  renderWorldTimeItems();
 }
 
 function formatLocalTime(epochSec, offsetMinutes){
@@ -1348,6 +1773,7 @@ function syncNTP(){
 
 window.addEventListener('load', function(){
   if (document.getElementById('btnSaveAll')) {
+    initSettingsTabs();
     loadAll();
     var btn = document.getElementById('btnSaveAll');
     if (btn) btn.addEventListener('click', saveAllSettings);
@@ -1367,8 +1793,30 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', saveAlarmSettingsWeb);
     btn = document.getElementById('btnSaveNoaa');
     if (btn) btn.addEventListener('click', saveNoaaSettingsWeb);
+    btn = document.getElementById('btnSaveLocation');
+    if (btn) btn.addEventListener('click', saveLocationSettingsWeb);
     btn = document.getElementById('btnSaveForecastUi');
     if (btn) btn.addEventListener('click', saveForecastUiSettingsWeb);
+    btn = document.getElementById('btnSaveWorldTime');
+    if (btn) btn.addEventListener('click', saveWorldTimeSettingsWeb);
+    btn = document.getElementById('btnClearWorldTime');
+    if (btn) btn.addEventListener('click', clearWorldTimeSettingsWeb);
+    btn = document.getElementById('btnAddWorldCustom');
+    if (btn) btn.addEventListener('click', addWorldCustomCityWeb);
+    btn = document.getElementById('btnActionWifiSignal');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('wifi-signal-test', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionPreviewScreens');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('preview-screens', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionLearnRemote');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('learn-remote', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionClearRemote');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('clear-learned-remote', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionQuickRestore');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('quick-restore', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionFactoryReset');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('factory-reset', 'systemActionMsg'); });
+    btn = document.getElementById('btnActionReboot');
+    if (btn) btn.addEventListener('click', function(){ runSystemAction('reboot', 'systemActionMsg'); });
     var clockFormatEl = document.getElementById('uClock');
     if (clockFormatEl) clockFormatEl.addEventListener('change', function(){
       applyAlarmHourFormat(isClock24Selected());
@@ -1401,17 +1849,6 @@ window.addEventListener('load', function(){
   }
   loadIndexStatus();
   setupRemoteControls();
-  scheduleIndexStatusRefresh();
-});
-
-document.addEventListener('visibilitychange', function(){
-  if (!document.getElementById('st-ssid')) {
-    return;
-  }
-  if (!document.hidden) {
-    loadIndexStatus();
-  }
-  scheduleIndexStatusRefresh();
 });
 
 

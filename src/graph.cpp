@@ -4,14 +4,14 @@
 #include <math.h>
 #include <float.h>
 #include <time.h>
-#include <functional>
 #include "datalogger.h"
 #include "display.h"
 #include "InfoModal.h"
 #include "units.h"
 #include "settings.h"
 #include "ScrollLine.h"
-#include "RollingUpScreen.h"
+#include "fonts/verdanab8pt7b.h"
+#include "ui_theme.h"
 
 extern int theme;
 
@@ -79,13 +79,114 @@ static uint32_t midnightFor(uint32_t ts)
     return ts - (ts % 86400UL);
 }
 
+// Rolling 24-hour window start anchored at the most recent sample time.
+static uint32_t windowStartForLast24h(uint32_t lastTs)
+{
+    return (lastTs > 86400UL) ? (lastTs - 86400UL) : 0UL;
+}
+
 static ScrollLine s_tempScroll(PANEL_RES_X, 60);
 static ScrollLine s_co2Scroll(PANEL_RES_X, 60);
 static ScrollLine s_humScroll(PANEL_RES_X, 60);
 static ScrollLine s_baroScroll(PANEL_RES_X, 60);
-static std::vector<String> s_predictLines;
-static RollingUpScreen s_predictRoll(PANEL_RES_X, PANEL_RES_Y - 9, 8);
-static std::vector<int> s_predictOffsets;
+
+enum class PredictPageId : uint8_t
+{
+    Outlook = 0,
+    Temp,
+    Humid,
+    Press,
+    Air,
+    Summary,
+    Count
+};
+
+struct PredictPage
+{
+    PredictPageId id;
+    const char *title;
+    char big[24];
+    char meaning[96];
+    int8_t trendDir = 0;     // -1 down, 0 right, +1 up
+    uint8_t trendArrows = 0; // 0 none, 1 normal, 2 fast
+};
+
+struct PredictSnapshot
+{
+    bool ready = false;
+    bool hasCo2 = false;
+    int signalPercent = 0;
+    char outlook[16] = "STEADY";
+    char reason[64] = "Pressure steady, humidity steady, temperature steady";
+
+    char tempBig[24] = "--";
+    char tempRange[24] = "24H --/--";
+    char tempHint[12] = "STABLE";
+
+    char humBig[24] = "--";
+    char humRange[24] = "24H --/--";
+    char humHint[12] = "STABLE";
+
+    char pressBig[24] = "--";
+    char pressRange[24] = "24H --/--";
+    char pressHint[12] = "STABLE";
+
+    char airBig[24] = "--";
+    char airRange[24] = "24H --/--";
+    char airHint[12] = "OK";
+
+    char summaryBig[24] = "STEADY";
+    char summaryLine[96] = "Temperature steady, humidity steady, pressure steady";
+};
+
+static PredictSnapshot s_predictSnapshot;
+static PredictPage s_predictPages[static_cast<size_t>(PredictPageId::Count)];
+static uint8_t s_predictPageCount = 0;
+static uint8_t s_predictPageIndex = 0;
+static unsigned long s_predictLastSwitchMs = 0;
+static unsigned long s_predictManualHoldUntilMs = 0;
+static bool s_predictTransitionActive = false;
+static unsigned long s_predictTransitionStartMs = 0;
+static constexpr unsigned long kPredictPageAutoMs = 4200UL;
+static constexpr unsigned long kPredictManualHoldMs = 5000UL;
+static constexpr unsigned long kPredictTransitionMs = 180UL;
+static constexpr unsigned long kPredictMeaningStepMs = 45UL;
+static constexpr int kPredictMeaningGapPx = 12;
+static bool s_predictMeaningCycleDone = false;
+static bool s_predictMeaningNeedsScroll = false;
+static int s_predictMeaningOffsetPx = 0;
+static int s_predictMeaningWidthPx = 0;
+static unsigned long s_predictMeaningLastStepMs = 0;
+static uint8_t s_predictMeaningPageIndex = 255;
+
+static const ScreenMode kHistory24Pages[] = {
+    SCREEN_TEMP_HISTORY,
+    SCREEN_HUM_HISTORY,
+    SCREEN_CO2_HISTORY,
+    SCREEN_BARO_HISTORY};
+static constexpr uint8_t kHistory24PageCount = sizeof(kHistory24Pages) / sizeof(kHistory24Pages[0]);
+static uint8_t s_history24PageIndex = 0;
+static unsigned long s_history24LastSwitchMs = 0;
+static unsigned long s_history24ManualHoldUntilMs = 0;
+static bool s_history24WaitForMarqueeCycle = false;
+static int8_t s_history24ArmedPageIndex = -1;
+
+static ScrollLine *scrollFor24HourPage(ScreenMode mode)
+{
+    switch (mode)
+    {
+    case SCREEN_TEMP_HISTORY:
+        return &s_tempScroll;
+    case SCREEN_HUM_HISTORY:
+        return &s_humScroll;
+    case SCREEN_CO2_HISTORY:
+        return &s_co2Scroll;
+    case SCREEN_BARO_HISTORY:
+        return &s_baroScroll;
+    default:
+        return nullptr;
+    }
+}
 
 String formatTempShort(float tempC, uint8_t decimals)
 {
@@ -164,51 +265,6 @@ String formatHumDelta(double delta)
     return out;
 }
 
-static std::vector<String> wrapLines(const String &text, int maxWidthPx)
-{
-    std::vector<String> lines;
-    String current = "";
-    int currentW = 0;
-    int spaceW = getTextWidth(" ");
-    int maxChars = maxWidthPx / 6;
-    if (maxChars < 4) maxChars = 4;
-
-    int idx = 0;
-    while (idx < text.length())
-    {
-        int nextSpace = text.indexOf(' ', idx);
-        if (nextSpace < 0) nextSpace = text.length();
-        String word = text.substring(idx, nextSpace);
-        int wordW = getTextWidth(word.c_str());
-        if (current.length() == 0)
-        {
-            if (word.length() > maxChars)
-            {
-                lines.push_back(word);
-                idx = nextSpace + 1;
-                continue;
-            }
-            current = word;
-            currentW = wordW;
-        }
-        else if (currentW + spaceW + wordW <= maxWidthPx)
-        {
-            current += " " + word;
-            currentW += spaceW + wordW;
-        }
-        else
-        {
-            lines.push_back(current);
-            current = word;
-            currentW = wordW;
-        }
-        idx = nextSpace + 1;
-    }
-    if (current.length() > 0)
-        lines.push_back(current);
-    return lines;
-}
-
 Point mapSampleToPoint(uint32_t ts, uint32_t dayStart, float value, float minVal, float maxVal,
                        int graphLeft, int graphWidth, int graphTop, int graphHeight)
 {
@@ -218,7 +274,7 @@ Point mapSampleToPoint(uint32_t ts, uint32_t dayStart, float value, float minVal
     if (range < 0.1f)
         range = 0.1f;
 
-    // Position along 0..24h day (seconds 0..86400)
+    // Position along rolling 24-hour window (seconds 0..86400)
     float frac = 0.0f;
     if (ts > dayStart)
     {
@@ -268,6 +324,376 @@ void drawXAxisTicks(int graphLeft, int graphWidth, int yBase, uint16_t morningCo
         dma_display->drawPixel(x, yBase, c);
     }
 }
+
+void drawChartScaffold(int graphLeft, int graphTop, int graphWidth, int graphHeight, uint16_t frameColor, uint16_t gridColor)
+{
+    if (graphWidth < 2 || graphHeight < 2)
+        return;
+
+    const bool mono = (theme == 1);
+    // Match Lunar title divider dim tone.
+    const uint16_t bottomBorderColor = mono ? dma_display->color565(80, 80, 90)
+                                            : dma_display->color565(55, 80, 120);
+
+    // Frame without top edge: keep sides + bottom only.
+    dma_display->drawFastVLine(graphLeft - 1, graphTop - 1, graphHeight + 2, frameColor);
+    dma_display->drawFastVLine(graphLeft + graphWidth, graphTop - 1, graphHeight + 2, frameColor);
+    dma_display->drawFastHLine(graphLeft - 1, graphTop + graphHeight, graphWidth + 2, bottomBorderColor);
+
+    // Lightweight quarter-step guides improve readability without visual clutter.
+    for (int i = 1; i <= 3; ++i)
+    {
+        int y = graphTop + (graphHeight * i) / 4;
+        dma_display->drawFastHLine(graphLeft, y, graphWidth, gridColor);
+    }
+    for (int i = 1; i <= 3; ++i)
+    {
+        int x = graphLeft + (graphWidth * i) / 4;
+        dma_display->drawFastVLine(x, graphTop, graphHeight, gridColor);
+    }
+}
+
+void draw24HourSectionPageBar(uint8_t activePage)
+{
+    (void)activePage;
+    // Page indicator intentionally disabled.
+}
+
+static void resetPredictMeaningScroll(unsigned long nowMs)
+{
+    s_predictMeaningOffsetPx = 0;
+    s_predictMeaningWidthPx = 0;
+    s_predictMeaningLastStepMs = nowMs;
+    s_predictMeaningPageIndex = 255;
+    s_predictMeaningCycleDone = false;
+    s_predictMeaningNeedsScroll = false;
+}
+
+static void onPredictPageChanged(unsigned long nowMs)
+{
+    s_predictLastSwitchMs = nowMs;
+    s_predictTransitionActive = true;
+    s_predictTransitionStartMs = nowMs;
+    resetPredictMeaningScroll(nowMs);
+}
+
+static void renderPredictPage(unsigned long nowMs)
+{
+    if (!dma_display || !s_predictSnapshot.ready || s_predictPageCount == 0)
+        return;
+
+    const bool mono = (theme == 1);
+    const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
+    const uint16_t bigColor = mono ? dma_display->color565(220, 220, 120) : dma_display->color565(255, 240, 140);
+    const uint16_t bodyColor = mono ? ui_theme::monoBodyText() : dma_display->color565(120, 200, 255);
+    dma_display->fillScreen(0);
+    dma_display->fillRect(0, 0, PANEL_RES_X, 8, headerBg);
+
+    const PredictPage &page = s_predictPages[s_predictPageIndex];
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    int16_t tx1, ty1;
+    uint16_t tw, th;
+    dma_display->getTextBounds(page.title, 0, 0, &tx1, &ty1, &tw, &th);
+    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
+    if (titleX < 0) titleX = 0;
+    dma_display->setTextColor(headerFg, headerBg);
+    dma_display->setCursor(titleX, 0);
+    dma_display->print(page.title);
+
+    auto drawTrendArrowLikeMenu = [&](int x, int y, uint16_t color, int8_t dir) {
+        // Menu back-arrow rotated 90deg (up direction)
+        if (dir > 0)
+        {
+            // Up
+            dma_display->drawLine(x + 3, y + 1, x + 1, y + 3, color);
+            dma_display->drawLine(x + 3, y + 1, x + 5, y + 3, color);
+            dma_display->drawLine(x + 3, y + 1, x + 3, y + 7, color);
+        }
+        else if (dir < 0)
+        {
+            // Down
+            dma_display->drawLine(x + 3, y + 7, x + 1, y + 5, color);
+            dma_display->drawLine(x + 3, y + 7, x + 5, y + 5, color);
+            dma_display->drawLine(x + 3, y + 1, x + 3, y + 7, color);
+        }
+        else
+        {
+            // Right
+            dma_display->drawLine(x + 7, y + 3, x + 5, y + 1, color);
+            dma_display->drawLine(x + 7, y + 3, x + 5, y + 5, color);
+            dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color);
+        }
+    };
+
+    // Big text: same font style used by clock main digits, fitted into 64x16 area.
+    // Center big value in the area between title bar (y:0-7) and footer line (y:25).
+    const int bigAreaTop = 9;
+    const int bigAreaH = 16; // y:9..24
+    const int arrowStride = 9;
+    const int arrowBlockW = (page.trendArrows > 0) ? static_cast<int>(page.trendArrows) * arrowStride : 0;
+
+    dma_display->setFont(&verdanab8pt7b);
+    dma_display->setTextSize(1);
+
+    int bigX = 0;
+    int bigY = 0;
+    int textDrawW = 0;
+
+    if (page.id == PredictPageId::Air && strncmp(page.big, "CO2 ", 4) == 0)
+    {
+        const char *valueText = page.big + 4; // after "CO2 "
+
+        int16_t valX1, valY1;
+        uint16_t valW, valH;
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(valueText, 0, 0, &valX1, &valY1, &valW, &valH);
+
+        // Small CO2 label at requested position inside content section.
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(bigColor);
+        dma_display->setCursor(16, bigAreaTop + 0);
+        dma_display->print("CO2");
+
+        // Center CO2 value in big-font area.
+        textDrawW = static_cast<int>(valW);
+        bigX = (PANEL_RES_X - (textDrawW + arrowBlockW)) / 2 - valX1;
+        if (bigX < 0) bigX = 0;
+        bigY = bigAreaTop + (bigAreaH - static_cast<int>(valH)) / 2 - valY1;
+
+        dma_display->setTextColor(bigColor);
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->setCursor(bigX, bigY);
+        dma_display->print(valueText);
+    }
+    else if (page.id == PredictPageId::Temp)
+    {
+        char valueText[16] = {0};
+        char unitChar = (units.temp == TempUnit::F) ? 'F' : 'C';
+        size_t widx = 0;
+        for (const char *p = page.big; *p && widx < sizeof(valueText) - 1; ++p)
+        {
+            if ((*p >= '0' && *p <= '9') || *p == '-' || *p == '+')
+            {
+                valueText[widx++] = *p;
+            }
+            else if (*p == 'C' || *p == 'F')
+            {
+                unitChar = *p;
+            }
+        }
+        valueText[widx] = '\0';
+        if (widx == 0)
+        {
+            strncpy(valueText, "--", sizeof(valueText) - 1);
+            valueText[sizeof(valueText) - 1] = '\0';
+        }
+
+        int16_t valX1, valY1;
+        uint16_t valW, valH;
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(valueText, 0, 0, &valX1, &valY1, &valW, &valH);
+
+        char unitText[4] = {'\xB0', unitChar, '\0'};
+        int16_t unitX1, unitY1;
+        uint16_t unitW, unitH;
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(unitText, 0, 0, &unitX1, &unitY1, &unitW, &unitH);
+
+        const int unitGap = 1;
+        textDrawW = static_cast<int>(valW) + unitGap + static_cast<int>(unitW);
+        bigX = (PANEL_RES_X - (textDrawW + arrowBlockW)) / 2 - valX1;
+        if (bigX < 0)
+            bigX = 0;
+        bigY = bigAreaTop + (bigAreaH - static_cast<int>(valH)) / 2 - valY1;
+
+        dma_display->setTextColor(bigColor);
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->setCursor(bigX, bigY);
+        dma_display->print(valueText);
+
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->setCursor(bigX + static_cast<int>(valW) + unitGap, bigAreaTop + 2);
+        dma_display->print(unitText);
+    }
+    else if (page.id == PredictPageId::Humid)
+    {
+        char valueText[16] = {0};
+        size_t widx = 0;
+        bool hasPercent = false;
+        for (const char *p = page.big; *p && widx < sizeof(valueText) - 1; ++p)
+        {
+            if ((*p >= '0' && *p <= '9') || *p == '-' || *p == '+')
+            {
+                valueText[widx++] = *p;
+            }
+            else if (*p == '%')
+            {
+                hasPercent = true;
+            }
+        }
+        valueText[widx] = '\0';
+        if (widx == 0)
+        {
+            strncpy(valueText, "--", sizeof(valueText) - 1);
+            valueText[sizeof(valueText) - 1] = '\0';
+        }
+
+        int16_t valX1, valY1;
+        uint16_t valW, valH;
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(valueText, 0, 0, &valX1, &valY1, &valW, &valH);
+
+        const char *unitText = hasPercent ? "%" : "";
+        int16_t unitX1, unitY1;
+        uint16_t unitW, unitH;
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(unitText, 0, 0, &unitX1, &unitY1, &unitW, &unitH);
+
+        const int unitGap = hasPercent ? 1 : 0;
+        textDrawW = static_cast<int>(valW) + unitGap + static_cast<int>(unitW);
+        bigX = (PANEL_RES_X - (textDrawW + arrowBlockW)) / 2 - valX1;
+        if (bigX < 0)
+            bigX = 0;
+        bigY = bigAreaTop + (bigAreaH - static_cast<int>(valH)) / 2 - valY1;
+
+        dma_display->setTextColor(bigColor);
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->setCursor(bigX, bigY);
+        dma_display->print(valueText);
+
+        if (hasPercent)
+        {
+            dma_display->setFont(&Font5x7Uts);
+            dma_display->setTextSize(1);
+            dma_display->setCursor(bigX + static_cast<int>(valW) + unitGap + 2, bigAreaTop + 2);
+            dma_display->print(unitText);
+        }
+    }
+    else
+    {
+        // Auto-fit textual headlines: use big font when it fits, fallback to 5x7 for long words.
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->getTextBounds(page.big, 0, 0, &tx1, &ty1, &tw, &th);
+        int bigFontW = static_cast<int>(tw);
+        int bigFontH = static_cast<int>(th);
+        const bool fitsBig = (bigFontW + arrowBlockW) <= PANEL_RES_X;
+
+        if (fitsBig)
+        {
+            textDrawW = bigFontW;
+            bigX = (PANEL_RES_X - (textDrawW + arrowBlockW)) / 2 - tx1;
+            if (bigX < 0) bigX = 0;
+            bigY = bigAreaTop + (bigAreaH - bigFontH) / 2 - ty1;
+            dma_display->setTextColor(bigColor);
+            dma_display->setCursor(bigX, bigY);
+            dma_display->print(page.big);
+        }
+        else
+        {
+            dma_display->setFont(&Font5x7Uts);
+            dma_display->setTextSize(1);
+            dma_display->getTextBounds(page.big, 0, 0, &tx1, &ty1, &tw, &th);
+            textDrawW = static_cast<int>(tw);
+            bigX = (PANEL_RES_X - (textDrawW + arrowBlockW)) / 2 - tx1;
+            if (bigX < 0) bigX = 0;
+            bigY = bigAreaTop + (bigAreaH - static_cast<int>(th)) / 2 - ty1;
+            dma_display->setTextColor(bigColor);
+            dma_display->setCursor(bigX, bigY);
+            dma_display->print(page.big);
+        }
+    }
+
+    if (page.trendArrows > 0)
+    {
+        int ax = bigX + textDrawW + 2; // 2px gap between value and trend arrow
+        if (page.id == PredictPageId::Humid)
+            ax += 2;
+        if (page.id == PredictPageId::Press)
+            ax += 1;
+        int ay = bigAreaTop + ((bigAreaH - 8) / 2);
+        for (uint8_t i = 0; i < page.trendArrows; ++i)
+        {
+            drawTrendArrowLikeMenu(ax + static_cast<int>(i) * arrowStride, ay, bigColor, page.trendDir);
+        }
+    }
+
+    // Bottom line: small scrolling explanation text.
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    if (s_predictMeaningPageIndex != s_predictPageIndex)
+    {
+        s_predictMeaningPageIndex = s_predictPageIndex;
+        s_predictMeaningWidthPx = getTextWidth(page.meaning);
+        s_predictMeaningLastStepMs = nowMs;
+        if (s_predictMeaningWidthPx <= PANEL_RES_X)
+        {
+            s_predictMeaningNeedsScroll = false;
+            s_predictMeaningCycleDone = true;
+            s_predictMeaningOffsetPx = 0;
+        }
+        else
+        {
+            s_predictMeaningNeedsScroll = true;
+            s_predictMeaningCycleDone = false;
+            s_predictMeaningOffsetPx = PANEL_RES_X; // Lunar-style: enter from right edge
+        }
+    }
+    if (s_predictMeaningWidthPx <= 0)
+        s_predictMeaningWidthPx = getTextWidth(page.meaning);
+
+    if (s_predictMeaningNeedsScroll && (nowMs - s_predictMeaningLastStepMs) >= kPredictMeaningStepMs)
+    {
+        // Lunar-style: fixed 1px per tick to avoid catch-up jumps.
+        s_predictMeaningOffsetPx -= 1;
+        s_predictMeaningLastStepMs = nowMs;
+        if (s_predictMeaningOffsetPx <= -(s_predictMeaningWidthPx + kPredictMeaningGapPx))
+        {
+            s_predictMeaningCycleDone = true;
+        }
+    }
+
+    dma_display->setTextColor(bodyColor);
+    const int meaningY = 25;
+    if (!s_predictMeaningNeedsScroll)
+    {
+        dma_display->setCursor(0, meaningY);
+        dma_display->print(page.meaning);
+    }
+    else
+    {
+        dma_display->setCursor(s_predictMeaningOffsetPx, meaningY);
+        dma_display->print(page.meaning);
+    }
+
+    if (s_predictTransitionActive)
+    {
+        unsigned long elapsed = nowMs - s_predictTransitionStartMs;
+        if (elapsed >= kPredictTransitionMs)
+        {
+            s_predictTransitionActive = false;
+        }
+        else
+        {
+            int visibleW = static_cast<int>((static_cast<uint32_t>(elapsed) * PANEL_RES_X) / kPredictTransitionMs);
+            if (visibleW < 0) visibleW = 0;
+            if (visibleW > PANEL_RES_X) visibleW = PANEL_RES_X;
+            dma_display->fillRect(visibleW, 10, PANEL_RES_X - visibleW, PANEL_RES_Y - 10, myBLACK);
+        }
+    }
+}
 } // namespace
 
 void updateGraphData()
@@ -297,12 +723,12 @@ void drawTemperatureHistoryScreen()
     }
     if (!tempsC.empty())
     {
-        dayStart = midnightFor(tempsC.back().ts);
+        dayStart = windowStartForLast24h(tempsC.back().ts);
         std::vector<TimedValue> filtered;
         filtered.reserve(tempsC.size());
         for (const auto &tv : tempsC)
         {
-            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400UL)
                 filtered.push_back(tv);
         }
         tempsC.swap(filtered);
@@ -311,12 +737,15 @@ void drawTemperatureHistoryScreen()
     dma_display->fillScreen(0);
 
     const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    const uint16_t underlineColor = mono ? dma_display->color565(30, 30, 70) : INFOMODAL_ULINE;
-    const uint16_t statsColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
+    const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
+    const uint16_t underlineColor = mono ? dma_display->color565(80, 80, 90)
+                                         : dma_display->color565(55, 80, 120);
+    const uint16_t statsColor = mono ? ui_theme::monoBodyText() : INFOMODAL_UNSEL;
     // Pick an axis color distinct from both tick colors for clarity
-    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(200, 200, 220);
+    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(170, 190, 215);
+    const uint16_t frameColor = mono ? dma_display->color565(70, 70, 110) : dma_display->color565(110, 130, 150);
+    const uint16_t gridColor = mono ? dma_display->color565(26, 26, 44) : dma_display->color565(24, 34, 46);
     const uint16_t lineColor = mono ? dma_display->color565(170, 170, 230) : dma_display->color565(255, 170, 90);
     const uint16_t minColor = mono ? dma_display->color565(120, 160, 220) : dma_display->color565(90, 200, 255);
     const uint16_t maxColor = mono ? dma_display->color565(220, 140, 140) : dma_display->color565(255, 90, 90);
@@ -324,11 +753,11 @@ void drawTemperatureHistoryScreen()
     const int headerHeight = 8;
     dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
     dma_display->setTextColor(headerFg);
-    const char *title = "Temp 24h";
+    const char *title = "Temp 24H";
     int16_t tx1, ty1;
     uint16_t tw, th;
     dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = 1; // left align to leave room elsewhere for current temp
+    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
     if (titleX < 0)
         titleX = 0;
     dma_display->setCursor(titleX, 0);
@@ -375,12 +804,13 @@ void drawTemperatureHistoryScreen()
         String lines[] = {statsLine};
         s_tempScroll.setLines(lines, 1, true);
         s_tempScroll.setScrollSpeed(scrollSpeed); // match global marquee speed
+        s_tempScroll.setStartPauseMs(2000);
+        s_tempScroll.setContinuousWrap(false);
         uint16_t textColors[] = {statsColor};
         uint16_t bgColors[] = {0};
         s_tempScroll.setLineColors(textColors, bgColors, 1);
         prevTempStats = statsLine;
     }
-    s_tempScroll.update();
     s_tempScroll.draw(0, statsY, statsColor);
 
     const int graphLeft = 1;
@@ -392,10 +822,10 @@ void drawTemperatureHistoryScreen()
 
     // Draw only bottom border; remove top/left/right outline
     int axisY = graphTop + graphHeight;
+    drawChartScaffold(graphLeft, graphTop, graphWidth, graphHeight, frameColor, gridColor);
     dma_display->drawFastHLine(graphLeft - 1, axisY, graphWidth + 2, axisColor);
-    // Use red for all tick dots
-    uint16_t morningTickColor = dma_display->color565(255, 60, 60);
-    uint16_t afternoonTickColor = morningTickColor;
+    uint16_t morningTickColor = mono ? dma_display->color565(92, 112, 168) : dma_display->color565(95, 140, 185);
+    uint16_t afternoonTickColor = mono ? dma_display->color565(108, 94, 148) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
     // Line chart for clearer trend
@@ -467,12 +897,12 @@ void drawHumidityHistoryScreen()
     }
     if (!hums.empty())
     {
-        dayStart = midnightFor(hums.back().ts);
+        dayStart = windowStartForLast24h(hums.back().ts);
         std::vector<TimedValue> filtered;
         filtered.reserve(hums.size());
         for (const auto &tv : hums)
         {
-            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400UL)
                 filtered.push_back(tv);
         }
         hums.swap(filtered);
@@ -481,11 +911,14 @@ void drawHumidityHistoryScreen()
     dma_display->fillScreen(0);
 
     const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    const uint16_t underlineColor = mono ? dma_display->color565(30, 30, 70) : INFOMODAL_ULINE;
-    const uint16_t statsColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
-    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(200, 200, 220);
+    const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
+    const uint16_t underlineColor = mono ? dma_display->color565(80, 80, 90)
+                                         : dma_display->color565(55, 80, 120);
+    const uint16_t statsColor = mono ? ui_theme::monoBodyText() : INFOMODAL_UNSEL;
+    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(170, 190, 215);
+    const uint16_t frameColor = mono ? dma_display->color565(70, 70, 110) : dma_display->color565(110, 130, 150);
+    const uint16_t gridColor = mono ? dma_display->color565(26, 26, 44) : dma_display->color565(24, 34, 46);
     const uint16_t lineColor = mono ? dma_display->color565(170, 170, 230) : dma_display->color565(255, 170, 90);
     const uint16_t minColor = mono ? dma_display->color565(120, 160, 220) : dma_display->color565(90, 200, 255);
     const uint16_t maxColor = mono ? dma_display->color565(220, 140, 140) : dma_display->color565(255, 90, 90);
@@ -493,11 +926,11 @@ void drawHumidityHistoryScreen()
     const int headerHeight = 8;
     dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
     dma_display->setTextColor(headerFg);
-    const char *title = "Humidity 24h";
+    const char *title = "Humidity 24H";
     int16_t tx1, ty1;
     uint16_t tw, th;
     dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = 1;
+    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
     if (titleX < 0)
         titleX = 0;
     dma_display->setCursor(titleX, 0);
@@ -544,12 +977,13 @@ void drawHumidityHistoryScreen()
         String lines[] = {statsLine};
         s_humScroll.setLines(lines, 1, true);
         s_humScroll.setScrollSpeed(scrollSpeed);
+        s_humScroll.setStartPauseMs(2000);
+        s_humScroll.setContinuousWrap(false);
         uint16_t textColors[] = {statsColor};
         uint16_t bgColors[] = {0};
         s_humScroll.setLineColors(textColors, bgColors, 1);
         prevHumStats = statsLine;
     }
-    s_humScroll.update();
     s_humScroll.draw(0, statsY, statsColor);
 
     const int graphLeft = 1;
@@ -560,9 +994,10 @@ void drawHumidityHistoryScreen()
         return;
 
     int axisY = graphTop + graphHeight;
+    drawChartScaffold(graphLeft, graphTop, graphWidth, graphHeight, frameColor, gridColor);
     dma_display->drawFastHLine(graphLeft - 1, axisY, graphWidth + 2, axisColor);
-    uint16_t morningTickColor = dma_display->color565(255, 60, 60);
-    uint16_t afternoonTickColor = morningTickColor;
+    uint16_t morningTickColor = mono ? dma_display->color565(92, 112, 168) : dma_display->color565(95, 140, 185);
+    uint16_t afternoonTickColor = mono ? dma_display->color565(108, 94, 148) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
     // Dim vertical guide at current time through the full chart height
@@ -636,12 +1071,12 @@ void drawBaroHistoryScreen()
     }
     if (!pressVals.empty())
     {
-        dayStart = midnightFor(pressVals.back().ts);
+        dayStart = windowStartForLast24h(pressVals.back().ts);
         std::vector<TimedValue> filtered;
         filtered.reserve(pressVals.size());
         for (const auto &tv : pressVals)
         {
-            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400UL)
                 filtered.push_back(tv);
         }
         pressVals.swap(filtered);
@@ -650,11 +1085,14 @@ void drawBaroHistoryScreen()
     dma_display->fillScreen(0);
 
     const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    const uint16_t underlineColor = mono ? dma_display->color565(30, 30, 70) : INFOMODAL_ULINE;
-    const uint16_t statsColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
-    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(200, 200, 220);
+    const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
+    const uint16_t underlineColor = mono ? dma_display->color565(80, 80, 90)
+                                         : dma_display->color565(55, 80, 120);
+    const uint16_t statsColor = mono ? ui_theme::monoBodyText() : INFOMODAL_UNSEL;
+    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(170, 190, 215);
+    const uint16_t frameColor = mono ? dma_display->color565(70, 70, 110) : dma_display->color565(110, 130, 150);
+    const uint16_t gridColor = mono ? dma_display->color565(26, 26, 44) : dma_display->color565(24, 34, 46);
     const uint16_t lineColor = mono ? dma_display->color565(170, 170, 230) : dma_display->color565(255, 170, 90);
     const uint16_t minColor = mono ? dma_display->color565(120, 160, 220) : dma_display->color565(90, 200, 255);
     const uint16_t maxColor = mono ? dma_display->color565(220, 140, 140) : dma_display->color565(255, 90, 90);
@@ -662,11 +1100,11 @@ void drawBaroHistoryScreen()
     const int headerHeight = 8;
     dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
     dma_display->setTextColor(headerFg);
-    const char *title = "Baro 24h";
+    const char *title = "Baro 24H";
     int16_t tx1, ty1;
     uint16_t tw, th;
     dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = 1;
+    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
     if (titleX < 0)
         titleX = 0;
     dma_display->setCursor(titleX, 0);
@@ -712,12 +1150,13 @@ void drawBaroHistoryScreen()
         String lines[] = {statsLine};
         s_baroScroll.setLines(lines, 1, true);
         s_baroScroll.setScrollSpeed(scrollSpeed);
+        s_baroScroll.setStartPauseMs(2000);
+        s_baroScroll.setContinuousWrap(false);
         uint16_t textColors[] = {statsColor};
         uint16_t bgColors[] = {0};
         s_baroScroll.setLineColors(textColors, bgColors, 1);
         prevBaroStats = statsLine;
     }
-    s_baroScroll.update();
     s_baroScroll.draw(0, statsY, statsColor);
 
     const int graphLeft = 1;
@@ -728,9 +1167,10 @@ void drawBaroHistoryScreen()
         return;
 
     int axisY = graphTop + graphHeight;
+    drawChartScaffold(graphLeft, graphTop, graphWidth, graphHeight, frameColor, gridColor);
     dma_display->drawFastHLine(graphLeft - 1, axisY, graphWidth + 2, axisColor);
-    uint16_t morningTickColor = dma_display->color565(255, 60, 60);
-    uint16_t afternoonTickColor = morningTickColor;
+    uint16_t morningTickColor = mono ? dma_display->color565(92, 112, 168) : dma_display->color565(95, 140, 185);
+    uint16_t afternoonTickColor = mono ? dma_display->color565(108, 94, 148) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
     // Dim vertical guide at current time through the full chart height
@@ -813,12 +1253,12 @@ void drawCo2HistoryScreen()
     }
     if (!co2Vals.empty())
     {
-        dayStart = midnightFor(co2Vals.back().ts);
+        dayStart = windowStartForLast24h(co2Vals.back().ts);
         std::vector<TimedValue> filtered;
         filtered.reserve(co2Vals.size());
         for (const auto &tv : co2Vals)
         {
-            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400)
+            if (tv.ts >= dayStart && tv.ts <= dayStart + 86400UL)
                 filtered.push_back(tv);
         }
         co2Vals.swap(filtered);
@@ -827,12 +1267,15 @@ void drawCo2HistoryScreen()
     dma_display->fillScreen(0);
 
     const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    const uint16_t underlineColor = mono ? dma_display->color565(30, 30, 70) : INFOMODAL_ULINE;
-    const uint16_t statsColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
+    const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
+    const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
+    const uint16_t underlineColor = mono ? dma_display->color565(80, 80, 90)
+                                         : dma_display->color565(55, 80, 120);
+    const uint16_t statsColor = mono ? ui_theme::monoBodyText() : INFOMODAL_UNSEL;
     // Pick an axis color distinct from both tick colors for clarity
-    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(200, 200, 220);
+    const uint16_t axisColor = mono ? dma_display->color565(90, 90, 140) : dma_display->color565(170, 190, 215);
+    const uint16_t frameColor = mono ? dma_display->color565(70, 70, 110) : dma_display->color565(110, 130, 150);
+    const uint16_t gridColor = mono ? dma_display->color565(26, 26, 44) : dma_display->color565(24, 34, 46);
     const uint16_t lineColor = mono ? dma_display->color565(170, 170, 230) : dma_display->color565(255, 170, 90);
     const uint16_t minColor = mono ? dma_display->color565(120, 160, 220) : dma_display->color565(90, 200, 255);
     const uint16_t maxColor = mono ? dma_display->color565(220, 140, 140) : dma_display->color565(255, 90, 90);
@@ -840,11 +1283,11 @@ void drawCo2HistoryScreen()
     const int headerHeight = 8;
     dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
     dma_display->setTextColor(headerFg);
-    const char *title = "CO2 24h";
+    const char *title = "CO2 24H";
     int16_t tx1, ty1;
     uint16_t tw, th;
     dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = 1; // left align, leave graph area for current value
+    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
     if (titleX < 0)
         titleX = 0;
     dma_display->setCursor(titleX, 0);
@@ -889,12 +1332,13 @@ void drawCo2HistoryScreen()
         String lines[] = {statsLine};
         s_co2Scroll.setLines(lines, 1, true);
         s_co2Scroll.setScrollSpeed(scrollSpeed); // match global marquee speed
+        s_co2Scroll.setStartPauseMs(2000);
+        s_co2Scroll.setContinuousWrap(false);
         uint16_t textColors[] = {statsColor};
         uint16_t bgColors[] = {0};
         s_co2Scroll.setLineColors(textColors, bgColors, 1);
         prevCo2Stats = statsLine;
     }
-    s_co2Scroll.update();
     s_co2Scroll.draw(0, statsY, statsColor);
 
     const int graphLeft = 1;
@@ -906,10 +1350,10 @@ void drawCo2HistoryScreen()
 
     // Draw only bottom border; remove top/left/right outline
     int axisY = graphTop + graphHeight;
+    drawChartScaffold(graphLeft, graphTop, graphWidth, graphHeight, frameColor, gridColor);
     dma_display->drawFastHLine(graphLeft - 1, axisY, graphWidth + 2, axisColor);
-    // Use red for all tick dots
-    uint16_t morningTickColor = dma_display->color565(255, 60, 60);
-    uint16_t afternoonTickColor = morningTickColor;
+    uint16_t morningTickColor = mono ? dma_display->color565(92, 112, 168) : dma_display->color565(95, 140, 185);
+    uint16_t afternoonTickColor = mono ? dma_display->color565(120, 120, 168) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
     static bool blinkOn = true;
@@ -961,190 +1405,425 @@ void drawPredictionScreen()
     if (!dma_display)
         return;
 
-    dma_display->setTextWrap(false);
-    dma_display->setTextSize(1);
-    dma_display->setFont(&Font5x7Uts);
+    auto copyText = [](char *dst, size_t dstLen, const char *src) {
+        if (!dst || dstLen == 0)
+            return;
+        if (!src)
+            src = "";
+        strncpy(dst, src, dstLen - 1);
+        dst[dstLen - 1] = '\0';
+    };
+
+    auto tempCompact = [&](float tempC, char *out, size_t outLen) {
+        if (!out || outLen == 0)
+            return;
+        if (isnan(tempC))
+        {
+            copyText(out, outLen, "--");
+            return;
+        }
+        int v = static_cast<int>(lround(dispTemp(tempC)));
+        snprintf(out, outLen, "%d\xB0%c", v, (units.temp == TempUnit::F) ? 'F' : 'C');
+    };
+
+    auto pressCompact = [&](float pressHpa, char *out, size_t outLen) {
+        if (!out || outLen == 0)
+            return;
+        if (isnan(pressHpa) || pressHpa <= 0.0f)
+        {
+            copyText(out, outLen, "--");
+            return;
+        }
+        double disp = dispPress(pressHpa);
+        if (units.press == PressUnit::INHG)
+            snprintf(out, outLen, "%.2f", disp);
+        else
+            snprintf(out, outLen, "%d", static_cast<int>(lround(disp)));
+    };
+
+    auto trendDirAndArrows = [](double delta, double weak, double strong, int8_t &dir, uint8_t &arrows) {
+        if (delta >= strong)
+        {
+            dir = 1;
+            arrows = 2;
+        }
+        else if (delta >= weak)
+        {
+            dir = 1;
+            arrows = 1;
+        }
+        else if (delta <= -strong)
+        {
+            dir = -1;
+            arrows = 2;
+        }
+        else if (delta <= -weak)
+        {
+            dir = -1;
+            arrows = 1;
+        }
+        else
+        {
+            dir = 0;
+            arrows = 1;
+        }
+    };
+
+    auto trendWord = [](double delta, double weak, double strong) -> const char * {
+        if (delta >= strong) return "rising fast";
+        if (delta >= weak) return "rising";
+        if (delta <= -strong) return "falling fast";
+        if (delta <= -weak) return "falling";
+        return "steady";
+    };
+
+    auto rangeTemp = [&](float mn, float mx, char *out, size_t outLen) {
+        if (isnan(mn) || isnan(mx))
+        {
+            copyText(out, outLen, "24H --/--");
+            return;
+        }
+        int lo = static_cast<int>(lround(dispTemp(mn)));
+        int hi = static_cast<int>(lround(dispTemp(mx)));
+        snprintf(out, outLen, "24H %d-%d\xB0%c", lo, hi, (units.temp == TempUnit::F) ? 'F' : 'C');
+    };
+
+    auto rangeHum = [](float mn, float mx, char *out, size_t outLen) {
+        if (isnan(mn) || isnan(mx))
+        {
+            strncpy(out, "24H --/--", outLen - 1);
+            out[outLen - 1] = '\0';
+            return;
+        }
+        snprintf(out, outLen, "24H %d-%d%%", static_cast<int>(lround(mn)), static_cast<int>(lround(mx)));
+    };
+
+    auto rangePress = [&](float mn, float mx, char *out, size_t outLen) {
+        if (isnan(mn) || isnan(mx) || mn <= 0.0f || mx <= 0.0f)
+        {
+            copyText(out, outLen, "24H --/--");
+            return;
+        }
+        if (units.press == PressUnit::INHG)
+            snprintf(out, outLen, "24H %.2f-%.2f", dispPress(mn), dispPress(mx));
+        else
+            snprintf(out, outLen, "24H %d-%d",
+                     static_cast<int>(lround(dispPress(mn))),
+                     static_cast<int>(lround(dispPress(mx))));
+    };
+
+    auto rangeCo2 = [](float mn, float mx, char *out, size_t outLen) {
+        if (isnan(mn) || isnan(mx) || mn <= 0.0f || mx <= 0.0f)
+        {
+            strncpy(out, "24H --/--", outLen - 1);
+            out[outLen - 1] = '\0';
+            return;
+        }
+        snprintf(out, outLen, "24H %d-%d", static_cast<int>(lround(mn)), static_cast<int>(lround(mx)));
+    };
+
+    auto addPage = [&](PredictPageId id, const char *title, const char *big, const char *meaning,
+                       int8_t trendDir = 0, uint8_t trendArrows = 0) {
+        if (s_predictPageCount >= static_cast<uint8_t>(PredictPageId::Count))
+            return;
+        PredictPage &p = s_predictPages[s_predictPageCount++];
+        p.id = id;
+        p.title = title;
+        copyText(p.big, sizeof(p.big), big);
+        copyText(p.meaning, sizeof(p.meaning), meaning);
+        p.trendDir = trendDir;
+        p.trendArrows = trendArrows;
+    };
 
     const auto &log = getSensorLog();
+    s_predictSnapshot = PredictSnapshot{};
+    s_predictPageCount = 0;
+
     if (log.size() < 2)
     {
         dma_display->fillScreen(0);
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
         dma_display->setTextColor(INFOMODAL_UNSEL);
-        dma_display->setCursor(2, 10);
-        dma_display->print("Not enough data");
+        dma_display->setCursor(1, 12);
+        dma_display->print("Need more data");
+        s_predictSnapshot.ready = false;
         return;
     }
 
-    size_t firstIdx = 0;
-    size_t lastIdx = log.size() - 1;
-    float tFirst = log[firstIdx].temp + tempOffset;
-    float tLast = log[lastIdx].temp + tempOffset;
-    float hFirst = log[firstIdx].hum;
-    float hLast = log[lastIdx].hum;
-    float pFirst = log[firstIdx].press;
-    float pLast = log[lastIdx].press;
-
-    double tempDeltaC = (double)tLast - (double)tFirst;
-    double humDelta = (double)hLast - (double)hFirst;
-    double pressDelta = (double)pLast - (double)pFirst;
-    // Shorter-term pressure tendency (last ~6 samples) for near-term signal
-    size_t shortIdx = (log.size() > 6) ? (log.size() - 6) : 0;
-    double pressDeltaShort = (double)pLast - (double)log[shortIdx].press;
-
-    String tempTrend = formatTempDelta(tempDeltaC);
-    String humTrend = formatHumDelta(humDelta);
-    String pressTrend = formatPressDelta(pressDelta);
-    String pressTendency = "Steady";
-    if (pressDeltaShort <= -3.0)
-        pressTendency = "Rapid drop";
-    else if (pressDeltaShort <= -1.5)
-        pressTendency = "Falling";
-    else if (pressDeltaShort >= 3.0)
-        pressTendency = "Rapid rise";
-    else if (pressDeltaShort >= 1.5)
-        pressTendency = "Rising";
-
-    String outlook = "Steady/Clouds";
-    if (pressDelta < -3.0 && humDelta > 5.0)
-        outlook = "Rain/Storm risk";
-    else if (pressDelta < -1.5 && humDelta > 2.5)
-        outlook = "Rain likely";
-    else if (pressDelta > 2.0 && humDelta < -3.0)
-        outlook = "Clearing/Fair";
-
-    String tempDir = (tempDeltaC > 1.0) ? "Warming" : (tempDeltaC < -1.0) ? "Cooling" : "Stable";
-    // Simple confidence estimate based on signal strength
-    String confidence = "Medium";
-    double absPress = fabs(pressDeltaShort);
-    double absHum = fabs(humDelta);
-    if (absPress > 3.5 || (absPress > 2.5 && absHum > 4.0))
-        confidence = "High";
-    else if (absPress < 1.0 && absHum < 2.0)
-        confidence = "Low";
-
-    // Gather last-24h ranges for readability
-    uint32_t windowStart = log.back().ts > 86400 ? (log.back().ts - 86400) : 0;
-    float tMin = NAN, tMax = NAN, hMin = NAN, hMax = NAN, pMin = NAN, pMax = NAN, co2Min = NAN, co2Max = NAN;
-    auto updateMinMax = [](float v, float &mn, float &mx) {
-        if (isnan(v)) return;
-        if (isnan(mn) || v < mn) mn = v;
-        if (isnan(mx) || v > mx) mx = v;
-    };
-    for (const auto &s : log)
+    float tFirst = NAN, tLast = NAN, hFirst = NAN, hLast = NAN, pFirst = NAN, pLast = NAN, co2First = NAN, co2Last = NAN;
+    for (size_t i = 0; i < log.size(); ++i)
     {
-        if (s.ts < windowStart) continue;
-        updateMinMax(s.temp + tempOffset, tMin, tMax);
-        updateMinMax(s.hum, hMin, hMax);
-        updateMinMax(s.press, pMin, pMax);
-        updateMinMax(s.co2, co2Min, co2Max);
-    }
-
-    dma_display->fillScreen(0);
-
-    const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    const uint16_t bodyColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
-    // Match the theme palette: labels use the header color, values use the body color
-    const uint16_t labelColor = mono ? dma_display->color565(220, 220, 120) : dma_display->color565(255, 240, 140);
-    const uint16_t valueColor = mono ? dma_display->color565(120, 160, 255) : dma_display->color565(120, 200, 255);
-    constexpr int matrixHeight = 24; // emulate a 64x24 dot-matrix window for scrolling
-
-    const int headerHeight = 8;
-    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
-    dma_display->setTextColor(headerFg, headerBg); // opaque title background
-    const char *title = "Next 24h";
-    dma_display->setCursor(1, 0);
-    dma_display->print(title);
-
-    // Build labeled lines with distinct colors and a bit more context
-    // Current values are taken from the last sample to give a concise snapshot
-    float currentTemp = tLast;
-    float currentHum = hLast;
-    float currentPress = pLast;
-    String tempLine = "Temperature: " + tempDir + " (" + tempTrend + "), now " + formatTempShort(currentTemp, 1);
-    String humLine = "Humidity: " + formatHumDelta(humDelta) + ", now " + formatHumShort(currentHum, 0);
-    String pressLine = "Pressure: " + pressTrend + ", now " + formatPressShort(currentPress);
-    String outlookLine = "Outlook: " + outlook;
-    String tendLine = "Pressure Tend: " + pressTendency;
-    String confLine = "Confidence: " + confidence;
-    // Ranges for last 24h where available
-    auto makeRange = [&](const String &label, float mn, float mx, const std::function<String(float)> &fmtFn) -> String {
-        if (isnan(mn) || isnan(mx)) return "";
-        return label + ": " + fmtFn(mn) + " - " + fmtFn(mx);
-    };
-    String tempRange = makeRange("Temp 24h", tMin, tMax, std::function<String(float)>([&](float v){ return formatTempShort(v, 1); }));
-    String humRange = makeRange("Hum 24h", hMin, hMax, std::function<String(float)>([&](float v){ return formatHumShort(v, 0); }));
-    String pressRange = makeRange("Press 24h", pMin, pMax, std::function<String(float)>([&](float v){ return formatPressShort(v); }));
-    String co2Range;
-    if (!isnan(co2Min) && !isnan(co2Max) && co2Min > 0 && co2Max > 0)
-    {
-        co2Range = "CO2 24h: " + String(static_cast<int>(co2Min + 0.5f)) + "-" +
-                   String(static_cast<int>(co2Max + 0.5f)) + " ppm";
-    }
-
-    int textWidth = min(PANEL_RES_X - 2 - 4, 64); // constrain and leave room for indent
-    if (textWidth < 1) textWidth = 1;
-    s_predictLines.clear();
-    std::vector<uint16_t> lineColors;
-    s_predictOffsets.clear();
-    auto pushWrapped = [&](const String &line, uint16_t colorLabels, uint16_t colorValues) {
-        // Split label/value at first colon for coloring
-        int colon = line.indexOf(':');
-        String labelPart = (colon >= 0) ? line.substring(0, colon + 1) : "";
-        String valuePart = (colon >= 0) ? line.substring(colon + 1) : line;
-        String combined = labelPart + valuePart;
-        auto wrapped = wrapLines(combined, textWidth);
-        for (const auto &w : wrapped)
+        if (isnan(tFirst) && !isnan(log[i].temp)) tFirst = log[i].temp + tempOffset;
+        if (isnan(hFirst) && !isnan(log[i].hum)) hFirst = log[i].hum;
+        if (isnan(pFirst) && !isnan(log[i].press) && log[i].press > 0.0f) pFirst = log[i].press;
+        if (!isnan(log[i].temp)) tLast = log[i].temp + tempOffset;
+        if (!isnan(log[i].hum)) hLast = log[i].hum;
+        if (!isnan(log[i].press) && log[i].press > 0.0f) pLast = log[i].press;
+        if (!isnan(log[i].co2) && log[i].co2 > 0.0f)
         {
-            // Apply label color if the wrapped line still starts inside the label span
-            if (!labelPart.isEmpty() && w.startsWith(labelPart))
-            {
-                s_predictLines.push_back(w);
-                lineColors.push_back(colorLabels);
-                s_predictOffsets.push_back(0);
-            }
-            else
-            {
-                s_predictLines.push_back(w);
-                lineColors.push_back(colorValues);
-                s_predictOffsets.push_back(4); // indent value lines 4px under their labels
-            }
+            if (isnan(co2First)) co2First = log[i].co2;
+            co2Last = log[i].co2;
         }
-    };
-    pushWrapped(tempLine, labelColor, valueColor);
-    pushWrapped(humLine, labelColor, valueColor);
-    pushWrapped(pressLine, labelColor, valueColor);
-    pushWrapped(outlookLine, labelColor, valueColor);
-    pushWrapped(tendLine, labelColor, valueColor);
-    pushWrapped(confLine, labelColor, valueColor);
-    if (tempRange.length()) pushWrapped(tempRange, labelColor, valueColor);
-    if (humRange.length()) pushWrapped(humRange, labelColor, valueColor);
-    if (pressRange.length()) pushWrapped(pressRange, labelColor, valueColor);
-    if (co2Range.length()) pushWrapped(co2Range, labelColor, valueColor);
-
-    s_predictRoll.setLines(s_predictLines, false); // keep position continuous
-    s_predictRoll.setLineColors(lineColors);
-    s_predictRoll.setLineOffsets(s_predictOffsets);
-    // Use 500 ms gap hold to match other scroll-up screens
-    s_predictRoll.setGapHoldMs(500);
-    s_predictRoll.onUpPress(); // ensure auto-scroll enabled
-    const int yStart = headerHeight + 1;
-    const int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart); // visible body height
-    const int entryY = yStart + bodyHeight; // enter from bottom of body
-    const int exitY = 7; // exit one pixel higher above the header line
-    s_predictRoll.setEntryExit(entryY, exitY);
-    unsigned int speed = (verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u;
-    s_predictRoll.setScrollSpeed(speed);
-
-    dma_display->setTextColor(bodyColor);
-    int y = yStart;
-    for (const auto &line : s_predictLines)
-    {
-        dma_display->setCursor(0, y);
-        dma_display->print(line);
-        y += 8;
     }
+
+    if (isnan(tFirst) || isnan(tLast) || isnan(hFirst) || isnan(hLast) || isnan(pFirst) || isnan(pLast))
+    {
+        dma_display->fillScreen(0);
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(INFOMODAL_UNSEL);
+        dma_display->setCursor(1, 12);
+        dma_display->print("Sensor data low");
+        s_predictSnapshot.ready = false;
+        return;
+    }
+
+    const size_t shortIdx = (log.size() > 6) ? (log.size() - 6) : 0;
+    float pShort = pFirst;
+    for (size_t i = shortIdx; i < log.size(); ++i)
+    {
+        if (!isnan(log[i].press) && log[i].press > 0.0f)
+        {
+            pShort = log[i].press;
+            break;
+        }
+    }
+
+    const double tempDeltaC = static_cast<double>(tLast) - static_cast<double>(tFirst);
+    const double humDelta = static_cast<double>(hLast) - static_cast<double>(hFirst);
+    const double pressDelta = static_cast<double>(pLast) - static_cast<double>(pFirst);
+    const double pressDeltaShort = static_cast<double>(pLast) - static_cast<double>(pShort);
+
+    const uint32_t lastTs = log.back().ts;
+    const uint32_t firstTs = log.front().ts;
+    const uint32_t spanSec = (lastTs > firstTs) ? (lastTs - firstTs) : 0;
+    const uint32_t windowStart = (lastTs > 86400UL) ? (lastTs - 86400UL) : 0;
+
+    float tMin = NAN, tMax = NAN, hMin = NAN, hMax = NAN, pMin = NAN, pMax = NAN, co2Min = NAN, co2Max = NAN;
+    int tCount = 0, hCount = 0, pCount = 0;
+    for (size_t i = 0; i < log.size(); ++i)
+    {
+        const SensorSample &s = log[i];
+        if (s.ts < windowStart)
+            continue;
+        if (!isnan(s.temp))
+        {
+            float v = s.temp + tempOffset;
+            if (isnan(tMin) || v < tMin) tMin = v;
+            if (isnan(tMax) || v > tMax) tMax = v;
+            ++tCount;
+        }
+        if (!isnan(s.hum))
+        {
+            if (isnan(hMin) || s.hum < hMin) hMin = s.hum;
+            if (isnan(hMax) || s.hum > hMax) hMax = s.hum;
+            ++hCount;
+        }
+        if (!isnan(s.press) && s.press > 0.0f)
+        {
+            if (isnan(pMin) || s.press < pMin) pMin = s.press;
+            if (isnan(pMax) || s.press > pMax) pMax = s.press;
+            ++pCount;
+        }
+        if (!isnan(s.co2) && s.co2 > 0.0f)
+        {
+            if (isnan(co2Min) || s.co2 < co2Min) co2Min = s.co2;
+            if (isnan(co2Max) || s.co2 > co2Max) co2Max = s.co2;
+        }
+    }
+
+    int confScore = 0;
+    if (spanSec >= 20UL * 3600UL) confScore += 2;
+    else if (spanSec >= 8UL * 3600UL) confScore += 1;
+
+    if (tCount >= 96 && hCount >= 96 && pCount >= 96) confScore += 2;
+    else if (tCount >= 24 && hCount >= 24 && pCount >= 24) confScore += 1;
+
+    const bool pressureAligned =
+        ((pressDelta >= 0.4 && pressDeltaShort >= 0.4) ||
+         (pressDelta <= -0.4 && pressDeltaShort <= -0.4) ||
+         (fabs(pressDelta) < 0.4 && fabs(pressDeltaShort) < 0.4));
+    if (pressureAligned) confScore += 1;
+    else confScore -= 1;
+
+    const bool sensorStable = (fabs(humDelta) < 14.0 && fabs(tempDeltaC) < 6.0);
+    if (sensorStable) confScore += 1;
+
+    int clampedScore = confScore;
+    if (clampedScore < 0) clampedScore = 0;
+    if (clampedScore > 6) clampedScore = 6;
+    s_predictSnapshot.signalPercent = static_cast<int>((clampedScore * 100 + 3) / 6);
+
+    const char *outlook = "STEADY";
+    if (pressDeltaShort <= -1.8 && humDelta >= 2.0) outlook = "RAIN POSS";
+    else if (pressDeltaShort >= 1.6 && humDelta <= 1.0) outlook = "CLEARING";
+    else if (fabs(pressDeltaShort) < 0.8 && hLast >= 70.0f) outlook = "CLOUDY";
+    else if (humDelta >= 3.0 && hLast >= 65.0f) outlook = "MUGGY";
+    else if (pressDeltaShort <= -1.2 && tempDeltaC <= -0.8) outlook = "UNSETTLED";
+    else if (pressDeltaShort > 0.8) outlook = "FAIR";
+    else if (pressDeltaShort < -0.8) outlook = "CHANGE";
+
+    copyText(s_predictSnapshot.outlook, sizeof(s_predictSnapshot.outlook), outlook);
+    snprintf(s_predictSnapshot.reason, sizeof(s_predictSnapshot.reason), "Pressure %s, humidity %s",
+             trendWord(pressDeltaShort, 0.8, 2.0),
+             trendWord(humDelta, 1.5, 4.0));
+
+    char tempNow[12];
+    tempCompact(tLast, tempNow, sizeof(tempNow));
+    copyText(s_predictSnapshot.tempBig, sizeof(s_predictSnapshot.tempBig), tempNow);
+    int8_t tempTrendDir = 0;
+    uint8_t tempTrendArrows = 1;
+    trendDirAndArrows(tempDeltaC, 0.6, 2.0, tempTrendDir, tempTrendArrows);
+    rangeTemp(tMin, tMax, s_predictSnapshot.tempRange, sizeof(s_predictSnapshot.tempRange));
+    if (tempDeltaC >= 0.6) copyText(s_predictSnapshot.tempHint, sizeof(s_predictSnapshot.tempHint), "WARMING");
+    else if (tempDeltaC <= -0.6) copyText(s_predictSnapshot.tempHint, sizeof(s_predictSnapshot.tempHint), "COOLING");
+    else copyText(s_predictSnapshot.tempHint, sizeof(s_predictSnapshot.tempHint), "STABLE");
+
+    snprintf(s_predictSnapshot.humBig, sizeof(s_predictSnapshot.humBig), "%d%%",
+             static_cast<int>(lround(hLast)));
+    int8_t humTrendDir = 0;
+    uint8_t humTrendArrows = 1;
+    trendDirAndArrows(humDelta, 1.5, 4.0, humTrendDir, humTrendArrows);
+    rangeHum(hMin, hMax, s_predictSnapshot.humRange, sizeof(s_predictSnapshot.humRange));
+    if (hLast >= 70.0f || humDelta >= 4.0) copyText(s_predictSnapshot.humHint, sizeof(s_predictSnapshot.humHint), "MUGGY");
+    else if (hLast <= 35.0f || humDelta <= -4.0) copyText(s_predictSnapshot.humHint, sizeof(s_predictSnapshot.humHint), "DRY");
+    else copyText(s_predictSnapshot.humHint, sizeof(s_predictSnapshot.humHint), "COMFY");
+
+    char pressNow[16];
+    pressCompact(pLast, pressNow, sizeof(pressNow));
+    copyText(s_predictSnapshot.pressBig, sizeof(s_predictSnapshot.pressBig), pressNow);
+    int8_t pressTrendDir = 0;
+    uint8_t pressTrendArrows = 1;
+    if (pressDeltaShort >= 2.0)
+    {
+        pressTrendDir = 1;
+        pressTrendArrows = 2;
+    }
+    else if (pressDeltaShort >= 0.8)
+    {
+        pressTrendDir = 1;
+        pressTrendArrows = 1;
+    }
+    else if (pressDeltaShort <= -2.0)
+    {
+        pressTrendDir = -1;
+        pressTrendArrows = 2;
+    }
+    else if (pressDeltaShort <= -0.8)
+    {
+        pressTrendDir = -1;
+        pressTrendArrows = 1;
+    }
+    else
+    {
+        pressTrendDir = 0; // stable -> right arrow
+        pressTrendArrows = 1;
+    }
+    rangePress(pMin, pMax, s_predictSnapshot.pressRange, sizeof(s_predictSnapshot.pressRange));
+    if (pressDeltaShort <= -2.0) copyText(s_predictSnapshot.pressHint, sizeof(s_predictSnapshot.pressHint), "DROPFAST");
+    else if (pressDeltaShort <= -0.8) copyText(s_predictSnapshot.pressHint, sizeof(s_predictSnapshot.pressHint), "FALLING");
+    else if (pressDeltaShort >= 2.0) copyText(s_predictSnapshot.pressHint, sizeof(s_predictSnapshot.pressHint), "RISEFAST");
+    else if (pressDeltaShort >= 0.8) copyText(s_predictSnapshot.pressHint, sizeof(s_predictSnapshot.pressHint), "RISING");
+    else copyText(s_predictSnapshot.pressHint, sizeof(s_predictSnapshot.pressHint), "STABLE");
+
+    s_predictSnapshot.hasCo2 = (!isnan(co2Last) && co2Last > 0.0f && !isnan(co2Min) && !isnan(co2Max));
+    if (s_predictSnapshot.hasCo2)
+    {
+        double co2Delta = (!isnan(co2First) && co2First > 0.0f) ? (static_cast<double>(co2Last) - static_cast<double>(co2First)) : 0.0;
+        int8_t co2TrendDir = 0;
+        uint8_t co2TrendArrows = 1;
+        if (co2Delta >= 150.0)
+        {
+            co2TrendDir = 1;
+            co2TrendArrows = 2;
+        }
+        else if (co2Delta >= 50.0)
+        {
+            co2TrendDir = 1;
+            co2TrendArrows = 1;
+        }
+        else if (co2Delta <= -150.0)
+        {
+            co2TrendDir = -1;
+            co2TrendArrows = 2;
+        }
+        else if (co2Delta <= -50.0)
+        {
+            co2TrendDir = -1;
+            co2TrendArrows = 1;
+        }
+        else
+        {
+            co2TrendDir = 0;
+            co2TrendArrows = 1;
+        }
+
+        snprintf(s_predictSnapshot.airBig, sizeof(s_predictSnapshot.airBig), "%d",
+                 static_cast<int>(lround(co2Last)));
+        rangeCo2(co2Min, co2Max, s_predictSnapshot.airRange, sizeof(s_predictSnapshot.airRange));
+        if (co2Last <= 800.0f) copyText(s_predictSnapshot.airHint, sizeof(s_predictSnapshot.airHint), "AIR GOOD");
+        else if (co2Last <= 1200.0f) copyText(s_predictSnapshot.airHint, sizeof(s_predictSnapshot.airHint), "OPEN WINDOW");
+        else copyText(s_predictSnapshot.airHint, sizeof(s_predictSnapshot.airHint), "VENT NOW");
+
+        addPage(PredictPageId::Air, "CO2",
+                s_predictSnapshot.airBig,
+                (String(s_predictSnapshot.airRange) + ". " + s_predictSnapshot.airHint).c_str(),
+                co2TrendDir,
+                co2TrendArrows);
+    }
+
+    copyText(s_predictSnapshot.summaryBig, sizeof(s_predictSnapshot.summaryBig), s_predictSnapshot.outlook);
+    snprintf(s_predictSnapshot.summaryLine, sizeof(s_predictSnapshot.summaryLine),
+             "Temperature %s, humidity %s, pressure %s",
+             trendWord(tempDeltaC, 0.5, 1.5),
+             trendWord(humDelta, 1.5, 4.0),
+             trendWord(pressDeltaShort, 0.8, 2.0));
+
+    addPage(PredictPageId::Temp, "TEMP",
+            s_predictSnapshot.tempBig,
+            (String(s_predictSnapshot.tempRange) + ". Trend " + s_predictSnapshot.tempHint).c_str(),
+            tempTrendDir,
+            tempTrendArrows);
+    addPage(PredictPageId::Humid, "HUMID",
+            s_predictSnapshot.humBig,
+            (String(s_predictSnapshot.humRange) + ". Air feels " + s_predictSnapshot.humHint).c_str(),
+            humTrendDir,
+            humTrendArrows);
+    addPage(PredictPageId::Press, "PRESSURE",
+            s_predictSnapshot.pressBig,
+            (String("Pressure is ") + s_predictSnapshot.pressHint + ". " + s_predictSnapshot.pressRange).c_str(),
+            pressTrendDir,
+            pressTrendArrows);
+    if (s_predictSnapshot.hasCo2)
+    {
+        // Added above with trend arrows.
+    }
+    addPage(PredictPageId::Summary, "NEXT 24H",
+            s_predictSnapshot.summaryBig,
+            (String(s_predictSnapshot.summaryLine) + ". Signal " + String(s_predictSnapshot.signalPercent) + "%").c_str());
+
+    if (s_predictPageCount == 0)
+    {
+        dma_display->fillScreen(0);
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(INFOMODAL_UNSEL);
+        dma_display->setCursor(1, 12);
+        dma_display->print("No prediction");
+        s_predictSnapshot.ready = false;
+        return;
+    }
+
+    if (s_predictPageIndex >= s_predictPageCount)
+        s_predictPageIndex = 0;
+
+    const unsigned long nowMs = millis();
+    if (s_predictLastSwitchMs == 0)
+        s_predictLastSwitchMs = nowMs;
+
+    s_predictSnapshot.ready = true;
+    renderPredictPage(nowMs);
 }
 
 // Tick functions to animate marquee between full redraws
@@ -1181,43 +1860,201 @@ void tickBaroHistoryMarquee()
     s_baroScroll.draw(0, PANEL_RES_Y - 8, defaultColor);
 }
 
-void tickPredictionScreen()
+bool is24HourSectionScreen(ScreenMode mode)
 {
-    if (!dma_display) return;
-    if (s_predictLines.empty())
+    return mode == SCREEN_TEMP_HISTORY ||
+           mode == SCREEN_HUM_HISTORY ||
+           mode == SCREEN_CO2_HISTORY ||
+           mode == SCREEN_BARO_HISTORY;
+}
+
+void set24HourSectionPageForScreen(ScreenMode mode)
+{
+    for (uint8_t i = 0; i < kHistory24PageCount; ++i)
+    {
+        if (kHistory24Pages[i] == mode)
+        {
+            s_history24PageIndex = i;
+            return;
+        }
+    }
+    s_history24PageIndex = 0;
+}
+
+void draw24HourSectionScreen()
+{
+    if (!dma_display)
         return;
 
-    const bool mono = (theme == 1);
-    const uint16_t headerBg = mono ? dma_display->color565(20, 20, 40) : INFOMODAL_HEADERBG;
-    const uint16_t headerFg = mono ? dma_display->color565(60, 60, 120) : INFOMODAL_GREEN;
-    uint16_t bodyColor = mono ? dma_display->color565(90, 90, 150) : INFOMODAL_UNSEL;
-    constexpr int headerHeight = 8;
-    constexpr int matrixHeight = 24;
-    const int yStart = headerHeight; // body begins immediately under the title
-    const int bodyHeight = min(matrixHeight, PANEL_RES_Y - yStart); // emulate 64x24 dot-matrix window
+    if (s_history24PageIndex >= kHistory24PageCount)
+        s_history24PageIndex = 0;
 
-    // Clear only the body area (keep header intact)
-    dma_display->fillRect(0, yStart, PANEL_RES_X, bodyHeight, 0);
-    // No separator row; text starts directly under header
-    s_predictRoll.setScrollSpeed((verticalScrollSpeed > 0) ? static_cast<unsigned int>(verticalScrollSpeed) : 60u);
-    // Ensure exit stays one pixel above previous (y=7); entry from bottom of body
-    s_predictRoll.setEntryExit(yStart + bodyHeight, 7);
-    s_predictRoll.update();
-    s_predictRoll.draw(*dma_display, 0, yStart, bodyHeight, bodyColor);
+    const int8_t currentPage = static_cast<int8_t>(s_history24PageIndex);
+    const bool pageChanged = (s_history24ArmedPageIndex != currentPage);
+    ScrollLine *activeScroll = scrollFor24HourPage(kHistory24Pages[s_history24PageIndex]);
 
-    // Repaint the header so scrolling text can never discolor it
-    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
-    dma_display->setTextColor(headerFg, headerBg); // opaque title background
-    dma_display->setCursor(1, 0);
-    dma_display->print("Next 24h");
+    if (pageChanged && activeScroll)
+    {
+        // Reset before draw so first frame does not start mid-scroll.
+        activeScroll->reset();
+        activeScroll->consumeCycleCompleted();
+        activeScroll->consumeEnteredFromRight();
+    }
+
+    switch (kHistory24Pages[s_history24PageIndex])
+    {
+    case SCREEN_TEMP_HISTORY:
+        drawTemperatureHistoryScreen();
+        break;
+    case SCREEN_HUM_HISTORY:
+        drawHumidityHistoryScreen();
+        break;
+    case SCREEN_CO2_HISTORY:
+        drawCo2HistoryScreen();
+        break;
+    case SCREEN_BARO_HISTORY:
+        drawBaroHistoryScreen();
+        break;
+    default:
+        drawTemperatureHistoryScreen();
+        break;
+    }
+
+    // Re-evaluate after draw because draw functions can refresh line content via setLines().
+    if (pageChanged && activeScroll)
+    {
+        s_history24WaitForMarqueeCycle = activeScroll->selectedLineNeedsScroll();
+    }
+    else if (pageChanged)
+    {
+        s_history24WaitForMarqueeCycle = false;
+    }
+
+    s_history24ArmedPageIndex = currentPage;
+
+    if (s_history24LastSwitchMs == 0)
+        s_history24LastSwitchMs = millis();
+}
+
+void tick24HourSection()
+{
+    if (!dma_display)
+        return;
+
+    const unsigned long nowMs = millis();
+    ScrollLine *activeScroll = nullptr;
+    switch (kHistory24Pages[s_history24PageIndex])
+    {
+    case SCREEN_TEMP_HISTORY:
+        activeScroll = &s_tempScroll;
+        tickTemperatureHistoryMarquee();
+        break;
+    case SCREEN_HUM_HISTORY:
+        activeScroll = &s_humScroll;
+        tickHumidityHistoryMarquee();
+        break;
+    case SCREEN_CO2_HISTORY:
+        activeScroll = &s_co2Scroll;
+        tickCo2HistoryMarquee();
+        break;
+    case SCREEN_BARO_HISTORY:
+        activeScroll = &s_baroScroll;
+        tickBaroHistoryMarquee();
+        break;
+    default:
+        break;
+    }
+
+    if (kHistory24PageCount <= 1 || nowMs < s_history24ManualHoldUntilMs)
+        return;
+
+    bool canAdvance = false;
+    if (s_history24WaitForMarqueeCycle)
+    {
+        // Advance only after a full marquee cycle completes and returns to left edge.
+        canAdvance = (activeScroll != nullptr) && activeScroll->consumeCycleCompleted();
+    }
+    else
+    {
+        // If marquee is not needed, keep timed pacing.
+        canAdvance = (nowMs - s_history24LastSwitchMs) >= kPredictPageAutoMs;
+    }
+
+    if (canAdvance)
+    {
+        s_history24PageIndex = static_cast<uint8_t>((s_history24PageIndex + 1U) % kHistory24PageCount);
+        s_history24LastSwitchMs = nowMs;
+        draw24HourSectionScreen();
+    }
+}
+
+void handle24HourSectionDownPress()
+{
+    if (kHistory24PageCount <= 1)
+        return;
+    s_history24PageIndex = static_cast<uint8_t>((s_history24PageIndex + 1U) % kHistory24PageCount);
+    const unsigned long nowMs = millis();
+    s_history24LastSwitchMs = nowMs;
+    s_history24ManualHoldUntilMs = nowMs + kPredictManualHoldMs;
+    draw24HourSectionScreen();
+}
+
+void handle24HourSectionUpPress()
+{
+    if (kHistory24PageCount <= 1)
+        return;
+    int next = static_cast<int>(s_history24PageIndex) - 1;
+    if (next < 0)
+        next = static_cast<int>(kHistory24PageCount) - 1;
+    s_history24PageIndex = static_cast<uint8_t>(next);
+    const unsigned long nowMs = millis();
+    s_history24LastSwitchMs = nowMs;
+    s_history24ManualHoldUntilMs = nowMs + kPredictManualHoldMs;
+    draw24HourSectionScreen();
+}
+
+void tickPredictionScreen()
+{
+    if (!dma_display || !s_predictSnapshot.ready || s_predictPageCount == 0)
+        return;
+
+    const unsigned long nowMs = millis();
+    if (s_predictPageCount > 1 &&
+        nowMs >= s_predictManualHoldUntilMs &&
+        (nowMs - s_predictLastSwitchMs) >= kPredictPageAutoMs &&
+        s_predictMeaningCycleDone)
+    {
+        int next = static_cast<int>(s_predictPageIndex) + 1;
+        if (next >= static_cast<int>(s_predictPageCount))
+            next = 0;
+        s_predictPageIndex = static_cast<uint8_t>(next);
+        onPredictPageChanged(nowMs);
+    }
+    renderPredictPage(nowMs);
 }
 
 void handlePredictionDownPress()
 {
-    s_predictRoll.onDownPress();
+    if (!s_predictSnapshot.ready || s_predictPageCount <= 1)
+        return;
+    int next = static_cast<int>(s_predictPageIndex) + 1;
+    if (next >= static_cast<int>(s_predictPageCount))
+        next = 0;
+    s_predictPageIndex = static_cast<uint8_t>(next);
+    unsigned long nowMs = millis();
+    s_predictManualHoldUntilMs = nowMs + kPredictManualHoldMs;
+    onPredictPageChanged(nowMs);
 }
 
 void handlePredictionUpPress()
 {
-    s_predictRoll.onUpPress();
+    if (!s_predictSnapshot.ready || s_predictPageCount <= 1)
+        return;
+    int next = static_cast<int>(s_predictPageIndex) - 1;
+    if (next < 0)
+        next = static_cast<int>(s_predictPageCount) - 1;
+    s_predictPageIndex = static_cast<uint8_t>(next);
+    unsigned long nowMs = millis();
+    s_predictManualHoldUntilMs = nowMs + kPredictManualHoldMs;
+    onPredictPageChanged(nowMs);
 }

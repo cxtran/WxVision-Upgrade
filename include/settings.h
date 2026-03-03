@@ -26,7 +26,8 @@ extern int timeFormat24h;         // 1 = 24-hour, 0 = 12-hour
 enum DataSourceType : uint8_t {
     DATA_SOURCE_OWM = 0,
     DATA_SOURCE_WEATHERFLOW = 1,
-    DATA_SOURCE_NONE = 2
+    DATA_SOURCE_NONE = 2,
+    DATA_SOURCE_OPEN_METEO = 3
 };
 
 // --- Device ---
@@ -105,6 +106,8 @@ void toggleDataSource(int dir);
 void setDataSource(int source);
 bool isDataSourceOwm();
 bool isDataSourceWeatherFlow();
+bool isDataSourceOpenMeteo();
+bool isDataSourceForecastModel();
 bool isDataSourceNone();
 void toggleAutoRotate(int dir);
 void setAutoRotateEnabled(bool enabled, bool persist = true);

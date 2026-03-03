@@ -30,6 +30,7 @@ void showDeviceSettingsModal();
 void showDisplaySettingsModal();
 void showAlarmSettingsModal();
 void showNoaaSettingsModal();
+void showDeviceLocationModal();
 void showWeatherSettingsModal();
 void showWfTempestModal();
 void showCalibrationModal();
@@ -77,14 +78,17 @@ enum MenuLevel {
     MENU_SYSDATETIME,
     MENU_SYSUNITS,
     MENU_SYSWIFI,
+    MENU_SYSLOCATION,
     MENU_WIFI_SELECT = 99
 };
 extern std::vector<MenuLevel> menuStack;
+void pushMenu(MenuLevel newMenu);
 // --- Menu State ---
 extern MenuLevel currentMenuLevel;
 extern int currentMenuIndex;
 extern int menuScroll;
 extern bool menuActive;
+extern unsigned long lastMenuActivity;
 
 // --- Core App Logic Externs ---
 extern void saveDeviceSettings();
@@ -119,6 +123,7 @@ extern int verticalScrollSpeed;
 extern int scrollLevel;
 extern int verticalScrollLevel;
 extern String customMsg;
+extern String deviceHostname;
 extern float tempOffset;
 extern int humOffset;
 extern int lightGain;
@@ -149,6 +154,7 @@ extern InfoModal wifiSettingsModal;
 extern InfoModal unitSettingsModal;
 extern InfoModal alarmModal;
 extern InfoModal noaaModal;
+extern InfoModal locationModal;
 extern InfoModal worldTimeModal;
 extern InfoModal manageTzModal;
 

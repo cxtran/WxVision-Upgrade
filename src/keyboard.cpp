@@ -1,5 +1,6 @@
-﻿#include "keyboard.h"
+#include "keyboard.h"
 #include "display.h"  // Your dma_display instance
+#include "ui_theme.h"
 
 enum KbdMode { MODE_UPPER, MODE_LOWER, MODE_SYM };
 KbdMode kbdMode = MODE_UPPER;
@@ -256,8 +257,8 @@ void drawKeyboard() {
 
     // --- Title Background Bar ---
     int titleHeight = 8;
-    dma_display->fillRect(0, 0, dma_display->width(), titleHeight, dma_display->color565(0, 0, 120));
-    dma_display->drawFastHLine(0, titleHeight - 1, dma_display->width(), dma_display->color565(255, 255, 255));
+    dma_display->fillRect(0, 0, dma_display->width(), titleHeight, ui_theme::keyboardTitleBg());
+    dma_display->drawFastHLine(0, titleHeight - 1, dma_display->width(), ui_theme::keyboardTitleFg());
 
     // --- Title Text ---
     // Use safe buffer instead of pointer
@@ -267,7 +268,7 @@ void drawKeyboard() {
     if (textX < 0) textX = 0;
 
 
-    dma_display->setTextColor(dma_display->color565(255, 255, 255));
+    dma_display->setTextColor(ui_theme::keyboardTitleFg());
     dma_display->setCursor(textX, 0);  // vertically centered in 8px bar
     dma_display->print(title);
 
@@ -278,8 +279,8 @@ void drawKeyboard() {
     int start = (kbEditCursor > visibleChars - 1) ? (kbEditCursor - (visibleChars - 1)) : 0;
 
     uint16_t bufferColor = kbEditLineActive
-        ? dma_display->color565(255, 220, 80)
-        : dma_display->color565(64, 128, 255);
+        ? ui_theme::keyboardBufferActive()
+        : ui_theme::keyboardBufferInactive();
 
     for (int i = 0; i < visibleChars; ++i) {
         int idx = start + i;
@@ -288,7 +289,7 @@ void drawKeyboard() {
         bool isCursor = (idx == kbEditCursor);
 
         if (isCursor) {
-            dma_display->setTextColor(blinkState ? dma_display->color565(255, 255, 64) : bufferColor);
+            dma_display->setTextColor(blinkState ? ui_theme::keyboardCursor() : bufferColor);
         } else {
             dma_display->setTextColor(bufferColor);
         }
@@ -298,11 +299,11 @@ void drawKeyboard() {
     }
 
     // Draw separator between buffer line and key line
-    const uint16_t separatorColor = dma_display->color565(20, 30, 80);
+    const uint16_t separatorColor = ui_theme::keyboardSeparator();
     dma_display->drawFastHLine(0, bufferY + 7, dma_display->width(), separatorColor);
 
     // --- Draw Keyboard Row (Line 2) ---
-    const uint16_t keyRowBgColor = dma_display->color565(18, 18, 40);
+    const uint16_t keyRowBgColor = ui_theme::keyboardKeyRowBg();
     dma_display->fillRect(0, bufferY + 8, dma_display->width(), 8, keyRowBgColor);
 
     int gridY = bufferY + 8;
@@ -314,10 +315,10 @@ void drawKeyboard() {
         bool isSel = (!kbEditLineActive && row == kbCursorRow && col == kbCursorCol && kbCursorRow < gridRows);
 
         if (isSel) {
-            dma_display->fillRect(x - 1, gridY - 1, 7, 9, dma_display->color565(0, 128, 255));
-            dma_display->setTextColor(dma_display->color565(255, 255, 255));
+            dma_display->fillRect(x - 1, gridY - 1, 7, 9, ui_theme::keyboardSelectedKeyBg());
+            dma_display->setTextColor(ui_theme::keyboardTitleFg());
         } else {
-            dma_display->setTextColor(dma_display->color565(180, 180, 180));
+            dma_display->setTextColor(ui_theme::keyboardKeyFg());
         }
         dma_display->setCursor(x, gridY);
         dma_display->print(keyboardGrid[row][col]);
@@ -336,15 +337,15 @@ void drawKeyboard() {
 
         uint16_t fill, border, textColor;
         if (i == BTN_CANCEL) {
-            fill = highlight ? dma_display->color565(220, 40, 40) : dma_display->color565(120, 0, 0);
-            border = dma_display->color565(255, 64, 64);
-            textColor = dma_display->color565(255, 255, 255);
+            fill = highlight ? ui_theme::keyboardBtnCancelBgSel() : ui_theme::keyboardBtnCancelBg();
+            border = ui_theme::keyboardBtnCancelBorder();
+            textColor = ui_theme::keyboardBtnCancelFg();
         } else {
             fill = highlight
-                ? (i == BTN_MODE ? dma_display->color565(180, 255, 0) : dma_display->color565(255, 180, 0))
-                : dma_display->color565(30, 40, 60);
-            border = dma_display->color565(255, 255, 0);
-            textColor = highlight ? dma_display->color565(0, 0, 0) : dma_display->color565(255, 255, 255);
+                ? (i == BTN_MODE ? ui_theme::keyboardBtnModeSelBg() : ui_theme::keyboardBtnSelBg())
+                : ui_theme::keyboardBtnBg();
+            border = ui_theme::keyboardBtnBorder();
+            textColor = highlight ? ui_theme::keyboardBtnSelFg() : ui_theme::keyboardBtnFg();
         }
 
         const char* label = btnLabels[i];
@@ -401,6 +402,7 @@ void drawKeyboard() {
         xpos += rawWidth + 1;
     }
 }
+
 
 
 

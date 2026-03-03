@@ -48,8 +48,16 @@ enum ScreenMode {
 enum class WeatherSceneKind {
     Sunny,
     SunnyNight,
+    PartlyCloudy,
+    PartlyCloudyNight,
     Cloudy,
     CloudyNight,
+    Overcast,
+    OvercastNight,
+    Fog,
+    FogNight,
+    Windy,
+    WindyNight,
     Rain,
     RainNight,
     Thunderstorm,
@@ -86,6 +94,8 @@ void scrollWeatherDetails();
 
 void drawOWMScreen();
 void drawClockScreen(); 
+void displayClock();
+void displayDate();
 void drawClockTimeLine(const DateTime &now, bool alarmActive);
 void drawClockDateLine(const DateTime &now);
 void drawClockPulseDot(int second);
@@ -110,6 +120,9 @@ ScreenMode enforceAllowedScreen(ScreenMode desired);
 ScreenMode homeScreenForDataSource();
 
 void drawConditionSceneScreen();
+void drawNoaaAlertsScreen();
+void tickNoaaAlertsScreen();
+void showSectionHeading(const char* title, const char* subtitle = nullptr, uint16_t ms = 2000);
 void drawWeatherConditionScene(WeatherSceneKind kind);
 void drawWeatherConditionScene(const String &condition);
 void tickConditionSceneMarquee();

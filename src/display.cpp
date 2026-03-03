@@ -17,39 +17,21 @@
 #include "weather_countries.h"
 #include "InfoModal.h"
 #include <math.h>
-#include "ScrollLine.h"
 #include "fortune_headline.h"
 #include "fortune_phrase_picker.h"
 #include "ir_codes.h"
 #include "worldtime.h"
+#include "display_runtime.h"
+#include "display_lunar_luck_sections.h"
+#include "display_lunar_luck_nen_tranh.h"
+#include "display_condition.h"
+#include "app_state.h"
 
-extern float aht20_temp;
-extern float SCD40_temp;
-extern float SCD40_hum;
-extern float aht20_hum;
-extern int scrollLevel;
-extern int scrollSpeed;
-extern void displayClock();
-extern void displayDate();
-extern void displayWeatherData();
-extern int theme;
-extern TempestData tempest;
-extern CurrentConditions currentCond;
-extern const ScreenMode InfoScreenModes[];
-extern const int NUM_INFOSCREENS;
-extern bool isDataSourceOwm();
-extern bool isDataSourceWeatherFlow();
-extern bool isDataSourceNone();
-extern String str_Temp;
-extern String str_Humd;
-extern String str_Weather_Conditions_Des;
-extern const uint8_t *getWeatherIconFromCondition(String condition);
-extern int humOffset;
-extern byte t_hour;
-extern byte t_minute;
-extern byte d_day;
-extern byte d_month;
-extern int d_year;
+static AppState &app = appState();
+#define scrollLevel app.scrollLevel
+#define scrollSpeed app.scrollSpeed
+#define theme app.theme
+#define humOffset app.humOffset
 /*
 const ScreenMode InfoScreenModes[] = {
     SCREEN_UDP_DATA,
@@ -63,14 +45,6 @@ MatrixPanel_I2S_DMA *dma_display = nullptr;
 uint8_t currentPanelBrightness = 0;
 
 uint16_t myRED, myGREEN, myBLUE, myWHITE, myBLACK, myYELLOW, myCYAN;
-
-// --- BEGIN WORLD TIME FEATURE ---
-static bool s_clockWorldHeaderEnabled = false;
-static String s_clockWorldHeaderText;
-static ScrollLine s_clockWorldHeaderScroll(PANEL_RES_X, 60);
-static bool s_clockWorldHeaderNeedsRedraw = false;
-static unsigned long s_clockWorldHeaderLastStepMs = 0;
-// --- END WORLD TIME FEATURE ---
 
 // ---------- Vietnamese lunar calendar helpers ----------
 struct LunarDate
@@ -296,8 +270,8 @@ static String buildOrdinal(int day)
     return String("th");
 }
 
-// Forward declaration so we reuse the global 12/24h formatter
-static String formatConditionSceneTimeTag();
+size_t buildNormalized(char *dst, size_t dstCap, const char *src);
+size_t summarizeListToBullets(char *dst, size_t cap, const char *src, int maxItems);
 
 static String formatLunarHourTag()
 {
@@ -323,8 +297,27 @@ static String formatLunarHourTag()
 
 static String formatLunarClockTag()
 {
-    // Use the same 12/24h formatting as the rest of the app
-    return formatConditionSceneTimeTag();
+    char buf[12];
+    if (units.clock24h)
+    {
+        snprintf(buf, sizeof(buf), "%02d:%02d", t_hour, t_minute);
+        return String(buf);
+    }
+
+    int hour = t_hour;
+    const char *suffix = "AM";
+    if (hour >= 12)
+    {
+        suffix = "PM";
+        if (hour > 12)
+            hour -= 12;
+    }
+    else if (hour == 0)
+    {
+        hour = 12;
+    }
+    snprintf(buf, sizeof(buf), "%02d:%02d %s", hour, t_minute, suffix);
+    return String(buf);
 }
 
 static String formatSolarTermTag()
@@ -588,13 +581,13 @@ static const char *toneLabelVN(LuckTone t)
     return "Bình";
 }
 
-static LuckSection g_sections[MAX_SECTIONS];
+LuckSection g_sections[MAX_SECTIONS];
 static char g_sectionContent[MAX_SECTIONS][CONTENT_MAX];
-static char g_goiyContent[GOIY_CONTENT_MAX];
-static uint8_t g_sectionCount = 0;
+char g_goiyContent[GOIY_CONTENT_MAX];
+uint8_t g_sectionCount = 0;
 static char g_titleTopic[TITLE_MAX];
 
-static uint8_t currentSectionIndex = 0;
+uint8_t currentSectionIndex = 0;
 static int16_t marqueeOffsetPx = 0;
 static uint32_t lastScrollMs = 0;
 static uint32_t sectionStartMs = 0;
@@ -611,18 +604,18 @@ enum HeaderAnimState
     HDR_IDLE = 0,
     HDR_DOOR
 };
-static HeaderAnimState hdrState = HDR_IDLE;
-static char hdrOld[TITLE_MAX];
-static char hdrNew[TITLE_MAX];
-static int16_t hdrDoorPx = 0;
-static bool hdrDrawNew = false;
+HeaderAnimState hdrState = HDR_IDLE;
+char hdrOld[TITLE_MAX];
+char hdrNew[TITLE_MAX];
+int16_t hdrDoorPx = 0;
+bool hdrDrawNew = false;
 static bool hdrReverse = false;
-static bool hdrBrightnessPulsed = false;
-static uint8_t hdrBrightnessSaved = 0;
+bool hdrBrightnessPulsed = false;
+uint8_t hdrBrightnessSaved = 0;
 static uint32_t hdrAnimStartMs = 0;
 static uint32_t hdrLastFrameMs = 0;
 static uint32_t hdrDelayStartMs = 0;
-static bool hdrDelayActive = false;
+bool hdrDelayActive = false;
 static constexpr uint16_t HDR_ANIM_MS = 160;
 static constexpr uint16_t HDR_FRAME_MS = 16;
 static constexpr int16_t HEADER_Y = 0;
@@ -773,121 +766,6 @@ static size_t appendSeparator(char *dst, size_t cap)
     return safeAppend(dst, cap, SEP);
 }
 
-size_t buildNormalized(char *dst, size_t dstCap, const char *src)
-{
-    if (!dst || dstCap == 0)
-        return 0;
-    dst[0] = '\0';
-    if (!src)
-        return 0;
-
-    bool prevSpace = false;
-    const size_t sepLen = strlen(SEP);
-    auto appendChunk = [&](const char *chunk, size_t chunkLen)
-    {
-        if (chunkLen == 0)
-            return;
-        size_t curLen = strlen(dst);
-        if (curLen + chunkLen > dstCap - 1)
-            return;
-        safeAppendN(dst, dstCap, chunk, chunkLen);
-    };
-    const uint8_t *p = reinterpret_cast<const uint8_t *>(src);
-    while (*p != 0)
-    {
-        if (p[0] == '\r')
-        {
-            ++p;
-            continue;
-        }
-
-        const bool isBullet = (p[0] == 0xE2 && p[1] == 0x80 && p[2] == 0xA2);
-        if (*p == '\n' || isBullet)
-        {
-            appendChunk(SEP, sepLen);
-            prevSpace = false;
-            p += isBullet ? 3 : 1;
-            continue;
-        }
-
-        const char c = static_cast<char>(*p);
-        if (isspace(static_cast<unsigned char>(c)))
-        {
-            if (!prevSpace)
-            {
-                appendChunk(" ", 1);
-                prevSpace = true;
-            }
-            ++p;
-            continue;
-        }
-
-        appendChunk(reinterpret_cast<const char *>(p), 1);
-        prevSpace = false;
-        ++p;
-    }
-
-    size_t len = boundedLen(dst, dstCap - 1);
-    while (len > 0 && dst[len - 1] == ' ')
-    {
-        dst[len - 1] = '\0';
-        --len;
-    }
-    return len;
-}
-
-static bool isTokenSeparator(char c)
-{
-    return (c == ';' || c == ',' || c == '\n' || c == '\r' || c == '\0');
-}
-
-size_t summarizeListToBullets(char *dst, size_t cap, const char *src, int maxItems)
-{
-    if (!dst || cap == 0)
-        return 0;
-    dst[0] = '\0';
-    if (!src || maxItems <= 0)
-        return 0;
-
-    char token[96];
-    size_t tokLen = 0;
-    int added = 0;
-
-    for (size_t i = 0;; ++i)
-    {
-        const char c = src[i];
-        if (!isTokenSeparator(c))
-        {
-            if (tokLen < sizeof(token) - 1)
-                token[tokLen++] = c;
-            continue;
-        }
-
-        token[tokLen] = '\0';
-        size_t start = 0;
-        while (token[start] != '\0' && isspace(static_cast<unsigned char>(token[start])))
-            ++start;
-        size_t end = strlen(token);
-        while (end > start && isspace(static_cast<unsigned char>(token[end - 1])))
-            --end;
-
-        if (end > start)
-        {
-            if (added > 0)
-                safeAppend(dst, cap, SEP);
-            safeAppendN(dst, cap, token + start, end - start);
-            ++added;
-            if (added >= maxItems)
-                break;
-        }
-
-        tokLen = 0;
-        if (c == '\0')
-            break;
-    }
-
-    return boundedLen(dst, cap - 1);
-}
 
 static void safeAppendClauseBoundary(char *dst, size_t cap, const char *clause)
 {
@@ -1313,9 +1191,6 @@ static void renderLunarLines(const String lines[3], const uint16_t widths[3], co
 {
     dma_display->fillScreen(0);
 
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-
     uint16_t headerBg, headerFg, underlineColor, bodyColor;
     uint16_t lineColors[3];
     if (theme == 1)
@@ -1345,14 +1220,11 @@ static void renderLunarLines(const String lines[3], const uint16_t widths[3], co
 
     dma_display->setTextColor(headerFg);
     const char *title = "Lunar Date";
-    int16_t tx1, ty1;
-    uint16_t tw, th;
-    dma_display->getTextBounds(title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = (PANEL_RES_X - (int)tw) / 2;
+    int tw = tinyVietnameseTextWidth(String(title));
+    int titleX = (PANEL_RES_X - tw) / 2;
     if (titleX < 0)
         titleX = 0;
-    dma_display->setCursor(titleX, 0);
-    dma_display->print(title);
+    drawTinyVietnameseText(titleX, 0, String(title), headerFg);
 
     // Header underline
     dma_display->drawFastHLine(0, headerHeight - 1, PANEL_RES_X, underlineColor);
@@ -1379,9 +1251,7 @@ static void renderLunarLines(const String lines[3], const uint16_t widths[3], co
             baseX = PANEL_RES_X - offsets[2];
         }
 
-        dma_display->setTextColor(lineColors[i]);
-        dma_display->setCursor(baseX, y);
-        dma_display->print(lines[i]);
+        drawTinyVietnameseText(baseX, y, lines[i], lineColors[i]);
     }
 }
 
@@ -1423,7 +1293,7 @@ static void buildLunarLinesMerged()
 
     for (int i = 0; i < 3; ++i)
     {
-        lunarWidths[i] = getTextWidth(lunarLines[i].c_str());
+        lunarWidths[i] = tinyVietnameseTextWidth(lunarLines[i]);
         if (lunarWidths[i] <= 0)
             lunarWidths[i] = 1;
     }
@@ -1731,11 +1601,13 @@ static uint32_t adviceSeed(
   return h;
 }
 
-static const char* pickOne(const char* const* arr, int n, uint32_t seed, uint32_t salt)
+static String pickOneProgmem(const char *const *arr, int n, uint32_t seed, uint32_t salt)
 {
-  if (!arr || n <= 0) return "";
+  if (!arr || n <= 0) return String();
   uint32_t idx = (seed ^ (salt * 2654435761u)) % (uint32_t)n;
-  return arr[idx];
+  char phrase[256];
+  readProgmemString(arr, static_cast<uint16_t>(idx), phrase, sizeof(phrase));
+  return String(phrase);
 }
 
 
@@ -1751,6 +1623,7 @@ static void buildLunarActionAdvice(
     String &nenLam,
     String &nenTranh)
 {
+    using namespace wxv::lunar_luck_nen_tranh;
     const bool tamNuong = isTamNuongDay(lunarDay);
     const bool nguyetKy = isNguyetKyDay(lunarDay);
 
@@ -1759,165 +1632,32 @@ static void buildLunarActionAdvice(
 
     if (score >= 2)
     {
-        // nenLam pools by element
-        static const char* const MOC_LAM[] = {
-            "Khởi động việc mới, kết nối hợp tác, phác thảo kế hoạch",
-            "Mở đầu gọn gàng, chốt hướng đi, tạo đà cho việc mới",
-            "Gặp người phù hợp, gieo ý tưởng, bắt tay việc quan trọng",
-            "Dọn đường cho kế hoạch, ưu tiên bước đầu rõ ràng",
-            "Thuận thời khai mở, gieo hạt hôm nay gặt quả mai sau",
-            "Hợp khởi sự hanh thông, việc nhỏ thành lớn",
-            "Mở lối mới, dốc lòng vun trồng nền tảng",
-            "Thuận gió xuôi chèo, mạnh dạn triển khai ý tưởng",
-            "Gieo nhân đúng lúc, dựng nền cho bước tiến dài"
-
-        };
-        static const char* const KIM_LAM[] = {
-            "Rà soát tài chính, xử lý giấy tờ, chuẩn hóa quy trình",
-            "Chốt hồ sơ, kiểm tra số liệu, làm mọi thứ đúng chuẩn",
-            "Tối ưu quy trình, sửa lỗi tồn, sắp xếp lại ưu tiên",
-            "Gọn sổ sách, rà điều khoản, hoàn thiện thủ tục",
-            "Chỉnh lý sổ sách, việc rõ ràng thì lòng an",
-            "Giữ nguyên tắc vững vàng, việc đâu vào đó",
-            "Lấy kỷ cương làm gốc, lấy rõ ràng làm trọng",
-            "Rà soát từng bước, chặt chẽ mới bền lâu",
-            "Sửa việc cũ cho ngay, mở đường mới cho sáng"
-
-        };
-        static const char* const THUY_LAM[] = {
-            "Giao tiếp, mở rộng quan hệ, xử lý linh hoạt các việc phát sinh",
-            "Trao đổi thẳng, kết nối nhanh, tháo gỡ vướng mắc",
-            "Đàm phán mềm, lắng nghe nhiều, xoay chuyển tình huống",
-            "Mở rộng liên hệ, cập nhật thông tin, phản ứng linh hoạt",
-            "Thuận lời nói phải, lòng người dễ mở",
-            "Mềm như nước chảy, thấu tình đạt lý",
-            "Lắng nghe trước khi quyết, nói ít hiểu nhiều",
-            "Kết giao chân thành, việc ắt hanh thông",
-            "Dùng lời ôn hòa, hóa giải việc khó"
-        };
-        static const char* const HOA_LAM[] = {
-            "Thuyết trình, quảng bá, học kỹ năng mới, tạo động lực cho đội nhóm",
-            "Đẩy năng lượng, lan tỏa ý tưởng, dẫn dắt tinh thần",
-            "Tập trung thể hiện, truyền cảm hứng, thử cách làm mới",
-            "Quảng bá nhẹ nhàng, học nhanh một kỹ năng, khơi động lực",
-            "Lửa nhỏ cũng đủ sưởi ấm lòng người",
-            "Đúng thời phát sáng, việc lớn thành công",
-            "Khơi nguồn cảm hứng, dẫn dắt tinh thần",
-            "Chủ động tỏa sáng nhưng giữ lòng khiêm",
-            "Truyền nhiệt huyết đúng lúc, lan động lực đúng nơi"
-        };
-        static const char* const THO_LAM[] = {
-            "Ổn định nhịp làm việc, củng cố nền tảng, hoàn thiện kế hoạch dài hạn",
-            "Gia cố việc nền, làm chắc từng bước, tính đường dài",
-            "Chậm mà chắc, hoàn thiện cấu trúc, dọn các điểm yếu",
-            "Củng cố nền tảng, sắp xếp lại trật tự, chốt kế hoạch dài hơi",
-            "Chậm mà chắc, từng bước vững vàng",
-            "Xây nền kiên cố, gốc rễ bền lâu",
-            "Lấy ổn định làm trọng, lấy bền lâu làm mục tiêu",
-            "Gia cố nền móng, việc sau mới vững",
-            "Lo xa một bước, tránh rối trăm phần"
-        };
-
-        // nenTranh pool (shared)
-        static const char* const TR_HIGH[] = {
-            "Tránh chủ quan, hứa vội, và chi tiêu theo cảm xúc",
-            "Tránh quá tự tin, quyết nhanh, và mua sắm bốc đồng",
-            "Tránh ôm đồm, nói quá tay, và tiêu tiền theo hứng",
-            "Tránh làm quá tốc độ, cam kết vội, và chi tiêu thiếu kiểm soát",
-            "Tránh tự mãn khi việc đang thuận",
-            "Tránh lời hứa vượt khả năng thực hiện",
-            "Tránh tham nhanh mà bỏ gốc",
-            "Tránh phô trương quá mức",
-            "Tránh nóng vội khi thời vận đang tốt"
-        };
-
         if (dayInfo.element == "Moc")
-            nenLam = pickOne(MOC_LAM, (int)(sizeof(MOC_LAM)/sizeof(MOC_LAM[0])), seed, 11);
+            nenLam = pickOneProgmem(kNenLamMoc, (int)(sizeof(kNenLamMoc) / sizeof(kNenLamMoc[0])), seed, 11);
         else if (dayInfo.element == "Kim")
-            nenLam = pickOne(KIM_LAM, (int)(sizeof(KIM_LAM)/sizeof(KIM_LAM[0])), seed, 12);
+            nenLam = pickOneProgmem(kNenLamKim, (int)(sizeof(kNenLamKim) / sizeof(kNenLamKim[0])), seed, 12);
         else if (dayInfo.element == "Thuy")
-            nenLam = pickOne(THUY_LAM, (int)(sizeof(THUY_LAM)/sizeof(THUY_LAM[0])), seed, 13);
+            nenLam = pickOneProgmem(kNenLamThuy, (int)(sizeof(kNenLamThuy) / sizeof(kNenLamThuy[0])), seed, 13);
         else if (dayInfo.element == "Hoa")
-            nenLam = pickOne(HOA_LAM, (int)(sizeof(HOA_LAM)/sizeof(HOA_LAM[0])), seed, 14);
+            nenLam = pickOneProgmem(kNenLamHoa, (int)(sizeof(kNenLamHoa) / sizeof(kNenLamHoa[0])), seed, 14);
         else
-            nenLam = pickOne(THO_LAM, (int)(sizeof(THO_LAM)/sizeof(THO_LAM[0])), seed, 15);
+            nenLam = pickOneProgmem(kNenLamTho, (int)(sizeof(kNenLamTho) / sizeof(kNenLamTho[0])), seed, 15);
 
-        nenTranh = pickOne(TR_HIGH, (int)(sizeof(TR_HIGH)/sizeof(TR_HIGH[0])), seed, 21);
+        nenTranh = pickOneProgmem(kNenTranhHigh, (int)(sizeof(kNenTranhHigh) / sizeof(kNenTranhHigh[0])), seed, 21);
     }
     else if (score <= -1)
     {
-        static const char* const LAM_LOW[] = {
-            "Ưu tiên việc nhẹ: dọn dẹp, sắp xếp, hoàn thiện việc còn dang dở",
-            "Giảm tốc độ: dọn tồn, chỉnh sửa, làm lại cho gọn",
-            "Làm việc vừa sức: rà lỗi, dọn backlog, hoàn tất phần còn thiếu",
-            "Tập trung việc nhỏ: thu gọn, kiểm tra, hoàn thiện nốt việc dang dở",
-            "An tĩnh xử việc nhỏ, chờ thời thuận lợi",
-            "Thu mình dưỡng sức, chỉnh lại điều chưa ổn",
-            "Làm ít nhưng làm kỹ, sửa sai cho sạch",
-            "Dọn việc cũ cho xong, giữ lòng cho nhẹ",
-            "Giảm tốc một nhịp, tránh sai một bước"
-        };
-
-        static const char* const TR_LOW_KH[] = {
-            "Tránh ký kết lớn, đầu tư mạo hiểm, và xung đột căng thẳng",
-            "Tránh quyết định lớn, tranh cãi gay, và liều tài chính",
-            "Tránh chốt hợp đồng lớn, đầu tư vội, và căng thẳng đôi co",
-            "Tránh va chạm, tránh mạo hiểm tiền bạc, và ký kết quan trọng",
-            "Tránh đối đầu trực diện khi chưa đủ lực",
-            "Tránh quyết lớn khi vận chưa thông",
-            "Tránh dấn thân mạo hiểm vì nóng lòng",
-            "Tránh đầu tư khi lòng còn phân vân",
-            "Tránh căng thẳng kéo dài không cần thiết"
-
-        };
-
-        static const char* const TR_LOW_OTHER[] = {
-            "Tránh đi xa, vay mượn, và quyết định gấp",
-            "Tránh hứa hẹn lớn, vay mượn, và xử lý vội",
-            "Tránh bốc đồng, tránh đi xa, và quyết định khi mệt",
-            "Tránh hành động gấp, vay mượn, và thay đổi lớn",
-            "Tránh di chuyển xa khi chưa thật cần",
-            "Tránh cam kết dài hạn lúc tâm chưa yên",
-            "Tránh vội vàng vì áp lực bên ngoài",
-            "Tránh mở việc mới khi việc cũ chưa xong",
-            "Tránh quyết định khi còn nhiều nghi ngại"
-        };
-
-        nenLam = pickOne(LAM_LOW, (int)(sizeof(LAM_LOW)/sizeof(LAM_LOW[0])), seed, 31);
+        nenLam = pickOneProgmem(kNenLamLow, (int)(sizeof(kNenLamLow) / sizeof(kNenLamLow[0])), seed, 31);
 
         if (dayInfo.element == "Kim" || dayInfo.element == "Hoa")
-            nenTranh = pickOne(TR_LOW_KH, (int)(sizeof(TR_LOW_KH)/sizeof(TR_LOW_KH[0])), seed, 32);
+            nenTranh = pickOneProgmem(kNenTranhLowKimHoa, (int)(sizeof(kNenTranhLowKimHoa) / sizeof(kNenTranhLowKimHoa[0])), seed, 32);
         else
-            nenTranh = pickOne(TR_LOW_OTHER, (int)(sizeof(TR_LOW_OTHER)/sizeof(TR_LOW_OTHER[0])), seed, 33);
+            nenTranh = pickOneProgmem(kNenTranhLowOther, (int)(sizeof(kNenTranhLowOther) / sizeof(kNenTranhLowOther[0])), seed, 33);
     }
     else
     {
-        static const char* const LAM_MID[] = {
-            "Giữ nhịp ổn định, làm việc theo kế hoạch, ưu tiên việc trong tầm kiểm soát",
-            "Đi đều: làm theo kế hoạch, kiểm tra tiến độ, giữ nhịp ổn định",
-            "Chọn việc chắc tay, làm từng bước, ưu tiên phần quan trọng",
-            "Giữ nhịp vừa phải, ưu tiên việc rõ ràng, tránh lan man",
-            "Đi từng bước chắc tay, tránh dao động",
-            "Lấy ổn định làm trọng, tiến vừa đủ nhịp",
-            "Làm việc trong khả năng, tránh quá tầm",
-            "Giữ cân bằng giữa tiến và thủ",
-            "Thuận theo kế hoạch, hạn chế biến động"
-        };
-
-        static const char* const TR_MID[] = {
-            "Tránh khởi sự rủi ro cao hoặc quyết khi chưa đủ dữ liệu",
-            "Tránh quyết vội, tránh rủi ro lớn, và đừng thiếu dữ liệu",
-            "Tránh mở việc khó khi chưa sẵn sàng và chưa đủ thông tin",
-            "Tránh liều lĩnh, tránh đoán mò, và đừng chốt khi còn thiếu dữ liệu",
-            "Tránh thay đổi chiến lược đột ngột",
-            "Tránh tin lời đồn chưa kiểm chứng",
-            "Tránh làm việc theo cảm tính",
-            "Tránh mở rộng khi nền chưa vững",
-            "Tránh quyết nhanh khi chưa cân nhắc đủ"
-        };
-
-        nenLam   = pickOne(LAM_MID, (int)(sizeof(LAM_MID)/sizeof(LAM_MID[0])), seed, 41);
-        nenTranh = pickOne(TR_MID,  (int)(sizeof(TR_MID)/sizeof(TR_MID[0])),  seed, 42);
+        nenLam = pickOneProgmem(kNenLamMid, (int)(sizeof(kNenLamMid) / sizeof(kNenLamMid[0])), seed, 41);
+        nenTranh = pickOneProgmem(kNenTranhMid, (int)(sizeof(kNenTranhMid) / sizeof(kNenTranhMid[0])), seed, 42);
     }
 
     // 2) Lunar-cycle: early/mid/late month (phrases feel like guidance, not technical)
@@ -2088,7 +1828,7 @@ static void buildHoangDaoHoursCompact(int dayBranchIndex, char *dst, size_t cap)
     }
 }
 
-static void setSectionStartState()
+void setSectionStartState()
 {
     if (g_sectionCount == 0)
         return;
@@ -2179,38 +1919,6 @@ static void updateHeaderAnim()
 
 static void renderHeaderLine1(const char *currentTitle, uint16_t headerFgColor, uint16_t headerBgColor, uint16_t headerDividerColor)
 {
-    auto drawPreviewIndicator = [&](int16_t offset)
-    {
-        const int16_t x = 61;
-        const int16_t y = 0;
-        const uint16_t indicatorColor = (theme == 1)
-                                            ? dma_display->color565(120, 220, 255)
-                                            : dma_display->color565(80, 255, 160);
-        dma_display->fillRect(x, y, 3, 3, headerBgColor);
-        if (offset == 0)
-            return;
-        if (offset > 0)
-        {
-            // .#.
-            // ###
-            // .#.
-            dma_display->drawPixel(x + 1, y + 0, indicatorColor);
-            dma_display->drawPixel(x + 0, y + 1, indicatorColor);
-            dma_display->drawPixel(x + 1, y + 1, indicatorColor);
-            dma_display->drawPixel(x + 2, y + 1, indicatorColor);
-            dma_display->drawPixel(x + 1, y + 2, indicatorColor);
-        }
-        else
-        {
-            // ...
-            // ###
-            // ...
-            dma_display->drawPixel(x + 0, y + 1, indicatorColor);
-            dma_display->drawPixel(x + 1, y + 1, indicatorColor);
-            dma_display->drawPixel(x + 2, y + 1, indicatorColor);
-        }
-    };
-
     dma_display->fillRect(0, HEADER_Y, HEADER_W, HEADER_H, headerBgColor);
     dma_display->drawFastHLine(0, HEADER_Y + HEADER_H - 1, HEADER_W, headerDividerColor);
     updateHeaderAnim();
@@ -2315,7 +2023,6 @@ static void renderHeaderLine1(const char *currentTitle, uint16_t headerFgColor, 
             dma_display->print(currentTitle);
         }
     }
-    drawPreviewIndicator(lunarDayOffset);
 }
 
 static void advanceSection()
@@ -2479,119 +2186,6 @@ static void extractFocusPhraseFromHeadline(
         safeAppend(focusDst, focusCap, fallbackTopic ? fallbackTopic : "");
 }
 
-void buildLuckSections(
-    int lunarDay, int lunarMonth, int lunarYear,
-    const char *canChiDay, const char *canChiMonth, const char *solarTerm, const char *canChiYear,
-    const char *hop1, const char *hop2, const char *ky,
-    const char *gioTotRawOrPreformatted,
-    int score,
-    const char *categoryName,
-    const char *focusPhrase,
-    const char *headlineRaw,
-    const char *nenLamRaw,
-    const char *nenTranhRaw,
-    const char *xuatHanhLine,
-    int xuatHanhTone,
-    const char *xuatHanhName,
-    const char *caDaoLine)
-{
-    g_sectionCount = 0;
-
-    char buf[CONTENT_MAX];
-
-    snprintf(buf, sizeof(buf), "%02d/%02d/%04d" SEP "%s" SEP "%s" SEP "%s" SEP "%s",
-             lunarDay, lunarMonth, lunarYear,
-             canChiDay ? canChiDay : "",
-             canChiMonth ? canChiMonth : "",
-             solarTerm ? solarTerm : "",
-             canChiYear ? canChiYear : "");
-    addSection("Âm Lịch", buf, false, false, 0);
-
-    const char *scoreLabel = "Bình";
-    if (score >= 2)
-        scoreLabel = "Tốt";
-    else if (score <= -1)
-        scoreLabel = "Xấu";
-    snprintf(buf, sizeof(buf), "Ngày: %s * X.Hành: %s", scoreLabel, xuatHanhLine ? xuatHanhLine : "");
-    buf[sizeof(buf) - 1] = '\0';
-    addSection("Vận Khí", buf, false, false, 0);
-
-    buf[0] = '\0';
-    safeAppend(buf, sizeof(buf), hop1 ? hop1 : "");
-    if (hop2 && hop2[0] != '\0')
-    {
-        safeAppend(buf, sizeof(buf), SEP);
-        safeAppend(buf, sizeof(buf), hop2);
-    }
-    addSection("Hợp Tuổi", buf, false, false, 0);
-
-    addSection("Kỵ Tuổi", ky ? ky : "", false, false, 0);
-    addSection("Giờ Tốt", gioTotRawOrPreformatted ? gioTotRawOrPreformatted : "", false, false, 0);
-
-    addSection("Chủ Đề", focusPhrase ? focusPhrase : "", false, false, 0);
-
-    const char *goiYNoTopic = skipTopicLeadForGoiY(headlineRaw);
-    const char *goiYBody = skipFocusLeadForGoiY(goiYNoTopic, focusPhrase);
-    char goiyBuilt[GOIY_CONTENT_MAX];
-    buildNormalized(goiyBuilt, sizeof(goiyBuilt), goiYBody ? goiYBody : "");
-    if (xuatHanhName && xuatHanhName[0] != '\0')
-    {
-        const char *clause = "Xuất hành vừa: đi được nhưng chọn việc chắc, tránh vội";
-        if (xuatHanhTone > 0)
-            clause = "Xuất hành thuận: dễ gặp trợ lực, việc đối ngoại hanh thông";
-        else if (xuatHanhTone < 0)
-            clause = "Xuất hành kém: nên giữ an toàn, hạn chế đi xa và chốt lớn";
-        safeAppendClauseBoundary(goiyBuilt, sizeof(goiyBuilt), clause);
-    }
-    addSection("Lời Bàn", goiyBuilt, false, false, 0, g_goiyContent, GOIY_CONTENT_MAX);
-
-    char nenBuilt[CONTENT_MAX];
-    char tranhBuilt[CONTENT_MAX];
-    summarizeListToBullets(nenBuilt, sizeof(nenBuilt), nenLamRaw ? nenLamRaw : "", 5);
-    summarizeListToBullets(tranhBuilt, sizeof(tranhBuilt), nenTranhRaw ? nenTranhRaw : "", 5);
-    if (xuatHanhName && xuatHanhName[0] != '\0')
-    {
-        const char *nenClause = "đi lại vừa phải, chọn việc đơn giản và chắc chắn";
-        const char *tranhClause = "tránh mở việc quá lớn khi chưa sẵn sàng";
-        if (xuatHanhTone > 0)
-        {
-            nenClause = "hợp đi lại, gặp gỡ, xử lý việc đối ngoại";
-            tranhClause = "tránh chần chừ bỏ lỡ thời điểm";
-        }
-        else if (xuatHanhTone < 0)
-        {
-            nenClause = "ưu tiên việc gần, việc nội bộ, rà soát và chỉnh sửa";
-            tranhClause = "hạn chế đi xa, khai trương, ký kết lớn";
-        }
-        safeAppendClauseBoundary(nenBuilt, sizeof(nenBuilt), nenClause);
-        safeAppendClauseBoundary(tranhBuilt, sizeof(tranhBuilt), tranhClause);
-    }
-    addSection("Nên", nenBuilt, false, false, 0);
-    addSection("Tránh", tranhBuilt, false, false, 0);
-    addSection("Ca Dao", caDaoLine ? caDaoLine : "", false, false, 0);
-
-    for (uint8_t i = 0; i < g_sectionCount; ++i)
-    {
-        g_sections[i].contentLen = static_cast<uint16_t>(strlen(g_sections[i].content));
-        g_sections[i].contentWidthPx = static_cast<int16_t>(measureTextWidthPx(g_sections[i].content, g_sections[i].contentLen));
-        g_sections[i].marquee = (g_sections[i].contentWidthPx > PANEL_RES_X);
-    }
-
-    currentSectionIndex = 0;
-    hdrState = HDR_IDLE;
-    hdrDoorPx = PANEL_RES_X / 2;
-    hdrDrawNew = true;
-    hdrDelayActive = false;
-    if (hdrBrightnessPulsed)
-    {
-        setPanelBrightness(hdrBrightnessSaved);
-        hdrBrightnessPulsed = false;
-    }
-    hdrOld[0] = '\0';
-    strncpy(hdrNew, g_sections[0].title ? g_sections[0].title : "", TITLE_MAX - 1);
-    hdrNew[TITLE_MAX - 1] = '\0';
-    setSectionStartState();
-}
 
 static void renderCurrentLunarLuckSection()
 {
@@ -2640,6 +2234,7 @@ static void renderCurrentLunarLuckSection()
 
         char ngayPart[CONTENT_MAX];
         char xhPart[CONTENT_MAX];
+        xhPart[0] = '\0';
         const size_t ngayLen = static_cast<size_t>(sepPtr - sec.content);
         const size_t copyNgay = (ngayLen < (CONTENT_MAX - 1)) ? ngayLen : (CONTENT_MAX - 1);
         memcpy(ngayPart, sec.content, copyNgay);
@@ -3135,7 +2730,7 @@ static void fillDayBackground()
     }
 }
 
-static void fillNightBackground()
+static void fillNightBackground(int starShiftX = 0)
 {
     // Deep blue + stars like the reference image.
     uint16_t top = dma_display->color565(2, 6, 28);
@@ -3155,14 +2750,17 @@ static void fillNightBackground()
     };
     for (auto &p : stars)
     {
-        dma_display->drawPixel(p[0], p[1], star);
+        int sx = static_cast<int>(p[0]) + starShiftX;
+        if (sx < 0 || sx >= SCENE_W)
+            continue;
+        dma_display->drawPixel(sx, p[1], star);
         // occasional plus star
         if ((p[0] % 3) == 0)
         {
-            if (p[0] > 0) dma_display->drawPixel(p[0] - 1, p[1], star);
-            if (p[0] < SCENE_W - 1) dma_display->drawPixel(p[0] + 1, p[1], star);
-            if (p[1] > 0) dma_display->drawPixel(p[0], p[1] - 1, star);
-            if (p[1] < SCENE_H - 1) dma_display->drawPixel(p[0], p[1] + 1, star);
+            if (sx > 0) dma_display->drawPixel(sx - 1, p[1], star);
+            if (sx < SCENE_W - 1) dma_display->drawPixel(sx + 1, p[1], star);
+            if (p[1] > 0) dma_display->drawPixel(sx, p[1] - 1, star);
+            if (p[1] < SCENE_H - 1) dma_display->drawPixel(sx, p[1] + 1, star);
         }
     }
 }
@@ -3243,48 +2841,50 @@ static void drawPixelMoon(int cx, int cy)
 
 static void drawPixelCloud(int x, int y, bool night)
 {
-    // Pixel-art cloud built from scanline spans (outline + 2 shades).
-    const uint8_t spans[][2] = {
-        {12, 12}, {9, 18}, {6, 24}, {4, 28}, {2, 32}, {1, 34},
-        {1, 34}, {2, 32}, {3, 30}, {5, 26}, {7, 22}, {9, 18}
-    };
-    uint16_t outline = night ? dma_display->color565(40, 55, 85) : dma_display->color565(70, 95, 140);
-    uint16_t fill = night ? dma_display->color565(140, 160, 195) : dma_display->color565(215, 230, 245);
-    uint16_t shade = night ? dma_display->color565(95, 115, 150) : dma_display->color565(170, 190, 215);
-    uint16_t hi = night ? dma_display->color565(175, 195, 230) : dma_display->color565(245, 250, 255);
+    // Alternate style: smoother silhouette cloud using scanline spans.
+    uint16_t outline = night ? dma_display->color565(92, 112, 150) : dma_display->color565(110, 132, 168);
+    uint16_t fill = night ? dma_display->color565(176, 192, 220) : dma_display->color565(236, 243, 250);
+    uint16_t shade = night ? dma_display->color565(128, 146, 184) : dma_display->color565(192, 208, 226);
+    uint16_t hi = night ? dma_display->color565(214, 226, 246) : dma_display->color565(254, 255, 255);
 
-    for (int row = 0; row < 12; ++row)
+    // left edge offset + run length for each row (about 24x11 cloud)
+    const uint8_t spans[][2] = {
+        {8, 8}, {6, 12}, {4, 16}, {3, 18}, {2, 20}, {1, 22},
+        {1, 22}, {2, 20}, {3, 18}, {5, 14}, {7, 10}
+    };
+
+    for (int row = 0; row < 11; ++row)
     {
-        int yy = y + row;
-        if (yy < 0 || yy >= SCENE_H) continue;
-        int start = x + spans[row][0];
+        int yy = y + row + 4; // move cloud up by 3 px
+        if (yy < 0 || yy >= SCENE_H)
+            continue;
+
+        int start = x + spans[row][0] + 2;
         int width = spans[row][1];
         int end = start + width - 1;
-        if (end < 0 || start >= SCENE_W) continue;
+        if (end < 0 || start >= SCENE_W)
+            continue;
 
-        // Outline edges
         for (int xx = start; xx <= end; ++xx)
         {
-            if (xx < 0 || xx >= SCENE_W) continue;
-            bool edge = (row == 0) || (row == 11) || (xx == start) || (xx == end);
+            if (xx < 0 || xx >= SCENE_W)
+                continue;
+            bool edge = (row == 0) || (row == 10) || (xx == start) || (xx == end);
             dma_display->drawPixel(xx, yy, edge ? outline : fill);
         }
 
-        // Bottom shading band
-        if (row >= 7 && width > 6)
+        // underside shading inside cloud body
+        if (row >= 6 && width > 6)
         {
             for (int xx = start + 2; xx <= end - 2; ++xx)
-            {
-                if ((xx + row) % 3 == 0)
-                    dma_display->drawPixel(xx, yy, shade);
-            }
+                dma_display->drawPixel(xx, yy, shade);
         }
     }
 
-    // Highlights on upper-left
-    dma_display->drawPixel(x + 16, y + 2, hi);
-    dma_display->drawPixel(x + 18, y + 3, hi);
-    dma_display->drawPixel(x + 14, y + 4, hi);
+    // small top highlights to lift the shape
+    dma_display->drawPixel(x + 14, y + 5, hi);
+    dma_display->drawPixel(x + 18, y + 4, hi);
+    dma_display->drawPixel(x + 21, y + 5, hi);
 }
 
 static void drawPixelRain(int x, int y, int w, bool night)
@@ -3486,8 +3086,7 @@ static void drawWeatherSceneSunny()
 {
     clearConditionSceneArea();
     fillDayBackground();
-    // Sunny Day: cloud left, sun right (like reference)
-    drawPixelCloud(2, 8, false);
+    // Clear/Sunny: keep sky visually clear (no cloud glyphs).
     drawPixelSun(50, 11);
 }
 
@@ -3516,6 +3115,8 @@ static void drawWeatherSceneRain()
     // Rainy Day: cloud + rain
     drawPixelCloud(10, 6, false);
     drawPixelRain(12, 14, 50, false);
+    drawPixelRain(2, 14, 10, false);   // left side band
+    drawPixelRain(54, 15, 8, false);   // right side band
 }
 
 static void drawWeatherSceneRainNight()
@@ -3526,6 +3127,8 @@ static void drawWeatherSceneRainNight()
     drawPixelCloud(10, 7, true);
     drawPixelMoon(54, 9);
     drawPixelRain(12, 14, 50, true);
+    drawPixelRain(2, 14, 10, true);    // left side band
+    drawPixelRain(54, 15, 8, true);    // right side band
 }
 
 static void drawWeatherSceneThunderstorm()
@@ -3536,6 +3139,8 @@ static void drawWeatherSceneThunderstorm()
     drawPixelCloud(10, 6, false);
     drawPixelBolt(38, 5);
     drawPixelRain(12, 14, 50, false);
+    drawPixelRain(2, 14, 10, false);   // left side band
+    drawPixelRain(54, 15, 8, false);   // right side band
 }
 
 static void drawWeatherSceneThunderstormNight()
@@ -3547,6 +3152,8 @@ static void drawWeatherSceneThunderstormNight()
     drawPixelMoon(54, 9);
     drawPixelBolt(38, 5);
     drawPixelRain(12, 14, 50, true);
+    drawPixelRain(2, 14, 10, true);    // left side band
+    drawPixelRain(54, 15, 8, true);    // right side band
 }
 
 static void drawWeatherSceneSnow()
@@ -3573,7 +3180,7 @@ static void drawWeatherSceneClearNight()
     clearConditionSceneArea();
     fillNightBackground();
     // Clear Night: moon + stars only (like reference)
-    drawPixelMoon(18, 11);
+    drawPixelMoon(54, 9);
 }
 
 struct WeatherSceneRenderer
@@ -3610,9 +3217,9 @@ static void drawWeatherSceneMono()
     uint16_t cloudMid = dma_display->color565(90, 90, 100);
     uint16_t cloudDark = dma_display->color565(70, 70, 80);
 
-    drawCompactCloud(PANEL_RES_X / 5, 8, cloudLight);
-    drawCompactCloud(PANEL_RES_X / 2, 10, cloudMid);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 4, 12, cloudDark);
+    drawCompactCloud(PANEL_RES_X / 2, 9, cloudLight);
+    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 3, 11, cloudMid);
+    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 5, 13, cloudDark);
 }
 
 static const WeatherSceneRenderer WEATHER_SCENE_RENDERERS[] = {
@@ -3645,19 +3252,24 @@ static const WeatherSceneAlias WEATHER_SCENE_ALIASES[] = {
     {"fair", WeatherSceneKind::Sunny},
     {"cloudy", WeatherSceneKind::Cloudy},
     {"mostly cloudy", WeatherSceneKind::Cloudy},
-    {"partly cloudy", WeatherSceneKind::Cloudy},
-    {"overcast", WeatherSceneKind::Cloudy},
-    {"overcast clouds", WeatherSceneKind::Cloudy},
-    {"few clouds", WeatherSceneKind::Cloudy},
-    {"scattered clouds", WeatherSceneKind::Cloudy},
-    {"broken clouds", WeatherSceneKind::Cloudy},
-    {"mist", WeatherSceneKind::Cloudy},
-    {"fog", WeatherSceneKind::Cloudy},
-    {"haze", WeatherSceneKind::Cloudy},
-    {"smoke", WeatherSceneKind::Cloudy},
-    {"dust", WeatherSceneKind::Cloudy},
-    {"sand", WeatherSceneKind::Cloudy},
-    {"ash", WeatherSceneKind::Cloudy},
+    {"partly cloudy", WeatherSceneKind::PartlyCloudy},
+    {"partly sunny", WeatherSceneKind::PartlyCloudy},
+    {"mostly clear", WeatherSceneKind::PartlyCloudy},
+    {"overcast", WeatherSceneKind::Overcast},
+    {"overcast clouds", WeatherSceneKind::Overcast},
+    {"few clouds", WeatherSceneKind::PartlyCloudy},
+    {"scattered clouds", WeatherSceneKind::PartlyCloudy},
+    {"broken clouds", WeatherSceneKind::PartlyCloudy},
+    {"mist", WeatherSceneKind::Fog},
+    {"fog", WeatherSceneKind::Fog},
+    {"haze", WeatherSceneKind::Fog},
+    {"smoke", WeatherSceneKind::Fog},
+    {"dust", WeatherSceneKind::Fog},
+    {"sand", WeatherSceneKind::Fog},
+    {"ash", WeatherSceneKind::Fog},
+    {"windy", WeatherSceneKind::Windy},
+    {"breezy", WeatherSceneKind::Windy},
+    {"gusty", WeatherSceneKind::Windy},
     {"rain", WeatherSceneKind::Rain},
     {"rainy", WeatherSceneKind::Rain},
     {"showers", WeatherSceneKind::Rain},
@@ -3723,8 +3335,16 @@ static WeatherSceneKind resolveWeatherSceneKind(const String &condition)
             WeatherSceneKind base = WEATHER_SCENE_ALIASES[i].kind;
             if (base == WeatherSceneKind::Sunny && night)
                 return WeatherSceneKind::SunnyNight;
+            if (base == WeatherSceneKind::PartlyCloudy && night)
+                return WeatherSceneKind::PartlyCloudyNight;
             if (base == WeatherSceneKind::Cloudy && night)
                 return WeatherSceneKind::CloudyNight;
+            if (base == WeatherSceneKind::Overcast && night)
+                return WeatherSceneKind::OvercastNight;
+            if (base == WeatherSceneKind::Fog && night)
+                return WeatherSceneKind::FogNight;
+            if (base == WeatherSceneKind::Windy && night)
+                return WeatherSceneKind::WindyNight;
             if (base == WeatherSceneKind::Rain && night)
                 return WeatherSceneKind::RainNight;
             if (base == WeatherSceneKind::Thunderstorm && night)
@@ -3737,13 +3357,22 @@ static WeatherSceneKind resolveWeatherSceneKind(const String &condition)
 
     if (normalized.indexOf("thunder") >= 0 || normalized.indexOf("storm") >= 0)
         return night ? WeatherSceneKind::ThunderstormNight : WeatherSceneKind::Thunderstorm;
+    if (normalized.indexOf("wind") >= 0 || normalized.indexOf("breez") >= 0 || normalized.indexOf("gust") >= 0)
+        return night ? WeatherSceneKind::WindyNight : WeatherSceneKind::Windy;
     if (normalized.indexOf("rain") >= 0 || normalized.indexOf("shower") >= 0 || normalized.indexOf("drizzle") >= 0)
         return night ? WeatherSceneKind::RainNight : WeatherSceneKind::Rain;
     if (normalized.indexOf("snow") >= 0 || normalized.indexOf("sleet") >= 0 || normalized.indexOf("flurry") >= 0)
         return night ? WeatherSceneKind::SnowNight : WeatherSceneKind::Snow;
     if (normalized.indexOf("night") >= 0)
         return WeatherSceneKind::ClearNight;
-    if (normalized.indexOf("cloud") >= 0 || normalized.indexOf("overcast") >= 0 || normalized.indexOf("mist") >= 0)
+    if (normalized.indexOf("overcast") >= 0)
+        return night ? WeatherSceneKind::OvercastNight : WeatherSceneKind::Overcast;
+    if (normalized.indexOf("fog") >= 0 || normalized.indexOf("mist") >= 0 || normalized.indexOf("haze") >= 0 ||
+        normalized.indexOf("smoke") >= 0 || normalized.indexOf("dust") >= 0 || normalized.indexOf("sand") >= 0 || normalized.indexOf("ash") >= 0)
+        return night ? WeatherSceneKind::FogNight : WeatherSceneKind::Fog;
+    if (normalized.indexOf("partly") >= 0 || normalized.indexOf("few cloud") >= 0 || normalized.indexOf("scattered cloud") >= 0 || normalized.indexOf("broken cloud") >= 0)
+        return night ? WeatherSceneKind::PartlyCloudyNight : WeatherSceneKind::PartlyCloudy;
+    if (normalized.indexOf("cloud") >= 0 || normalized.indexOf("overcast") >= 0)
         return night ? WeatherSceneKind::CloudyNight : WeatherSceneKind::Cloudy;
     return night ? WeatherSceneKind::SunnyNight : WeatherSceneKind::Sunny;
 }
@@ -3756,10 +3385,26 @@ static uint16_t weatherSceneAccentColor(WeatherSceneKind kind)
         return dma_display->color565(235, 185, 60);
     case WeatherSceneKind::SunnyNight:
         return dma_display->color565(180, 190, 240);
+    case WeatherSceneKind::PartlyCloudy:
+        return dma_display->color565(210, 205, 150);
+    case WeatherSceneKind::PartlyCloudyNight:
+        return dma_display->color565(170, 185, 220);
     case WeatherSceneKind::Cloudy:
         return dma_display->color565(190, 200, 220);
     case WeatherSceneKind::CloudyNight:
         return dma_display->color565(150, 170, 210);
+    case WeatherSceneKind::Overcast:
+        return dma_display->color565(176, 188, 202);
+    case WeatherSceneKind::OvercastNight:
+        return dma_display->color565(126, 144, 172);
+    case WeatherSceneKind::Fog:
+        return dma_display->color565(205, 210, 220);
+    case WeatherSceneKind::FogNight:
+        return dma_display->color565(145, 165, 190);
+    case WeatherSceneKind::Windy:
+        return dma_display->color565(180, 210, 230);
+    case WeatherSceneKind::WindyNight:
+        return dma_display->color565(135, 175, 215);
     case WeatherSceneKind::Rain:
         return dma_display->color565(120, 170, 210);
     case WeatherSceneKind::RainNight:
@@ -3777,6 +3422,99 @@ static uint16_t weatherSceneAccentColor(WeatherSceneKind kind)
     default:
         return dma_display->color565(200, 200, 210);
     }
+}
+
+static bool weatherSceneIsNight(WeatherSceneKind kind)
+{
+    return kind == WeatherSceneKind::SunnyNight ||
+           kind == WeatherSceneKind::PartlyCloudyNight ||
+           kind == WeatherSceneKind::CloudyNight ||
+           kind == WeatherSceneKind::OvercastNight ||
+           kind == WeatherSceneKind::FogNight ||
+           kind == WeatherSceneKind::WindyNight ||
+           kind == WeatherSceneKind::RainNight ||
+           kind == WeatherSceneKind::ThunderstormNight ||
+           kind == WeatherSceneKind::SnowNight ||
+           kind == WeatherSceneKind::ClearNight;
+}
+
+static uint16_t weatherSceneTempBgColor(WeatherSceneKind kind)
+{
+    // Approximate top-right sky color for each scene (where temp is rendered).
+    switch (kind)
+    {
+    case WeatherSceneKind::Sunny:
+        return dma_display->color565(45, 170, 255);
+    case WeatherSceneKind::PartlyCloudy:
+        return dma_display->color565(95, 175, 235);
+    case WeatherSceneKind::Cloudy:
+        return dma_display->color565(120, 165, 210);
+    case WeatherSceneKind::Overcast:
+        return dma_display->color565(128, 145, 165);
+    case WeatherSceneKind::Fog:
+        return dma_display->color565(160, 185, 205);
+    case WeatherSceneKind::Windy:
+        return dma_display->color565(85, 165, 225);
+    case WeatherSceneKind::Rain:
+        return dma_display->color565(55, 110, 175);
+    case WeatherSceneKind::Thunderstorm:
+        return dma_display->color565(38, 74, 128);
+    case WeatherSceneKind::Snow:
+        return dma_display->color565(175, 210, 240);
+    case WeatherSceneKind::SunnyNight:
+    case WeatherSceneKind::PartlyCloudyNight:
+    case WeatherSceneKind::CloudyNight:
+    case WeatherSceneKind::OvercastNight:
+    case WeatherSceneKind::FogNight:
+    case WeatherSceneKind::WindyNight:
+    case WeatherSceneKind::RainNight:
+    case WeatherSceneKind::ThunderstormNight:
+    case WeatherSceneKind::SnowNight:
+    case WeatherSceneKind::ClearNight:
+        return dma_display->color565(8, 16, 52);
+    default:
+        return dma_display->color565(36, 78, 134);
+    }
+}
+
+static int colorLuma565(uint16_t c)
+{
+    int r = ((c >> 11) & 0x1F) * 255 / 31;
+    int g = ((c >> 5) & 0x3F) * 255 / 63;
+    int b = (c & 0x1F) * 255 / 31;
+    return (r * 30 + g * 59 + b * 11) / 100;
+}
+
+static uint16_t weatherSceneAdaptiveTempTextColor(WeatherSceneKind kind, uint16_t accent, bool secondary)
+{
+    if (theme == 1)
+    {
+        return secondary ? dma_display->color565(135, 155, 205)
+                         : dma_display->color565(200, 215, 245);
+    }
+
+    if (weatherSceneIsNight(kind))
+    {
+        uint16_t base = secondary ? dma_display->color565(145, 205, 255)
+                                  : dma_display->color565(235, 246, 255);
+        return lerpColor565(base, accent, secondary ? 0.12f : 0.08f);
+    }
+
+    uint16_t base = secondary ? dma_display->color565(255, 188, 112)
+                              : dma_display->color565(255, 236, 172);
+    return lerpColor565(base, accent, secondary ? 0.10f : 0.06f);
+}
+
+static void drawSceneReadabilityOverlay(WeatherSceneKind kind)
+{
+    // Keep overlays lightweight so the scene top is never obscured.
+    // Only draw the scene/status divider line.
+    const bool night = weatherSceneIsNight(kind);
+    const uint16_t accent = weatherSceneAccentColor(kind);
+    const uint16_t divider = scaleColor565(accent, night ? 0.55f : 0.72f);
+
+    // Thin divider between scene and status/marquee zone.
+    dma_display->drawFastHLine(0, SCENE_H - 1, SCENE_W, divider);
 }
 
 static String formatConditionLabel(const String &condition)
@@ -3813,108 +3551,12 @@ static String formatConditionLabel(const String &condition)
     return label;
 }
 
-void drawWeatherConditionScene(WeatherSceneKind kind)
-{
-    if (theme == 1)
-    {
-        drawWeatherSceneMono();
-        return;
-    }
-
-    for (const auto &renderer : WEATHER_SCENE_RENDERERS)
-    {
-        if (renderer.kind == kind)
-        {
-            renderer.drawFn();
-            return;
-        }
-    }
-    drawWeatherSceneDefault();
-}
-
-void drawWeatherConditionScene(const String &condition)
-{
-    WeatherSceneKind kind = resolveWeatherSceneKind(condition);
-    drawWeatherConditionScene(kind);
-}
-
-bool screenIsAllowed(ScreenMode mode)
-{
-    switch (mode)
-    {
-    case SCREEN_OWM:
-        return isDataSourceOwm();
-    case SCREEN_UDP_DATA:
-    case SCREEN_UDP_FORECAST:
-    case SCREEN_WIND_DIR:
-    case SCREEN_CURRENT:
-    case SCREEN_HOURLY:
-        return isDataSourceWeatherFlow();
-    case SCREEN_CONDITION_SCENE:
-        return !isDataSourceNone();
-    case SCREEN_NOAA_ALERT:
-        return noaaAlertsEnabled;
-    default:
-        return true;
-    }
-}
-
-ScreenMode nextAllowedScreen(ScreenMode start, int direction)
-{
-    if (direction == 0)
-        direction = 1;
-
-    int startIdx = -1;
-    for (int i = 0; i < NUM_INFOSCREENS; ++i)
-    {
-        if (InfoScreenModes[i] == start)
-        {
-            startIdx = i;
-            break;
-        }
-    }
-    if (startIdx < 0)
-        startIdx = 0;
-
-    int idx = startIdx;
-    for (int steps = 0; steps < NUM_INFOSCREENS; ++steps)
-    {
-        idx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
-        ScreenMode candidate = InfoScreenModes[idx];
-        if (screenIsAllowed(candidate))
-            return candidate;
-    }
-    return SCREEN_CLOCK;
-}
-
-ScreenMode enforceAllowedScreen(ScreenMode desired)
-{
-    if (screenIsAllowed(desired))
-        return desired;
-
-    ScreenMode candidate = nextAllowedScreen(desired, +1);
-    if (screenIsAllowed(candidate))
-        return candidate;
-
-    candidate = nextAllowedScreen(desired, -1);
-    if (screenIsAllowed(candidate))
-        return candidate;
-
-    return SCREEN_CLOCK;
-}
-
-ScreenMode homeScreenForDataSource()
-{
-    if (isDataSourceOwm())
-        return SCREEN_OWM;
-    return SCREEN_CLOCK;
-}
-static String formatOutdoorTemperature()
+String formatOutdoorTemperature()
 {
     if (isDataSourceNone())
         return String("--");
 
-    if (isDataSourceWeatherFlow())
+    if (isDataSourceForecastModel())
     {
         if (!isnan(tempest.temperature))
             return fmtTemp(tempest.temperature, 0);
@@ -3936,7 +3578,7 @@ static String formatOutdoorHumidity()
     if (isDataSourceNone())
         return String("--");
 
-    if (isDataSourceWeatherFlow())
+    if (isDataSourceForecastModel())
     {
         if (!isnan(tempest.humidity))
             return String((int)(tempest.humidity + 0.5f));
@@ -3980,11 +3622,39 @@ static String formatIndoorHumidity()
 static void drawWeatherFlowIcon()
 {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
-    String cond = currentCond.cond;
-    if (cond.isEmpty())
-        cond = str_Weather_Conditions_Des;
-    const uint8_t *icon = getWeatherIconFromCondition(cond);
-    uint16_t color = getIconColorFromCondition(cond);
+    String key = currentCond.icon;
+    if (key.isEmpty())
+        key = currentCond.cond;
+    if (key.isEmpty())
+        key = str_Weather_Conditions_Des;
+
+    auto isNightAt = [&](time_t epoch, const tm *tmi) -> bool {
+        if (!tmi)
+            return false;
+        const int month = tmi->tm_mon + 1;
+        const int day = tmi->tm_mday;
+        for (int di = 0; di < forecast.numDays; ++di)
+        {
+            const ForecastDay &d = forecast.days[di];
+            if (d.monthNum == month && d.dayNum == day && d.sunrise > 0 && d.sunset > 0)
+            {
+                return !(epoch >= static_cast<time_t>(d.sunrise) && epoch < static_cast<time_t>(d.sunset));
+            }
+        }
+        const int hhLocal = tmi->tm_hour;
+        return (hhLocal < 6 || hhLocal >= 18);
+    };
+
+    if (key.length() > 0 && key.indexOf("night") < 0)
+    {
+        time_t baseEpoch = (currentCond.time > 0) ? static_cast<time_t>(currentCond.time) : time(nullptr);
+        tm *ti = localtime(&baseEpoch);
+        if (ti && isNightAt(baseEpoch, ti))
+            key += " night";
+    }
+
+    const uint8_t *icon = getWeatherIconFromCondition(key);
+    uint16_t color = getIconColorFromCondition(key);
     dma_display->drawBitmap(0, 0, icon, 16, 16, color);
 }
 static bool splashActive = false;
@@ -4282,6 +3952,198 @@ int getTextWidth(const char *text)
     return w;
 }
 
+static void copyTrimmed(const char *src, int start, int end, char *dst, size_t dstSize)
+{
+    if (!dst || dstSize == 0)
+        return;
+    if (!src)
+    {
+        dst[0] = '\0';
+        return;
+    }
+    while (start < end && isspace(static_cast<unsigned char>(src[start])))
+        ++start;
+    while (end > start && isspace(static_cast<unsigned char>(src[end - 1])))
+        --end;
+    int len = end - start;
+    if (len < 0)
+        len = 0;
+    if (len > static_cast<int>(dstSize) - 1)
+        len = static_cast<int>(dstSize) - 1;
+    if (len > 0)
+        memcpy(dst, src + start, static_cast<size_t>(len));
+    dst[len] = '\0';
+}
+
+static int textWidthOnCanvas(GFXcanvas16 &canvas, const char *text)
+{
+    int16_t x1, y1;
+    uint16_t w, h;
+    canvas.getTextBounds(text ? text : "", 0, 0, &x1, &y1, &w, &h);
+    return static_cast<int>(w);
+}
+
+static void splitHeadingTitle(GFXcanvas16 &canvas, const char *title, char *line1, size_t line1Size, char *line2, size_t line2Size, int maxWidthPx)
+{
+    if (!line1 || line1Size == 0 || !line2 || line2Size == 0)
+        return;
+
+    line1[0] = '\0';
+    line2[0] = '\0';
+
+    if (!title || !title[0])
+    {
+        strncpy(line1, "Section", line1Size - 1);
+        line1[line1Size - 1] = '\0';
+        return;
+    }
+
+    const int len = static_cast<int>(strlen(title));
+    if (textWidthOnCanvas(canvas, title) <= maxWidthPx)
+    {
+        strncpy(line1, title, line1Size - 1);
+        line1[line1Size - 1] = '\0';
+        return;
+    }
+
+    int bestSpace = -1;
+    int bestPenalty = 32767;
+    for (int i = 1; i < len - 1; ++i)
+    {
+        if (title[i] != ' ')
+            continue;
+        char left[48];
+        char right[48];
+        copyTrimmed(title, 0, i, left, sizeof(left));
+        copyTrimmed(title, i + 1, len, right, sizeof(right));
+        if (!left[0] || !right[0])
+            continue;
+        const int lw = textWidthOnCanvas(canvas, left);
+        const int rw = textWidthOnCanvas(canvas, right);
+        if (lw > maxWidthPx || rw > maxWidthPx)
+            continue;
+        int penalty = abs(lw - rw);
+        if (penalty < bestPenalty)
+        {
+            bestPenalty = penalty;
+            bestSpace = i;
+        }
+    }
+
+    if (bestSpace >= 0)
+    {
+        copyTrimmed(title, 0, bestSpace, line1, line1Size);
+        copyTrimmed(title, bestSpace + 1, len, line2, line2Size);
+        return;
+    }
+
+    // No ideal word split found: hard split into two visual halves.
+    int cut = len / 2;
+    while (cut < len - 1 && title[cut] != ' ')
+        ++cut;
+    if (cut >= len - 1)
+        cut = len / 2;
+    copyTrimmed(title, 0, cut, line1, line1Size);
+    copyTrimmed(title, cut + 1, len, line2, line2Size);
+    if (!line2[0])
+    {
+        // Final fallback when string has no spaces.
+        copyTrimmed(title, 0, len, line1, line1Size);
+    }
+}
+
+void showSectionHeading(const char *title, const char *subtitle, uint16_t ms)
+{
+    (void)ms; // duration is managed by screen scheduler state.
+    if (!dma_display)
+        return;
+
+    GFXcanvas16 canvas(PANEL_RES_X, PANEL_RES_Y);
+    canvas.fillScreen(0);
+    canvas.setFont(&Font5x7Uts);
+    canvas.setTextWrap(false);
+    canvas.setTextSize(1);
+
+    const bool mono = (theme == 1);
+    const uint16_t borderColor = mono ? dma_display->color565(150, 150, 180) : dma_display->color565(80, 190, 255);
+    const uint16_t titleColor = mono ? dma_display->color565(240, 240, 250) : dma_display->color565(220, 245, 255);
+    const uint16_t subtitleColor = mono ? dma_display->color565(175, 175, 200) : dma_display->color565(125, 190, 235);
+    const uint16_t decoColor = mono ? dma_display->color565(95, 95, 130) : dma_display->color565(65, 125, 175);
+
+    canvas.drawRect(1, 1, PANEL_RES_X - 2, PANEL_RES_Y - 2, borderColor);
+
+    (void)decoColor;
+
+    char titleLine1[48];
+    char titleLine2[48];
+    splitHeadingTitle(canvas, title, titleLine1, sizeof(titleLine1), titleLine2, sizeof(titleLine2), PANEL_RES_X - 8);
+    const bool hasTwoTitleLines = (titleLine2[0] != '\0');
+    const bool hasSubtitle = (subtitle && subtitle[0] != '\0');
+
+    auto measureLine = [&](const char *text, int16_t &x1, int16_t &y1, uint16_t &w, uint16_t &h) {
+        canvas.getTextBounds((text && text[0]) ? text : " ", 0, 0, &x1, &y1, &w, &h);
+    };
+
+    auto drawCenteredAtTop = [&](const char *text, int topY, uint16_t color) {
+        if (!text || !text[0])
+            return;
+        int16_t x1, y1;
+        uint16_t w, h;
+        measureLine(text, x1, y1, w, h);
+        int x = (PANEL_RES_X - static_cast<int>(w)) / 2 - x1;
+        if (x < 2)
+            x = 2;
+        int baselineY = topY - y1;
+        canvas.setTextColor(color, 0);
+        canvas.setCursor(x, baselineY);
+        canvas.print(text);
+    };
+
+    const char *lines[3];
+    uint16_t lineColors[3];
+    uint8_t lineCount = 0;
+    lines[lineCount] = titleLine1;
+    lineColors[lineCount++] = titleColor;
+    if (hasTwoTitleLines)
+    {
+        lines[lineCount] = titleLine2;
+        lineColors[lineCount++] = titleColor;
+    }
+    if (hasSubtitle)
+    {
+        lines[lineCount] = subtitle;
+        lineColors[lineCount++] = subtitleColor;
+    }
+
+    int lineHeights[3] = {0, 0, 0};
+    int totalTextH = 0;
+    const int lineGap = 1;
+    for (uint8_t i = 0; i < lineCount; ++i)
+    {
+        int16_t x1, y1;
+        uint16_t w, h;
+        measureLine(lines[i], x1, y1, w, h);
+        lineHeights[i] = static_cast<int>(h);
+        totalTextH += lineHeights[i];
+    }
+    if (lineCount > 1)
+        totalTextH += static_cast<int>(lineCount - 1) * lineGap;
+
+    const int innerTop = 2;
+    const int innerBottom = PANEL_RES_Y - 3;
+    const int innerH = innerBottom - innerTop + 1;
+    int y = innerTop + (innerH - totalTextH) / 2;
+    if (y < innerTop)
+        y = innerTop;
+    for (uint8_t i = 0; i < lineCount; ++i)
+    {
+        drawCenteredAtTop(lines[i], y, lineColors[i]);
+        y += lineHeights[i] + lineGap;
+    }
+
+    dma_display->drawRGBBitmap(0, 0, canvas.getBuffer(), PANEL_RES_X, PANEL_RES_Y);
+}
+
 const uint8_t *getWeatherIconFromCode(String code)
 {
     // Serial.printf("Code: %s", code);
@@ -4293,8 +4155,10 @@ const uint8_t *getWeatherIconFromCode(String code)
         return icon_clear;
     if (code.startsWith("02d"))
         return icon_cloudy;
-    if (code.startsWith("03") || code.startsWith("04"))
+    if (code.startsWith("03"))
         return icon_cloudy;
+    if (code.startsWith("04"))
+        return icon_overcast;
     if (code.startsWith("09") || code.startsWith("10"))
         return icon_rain;
     if (code.startsWith("11"))
@@ -4314,6 +4178,8 @@ const uint8_t *getWeatherIconFromCondition(String condition)
         return icon_clear_night;
     if (isNight && condition.indexOf("cloud") >= 0)
         return icon_cloud_night;
+    if (condition.indexOf("overcast") >= 0)
+        return icon_overcast;
     if (condition.indexOf("clear") >= 0)
         return icon_clear;
     if (condition.indexOf("cloud") >= 0)
@@ -4336,6 +4202,8 @@ const uint16_t getIconColorFromCondition(String condition)
     if (isNight) {
         if (condition.indexOf("clear") >= 0)
             return myBLUE;
+        if (condition.indexOf("overcast") >= 0)
+            return dma_display->color565(135, 145, 160);
         if (condition.indexOf("cloud") >= 0)
             return dma_display->color565(120, 160, 220);
         if (condition.indexOf("rain") >= 0)
@@ -4350,6 +4218,8 @@ const uint16_t getIconColorFromCondition(String condition)
     }
     if (condition.indexOf("clear") >= 0)
         return dma_display->color565(255, 255, 0); // (yellow)
+    if (condition.indexOf("overcast") >= 0)
+        return dma_display->color565(145, 150, 155);
     if (condition.indexOf("cloud") >= 0)
         return dma_display->color565(180, 180, 180);
     if (condition.indexOf("rain") >= 0)
@@ -4502,14 +4372,6 @@ String scrolling_Text = "";
 uint16_t text_Length_In_Pixel = 0;
 bool set_up_Scrolling_Text_Length = true;
 bool start_Scroll_Text = false;
-
-// Condition scene marquee state (use ScrollLine)
-static String conditionSceneMarqueeBase = "";
-static String conditionSceneMarqueeText = "";
-static String conditionSceneMarqueePendingText = "";
-static uint16_t conditionSceneMarqueeColor = 0;
-static ScrollLine conditionSceneScroll(PANEL_RES_X, 60);
-
 
 void getTimeFromRTC()
 {
@@ -4812,6 +4674,8 @@ void fetchWeatherFromOWM()
     double pressure = readNumber(mainBlock, "pressure");
     double windSpeed = toMetersPerSecond(readNumber(windBlock, "speed"));
     double windDir = readNumber(windBlock, "deg");
+    double windGust = toMetersPerSecond(readNumber(windBlock, "gust"));
+    double obsTime = readNumber(data, "dt");
 
     str_Weather_Icon = JSON.stringify(data["weather"][0]["icon"]);
     str_Weather_Icon.replace("\"", "");
@@ -4831,6 +4695,47 @@ void fetchWeatherFromOWM()
     str_Wind_Speed = String(windSpeed, 2);
     str_Wind_Direction = isnan(windDir) ? String("--") : String(windDir, 0);
 
+    // Map OWM payload into shared current/weather model so Wx screens behave
+    // the same way as Open-Meteo/forecast providers.
+    auto windCardinalFromDeg = [](double deg) -> String {
+        if (isnan(deg))
+            return "";
+        static const char *labels[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
+        double normalized = fmod(deg, 360.0);
+        if (normalized < 0)
+            normalized += 360.0;
+        int idx = static_cast<int>(floor((normalized + 22.5) / 45.0)) % 8;
+        return String(labels[idx]);
+    };
+
+    currentCond.temp = tempC;
+    currentCond.feelsLike = feelsC;
+    currentCond.dewPoint = NAN;
+    currentCond.humidity = isnan(humidity) ? -1 : static_cast<int>(lround(humidity));
+    currentCond.pressure = pressure;
+    currentCond.windAvg = windSpeed;
+    currentCond.windGust = windGust;
+    currentCond.windDir = windDir;
+    currentCond.uv = -1;
+    currentCond.precipProb = -1;
+    currentCond.cond = str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions;
+    currentCond.icon = str_Weather_Icon;
+    currentCond.windCardinal = windCardinalFromDeg(windDir);
+    currentCond.time = isnan(obsTime) ? 0U : static_cast<uint32_t>(obsTime);
+
+    tempest.temperature = currentCond.temp;
+    tempest.humidity = (currentCond.humidity >= 0) ? static_cast<double>(currentCond.humidity) : NAN;
+    tempest.pressure = currentCond.pressure;
+    tempest.windAvg = currentCond.windAvg;
+    tempest.windGust = currentCond.windGust;
+    tempest.windDir = currentCond.windDir;
+    tempest.obsWindAvg = currentCond.windAvg;
+    tempest.obsWindDir = currentCond.windDir;
+    tempest.obsEpoch = currentCond.time;
+    tempest.epoch = currentCond.time;
+    tempest.lastUpdate = millis();
+    forecast.lastUpdate = tempest.lastUpdate;
+
     Serial.println("Weather Updated:");
     Serial.printf("  Temp: %.1fC | Hum: %s%% | Wind: %.2fm/s\n",
                   tempC, str_Humd.c_str(), windSpeed);
@@ -4840,6 +4745,8 @@ void fetchWeatherFromOWM()
 
 void drawOWMScreen()
 {
+    static unsigned long s_lastOwmFetchAttemptMs = 0;
+
     getTimeFromRTC();
     displayClock();
     displayDate();
@@ -4863,13 +4770,24 @@ void drawOWMScreen()
         needScrollRebuild = false;
     }
 
-    // Update weather every 10 minutes at :10s
-    if ((t_minute % 10 == 0) && (t_second == 10))
+    // Update OWM weather with interval-based scheduling so fetch is not missed
+    // by frame timing drift. Forecast-model sources are refreshed elsewhere.
+    if (isDataSourceOwm())
     {
-        fetchWeatherFromOWM();
-        reset_Time_and_Date_Display = true;
-        displayWeatherData();
-        needScrollRebuild = true; // new values -> refresh marquee text
+        const unsigned long nowMs = millis();
+        const bool missingOwmData = (str_Temp.length() == 0 || str_Temp == "--");
+        const unsigned long refreshInterval = 10UL * 60UL * 1000UL; // 10 minutes
+        const unsigned long bootstrapInterval = 60UL * 1000UL;       // retry quickly until first data
+        const unsigned long dueInterval = missingOwmData ? bootstrapInterval : refreshInterval;
+
+        if ((s_lastOwmFetchAttemptMs == 0) || (nowMs - s_lastOwmFetchAttemptMs >= dueInterval))
+        {
+            s_lastOwmFetchAttemptMs = nowMs;
+            fetchWeatherFromOWM();
+            reset_Time_and_Date_Display = true;
+            displayWeatherData();
+            needScrollRebuild = true; // new values -> refresh marquee text
+        }
     }
 }
 
@@ -4886,36 +4804,111 @@ void drawWeatherIcon(String iconCode)
 
 void displayClock()
 {
+    const bool rightJustify = (currentScreen == SCREEN_OWM);
     int hour = atoi(chr_t_hour);
-    char amPm[] = "A";
-    if (hour >= 12)
+    bool isPM = false;
+    if (!units.clock24h)
     {
-        if (hour > 12)
-            hour -= 12;
-        strcpy(amPm, "P");
+        if (hour >= 12)
+        {
+            isPM = true;
+            if (hour > 12)
+                hour -= 12;
+        }
+        else if (hour == 0)
+        {
+            hour = 12;
+        }
     }
-    else if (hour == 0)
+    const uint16_t clockLineColor = rightJustify
+                                        ? ((theme == 1) ? dma_display->color565(60, 60, 120)
+                                                        : dma_display->color565(255, 255, 80))
+                                        : ((theme == 1) ? dma_display->color565(90, 90, 150) : myRED);
+    dma_display->setTextColor(clockLineColor);
+    if (rightJustify)
     {
-        hour = 12;
+        char buf[16];
+        if (units.clock24h)
+            snprintf(buf, sizeof(buf), "%02d:%s:%s", hour, chr_t_minute, chr_t_second);
+        else
+            snprintf(buf, sizeof(buf), "%02d:%s:%s%c", hour, chr_t_minute, chr_t_second, isPM ? 'P' : 'A');
+
+        int w = getTextWidth(buf);
+        int x = 64 - w;
+        if (x < 0)
+            x = 0;
+
+        dma_display->fillRect(0, 9, 64, 7, myBLACK);
+        dma_display->setCursor(x, 9);
+        dma_display->print(buf);
     }
-    dma_display->fillRect(15, 9, 45, 7, myBLACK);
-    dma_display->setCursor(16, 9);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(90, 90, 150) : myRED);
-    dma_display->printf("%02d:", hour);
-    dma_display->print(chr_t_minute);
-    dma_display->print(":");
-    dma_display->print(chr_t_second);
-    dma_display->fillRect(59, 9, 64, 16, myBLACK);
-    dma_display->setCursor(59, 9);
-    dma_display->printf("%s", amPm);
+    else
+    {
+        dma_display->fillRect(15, 9, 45, 7, myBLACK);
+        dma_display->setCursor(16, 9);
+        dma_display->printf("%02d:", hour);
+        dma_display->print(chr_t_minute);
+        dma_display->print(":");
+        dma_display->print(chr_t_second);
+        dma_display->fillRect(59, 9, 64, 16, myBLACK);
+        if (!units.clock24h)
+        {
+            dma_display->setCursor(59, 9);
+            dma_display->print(isPM ? "P" : "A");
+        }
+    }
 }
 
 void displayDate()
 {
+    const bool rightJustify = (currentScreen == SCREEN_OWM);
     dma_display->fillRect(0, 17, 64, 7, myBLACK);
-    dma_display->setCursor(0, 17);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
-    dma_display->printf("%s %s.%s.%s", daysOfTheWeek[d_daysOfTheWeek], chr_d_month, chr_d_day, chr_d_year + 2);
+    const char *dayStr = daysOfTheWeek[d_daysOfTheWeek];
+    char dateSuffix[10];
+    snprintf(dateSuffix, sizeof(dateSuffix), " %02d/%02d", d_month, d_day);
+    char dateStr[14];
+    snprintf(dateStr, sizeof(dateStr), "%s%s", dayStr, dateSuffix);
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    uint16_t dateColor = rightJustify
+                             ? ((theme == 1) ? dma_display->color565(95, 95, 170)
+                                             : dma_display->color565(255, 215, 120))
+                             : ((theme == 1) ? dma_display->color565(60, 60, 120)
+                                             : dma_display->color565(150, 200, 255));
+    uint16_t sundayColor = (theme == 1) ? dma_display->color565(180, 80, 120)
+                                        : dma_display->color565(255, 80, 120);
+    uint16_t saturdayColor = (theme == 1) ? dma_display->color565(80, 140, 200)
+                                          : dma_display->color565(80, 180, 255);
+
+    int16_t x1, y1;
+    uint16_t w, h;
+    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
+    int dateX = rightJustify ? (64 - static_cast<int>(w))
+                             : ((64 - static_cast<int>(w)) / 2);
+    if (dateX < 0)
+        dateX = 0;
+
+    dma_display->setCursor(dateX, 17);
+    if (d_daysOfTheWeek == 0)
+    {
+        dma_display->setTextColor(sundayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else if (d_daysOfTheWeek == 6)
+    {
+        dma_display->setTextColor(saturdayColor);
+        dma_display->print(dayStr);
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateSuffix);
+    }
+    else
+    {
+        dma_display->setTextColor(dateColor);
+        dma_display->print(dateStr);
+    }
 }
 
 void displayWeatherData()
@@ -4926,7 +4919,7 @@ void displayWeatherData()
         return;
     }
 
-    if (isDataSourceWeatherFlow())
+    if (isDataSourceForecastModel())
     {
         drawWeatherFlowIcon();
     }
@@ -4935,49 +4928,143 @@ void displayWeatherData()
         drawWeatherIcon(str_Weather_Icon);
     }
 
-    dma_display->fillRect(18, 0, 46, 7, myBLACK);
-    dma_display->setCursor(18, 0);
-    dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
-    dma_display->print(formatOutdoorTemperature());
+    // Keep a dedicated text lane on the right so it never overlaps the weather icon.
+    const int textLaneX = 18;
+    const int textLaneW = 64 - textLaneX;
+    dma_display->fillRect(textLaneX, 0, textLaneW, 7, myBLACK);
+
+    String outdoorTemp = formatOutdoorTemperature();
+    int tempWidth = getTextWidth(outdoorTemp.c_str());
+    int tempX = 64 - tempWidth;
+    if (tempX < textLaneX)
+        tempX = textLaneX;
+
+    dma_display->setCursor(tempX, 0);
+    dma_display->setTextColor((theme == 1) ? dma_display->color565(60, 60, 120)
+                                           : dma_display->color565(200, 200, 255));
+    dma_display->print(outdoorTemp);
 
     String humidityStr = formatOutdoorHumidity();
     if (humidityStr != "--")
     {
-        dma_display->setCursor(44, 0);
-        dma_display->setTextColor(theme == 1 ? dma_display->color565(70, 70, 130) : myCYAN);
-        dma_display->print(humidityStr);
-        dma_display->print("%");
+        String humidityText = humidityStr + "%";
+        int humidityWidth = getTextWidth(humidityText.c_str());
+        int humidityX = tempX - humidityWidth - 2;
+
+        // Render humidity only when it fits in the right-side lane.
+        if (humidityX >= textLaneX)
+        {
+            dma_display->setCursor(humidityX, 0);
+            dma_display->setTextColor((theme == 1) ? dma_display->color565(90, 90, 150)
+                                                   : dma_display->color565(150, 200, 255));
+            dma_display->print(humidityText);
+        }
     }
 }
 
 void createScrollingText()
 {
-    if (!isDataSourceOwm())
+    if (!(isDataSourceOwm() || isDataSourceForecastModel()))
     {
         scrolling_Text = "";
         text_Length_In_Pixel = 0;
         return;
     }
 
-//   String unitT = useImperial ? " Â°F" : " Â°C";
-    //   String unitW = useImperial ? "mph" : "m/s";
+    auto tempTextOrDash = [](double valueC) -> String {
+        return isnan(valueC) ? String("--") : fmtTemp(valueC, 0);
+    };
+    auto pressTextOrDash = [](double valueHpa) -> String {
+        return isnan(valueHpa) ? String("--") : fmtPress(valueHpa, 0);
+    };
+    auto windTextOrDash = [](double valueMps) -> String {
+        return isnan(valueMps) ? String("--") : fmtWind(valueMps, 1);
+    };
 
-    scrolling_Text =
-        "City: " + str_City + " Â¦ " +
-        "Weather: " + str_Weather_Conditions_Des + " Â¦ " +
-        "Feels Like: " + fmtTemp(atof(str_Feels_like.c_str()), 0) + " Â¦ " +
-        "Max: " + fmtTemp(atof(str_Temp_max.c_str()), 0) + "  Â¦ Min: " + fmtTemp(atof(str_Temp_min.c_str()), 0) + " Â¦ " +
-        "Pressure: " + fmtPress(atof(str_Pressure.c_str()), 0) + " Â¦ " +
-        "Wind: " + fmtWind(atof(str_Wind_Speed.c_str()), 1) + " Â¦ ";
+    auto nonEmptyOrDash = [](String text) -> String {
+        text.trim();
+        return text.length() ? text : String("--");
+    };
 
-    scrolling_Text_Color = (theme == 1) ? dma_display->color565(60, 60, 120) : myGREEN;
+    String provider = isDataSourceWeatherFlow() ? String("WeatherFlow")
+                    : (isDataSourceOpenMeteo() ? String("Open-Meteo")
+                                               : String("OWM"));
+    String weatherText = String("--");
+    String feelsText = String("--");
+    String maxText = String("--");
+    String minText = String("--");
+    String pressureText = String("--");
+    String windText = String("--");
+    String cityText = String("--");
+
+    if (isDataSourceForecastModel())
+    {
+        weatherText = nonEmptyOrDash(currentCond.cond.length() ? currentCond.cond : currentCond.icon);
+        feelsText = tempTextOrDash(currentCond.feelsLike);
+        pressureText = pressTextOrDash(currentCond.pressure);
+        windText = windTextOrDash(currentCond.windAvg);
+        if (forecast.numDays > 0)
+        {
+            maxText = tempTextOrDash(forecast.days[0].highTemp);
+            minText = tempTextOrDash(forecast.days[0].lowTemp);
+        }
+    }
+    else
+    {
+        cityText = nonEmptyOrDash(str_City);
+        weatherText = nonEmptyOrDash(str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions);
+        if (str_Feels_like.length() > 0 && str_Feels_like != "--")
+            feelsText = fmtTemp(atof(str_Feels_like.c_str()), 0);
+        if (str_Temp_max.length() > 0 && str_Temp_max != "--")
+            maxText = fmtTemp(atof(str_Temp_max.c_str()), 0);
+        if (str_Temp_min.length() > 0 && str_Temp_min != "--")
+            minText = fmtTemp(atof(str_Temp_min.c_str()), 0);
+        if (str_Pressure.length() > 0 && str_Pressure != "--")
+            pressureText = fmtPress(atof(str_Pressure.c_str()), 0);
+        if (str_Wind_Speed.length() > 0 && str_Wind_Speed != "--")
+            windText = fmtWind(atof(str_Wind_Speed.c_str()), 1);
+    }
+
+    provider = nonEmptyOrDash(provider);
+    weatherText = nonEmptyOrDash(weatherText);
+    feelsText = nonEmptyOrDash(feelsText);
+    maxText = nonEmptyOrDash(maxText);
+    minText = nonEmptyOrDash(minText);
+    pressureText = nonEmptyOrDash(pressureText);
+    windText = nonEmptyOrDash(windText);
+    cityText = nonEmptyOrDash(cityText);
+
+    if (isDataSourceOwm())
+    {
+        scrolling_Text =
+            "Src: " + provider + " Â¦ " +
+            "City: " + cityText + " Â¦ " +
+            "Weather: " + weatherText + " Â¦ " +
+            "Feels Like: " + feelsText + " Â¦ " +
+            "Max: " + maxText + "  Â¦ Min: " + minText + " Â¦ " +
+            "Pressure: " + pressureText + " Â¦ " +
+            "Wind: " + windText + " Â¦ ";
+    }
+    else
+    {
+        scrolling_Text =
+            "Src: " + provider + " Â¦ " +
+            "Weather: " + weatherText + " Â¦ " +
+            "Feels Like: " + feelsText + " Â¦ " +
+            "Max: " + maxText + "  Â¦ Min: " + minText + " Â¦ " +
+            "Pressure: " + pressureText + " Â¦ " +
+            "Wind: " + windText + " Â¦ ";
+    }
+
+    scrolling_Text_Color = (theme == 1) ? dma_display->color565(60, 60, 120)
+                                        : dma_display->color565(150, 200, 255);
     text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
 }
 
 // --- Scroll state variables for weather ---
 void scrollWeatherDetails()
 {
-    if (!isDataSourceOwm())
+    if (!(isDataSourceOwm() || isDataSourceForecastModel()))
         return;
 
     static unsigned long lastScrollTime = 0;
@@ -5008,7 +5095,8 @@ void scrollWeatherDetails()
         }
 
         const uint16_t desiredColor =
-            (theme == 1) ? dma_display->color565(60, 60, 120) : myGREEN;
+            (theme == 1) ? dma_display->color565(60, 60, 120)
+                         : dma_display->color565(150, 200, 255);
         if (desiredColor != scrolling_Text_Color)
         {
             scrolling_Text_Color = desiredColor;
@@ -5021,693 +5109,6 @@ void scrollWeatherDetails()
     }
 }
 
-static String formatConditionSceneTimeTag()
-{
-    char buf[12];
-    if (units.clock24h)
-    {
-        snprintf(buf, sizeof(buf), "%02d:%02d", t_hour, t_minute);
-        return String(buf);
-    }
-
-    int hour = t_hour;
-    const char *suffix = "AM";
-    if (hour >= 12)
-    {
-        suffix = "PM";
-        if (hour > 12)
-            hour -= 12;
-    }
-    else if (hour == 0)
-    {
-        hour = 12;
-    }
-    snprintf(buf, sizeof(buf), "%02d:%02d %s", hour, t_minute, suffix);
-    return String(buf);
-}
-
-// Build the condition marquee text with extra telemetry fields (humid, press, wind, feels like)
-static String buildConditionMarqueeText(const String &label)
-{
-    String combined = label;
-
-    auto appendField = [&](const String &field) {
-        if (field.length() == 0)
-            return;
-        if (combined.length() > 0)
-            combined += " Â¦ ";
-        combined += field;
-    };
-
-    // Time always first
-    appendField(formatConditionSceneTimeTag());
-
-    bool feelsAppended = false;
-
-    if (isDataSourceWeatherFlow())
-    {
-        if (currentCond.humidity >= 0)
-            appendField(String("Hum ") + currentCond.humidity + "%");
-        else if (!isnan(tempest.humidity))
-            appendField(String("Hum ") + String((int)roundf(tempest.humidity)) + "%");
-
-        double press = !isnan(currentCond.pressure) ? currentCond.pressure : tempest.pressure;
-        if (!isnan(press))
-            appendField(String("Press ") + fmtPress(press, 0));
-
-        double wind = !isnan(currentCond.windAvg) ? currentCond.windAvg : tempest.windAvg;
-        if (!isnan(wind))
-            appendField(String("Wind ") + fmtWind(wind, 1));
-
-        double feels = !isnan(currentCond.feelsLike) ? currentCond.feelsLike : tempest.temperature;
-        if (!isnan(feels))
-        {
-            appendField(String("Feels ") + fmtTemp(feels, 0));
-            feelsAppended = true;
-        }
-    }
-    else if (isDataSourceOwm())
-    {
-        String hum = formatOutdoorHumidity();
-        if (hum.length() > 0 && hum != "--")
-            appendField(String("Hum ") + hum + "%");
-
-        if (str_Pressure.length() > 0 && str_Pressure != "--")
-            appendField(String("Press ") + fmtPress(atof(str_Pressure.c_str()), 0));
-
-        if (str_Wind_Speed.length() > 0 && str_Wind_Speed != "--")
-            appendField(String("Wind ") + fmtWind(atof(str_Wind_Speed.c_str()), 1));
-
-        if (str_Feels_like.length() > 0 && str_Feels_like != "--")
-        {
-            appendField(String("Feels ") + fmtTemp(atof(str_Feels_like.c_str()), 0));
-            feelsAppended = true;
-        }
-        else if (str_Temp.length() > 0 && str_Temp != "--")
-        {
-            appendField(String("Feels ") + fmtTemp(atof(str_Temp.c_str()), 0));
-            feelsAppended = true;
-        }
-    }
-
-    // Fallback: if we still don't have a feels-like value but we have a temperature, reuse it
-    if (!feelsAppended)
-    {
-        double tempVal = NAN;
-        if (isDataSourceWeatherFlow())
-            tempVal = !isnan(currentCond.temp) ? currentCond.temp : tempest.temperature;
-        else if (isDataSourceOwm() && str_Temp.length() > 0 && str_Temp != "--")
-            tempVal = atof(str_Temp.c_str());
-
-        if (!isnan(tempVal))
-            appendField(String("Feels ") + fmtTemp(tempVal, 0));
-    }
-
-    return combined;
-}
-
-static void renderConditionSceneMarquee(bool force)
-{
-    if (conditionSceneMarqueeText.length() == 0)
-        return;
-
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-
-    if (conditionSceneMarqueePendingText.length() > 0)
-    {
-        String lines[] = {conditionSceneMarqueePendingText};
-        conditionSceneMarqueePendingText = "";
-        conditionSceneMarqueeText = lines[0];
-        conditionSceneScroll.setLines(lines, 1, true);
-        uint16_t textColors[] = {conditionSceneMarqueeColor};
-        uint16_t bgColors[] = {myBLACK};
-        conditionSceneScroll.setLineColors(textColors, bgColors, 1);
-        conditionSceneScroll.setScrollSpeed(scrollSpeed);
-    }
-
-    const int marqueeY = PANEL_RES_Y - 7;
-    int borderY = marqueeY - 1;
-    if (borderY >= 0)
-    {
-        uint16_t borderColor = scaleColor565(conditionSceneMarqueeColor, 0.65f);
-        dma_display->drawFastHLine(0, borderY, PANEL_RES_X, borderColor);
-    }
-    conditionSceneScroll.update();
-    conditionSceneScroll.draw(0, marqueeY, conditionSceneMarqueeColor);
-}
-void drawSunIcon(int x, int y, uint16_t color)
-{
-    // Consistent 7x7 sun with center + 8 rays
-    int cx = x + 3;
-    int cy = y + 3;
-
-    dma_display->drawLine(x + 3, y, x + 3, y + 6, color);     // Vertiacal
-    dma_display->drawLine(x, y + 3, x + 6, y + 3, color);     // Horizontal
-    dma_display->drawLine(x + 1, y + 1, x + 5, y + 5, color); // diagonal
-    dma_display->drawLine(x + 5, y + 1, x + 1, y + 5, color); // diagonal
-
-    /*
-        dma_display->fillCircle(cx, cy, 1, color);   // center
-
-        // main rays
-        dma_display->drawPixel(cx, cy - 3, color);
-        dma_display->drawPixel(cx, cy + 3, color);
-        dma_display->drawPixel(cx - 3, cy, color);
-        dma_display->drawPixel(cx + 3, cy, color);
-
-        dma_display->drawPixel(x + 2, y + 2, color);
-        dma_display->drawPixel(x + 4, y + 2, color);
-        dma_display->drawPixel(x + 2, y + 4, color);
-        dma_display->drawPixel(x + 4, y + 4, color);
-
-        // diagonal rays
-        dma_display->drawPixel(cx - 2, cy - 2, color);
-        dma_display->drawPixel(cx + 2, cy - 2, color);
-        dma_display->drawPixel(cx - 2, cy + 2, color);
-        dma_display->drawPixel(cx + 2, cy + 2, color);
-        */
-}
-
-void drawHouseIcon(int x, int y, uint16_t color)
-{
-    // Larger 7x7 house matching the sun's visual weight
-    // Roof
-    dma_display->drawPixel(x + 4, 0, color);
-    dma_display->drawLine(x + 2, y + 2, x + 6, y + 2, color);
-    dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color); // roof base
-    dma_display->drawLine(x + 3, y + 1, x + 5, y + 1, color); // left slope
-
-    // Walls
-    dma_display->drawRect(x + 2, y + 4, 5, 3, color);
-
-    // Door
-    dma_display->drawLine(x + 4, y + 5, x + 4, y + 6, color);
-}
-
-void drawHumidityIcon(int x, int y, uint16_t color)
-{
-    // 7x7 droplet with pointed tip and rounded base
-    dma_display->drawPixel(x + 3, y, color);                               // tip
-    dma_display->drawLine(x + 2, y + 1, x + 4, y + 1, color);              // gentle slope
-    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color);              // upper bulb
-    dma_display->drawLine(x + 1, y + 3, x + 5, y + 3, color);              // body
-    dma_display->drawLine(x + 1, y + 4, x + 5, y + 4, color);              // body
-    dma_display->drawLine(x + 2, y + 5, x + 4, y + 5, color);              // rounding into base
-//    dma_display->drawLine(x + 1, y + 6, x + 5, y + 6, color);              // flat bottom
-}
-
-static int wifiSignalLevelFromRssi(int rssi)
-{
-    if (rssi >= -55) return 3;   // excellent
-    if (rssi >= -67) return 2;   // good
-    if (rssi >= -75) return 1;   // fair
-    return 0;                    // weak/very weak
-}
-
-void drawWiFiIcon(int x, int y, uint16_t dimColor, uint16_t activeColor, int rssi)
-{
-    // Simple 7x5 Wi-Fi signal icon that reflects RSSI strength.
-    // (x,y) = top-left corner of the icon.
-    int level = wifiSignalLevelFromRssi(rssi);
-
-    // Draw full icon in dim color as background.
-    dma_display->drawPixel(x + 3, y + 4, dimColor);
-    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, dimColor); // support bar
-    dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, dimColor); // small arc
-    dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, dimColor); // mid arc
-    dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, dimColor); // top arc
-
-    // Overlay the active signal level with green only.
-    dma_display->drawPixel(x + 3, y + 4, activeColor);
-    dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, activeColor);
-    if (level >= 1)
-        dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, activeColor);
-    if (level >= 2)
-        dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, activeColor);
-    if (level >= 3)
-        dma_display->drawLine(x + 0, y + 1, x + 6, y + 1, activeColor);
-}
-
-void drawAlarmIcon(int x, int y, uint16_t color)
-{
-    // Draw 6x6 bell per provided pattern:
-    // Row 0: ..XX..
-    // Row 1: .XXXX.
-    // Row 2: .XXXX.
-    // Row 3: .XXXX.
-    // Row 4: XXXXXX
-    // Row 5: ..XX..
-    dma_display->drawLine(x + 2, y + 0, x + 3, y + 0, color);
-    dma_display->drawLine(x + 1, y + 1, x + 4, y + 1, color);
-    dma_display->drawLine(x + 1, y + 2, x + 4, y + 2, color);
-    dma_display->drawLine(x + 1, y + 3, x + 4, y + 3, color);
-    dma_display->drawLine(x + 0, y + 4, x + 5, y + 4, color);
-    dma_display->drawLine(x + 2, y + 5, x + 3, y + 5, color);
-}
-
-// --- BEGIN WORLD TIME FEATURE ---
-static String buildWorldTimeHeaderText()
-{
-    return worldTimeBuildCurrentHeaderText();
-}
-
-static bool worldHeaderNeedsScroll()
-{
-    // ScrollLine currently assumes fixed-width small font (~6 px/char).
-    return (static_cast<int>(s_clockWorldHeaderText.length()) * 6) > PANEL_RES_X;
-}
-
-static void drawClockWorldHeaderLine(bool forceDraw = false)
-{
-    if (!s_clockWorldHeaderEnabled)
-        return;
-
-    const bool needsScroll = worldHeaderNeedsScroll();
-    const unsigned long nowMs = millis();
-    unsigned long stepMs = (scrollSpeed > 0) ? static_cast<unsigned long>(scrollSpeed) : 40UL;
-    if (stepMs < 20UL)
-        stepMs = 20UL;
-
-    bool shouldDraw = forceDraw || s_clockWorldHeaderNeedsRedraw;
-    if (needsScroll && (nowMs - s_clockWorldHeaderLastStepMs >= stepMs))
-    {
-        s_clockWorldHeaderScroll.update();
-        s_clockWorldHeaderLastStepMs = nowMs;
-        shouldDraw = true;
-    }
-
-    // For static text, avoid continuous redraw to reduce flicker/banding.
-    if (!shouldDraw)
-        return;
-
-    uint16_t lineColor = (theme == 1) ? dma_display->color565(120, 120, 180)
-                                       : dma_display->color565(180, 220, 255);
-    s_clockWorldHeaderScroll.setScrollSpeed(scrollSpeed);
-    uint16_t textColors[] = {lineColor};
-    uint16_t bgColors[] = {myBLACK};
-    s_clockWorldHeaderScroll.setLineColors(textColors, bgColors, 1);
-
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    s_clockWorldHeaderScroll.draw(0, 0, lineColor);
-    s_clockWorldHeaderNeedsRedraw = false;
-}
-
-void tickClockWorldTimeMarquee()
-{
-    if (!s_clockWorldHeaderEnabled)
-        return;
-    drawClockWorldHeaderLine();
-}
-// --- END WORLD TIME FEATURE ---
-
-void drawClockTimeLine(const DateTime &now, bool alarmActive)
-{
-    int hour = now.hour();
-    int minute = now.minute();
-
-    // 12h/24h handling
-    bool isPM = false;
-    if (!units.clock24h)
-    {
-        if (hour == 0)
-            hour = 12;
-        else if (hour >= 12)
-        {
-            if (hour > 12)
-                hour -= 12;
-            isPM = true;
-        }
-    }
-
-    char timeStr[6]; // "HH:MM"
-    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-    bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
-
-    // ---- TIME (big Verdana Bold)
-    dma_display->setFont(&verdanab8pt7b);
-    dma_display->setTextSize(1);
-    uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                      : dma_display->color565(255, 255, 80);
-    if (alarmActive)
-        timeColor = dma_display->color565(255, 80, 80);
-    dma_display->setTextColor(timeColor);
-
-    int timeW = getTextWidth(timeStr);
-    int16_t x1, y1;
-    uint16_t w, h;
-    dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-    int timeH = h;
-
-    int ampmW = 0;
-    if (!units.clock24h)
-        ampmW = getTextWidth(isPM ? "PM" : "AM");
-    int totalW = timeW + (ampmW ? ampmW + 2 : 0);
-    int boxX = (64 - totalW) / 2;
-
-    // Shift slightly left when 24-hour mode (to balance space)
-    if (units.clock24h)
-        boxX -= 3;
-
-    if (boxX < 0)
-        boxX = 0;
-
-    int boxY = (32 - timeH) / 2;
-
-    if (showTimeDigits)
-    {
-        dma_display->setCursor(boxX, boxY + timeH - 1);
-        dma_display->print(timeStr);
-
-        // --- draw AM/PM inline
-        if (!units.clock24h)
-        {
-            String ampmStr = isPM ? "PM" : "AM";
-            dma_display->setFont(&Font5x7Uts);
-            dma_display->setTextSize(1);
-
-            dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-            int digitH = h;
-            dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-            int ampmWidth = w;
-            int ampmH = h;
-            int ampmX = 64 - ampmWidth - 1;
-            int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-            ampmY -= 1;
-
-            uint16_t ampmColor, bgColor;
-            if (theme == 1)
-            {
-                ampmColor = dma_display->color565(100, 100, 140);
-                bgColor = dma_display->color565(20, 20, 40);
-            }
-            else
-            {
-                if (isPM)
-                {
-                    ampmColor = dma_display->color565(255, 170, 60);
-                    bgColor = dma_display->color565(50, 30, 0);
-                }
-                else
-                {
-                    ampmColor = dma_display->color565(100, 200, 255);
-                    bgColor = dma_display->color565(10, 30, 50);
-                }
-            }
-
-            dma_display->setTextColor(ampmColor);
-            dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmWidth + 2, ampmH + 2, bgColor);
-            dma_display->setCursor(ampmX, ampmY);
-            dma_display->print(ampmStr);
-        }
-    }
-}
-
-void drawClockDateLine(const DateTime &now)
-{
-    const char *days[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
-    const char *dayStr = days[now.dayOfTheWeek()];
-    char dateSuffix[10];
-    snprintf(dateSuffix, sizeof(dateSuffix), " %02d/%02d", now.month(), now.day());
-    char dateStr[14];
-    snprintf(dateStr, sizeof(dateStr), "%s%s", dayStr, dateSuffix);
-
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    uint16_t dateColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                      : dma_display->color565(150, 200, 255);
-    uint16_t sundayColor = (theme == 1) ? dma_display->color565(180, 80, 120)
-                                        : dma_display->color565(255, 80, 120);
-    uint16_t saturdayColor = (theme == 1) ? dma_display->color565(80, 140, 200)
-                                          : dma_display->color565(80, 180, 255);
-
-    int16_t x1, y1;
-    uint16_t w, h;
-    dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
-    int dateX = (64 - static_cast<int>(w)) / 2;
-    int dateY = 25;
-    dma_display->setCursor(dateX, dateY);
-
-    if (now.dayOfTheWeek() == 0)
-    {
-        dma_display->setTextColor(sundayColor);
-        dma_display->print(dayStr);
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateSuffix);
-    }
-    else if (now.dayOfTheWeek() == 6)
-    {
-        dma_display->setTextColor(saturdayColor);
-        dma_display->print(dayStr);
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateSuffix);
-    }
-    else
-    {
-        dma_display->setTextColor(dateColor);
-        dma_display->print(dateStr);
-    }
-}
-
-void drawClockScreen()
-{
-
-    dma_display->fillScreen(0);
-
-    DateTime systemNow;
-    if (rtcReady)
-    {
-        DateTime utcNow = rtc.now();
-        int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utcNow);
-        systemNow = utcToLocal(utcNow, offsetMinutes);
-        updateTimezoneOffsetWithUtc(utcNow);
-    }
-    else if (!getLocalDateTime(systemNow))
-    {
-        systemNow = DateTime(2000, 1, 1, 0, 0, 0);
-    }
-    tickAlarmState(systemNow);
-
-    // --- BEGIN WORLD TIME FEATURE ---
-    DateTime now = systemNow;
-    bool worldView = false;
-    if (worldTimeIsWorldView())
-    {
-        DateTime worldNow;
-        if (worldTimeGetCurrentDateTime(worldNow))
-        {
-            now = worldNow;
-            worldView = true;
-        }
-    }
-    // --- END WORLD TIME FEATURE ---
-    int second = now.second();
-    bool alarmActive = isAlarmCurrentlyActive();
-    drawClockTimeLine(now, alarmActive);
-    int wifiX = 57;
-    int wifiY = 7;
-    int alarmX = units.clock24h ? wifiX : 51;
-    int alarmY = units.clock24h ? (wifiY + 8) : 8; // drop the bell under Wi-Fi when 24h
-
-    // ---- Draw Wi-Fi icon if connected ---- if connected ----
-    if (WiFi.status() == WL_CONNECTED)
-    {
-        // Position the Wi-Fi icon just above AM/PM
-
-        /*
-                    int wifiX = ampmX + 5;   // just after time text
-                    int wifiY = ampmY - 8;        // above AM/PM
-        */
-
-        uint16_t wifiDim = (theme == 1)
-                               ? dma_display->color565(35, 35, 60)   // dim background
-                               : dma_display->color565(80, 80, 80);  // dim background (visible on black)
-        uint16_t wifiActive = (theme == 1)
-                                  ? dma_display->color565(90, 140, 200)
-                                  : dma_display->color565(100, 255, 120);
-        drawWiFiIcon(wifiX, wifiY, wifiDim, wifiActive, WiFi.RSSI());
-    }
-    if (isAnyAlarmEnabled() || alarmActive)
-    {
-        uint16_t alarmColor = alarmActive
-                                  ? dma_display->color565(255, 80, 80)
-                                  : ((theme == 1) ? dma_display->color565(120, 120, 180)
-                                                  : dma_display->color565(255, 255, 120));
-        drawAlarmIcon(alarmX, alarmY, alarmColor);
-    }
-    // ---- DATE ----
-    drawClockDateLine(now);
-
-    // ---- TEMPERATURES ----
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    uint16_t tempColor = (theme == 1) ? dma_display->color565(60, 60, 120)
-                                      : dma_display->color565(200, 200, 255);
-    dma_display->setTextColor(tempColor);
-    int16_t x1, y1;
-    uint16_t w, h;
-    String outdoorTempStr = formatOutdoorTemperature();
-    bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
-    String indoorHumidityStr = formatIndoorHumidity();
-    bool showIndoorHumidity = isDataSourceNone() && indoorHumidityStr != "--";
-    float indoorTempC = NAN;
-    if (!isnan(SCD40_temp))
-        indoorTempC = SCD40_temp + tempOffset;
-    else if (!isnan(aht20_temp))
-        indoorTempC = aht20_temp + tempOffset;
-    String localTempStr = fmtTemp(indoorTempC, 0);        // Inside
-
-    // --- BEGIN WORLD TIME FEATURE ---
-    if (worldView)
-    {
-        String worldHeader = buildWorldTimeHeaderText();
-        if (!s_clockWorldHeaderEnabled)
-        {
-            s_clockWorldHeaderEnabled = true;
-            s_clockWorldHeaderNeedsRedraw = true;
-            s_clockWorldHeaderLastStepMs = millis();
-        }
-        if (worldHeader != s_clockWorldHeaderText)
-        {
-            s_clockWorldHeaderText = worldHeader;
-            String lines[] = {s_clockWorldHeaderText};
-            s_clockWorldHeaderScroll.setLines(lines, 1, true);
-            s_clockWorldHeaderNeedsRedraw = true;
-            s_clockWorldHeaderLastStepMs = millis();
-        }
-        drawClockWorldHeaderLine(true);
-    }
-    else
-    {
-        s_clockWorldHeaderEnabled = false;
-        s_clockWorldHeaderNeedsRedraw = false;
-        dma_display->fillRect(0, 0, 64, 7, myBLACK);
-
-        dma_display->fillRect(0, 0, 32, 7, myBLACK);
-
-        if (showOutdoor)
-        {
-            const int iconWidth = 7;
-            const int padding = 1;
-            int sunX = 0;
-            int sunY = 0;
-            uint16_t sunColor = (theme == 1)
-                ? dma_display->color565(100, 100, 140)
-                : dma_display->color565(255, 200, 60);
-            drawSunIcon(sunX, sunY, sunColor);
-
-            int tempX = sunX + iconWidth + padding;
-            dma_display->setCursor(tempX, 0);
-            dma_display->print(outdoorTempStr);
-        }
-        else if (showIndoorHumidity)
-        {
-            String humidityDisplay = indoorHumidityStr + "%";
-            const int iconWidth = 7;
-            const int padding = 1;
-            int dropX = 0;
-            int dropY = 0;
-            uint16_t dropColor = (theme == 1)
-                                     ? dma_display->color565(100, 100, 160)
-                                     : dma_display->color565(100, 200, 255);
-            drawHumidityIcon(dropX, dropY, dropColor);
-
-            int humidityX = dropX + iconWidth + padding;
-            dma_display->setCursor(humidityX, 0);
-            dma_display->print(humidityDisplay);
-        }
-    }
-    // --- END WORLD TIME FEATURE ---
-
-    if (!worldView)
-    {
-        // Draw house icon to the left of inside temperature
-        dma_display->getTextBounds(localTempStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-        int localX = 64 - w;
-        int localY = 0;
-        int houseX = localX - 9;
-        int houseY = 0;
-        // --- Indoor (House) color ---
-        uint16_t houseColor = (theme == 1)
-            ? dma_display->color565(100, 100, 140)    // dim gray-blue for mono
-            : dma_display->color565(100, 180, 255);   // cool sky blue for indoor comfort
-        drawHouseIcon(houseX, houseY, houseColor);
-
-        dma_display->setCursor(localX, localY);
-        dma_display->print(localTempStr);
-    }
-
-    // ---- Environmental status bars ----
-    const int dotRadius = 1;
-    const int dotDiameter = dotRadius * 2 + 1;
-    const int co2DotX = 2;
-    const int eqDotX = co2DotX;
-    const int eqDotY = 30;
-    const int co2DotY = eqDotY - (dotDiameter + 1);
-    const int clearTop = eqDotY - dotRadius;
-    const int clearHeight = (eqDotY + dotRadius) - clearTop + 1;
-    dma_display->fillRect(co2DotX - dotRadius - 1, clearTop, dotDiameter + 2, clearHeight, myBLACK);
-
-    float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
-    float humiditySource = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
-    if (!isnan(humiditySource))
-    {
-        humiditySource += static_cast<float>(humOffset);
-        if (humiditySource < 0.0f)
-            humiditySource = 0.0f;
-        else if (humiditySource > 100.0f)
-            humiditySource = 100.0f;
-    }
-    float pressure = (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f) ? bmp280_pressure : NAN;
-
-    EnvBand co2Band = envBandFromCo2(co2Raw);
-    EnvBand tempBand = envBandFromTemp(indoorTempC);
-    EnvBand humidityBand = envBandFromHumidity(humiditySource);
-    EnvBand pressureBand = envBandFromPressure(pressure);
-
-    EnvBand bands[] = {co2Band, tempBand, humidityBand, pressureBand};
-    int scoreSum = 0;
-    int validCount = 0;
-    for (EnvBand band : bands)
-    {
-        int score = envScoreForBand(band);
-        if (score >= 0)
-        {
-            scoreSum += score;
-            ++validCount;
-        }
-    }
-
-    float eqIndex = (validCount > 0) ? (static_cast<float>(scoreSum) / (validCount * 3.0f)) * 100.0f : -1.0f;
-    EnvBand eqBand = (validCount > 0) ? envBandFromIndex(eqIndex) : EnvBand::Unknown;
-
-    auto intensityForBand = [&](EnvBand band) -> float {
-        if (band == EnvBand::Critical)
-            return (second % 2 == 0) ? 1.0f : 0.35f;
-        if (band == EnvBand::Poor)
-            return ((second / 2) % 2 == 0) ? 1.0f : 0.6f;
-        return 1.0f;
-    };
-
-    uint16_t eqPulseColor = scaleColor565(envColorForBand(eqBand), intensityForBand(eqBand));
-    uint16_t co2PulseColor = scaleColor565(envColorForBand(co2Band), intensityForBand(co2Band));
-
-    dma_display->fillCircle(eqDotX, eqDotY, dotRadius, eqPulseColor);
-    dma_display->fillCircle(co2DotX, co2DotY, dotRadius, co2PulseColor);
-
-    drawClockPulseDot(second);
-}
-
-void drawClockPulseDot(int second)
-{
-    // ---- Seconds pulse ----
-    uint16_t pulseColor = (second % 2 == 0)
-                              ? dma_display->color565(0, 150, 0)
-                              : dma_display->color565(0, 60, 0);
-    dma_display->fillCircle(62, 30, 1, pulseColor);
-}
-
 void drawConditionSceneScreen()
 {
     String condition;
@@ -5715,7 +5116,7 @@ void drawConditionSceneScreen()
 
     getTimeFromRTC();
 
-    if (isDataSourceWeatherFlow())
+    if (isDataSourceForecastModel())
     {
         if (currentCond.cond.length() > 0)
             condition = currentCond.cond;
@@ -5751,23 +5152,11 @@ void drawConditionSceneScreen()
     String label = formatConditionLabel(condition);
     if (isDataSourceNone())
         label = "No Data";
-    else if (!hasData)
-        label = "Waiting...";
-
-    auto drawTextWithShadow = [&](int x, int y, const String &text, uint16_t color) {
-        uint16_t shadow = scaleColor565(color, 0.25f);
-        dma_display->setTextColor(shadow);
-        dma_display->setCursor(x + 1, y + 1);
-        dma_display->print(text);
-        dma_display->setTextColor(color);
-        dma_display->setCursor(x, y);
-        dma_display->print(text);
-    };
 
     uint16_t accent = weatherSceneAccentColor(sceneKind);
 
     String tempTag;
-    if (isDataSourceWeatherFlow())
+    if (isDataSourceForecastModel())
     {
         if (!isnan(currentCond.temp))
             tempTag = fmtTemp(currentCond.temp, 0);
@@ -5782,52 +5171,79 @@ void drawConditionSceneScreen()
 
     if (tempTag.length() > 0)
     {
-        int tempWidth = getTextWidth(tempTag.c_str());
-        int tempX = PANEL_RES_X - tempWidth - 3;
-        if (tempX < 2)
-            tempX = 2;
-        drawTextWithShadow(tempX, 6, tempTag, accent);
+        // Match Prediction style: large value + smaller degree/unit.
+        char valueText[16] = {0};
+        char unitChar = (units.temp == TempUnit::F) ? 'F' : 'C';
+        size_t vIdx = 0;
+        for (int i = 0; i < tempTag.length() && vIdx < sizeof(valueText) - 1; ++i)
+        {
+            char c = tempTag.charAt(i);
+            if ((c >= '0' && c <= '9') || c == '-' || c == '+' || c == '.')
+            {
+                valueText[vIdx++] = c;
+            }
+            else if (c == 'C' || c == 'F')
+            {
+                unitChar = c;
+            }
+        }
+        valueText[vIdx] = '\0';
+        if (vIdx == 0)
+        {
+            strncpy(valueText, "--", sizeof(valueText) - 1);
+            valueText[sizeof(valueText) - 1] = '\0';
+        }
+
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        int16_t vX1, vY1;
+        uint16_t vW, vH;
+        dma_display->getTextBounds(valueText, 0, 0, &vX1, &vY1, &vW, &vH);
+
+        char unitText[4] = {'\xB0', unitChar, '\0'};
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        int16_t uX1, uY1;
+        uint16_t uW, uH;
+        dma_display->getTextBounds(unitText, 0, 0, &uX1, &uY1, &uW, &uH);
+
+        const int unitGap = 1;
+        int totalW = static_cast<int>(vW) + unitGap + static_cast<int>(uW);
+
+        const int topPad = 1;
+        int tempX = 2;
+        int valueY = topPad - vY1;
+        int unitX = tempX + static_cast<int>(vW) + unitGap;
+        int unitY = topPad + 1;
+
+        uint16_t valueColor = weatherSceneAdaptiveTempTextColor(sceneKind, accent, false);
+        uint16_t unitColor = weatherSceneAdaptiveTempTextColor(sceneKind, accent, true);
+        uint16_t shadow = scaleColor565(weatherSceneTempBgColor(sceneKind), weatherSceneIsNight(sceneKind) ? 0.45f : 0.72f);
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(shadow);
+        dma_display->setCursor(tempX + 1, valueY + 1);
+        dma_display->print(valueText);
+        dma_display->setTextColor(valueColor);
+        dma_display->setCursor(tempX, valueY);
+        dma_display->print(valueText);
+
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        dma_display->setTextColor(shadow);
+        dma_display->setCursor(unitX + 1, unitY + 1);
+        dma_display->print(unitText);
+        dma_display->setTextColor(unitColor);
+        dma_display->setCursor(unitX, unitY);
+        dma_display->print(unitText);
+
+        // Restore small font for marquee rendering below.
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
     }
 
-    // Only (re)initialize the marquee when the underlying condition label changes.
-    // Time, wind, feels, etc. are updated via tickConditionSceneMarquee() using the pending buffer.
-    if (label != conditionSceneMarqueeBase || conditionSceneMarqueeText.length() == 0)
-    {
-        conditionSceneMarqueeBase = label;
-        conditionSceneMarqueeColor = accent;
-        conditionSceneMarqueeText = buildConditionMarqueeText(conditionSceneMarqueeBase);
-        String lines[] = {conditionSceneMarqueeText};
-        conditionSceneScroll.setLines(lines, 1, true);
-        uint16_t textColors[] = {conditionSceneMarqueeColor};
-        uint16_t bgColors[] = {myBLACK};
-        conditionSceneScroll.setLineColors(textColors, bgColors, 1);
-        conditionSceneScroll.setScrollSpeed(scrollSpeed);
-        conditionSceneMarqueePendingText = "";
-    }
-    else
-    {
-        // Keep accent color in sync even if we don't rebuild the text
-        conditionSceneMarqueeColor = accent;
-    }
-    renderConditionSceneMarquee(true);
-}
-
-void tickConditionSceneMarquee()
-{
-    if (currentScreen != SCREEN_CONDITION_SCENE)
-        return;
-
-    if (conditionSceneMarqueeBase.length() == 0)
-        return;
-
-    String combined = buildConditionMarqueeText(conditionSceneMarqueeBase);
-
-    if (combined != conditionSceneMarqueeText && combined != conditionSceneMarqueePendingText)
-    {
-        conditionSceneMarqueePendingText = combined;
-    }
-
-    renderConditionSceneMarquee(false);
+    // Use the shared scene-marquee state engine so draw/tick update the same buffer.
+    conditionSceneSyncMarquee(label, accent);
 }
 
 // Public helpers

@@ -7,6 +7,8 @@
 // Persistent selection storage
 void loadWorldTimeSettings();
 void saveWorldTimeSettings();
+bool worldTimeAutoCycleEnabled();
+void worldTimeSetAutoCycleEnabled(bool enabled);
 
 // Selection management
 size_t worldTimeSelectionCount();
@@ -43,3 +45,26 @@ String worldTimeBuildCurrentHeaderText();
 String worldTimeSelectionCityLabel(size_t selectionIndex);
 bool worldTimeGetSelectionDateTime(size_t selectionIndex, DateTime &outLocal);
 bool worldTimeGetSelectionWeather(size_t selectionIndex, WorldWeather &out);
+
+// Custom city entries (for World Clock)
+struct WorldTimeCustomCity
+{
+    String name;
+    float lat;
+    float lon;
+    int tzIndex; // reference timezone used for local time conversion
+    bool enabled;
+};
+
+size_t worldTimeCustomCityCount();
+bool worldTimeGetCustomCity(size_t index, WorldTimeCustomCity &out);
+bool worldTimeAddCustomCity(const WorldTimeCustomCity &city);
+bool worldTimeRemoveCustomCityAt(size_t index);
+bool worldTimeSetCustomCityEnabled(size_t index, bool enabled);
+void worldTimeClearCustomCities();
+
+// Combined display entries (selected tz + custom cities)
+size_t worldTimeDisplayCount();
+String worldTimeDisplayCityLabel(size_t index);
+bool worldTimeGetDisplayDateTime(size_t index, DateTime &outLocal);
+bool worldTimeGetDisplayWeather(size_t index, WorldWeather &out);

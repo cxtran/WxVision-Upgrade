@@ -11,9 +11,13 @@
 
 static std::vector<int> s_worldTimeZoneIndices;
 static int s_worldTimeViewIndex = -1; // -1 => system clock view, >=0 => index into s_worldTimeZoneIndices
+static bool s_worldTimeAutoCycle = true;
+static std::vector<WorldTimeCustomCity> s_worldCustomCities;
 
 static constexpr const char *kPrefsNs = "visionwx";
 static constexpr const char *kPrefsKeyIds = "wt_ids";
+static constexpr const char *kPrefsKeyAuto = "wt_auto";
+static constexpr const char *kPrefsKeyCustom = "wt_custom";
 static constexpr const char *kWorldWeatherHost = "api.open-meteo.com";
 static constexpr uint16_t kWorldWeatherPort = 80;
 static constexpr unsigned long kWorldWeatherRefreshMs = 15UL * 60UL * 1000UL;
@@ -33,7 +37,10 @@ struct WorldWeatherRequest
 {
     WorldWeatherFetchState state = WorldWeatherFetchState::Idle;
     WiFiClient client;
-    int tzIndex = -1;
+    bool custom = false;
+    int index = -1;
+    float lat = NAN;
+    float lon = NAN;
     unsigned long startedAt = 0;
     unsigned long lastRxAt = 0;
     String response;
@@ -41,6 +48,8 @@ struct WorldWeatherRequest
 
 static std::vector<WorldWeather> s_worldWeatherByTz;
 static std::vector<unsigned long> s_worldWeatherRetryAfter;
+static std::vector<WorldWeather> s_worldCustomWeather;
+static std::vector<unsigned long> s_worldCustomRetryAfter;
 static WorldWeatherRequest s_worldWeatherReq;
 static int s_worldWeatherRoundRobin = 0;
 static unsigned long s_worldWeatherNextStartMs = 0;
@@ -56,6 +65,51 @@ static void ensureWorldWeatherSlots()
     {
         s_worldWeatherRetryAfter.assign(n, 0UL);
     }
+    if (s_worldCustomWeather.size() != s_worldCustomCities.size())
+    {
+        s_worldCustomWeather.assign(s_worldCustomCities.size(), WorldWeather{"", NAN, 0UL, false});
+    }
+    if (s_worldCustomRetryAfter.size() != s_worldCustomCities.size())
+    {
+        s_worldCustomRetryAfter.assign(s_worldCustomCities.size(), 0UL);
+    }
+}
+
+static size_t worldDisplayCountInternal()
+{
+    size_t enabledCustom = 0;
+    for (size_t i = 0; i < s_worldCustomCities.size(); ++i)
+    {
+        if (s_worldCustomCities[i].enabled)
+            ++enabledCustom;
+    }
+    return s_worldTimeZoneIndices.size() + enabledCustom;
+}
+
+static bool mapDisplayIndexToTarget(size_t displayIndex, bool &outCustom, int &outIndex)
+{
+    if (displayIndex < s_worldTimeZoneIndices.size())
+    {
+        outCustom = false;
+        outIndex = s_worldTimeZoneIndices[displayIndex];
+        return outIndex >= 0 && outIndex < static_cast<int>(timezoneCount());
+    }
+
+    size_t customOffset = displayIndex - s_worldTimeZoneIndices.size();
+    size_t enabledSeen = 0;
+    for (size_t i = 0; i < s_worldCustomCities.size(); ++i)
+    {
+        if (!s_worldCustomCities[i].enabled)
+            continue;
+        if (enabledSeen == customOffset)
+        {
+            outCustom = true;
+            outIndex = static_cast<int>(i);
+            return true;
+        }
+        ++enabledSeen;
+    }
+    return false;
 }
 
 static int currentWorldTzIndex()
@@ -163,60 +217,136 @@ static const char *countryIso2FromName(const char *country)
     return "--";
 }
 
-static int pickNextTimezoneToRefresh(unsigned long nowMs)
+static bool targetDue(bool custom, int index, unsigned long nowMs)
 {
-    ensureWorldWeatherSlots();
-    if (!worldTimeHasSelections())
-        return -1;
-
-    const int current = currentWorldTzIndex();
-    if (current >= 0 && current < static_cast<int>(timezoneCount()))
+    if (custom)
     {
-        const WorldWeather &cw = s_worldWeatherByTz[static_cast<size_t>(current)];
-        bool due = !cw.valid || (nowMs - cw.lastUpdate >= kWorldWeatherRefreshMs);
-        if (due && nowMs >= s_worldWeatherRetryAfter[static_cast<size_t>(current)])
-            return current;
+        if (index < 0 || index >= static_cast<int>(s_worldCustomCities.size()))
+            return false;
+        const WorldWeather &w = s_worldCustomWeather[static_cast<size_t>(index)];
+        if (nowMs < s_worldCustomRetryAfter[static_cast<size_t>(index)])
+            return false;
+        return !w.valid || (nowMs - w.lastUpdate >= kWorldWeatherRefreshMs);
     }
 
-    const size_t total = worldTimeSelectionCount();
-    if (total == 0)
-        return -1;
+    if (index < 0 || index >= static_cast<int>(timezoneCount()))
+        return false;
+    const WorldWeather &w = s_worldWeatherByTz[static_cast<size_t>(index)];
+    if (nowMs < s_worldWeatherRetryAfter[static_cast<size_t>(index)])
+        return false;
+    return !w.valid || (nowMs - w.lastUpdate >= kWorldWeatherRefreshMs);
+}
 
+static bool targetValid(bool custom, int index)
+{
+    if (custom)
+    {
+        if (index < 0 || index >= static_cast<int>(s_worldCustomWeather.size()))
+            return false;
+        return s_worldCustomWeather[static_cast<size_t>(index)].valid;
+    }
+
+    if (index < 0 || index >= static_cast<int>(s_worldWeatherByTz.size()))
+        return false;
+    return s_worldWeatherByTz[static_cast<size_t>(index)].valid;
+}
+
+static bool pickNextTargetToRefresh(unsigned long nowMs, bool &outCustom, int &outIndex)
+{
+    ensureWorldWeatherSlots();
+    if (worldDisplayCountInternal() == 0)
+        return false;
+
+    const size_t total = worldDisplayCountInternal();
+    if (total == 0)
+        return false;
+
+    // First, fill entries that are still invalid so late-list cities/custom entries
+    // don't starve while the screen keeps cycling.
     for (size_t i = 0; i < total; ++i)
     {
         const int pos = (s_worldWeatherRoundRobin + static_cast<int>(i)) % static_cast<int>(total);
-        int tzIndex = worldTimeSelectionAt(static_cast<size_t>(pos));
-        if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+        bool custom = false;
+        int index = -1;
+        if (!mapDisplayIndexToTarget(static_cast<size_t>(pos), custom, index))
             continue;
-
-        const WorldWeather &w = s_worldWeatherByTz[static_cast<size_t>(tzIndex)];
-        if (nowMs < s_worldWeatherRetryAfter[static_cast<size_t>(tzIndex)])
+        if (targetValid(custom, index))
             continue;
-
-        bool due = !w.valid || (nowMs - w.lastUpdate >= kWorldWeatherRefreshMs);
-        if (due)
+        if (targetDue(custom, index, nowMs))
         {
             s_worldWeatherRoundRobin = (pos + 1) % static_cast<int>(total);
-            return tzIndex;
+            outCustom = custom;
+            outIndex = index;
+            return true;
         }
     }
-    return -1;
+
+    // Then keep the currently shown timezone reasonably fresh.
+    const int current = currentWorldTzIndex();
+    if (current >= 0 && current < static_cast<int>(timezoneCount()))
+    {
+        if (targetDue(false, current, nowMs))
+        {
+            outCustom = false;
+            outIndex = current;
+            return true;
+        }
+    }
+
+    // Finally, background-refresh any due entry in round-robin order.
+    for (size_t i = 0; i < total; ++i)
+    {
+        const int pos = (s_worldWeatherRoundRobin + static_cast<int>(i)) % static_cast<int>(total);
+        bool custom = false;
+        int index = -1;
+        if (!mapDisplayIndexToTarget(static_cast<size_t>(pos), custom, index))
+            continue;
+        if (targetDue(custom, index, nowMs))
+        {
+            s_worldWeatherRoundRobin = (pos + 1) % static_cast<int>(total);
+            outCustom = custom;
+            outIndex = index;
+            return true;
+        }
+    }
+    return false;
 }
 
-static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
+static bool startWorldWeatherRequest(bool custom, int index, unsigned long nowMs)
 {
     ensureWorldWeatherSlots();
-    if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
-        return false;
     if (WiFi.status() != WL_CONNECTED)
         return false;
 
-    const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(tzIndex));
+    float lat = NAN;
+    float lon = NAN;
+    if (custom)
+    {
+        if (index < 0 || index >= static_cast<int>(s_worldCustomCities.size()))
+            return false;
+        lat = s_worldCustomCities[static_cast<size_t>(index)].lat;
+        lon = s_worldCustomCities[static_cast<size_t>(index)].lon;
+    }
+    else
+    {
+        if (index < 0 || index >= static_cast<int>(timezoneCount()))
+            return false;
+        const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(index));
+        lat = tz.latitude;
+        lon = tz.longitude;
+    }
+
+    if (!isfinite(lat) || !isfinite(lon))
+        return false;
+
     s_worldWeatherReq.client.stop();
     s_worldWeatherReq.client.setTimeout(20);
     if (!s_worldWeatherReq.client.connect(kWorldWeatherHost, kWorldWeatherPort, kWorldWeatherConnectTimeoutMs))
     {
-        s_worldWeatherRetryAfter[static_cast<size_t>(tzIndex)] = nowMs + kWorldWeatherRetryMs;
+        if (custom)
+            s_worldCustomRetryAfter[static_cast<size_t>(index)] = nowMs + kWorldWeatherRetryMs;
+        else
+            s_worldWeatherRetryAfter[static_cast<size_t>(index)] = nowMs + kWorldWeatherRetryMs;
         s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
         return false;
     }
@@ -224,7 +354,7 @@ static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
     char path[220];
     snprintf(path, sizeof(path),
              "/v1/forecast?latitude=%.4f&longitude=%.4f&current_weather=true&current=temperature_2m,weather_code",
-             static_cast<double>(tz.latitude), static_cast<double>(tz.longitude));
+             static_cast<double>(lat), static_cast<double>(lon));
 
     s_worldWeatherReq.client.printf(
         "GET %s HTTP/1.1\r\n"
@@ -236,7 +366,10 @@ static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
         path, kWorldWeatherHost);
 
     s_worldWeatherReq.state = WorldWeatherFetchState::Reading;
-    s_worldWeatherReq.tzIndex = tzIndex;
+    s_worldWeatherReq.custom = custom;
+    s_worldWeatherReq.index = index;
+    s_worldWeatherReq.lat = lat;
+    s_worldWeatherReq.lon = lon;
     s_worldWeatherReq.startedAt = nowMs;
     s_worldWeatherReq.lastRxAt = nowMs;
     s_worldWeatherReq.response = "";
@@ -247,14 +380,28 @@ static bool startWorldWeatherRequest(int tzIndex, unsigned long nowMs)
 
 static void failWorldWeatherRequest(unsigned long nowMs)
 {
-    if (s_worldWeatherReq.tzIndex >= 0 &&
-        s_worldWeatherReq.tzIndex < static_cast<int>(s_worldWeatherRetryAfter.size()))
+    if (s_worldWeatherReq.custom)
     {
-        s_worldWeatherRetryAfter[static_cast<size_t>(s_worldWeatherReq.tzIndex)] = nowMs + kWorldWeatherRetryMs;
+        if (s_worldWeatherReq.index >= 0 &&
+            s_worldWeatherReq.index < static_cast<int>(s_worldCustomRetryAfter.size()))
+        {
+            s_worldCustomRetryAfter[static_cast<size_t>(s_worldWeatherReq.index)] = nowMs + kWorldWeatherRetryMs;
+        }
+    }
+    else
+    {
+        if (s_worldWeatherReq.index >= 0 &&
+            s_worldWeatherReq.index < static_cast<int>(s_worldWeatherRetryAfter.size()))
+        {
+            s_worldWeatherRetryAfter[static_cast<size_t>(s_worldWeatherReq.index)] = nowMs + kWorldWeatherRetryMs;
+        }
     }
     s_worldWeatherReq.client.stop();
     s_worldWeatherReq.state = WorldWeatherFetchState::Idle;
-    s_worldWeatherReq.tzIndex = -1;
+    s_worldWeatherReq.custom = false;
+    s_worldWeatherReq.index = -1;
+    s_worldWeatherReq.lat = NAN;
+    s_worldWeatherReq.lon = NAN;
     s_worldWeatherReq.response = "";
     s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
 }
@@ -306,19 +453,37 @@ static void completeWorldWeatherRequest(unsigned long nowMs)
         return;
     }
 
-    if (s_worldWeatherReq.tzIndex >= 0 &&
-        s_worldWeatherReq.tzIndex < static_cast<int>(s_worldWeatherByTz.size()))
+    if (s_worldWeatherReq.custom)
     {
-        WorldWeather &slot = s_worldWeatherByTz[static_cast<size_t>(s_worldWeatherReq.tzIndex)];
-        slot.condition = condition;
-        slot.temperature = temp;
-        slot.lastUpdate = nowMs;
-        slot.valid = true;
+        if (s_worldWeatherReq.index >= 0 &&
+            s_worldWeatherReq.index < static_cast<int>(s_worldCustomWeather.size()))
+        {
+            WorldWeather &slot = s_worldCustomWeather[static_cast<size_t>(s_worldWeatherReq.index)];
+            slot.condition = condition;
+            slot.temperature = temp;
+            slot.lastUpdate = nowMs;
+            slot.valid = true;
+        }
+    }
+    else
+    {
+        if (s_worldWeatherReq.index >= 0 &&
+            s_worldWeatherReq.index < static_cast<int>(s_worldWeatherByTz.size()))
+        {
+            WorldWeather &slot = s_worldWeatherByTz[static_cast<size_t>(s_worldWeatherReq.index)];
+            slot.condition = condition;
+            slot.temperature = temp;
+            slot.lastUpdate = nowMs;
+            slot.valid = true;
+        }
     }
 
     s_worldWeatherReq.client.stop();
     s_worldWeatherReq.state = WorldWeatherFetchState::Idle;
-    s_worldWeatherReq.tzIndex = -1;
+    s_worldWeatherReq.custom = false;
+    s_worldWeatherReq.index = -1;
+    s_worldWeatherReq.lat = NAN;
+    s_worldWeatherReq.lon = NAN;
     s_worldWeatherReq.response = "";
     s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
 }
@@ -331,54 +496,95 @@ static void sortSelectionsByTimezoneIndex()
 void loadWorldTimeSettings()
 {
     s_worldTimeZoneIndices.clear();
+    s_worldCustomCities.clear();
+    s_worldTimeAutoCycle = true;
 
     Preferences prefs;
     if (!prefs.begin(kPrefsNs, true))
         return;
 
     String raw = prefs.getString(kPrefsKeyIds, "");
+    s_worldTimeAutoCycle = prefs.getBool(kPrefsKeyAuto, true);
+    String customRaw = prefs.getString(kPrefsKeyCustom, "");
     prefs.end();
 
     raw.trim();
-    if (raw.isEmpty())
+    if (!raw.isEmpty())
     {
-        s_worldTimeViewIndex = -1;
-        return;
-    }
-
-    int start = 0;
-    while (start < raw.length())
-    {
-        int sep = raw.indexOf('|', start);
-        if (sep < 0)
-            sep = raw.length();
-        String token = raw.substring(start, sep);
-        token.trim();
-        if (!token.isEmpty())
+        int start = 0;
+        while (start < raw.length())
         {
-            int tzIndex = timezoneIndexFromId(token.c_str());
-            if (tzIndex >= 0)
+            int sep = raw.indexOf('|', start);
+            if (sep < 0)
+                sep = raw.length();
+            String token = raw.substring(start, sep);
+            token.trim();
+            if (!token.isEmpty())
             {
-                bool exists = false;
-                for (size_t i = 0; i < s_worldTimeZoneIndices.size(); ++i)
+                int tzIndex = timezoneIndexFromId(token.c_str());
+                if (tzIndex >= 0)
                 {
-                    if (s_worldTimeZoneIndices[i] == tzIndex)
+                    bool exists = false;
+                    for (size_t i = 0; i < s_worldTimeZoneIndices.size(); ++i)
                     {
-                        exists = true;
-                        break;
+                        if (s_worldTimeZoneIndices[i] == tzIndex)
+                        {
+                            exists = true;
+                            break;
+                        }
+                    }
+                    if (!exists)
+                    {
+                        s_worldTimeZoneIndices.push_back(tzIndex);
                     }
                 }
-                if (!exists)
-                {
-                    s_worldTimeZoneIndices.push_back(tzIndex);
-                }
             }
+            start = sep + 1;
         }
-        start = sep + 1;
     }
 
     s_worldTimeViewIndex = -1;
     sortSelectionsByTimezoneIndex();
+    ensureWorldWeatherSlots();
+
+    customRaw.trim();
+    if (!customRaw.isEmpty())
+    {
+        DynamicJsonDocument doc(4096);
+        DeserializationError err = deserializeJson(doc, customRaw);
+        if (!err && doc.is<JsonArray>())
+        {
+            JsonArray arr = doc.as<JsonArray>();
+            for (JsonObject obj : arr)
+            {
+                WorldTimeCustomCity city{};
+                city.name = String(obj["name"] | "");
+                city.name.trim();
+                city.lat = obj["lat"] | NAN;
+                city.lon = obj["lon"] | NAN;
+                city.enabled = obj["enabled"].isNull() ? true : obj["enabled"].as<bool>();
+
+                int tzIndex = -1;
+                if (!obj["tzId"].isNull())
+                {
+                    tzIndex = timezoneIndexFromId(obj["tzId"].as<const char *>());
+                }
+                if (tzIndex < 0 && !obj["tzIndex"].isNull())
+                {
+                    tzIndex = obj["tzIndex"].as<int>();
+                }
+                if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+                    continue;
+                if (city.name.isEmpty() || !isfinite(city.lat) || !isfinite(city.lon))
+                    continue;
+                city.lat = constrain(city.lat, -90.0f, 90.0f);
+                city.lon = constrain(city.lon, -180.0f, 180.0f);
+                city.tzIndex = tzIndex;
+                s_worldCustomCities.push_back(city);
+            }
+        }
+    }
+    ensureWorldWeatherSlots();
 }
 
 void saveWorldTimeSettings()
@@ -394,11 +600,40 @@ void saveWorldTimeSettings()
         serialized += timezoneInfoAt(static_cast<size_t>(tzIndex)).id;
     }
 
+    DynamicJsonDocument customDoc(4096);
+    JsonArray customArr = customDoc.to<JsonArray>();
+    for (size_t i = 0; i < s_worldCustomCities.size(); ++i)
+    {
+        const WorldTimeCustomCity &c = s_worldCustomCities[i];
+        if (c.tzIndex < 0 || c.tzIndex >= static_cast<int>(timezoneCount()))
+            continue;
+        JsonObject obj = customArr.add<JsonObject>();
+        obj["name"] = c.name;
+        obj["lat"] = c.lat;
+        obj["lon"] = c.lon;
+        obj["enabled"] = c.enabled;
+        obj["tzId"] = timezoneInfoAt(static_cast<size_t>(c.tzIndex)).id;
+    }
+    String customRaw;
+    serializeJson(customDoc, customRaw);
+
     Preferences prefs;
     if (!prefs.begin(kPrefsNs, false))
         return;
     prefs.putString(kPrefsKeyIds, serialized);
+    prefs.putBool(kPrefsKeyAuto, s_worldTimeAutoCycle);
+    prefs.putString(kPrefsKeyCustom, customRaw);
     prefs.end();
+}
+
+bool worldTimeAutoCycleEnabled()
+{
+    return s_worldTimeAutoCycle;
+}
+
+void worldTimeSetAutoCycleEnabled(bool enabled)
+{
+    s_worldTimeAutoCycle = enabled;
 }
 
 size_t worldTimeSelectionCount()
@@ -631,10 +866,11 @@ void worldTimeWeatherTick(bool allowStart)
         if (!allowStart || nowMs < s_worldWeatherNextStartMs)
             return;
 
-        int tzIndex = pickNextTimezoneToRefresh(nowMs);
-        if (tzIndex >= 0)
+        bool custom = false;
+        int index = -1;
+        if (pickNextTargetToRefresh(nowMs, custom, index))
         {
-            startWorldWeatherRequest(tzIndex, nowMs);
+            startWorldWeatherRequest(custom, index, nowMs);
         }
         return;
     }
@@ -702,6 +938,128 @@ bool worldTimeGetSelectionWeather(size_t selectionIndex, WorldWeather &out)
         return false;
 
     const WorldWeather &slot = s_worldWeatherByTz[static_cast<size_t>(tzIndex)];
+    if (!slot.valid)
+        return false;
+    out = slot;
+    return true;
+}
+
+size_t worldTimeCustomCityCount()
+{
+    return s_worldCustomCities.size();
+}
+
+bool worldTimeGetCustomCity(size_t index, WorldTimeCustomCity &out)
+{
+    if (index >= s_worldCustomCities.size())
+        return false;
+    out = s_worldCustomCities[index];
+    return true;
+}
+
+bool worldTimeAddCustomCity(const WorldTimeCustomCity &city)
+{
+    if (city.name.length() == 0 || !isfinite(city.lat) || !isfinite(city.lon))
+        return false;
+    if (city.tzIndex < 0 || city.tzIndex >= static_cast<int>(timezoneCount()))
+        return false;
+
+    WorldTimeCustomCity c = city;
+    c.name.trim();
+    if (c.name.length() == 0)
+        return false;
+    c.lat = constrain(c.lat, -90.0f, 90.0f);
+    c.lon = constrain(c.lon, -180.0f, 180.0f);
+    s_worldCustomCities.push_back(c);
+    ensureWorldWeatherSlots();
+    return true;
+}
+
+bool worldTimeRemoveCustomCityAt(size_t index)
+{
+    if (index >= s_worldCustomCities.size())
+        return false;
+    s_worldCustomCities.erase(s_worldCustomCities.begin() + static_cast<long long>(index));
+    ensureWorldWeatherSlots();
+    return true;
+}
+
+bool worldTimeSetCustomCityEnabled(size_t index, bool enabled)
+{
+    if (index >= s_worldCustomCities.size())
+        return false;
+    s_worldCustomCities[index].enabled = enabled;
+    return true;
+}
+
+void worldTimeClearCustomCities()
+{
+    s_worldCustomCities.clear();
+    ensureWorldWeatherSlots();
+}
+
+size_t worldTimeDisplayCount()
+{
+    return worldDisplayCountInternal();
+}
+
+String worldTimeDisplayCityLabel(size_t index)
+{
+    bool custom = false;
+    int mapped = -1;
+    if (!mapDisplayIndexToTarget(index, custom, mapped))
+        return "";
+    if (custom)
+        return s_worldCustomCities[static_cast<size_t>(mapped)].name;
+    return String(timezoneInfoAt(static_cast<size_t>(mapped)).city);
+}
+
+bool worldTimeGetDisplayDateTime(size_t index, DateTime &outLocal)
+{
+    bool custom = false;
+    int mapped = -1;
+    if (!mapDisplayIndexToTarget(index, custom, mapped))
+        return false;
+
+    int tzIndex = mapped;
+    if (custom)
+        tzIndex = s_worldCustomCities[static_cast<size_t>(mapped)].tzIndex;
+    if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+        return false;
+
+    DateTime baseLocal;
+    if (!getLocalDateTime(baseLocal))
+        return false;
+
+    int baseOffset = timezoneOffsetForLocal(baseLocal);
+    DateTime referenceUtc = localToUtc(baseLocal, baseOffset);
+    int worldOffset = timezoneOffsetForUtcAtIndex(tzIndex, referenceUtc);
+    outLocal = utcToLocal(referenceUtc, worldOffset);
+    return true;
+}
+
+bool worldTimeGetDisplayWeather(size_t index, WorldWeather &out)
+{
+    ensureWorldWeatherSlots();
+    bool custom = false;
+    int mapped = -1;
+    if (!mapDisplayIndexToTarget(index, custom, mapped))
+        return false;
+
+    if (custom)
+    {
+        if (mapped < 0 || mapped >= static_cast<int>(s_worldCustomWeather.size()))
+            return false;
+        const WorldWeather &slot = s_worldCustomWeather[static_cast<size_t>(mapped)];
+        if (!slot.valid)
+            return false;
+        out = slot;
+        return true;
+    }
+
+    if (mapped < 0 || mapped >= static_cast<int>(s_worldWeatherByTz.size()))
+        return false;
+    const WorldWeather &slot = s_worldWeatherByTz[static_cast<size_t>(mapped)];
     if (!slot.valid)
         return false;
     out = slot;

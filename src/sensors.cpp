@@ -57,7 +57,7 @@ static float computeCalibratedLux(float rawLux)
 
 namespace
 {
-  constexpr uint8_t kVirtualIrQueueSize = 8;
+  constexpr uint8_t kVirtualIrQueueSize = 24;
   volatile IRCodes::WxKey s_virtualIrQueue[kVirtualIrQueueSize] = {};
   volatile uint8_t s_virtualIrHead = 0;
   volatile uint8_t s_virtualIrTail = 0;

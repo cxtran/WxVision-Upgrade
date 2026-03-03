@@ -2,11 +2,12 @@
 #include <Arduino.h>
 #include "display.h"
 #include "ir_codes.h"
+#include "ui_theme.h"
 
 #define INFOSCREEN_MAX_LINES     20
 #define INFOSCREEN_VISIBLE_ROWS  3
-#define INFOSCREEN_HEADERFG dma_display->color565(156, 255, 91)
-#define INFOSCREEN_HEADERBG dma_display->color565(0,20,60)
+#define INFOSCREEN_HEADERFG ui_theme::infoScreenHeaderFg()
+#define INFOSCREEN_HEADERBG ui_theme::infoScreenHeaderBg()
 
 class InfoScreen {
 public:

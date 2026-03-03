@@ -51,6 +51,34 @@ header nav a[aria-current="page"] { text-decoration:underline; }
 }
 .nav-btn:hover { background:#12203a; border-color:#38517f; }
 .container { max-width:980px; margin:24px auto; padding:0 12px 48px; display:grid; gap:16px; }
+.settings-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  align-items:center;
+}
+.settings-tab-btn {
+  padding:7px 12px;
+  border:1px solid #2a3a58;
+  border-radius:999px;
+  background:#0f1726;
+  color:#def;
+  cursor:pointer;
+  font-size:13px;
+}
+.settings-tab-btn:hover {
+  background:#12203a;
+  border-color:#38517f;
+}
+.settings-tab-btn.active {
+  background:var(--accent);
+  color:#041019;
+  border-color:transparent;
+  font-weight:600;
+}
+.settings-tab-panel.tab-hidden {
+  display:none !important;
+}
 .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; }
 .card h2 { margin:0 0 12px; font-size:16px; color:#cfe8ff; }
 .row { display:grid; grid-template-columns: minmax(140px, max-content) 1fr; gap:10px 16px; align-items:center; margin:10px 0; }
@@ -265,6 +293,55 @@ input[type="time"] {
   color-scheme: dark; /* helps keep the text/icons light in supported browsers */
 }
 .hidden { display:none !important; }
+
+.wait-indicator {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid #3a4f73;
+  background: rgba(11, 14, 20, 0.2);
+  color: #def;
+  font-size: 14px;
+  font-weight: 600;
+  pointer-events: auto;
+}
+
+.wait-indicator::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.40);
+  backdrop-filter: blur(1px);
+  z-index: -1;
+}
+
+.wait-indicator.active {
+  display: inline-flex;
+}
+
+.wait-indicator .spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(222, 238, 255, 0.35);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: wait-spin 0.8s linear infinite;
+}
+
+@keyframes wait-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+body.is-waiting {
+  cursor: progress;
+}
 
 
 

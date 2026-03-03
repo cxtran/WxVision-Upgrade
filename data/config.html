@@ -20,6 +20,7 @@
 </header>
 
 <main class="container">
+  <div id="settingsTabs" class="settings-tabs" role="tablist" aria-label="Settings Sections"></div>
 
   <!-- Device -->
   <section class="card" id="card-device">
@@ -59,6 +60,7 @@
         <select id="dataSource">
           <option value="0">OWM (OpenWeatherMap)</option>
           <option value="1">WeatherFlow Tempest</option>
+          <option value="3">Open-Meteo (WF Screens)</option>
           <option value="2">None</option>
         </select>
       </div>
@@ -437,18 +439,29 @@
           <option value="1">On</option>
         </select>
       </div>
-      <div class="row">
-        <label for="noaaLat">Latitude</label>
-        <input id="noaaLat" type="number" step="0.0001" min="-90" max="90" placeholder="e.g. 37.7749">
-      </div>
-      <div class="row">
-        <label for="noaaLon">Longitude</label>
-        <input id="noaaLon" type="number" step="0.0001" min="-180" max="180" placeholder="-122.4194">
-      </div>
     </div>
     <div class="actions">
       <button class="btn" id="btnSaveNoaa">Save NOAA</button>
       <span class="msg" id="saveNoaaMsg"></span>
+    </div>
+  </section>
+
+  <!-- Device Location -->
+  <section class="card" id="card-location">
+    <h2>Device Location</h2>
+    <div class="grid2">
+      <div class="row">
+        <label for="deviceLat">Latitude</label>
+        <input id="deviceLat" type="number" step="0.0001" min="-90" max="90" placeholder="e.g. 37.7749">
+      </div>
+      <div class="row">
+        <label for="deviceLon">Longitude</label>
+        <input id="deviceLon" type="number" step="0.0001" min="-180" max="180" placeholder="-122.4194">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveLocation">Save Location</button>
+      <span class="msg" id="saveLocationMsg"></span>
     </div>
   </section>
 
@@ -523,6 +536,62 @@
     </div>
   </section>
 
+  <!-- World Time -->
+  <section class="card" id="card-worldtime">
+    <h2>World Time</h2>
+    <div class="row">
+      <label for="worldTimeAutoCycle">Auto Cycle</label>
+      <select id="worldTimeAutoCycle">
+        <option value="1">On</option>
+        <option value="0">Off</option>
+      </select>
+    </div>
+    <div class="row">
+      <label>Selected Cities</label>
+      <small class="help">These cities are used by the World Clock screen on device.</small>
+    </div>
+    <div class="row">
+      <div id="worldTimeList" class="wifi-scan">
+        <div class="wifi-scan-header">
+          <span id="worldTimeSelectedCount" class="wifi-scan-status">Selected: 0</span>
+        </div>
+        <ul class="wifi-scan-list" id="worldTimeItems">
+          <li class="wifi-scan-empty">Loading timezones...</li>
+        </ul>
+      </div>
+    </div>
+    <div class="row">
+      <label>Custom Cities</label>
+      <small class="help">Add city name with lat/lon and timezone for World Clock.</small>
+    </div>
+    <div class="row">
+      <label for="worldCustomName">City Name</label>
+      <input id="worldCustomName" type="text" placeholder="e.g. Da Nang">
+    </div>
+    <div class="row">
+      <label for="worldCustomTz">Timezone</label>
+      <select id="worldCustomTz"></select>
+    </div>
+    <div class="row two-col">
+      <div>
+        <label for="worldCustomLat">Latitude</label>
+        <input id="worldCustomLat" type="number" step="0.0001" min="-90" max="90" placeholder="16.0544">
+      </div>
+      <div>
+        <label for="worldCustomLon">Longitude</label>
+        <input id="worldCustomLon" type="number" step="0.0001" min="-180" max="180" placeholder="108.2022">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="btnAddWorldCustom">Add Custom City</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnSaveWorldTime">Save World Time</button>
+      <button class="btn ghost" id="btnClearWorldTime">Clear</button>
+      <span class="msg" id="saveWorldTimeMsg"></span>
+    </div>
+  </section>
+
   <!-- Save All -->
   <section class="card" id="card-sound">
     <h2>Sound</h2>
@@ -541,6 +610,26 @@
         <option value="5">Warm</option>
         <option value="6">Melody</option>
       </select>
+    </div>
+  </section>
+
+  <!-- System -->
+  <section class="card" id="card-system">
+    <h2>System Actions</h2>
+    <div class="actions">
+      <button class="btn" id="btnActionWifiSignal">WiFi Signal Test</button>
+      <button class="btn" id="btnActionPreviewScreens">Preview Screens</button>
+      <button class="btn" id="btnActionLearnRemote">Learn Remote</button>
+      <button class="btn" id="btnActionClearRemote">Clear Learned Remote</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="btnActionQuickRestore">Quick Restore</button>
+      <button class="btn warn" id="btnActionFactoryReset">Factory Reset</button>
+      <button class="btn warn" id="btnActionReboot">Reboot</button>
+    </div>
+    <div class="actions">
+      <a class="btn-link" href="/status.html">Show System Info</a>
+      <span class="msg" id="systemActionMsg"></span>
     </div>
   </section>
 

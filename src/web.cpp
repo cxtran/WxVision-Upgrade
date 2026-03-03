@@ -21,51 +21,68 @@
 #include "wifisettings.h"
 #include "default_values.h"
 #include "notifications.h"
+#include "menu.h"
+#include "worldtime.h"
+#include "app_state.h"
+#include "weather_provider.h"
 
-// ---- externs ----
-extern int dayFormat, dataSource, autoRotate, manualScreen, autoRotateInterval;
-extern UnitPrefs units;
-extern int theme, brightness, scrollSpeed, scrollLevel, splashDurationSec;
-extern bool autoBrightness;
-extern String customMsg;
-extern String wifiSSID, wifiPass;
-extern String owmCity, owmApiKey, wfToken, wfStationId;
-extern int owmCountryIndex;
-extern String owmCountryCustom;
-extern String owmCountryCode;
-extern float tempOffset;
-extern int humOffset, lightGain;
-extern int buzzerVolume, buzzerToneSet, alarmSoundMode;
-extern void saveAllSettings();
-extern void loadSettings();
-extern String str_Weather_Conditions, str_Temp, str_Humd;
-extern char chr_t_hour[3], chr_t_minute[3], chr_t_second[3];
-extern String deviceHostname;
+static AppState &app = appState();
 bool otaInProgress = false;
-extern bool alarmEnabled[3];
-extern int alarmHour[3];
-  extern int alarmMinute[3];
-  extern AlarmRepeatMode alarmRepeatMode[3];
-  extern int alarmWeeklyDay[3];
-  extern bool noaaAlertsEnabled;
-  extern float noaaLatitude;
-  extern float noaaLongitude;
-  extern int forecastLinesPerDay;
-  extern int forecastPauseMs;
-  extern int forecastIconSize;
 
-// Date/Time bits
-extern RTC_DS3231 rtc;
-extern int tzOffset; // minutes
-extern int dateFmt;  // 0/1/2
-extern int fmt24;    // 0/1
-extern void saveDateTimeSettings();
-extern bool syncTimeFromNTP();
-extern char ntpServerHost[64];
+#define dayFormat app.dayFormat
+#define dataSource app.dataSource
+#define autoRotate app.autoRotate
+#define manualScreen app.manualScreen
+#define autoRotateInterval app.autoRotateInterval
+#define units app.units
+#define theme app.theme
+#define brightness app.brightness
+#define scrollSpeed app.scrollSpeed
+#define scrollLevel app.scrollLevel
+#define splashDurationSec app.splashDurationSec
+#define autoBrightness app.autoBrightness
+#define customMsg app.customMsg
+#define wifiSSID app.wifiSSID
+#define wifiPass app.wifiPass
+#define owmCity app.owmCity
+#define owmApiKey app.owmApiKey
+#define wfToken app.wfToken
+#define wfStationId app.wfStationId
+#define owmCountryIndex app.owmCountryIndex
+#define owmCountryCustom app.owmCountryCustom
+#define tempOffset app.tempOffset
+#define humOffset app.humOffset
+#define lightGain app.lightGain
+#define buzzerVolume app.buzzerVolume
+#define buzzerToneSet app.buzzerToneSet
+#define alarmSoundMode app.alarmSoundMode
+#define alarmEnabled app.alarmEnabled
+#define alarmHour app.alarmHour
+#define alarmMinute app.alarmMinute
+#define alarmRepeatMode app.alarmRepeatMode
+#define alarmWeeklyDay app.alarmWeeklyDay
+#define noaaAlertsEnabled app.noaaAlertsEnabled
+#define noaaLatitude app.noaaLatitude
+#define noaaLongitude app.noaaLongitude
+#define forecastLinesPerDay app.forecastLinesPerDay
+#define forecastPauseMs app.forecastPauseMs
+#define forecastIconSize app.forecastIconSize
+#define rtc app.rtc
+#define tzOffset app.tzOffset
+#define dateFmt app.dateFmt
+#define fmt24 app.fmt24
+#define ntpServerHost app.ntpServerHost
+#define scrollDelays app.scrollDelays
+#define reset_Time_and_Date_Display app.reset_Time_and_Date_Display
 
-// from settings.h
-extern const int scrollDelays[10];
-extern bool reset_Time_and_Date_Display;
+#define str_Weather_Conditions app.str_Weather_Conditions
+#define str_Temp app.str_Temp
+#define str_Humd app.str_Humd
+#define chr_t_hour app.chr_t_hour
+#define chr_t_minute app.chr_t_minute
+#define chr_t_second app.chr_t_second
+#define deviceHostname app.deviceHostname
+#define owmCountryCode app.owmCountryCode
 
 AsyncWebServer server(80);
 static bool webServerRunning = false;
@@ -145,6 +162,8 @@ static const char *dataSourceLabel(int value)
     return "WeatherFlow Tempest";
   case 2:
     return "Offline";
+  case 3:
+    return "Open-Meteo";
   default:
     return "Unknown";
   }
@@ -169,9 +188,10 @@ static const char *screenModeLabel(ScreenMode mode)
   case SCREEN_ENV_INDEX:
     return "Air Quality";
   case SCREEN_TEMP_HISTORY:
-    return "Temp (24h)";
+  case SCREEN_HUM_HISTORY:
   case SCREEN_CO2_HISTORY:
-    return "CO2 (24h)";
+  case SCREEN_BARO_HISTORY:
+    return "24 Hours";
   case SCREEN_CONDITION_SCENE:
     return "Weather Scene";
   case SCREEN_CURRENT:
@@ -269,6 +289,19 @@ static long currentEpoch()
   updateTimezoneOffsetWithUtc(utcNow);
   return (long)utcNow.unixtime();
 }
+
+static String formatEpochLocalTime(uint32_t epoch)
+{
+  if (epoch == 0)
+    return String("--");
+  time_t rawTime = static_cast<time_t>(epoch);
+  struct tm *ti = localtime(&rawTime);
+  if (!ti)
+    return String("--");
+  char buf[22];
+  strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", ti);
+  return String(buf);
+}
 void setupWebServer() {
   if (webServerRunning) {
     return;
@@ -309,121 +342,134 @@ void setupWebServer() {
     req->send(SPIFFS, "/config.html", "text/html");
   });
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
-    JsonDocument doc;
+    static String cachedPayload;
+    static uint32_t cacheBuiltAt = 0;
+    uint32_t now = millis();
+    bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 2000u;
+    if (refreshCache) {
+      JsonDocument doc;
       String dispTemp;
-    String humidityValue;
-    String conditionsValue = str_Weather_Conditions;
+      String humidityValue;
+      String conditionsValue = str_Weather_Conditions;
+      uint32_t weatherUpdatedEpoch = 0;
 
-    if (dataSource == 1) {
-      dispTemp = fmtTemp(currentCond.temp, 0);
-      humidityValue = (currentCond.humidity >= 0) ? String(currentCond.humidity) : "--";
-      if (!currentCond.cond.isEmpty()) conditionsValue = currentCond.cond;
-    } else {
-      dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
-      humidityValue = str_Humd;
+      if (isDataSourceForecastModel()) {
+        dispTemp = fmtTemp(currentCond.temp, 0);
+        humidityValue = (currentCond.humidity >= 0) ? String(currentCond.humidity) : "--";
+        if (!currentCond.cond.isEmpty()) conditionsValue = currentCond.cond;
+        weatherUpdatedEpoch = currentCond.time;
+      } else {
+        dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
+        humidityValue = str_Humd;
+      }
+
+      doc["wifiSSID"] = WiFi.SSID();
+      doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
+      doc["hostname"] = deviceHostname;
+      doc["ip"] = WiFi.localIP().toString();
+      doc["mac"] = WiFi.macAddress();
+      doc["rssi"] = WiFi.RSSI();
+      float luxNow = getLastRawLux();
+      doc["lux"] = isfinite(luxNow) ? luxNow : NAN;
+
+      unsigned long uptimeSec = millis() / 1000UL;
+      doc["uptimeSec"] = uptimeSec;
+      doc["uptime"] = formatUptime(uptimeSec);
+
+      size_t heapTotal = 327680; // align with System Info modal
+      size_t heapFree = ESP.getFreeHeap();
+      if (heapFree > heapTotal) {
+        heapTotal = heapFree;
+      }
+      size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
+      doc["freeHeap"] = heapFree; // legacy field
+      doc["heapTotal"] = heapTotal;
+      doc["heapFree"] = heapFree;
+      doc["heapUsed"] = heapUsed;
+      doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
+
+      size_t fsTotal = SPIFFS.totalBytes();
+      size_t fsUsed = SPIFFS.usedBytes();
+      size_t fsFree = (fsTotal > fsUsed) ? (fsTotal - fsUsed) : 0;
+      doc["fsTotal"] = fsTotal;
+      doc["fsUsed"] = fsUsed;
+      doc["fsFree"] = fsFree;
+      doc["fsUsedPercent"] = (fsTotal > 0) ? static_cast<uint8_t>((fsUsed * 100 + fsTotal / 2) / fsTotal) : 0;
+
+      size_t sketchSize = ESP.getSketchSize();
+      const esp_partition_t *running = esp_ota_get_running_partition();
+      size_t flashTotal = running ? running->size : 0;
+      size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+      if (flashTotal == 0) {
+        size_t sketchFree = ESP.getFreeSketchSpace();
+        flashTotal = sketchSize + sketchFree;
+        flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+      }
+      doc["flashTotal"] = flashTotal;
+      doc["flashUsed"] = sketchSize;
+      doc["flashFree"] = flashFree;
+      doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
+
+      doc["dataSource"] = dataSource;
+      doc["dataSourceLabel"] = dataSourceLabel(dataSource);
+      bool screenOff = isScreenOff();
+      doc["screenOff"] = screenOff;
+      doc["screen"] = static_cast<uint8_t>(currentScreen);
+      doc["screenLabel"] = screenOff ? "Screen Off" : screenModeLabel(currentScreen);
+
+      doc["temp"] = dispTemp;
+      doc["humidity"] = (isDataSourceForecastModel() && currentCond.humidity >= 0) ? String(currentCond.humidity) : str_Humd;
+      doc["conditions"] = (isDataSourceForecastModel() && currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
+      doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
+      doc["locationLat"] = noaaLatitude;
+      doc["locationLon"] = noaaLongitude;
+      doc["weatherUpdatedEpoch"] = weatherUpdatedEpoch;
+      doc["weatherUpdated"] = formatEpochLocalTime(weatherUpdatedEpoch);
+
+      if (!isnan(SCD40_temp)) {
+        float indoorCal = SCD40_temp + tempOffset;
+        doc["indoorTemp"] = fmtTemp(indoorCal, 1);
+        doc["indoorTempRaw"] = indoorCal;
+        doc["indoorTempSensor"] = SCD40_temp;
+      }
+      if (!isnan(SCD40_hum)) {
+        float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
+        if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
+        if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
+        doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
+        doc["indoorHumidityRaw"] = indoorHumCal;
+        doc["indoorHumiditySensor"] = SCD40_hum;
+      }
+      if (SCD40_co2 > 0) {
+        doc["co2"] = SCD40_co2;
+      }
+
+      if (!isnan(aht20_temp)) {
+        float ahtCal = aht20_temp + tempOffset;
+        doc["ahtTemp"] = fmtTemp(ahtCal, 1);
+        doc["ahtTempRaw"] = ahtCal;
+        doc["ahtTempSensor"] = aht20_temp;
+      }
+      if (!isnan(aht20_hum)) {
+        float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
+        if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
+        if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
+        doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
+        doc["ahtHumidityRaw"] = ahtHumCal;
+        doc["ahtHumiditySensor"] = aht20_hum;
+      }
+      if (!isnan(bmp280_pressure)) {
+        doc["pressure"] = fmtPress(bmp280_pressure, 1);
+        doc["pressureRaw"] = bmp280_pressure;
+      }
+
+      cachedPayload = "";
+      serializeJson(doc, cachedPayload);
+      cacheBuiltAt = now;
     }
 
-    doc["wifiSSID"] = WiFi.SSID();
-    doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
-    doc["hostname"] = deviceHostname;
-    doc["ip"] = WiFi.localIP().toString();
-    doc["mac"] = WiFi.macAddress();
-    doc["rssi"] = WiFi.RSSI();
-    float luxNow = getLastRawLux();
-    if (!isfinite(luxNow)) {
-      luxNow = readBrightnessSensor();
-    }
-    doc["lux"] = luxNow;
-
-    unsigned long uptimeSec = millis() / 1000UL;
-    doc["uptimeSec"] = uptimeSec;
-    doc["uptime"] = formatUptime(uptimeSec);
-
-    size_t heapTotal = 327680; // align with System Info modal
-    size_t heapFree = ESP.getFreeHeap();
-    if (heapFree > heapTotal) {
-      heapTotal = heapFree;
-    }
-    size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
-    doc["freeHeap"] = heapFree; // legacy field
-    doc["heapTotal"] = heapTotal;
-    doc["heapFree"] = heapFree;
-    doc["heapUsed"] = heapUsed;
-    doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
-
-    size_t fsTotal = SPIFFS.totalBytes();
-    size_t fsUsed = SPIFFS.usedBytes();
-    size_t fsFree = (fsTotal > fsUsed) ? (fsTotal - fsUsed) : 0;
-    doc["fsTotal"] = fsTotal;
-    doc["fsUsed"] = fsUsed;
-    doc["fsFree"] = fsFree;
-    doc["fsUsedPercent"] = (fsTotal > 0) ? static_cast<uint8_t>((fsUsed * 100 + fsTotal / 2) / fsTotal) : 0;
-
-    size_t sketchSize = ESP.getSketchSize();
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    size_t flashTotal = running ? running->size : 0;
-    size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
-    if (flashTotal == 0) {
-      size_t sketchFree = ESP.getFreeSketchSpace();
-      flashTotal = sketchSize + sketchFree;
-      flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
-    }
-    doc["flashTotal"] = flashTotal;
-    doc["flashUsed"] = sketchSize;
-    doc["flashFree"] = flashFree;
-    doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
-
-    doc["dataSource"] = dataSource;
-    doc["dataSourceLabel"] = dataSourceLabel(dataSource);
-    bool screenOff = isScreenOff();
-    doc["screenOff"] = screenOff;
-    doc["screen"] = static_cast<uint8_t>(currentScreen);
-    doc["screenLabel"] = screenOff ? "Screen Off" : screenModeLabel(currentScreen);
-
-    doc["temp"] = dispTemp;
-    doc["humidity"] = (dataSource == 1 && currentCond.humidity >= 0) ? String(currentCond.humidity) : str_Humd;
-    doc["conditions"] = (dataSource == 1 && currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
-    doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
-
-    if (!isnan(SCD40_temp)) {
-      float indoorCal = SCD40_temp + tempOffset;
-      doc["indoorTemp"] = fmtTemp(indoorCal, 1);
-      doc["indoorTempRaw"] = indoorCal;
-      doc["indoorTempSensor"] = SCD40_temp;
-    }
-    if (!isnan(SCD40_hum)) {
-      float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
-      if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
-      if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
-      doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
-      doc["indoorHumidityRaw"] = indoorHumCal;
-      doc["indoorHumiditySensor"] = SCD40_hum;
-    }
-    if (SCD40_co2 > 0) {
-      doc["co2"] = SCD40_co2;
-    }
-
-    if (!isnan(aht20_temp)) {
-      float ahtCal = aht20_temp + tempOffset;
-      doc["ahtTemp"] = fmtTemp(ahtCal, 1);
-      doc["ahtTempRaw"] = ahtCal;
-      doc["ahtTempSensor"] = aht20_temp;
-    }
-    if (!isnan(aht20_hum)) {
-      float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
-      if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
-      if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
-      doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
-      doc["ahtHumidityRaw"] = ahtHumCal;
-      doc["ahtHumiditySensor"] = aht20_hum;
-    }
-    if (!isnan(bmp280_pressure)) {
-      doc["pressure"] = fmtPress(bmp280_pressure, 1);
-      doc["pressureRaw"] = bmp280_pressure;
-    }
-
-    AsyncResponseStream *res = req->beginResponseStream("application/json");
-    serializeJson(doc, *res);
+    AsyncWebServerResponse *res = req->beginResponse(200, "application/json", cachedPayload);
+    res->addHeader("Cache-Control", "no-store, max-age=0");
     req->send(res);
   });
 
@@ -431,13 +477,15 @@ void setupWebServer() {
     static String cachedPayload;
     static uint32_t cacheBuiltAt = 0;
     uint32_t now = millis();
-    bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 1000u;
+    bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 5000u;
     if (refreshCache) {
       JsonDocument doc;
+      uint32_t weatherUpdatedEpoch = 0;
 
       String dispTemp;
-      if (dataSource == 1) {
+      if (isDataSourceForecastModel()) {
         dispTemp = fmtTemp(currentCond.temp, 0);
+        weatherUpdatedEpoch = currentCond.time;
       } else {
         dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
       }
@@ -445,10 +493,14 @@ void setupWebServer() {
       doc["wifiSSID"] = WiFi.SSID();
       doc["ip"] = WiFi.localIP().toString();
       doc["temp"] = dispTemp;
-      doc["humidity"] = (dataSource == 1 && currentCond.humidity >= 0)
+      doc["humidity"] = (isDataSourceForecastModel() && currentCond.humidity >= 0)
         ? String(currentCond.humidity)
         : str_Humd;
       doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
+      doc["locationLat"] = noaaLatitude;
+      doc["locationLon"] = noaaLongitude;
+      doc["weatherUpdatedEpoch"] = weatherUpdatedEpoch;
+      doc["weatherUpdated"] = formatEpochLocalTime(weatherUpdatedEpoch);
 
       int currentIdx = timezoneCurrentIndex();
       if (currentIdx >= 0) {
@@ -624,6 +676,50 @@ void setupWebServer() {
     String json;
     serializeJson(doc, json);
     req->send(200, "application/json", json);
+  });
+
+  server.on("/action/quick-restore", HTTP_POST, [](AsyncWebServerRequest *req) {
+    quickRestore();
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Quick restore completed.\"}");
+  });
+
+  server.on("/action/factory-reset", HTTP_POST, [](AsyncWebServerRequest *req) {
+    factoryReset();
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset started.\"}");
+  });
+
+  server.on("/action/reboot", HTTP_POST, [](AsyncWebServerRequest *req) {
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Rebooting...\"}");
+    delay(1000);
+    ESP.restart();
+  });
+
+  server.on("/action/learn-remote", HTTP_POST, [](AsyncWebServerRequest *req) {
+    bool ok = startUniversalRemoteLearning();
+    if (!ok) {
+      req->send(409, "application/json", "{\"ok\":false,\"error\":\"Remote learning unavailable.\"}");
+      return;
+    }
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Remote learning started.\"}");
+  });
+
+  server.on("/action/clear-learned-remote", HTTP_POST, [](AsyncWebServerRequest *req) {
+    bool ok = clearUniversalRemoteLearning();
+    if (!ok) {
+      req->send(409, "application/json", "{\"ok\":false,\"error\":\"No learned remote to clear.\"}");
+      return;
+    }
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Learned remote cleared.\"}");
+  });
+
+  server.on("/action/wifi-signal-test", HTTP_POST, [](AsyncWebServerRequest *req) {
+    showWiFiSignalTest();
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"WiFi signal test opened on device.\"}");
+  });
+
+  server.on("/action/preview-screens", HTTP_POST, [](AsyncWebServerRequest *req) {
+    showScenePreviewModal();
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Preview screens opened on device.\"}");
   });
 
   server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -1007,7 +1103,7 @@ void setupWebServer() {
 
         if (owmSettingsChanged) {
           if (WiFi.status() == WL_CONNECTED) {
-            fetchWeatherFromOWM();
+            wxv::provider::fetchActiveProviderData();
             requestScrollRebuild();
             serviceScrollRebuild();
             displayWeatherData();
@@ -1016,7 +1112,9 @@ void setupWebServer() {
         }
 
         if (wfCredsChanged && isDataSourceWeatherFlow()) {
-          fetchForecastData();
+          wxv::provider::fetchActiveProviderData();
+        } else if (isDataSourceOpenMeteo()) {
+          wxv::provider::fetchActiveProviderData();
         }
       }
     }
@@ -1024,21 +1122,25 @@ void setupWebServer() {
 
   // ---------- Timezones / Time ----------
   server.on("/timezones.json", HTTP_GET, [](AsyncWebServerRequest* req){
-    JsonDocument doc;
-    JsonArray arr = doc.to<JsonArray>();
-    size_t count = timezoneCount();
-    for (size_t i = 0; i < count; ++i) {
-      const TimezoneInfo& info = timezoneInfoAt(i);
-      JsonObject o = arr.add<JsonObject>();
-      o["id"]        = info.id;
-      o["city"]      = info.city;
-      o["country"]   = info.country;
-      o["offset"]    = info.offsetMinutes;
-      o["label"]     = timezoneLabelAt(i);
-      o["supportsDst"] = timezoneSupportsDst(i);
+    static String cachedPayload;
+    if (cachedPayload.isEmpty()) {
+      JsonDocument doc;
+      JsonArray arr = doc.to<JsonArray>();
+      size_t count = timezoneCount();
+      for (size_t i = 0; i < count; ++i) {
+        const TimezoneInfo& info = timezoneInfoAt(i);
+        JsonObject o = arr.add<JsonObject>();
+        o["id"]        = info.id;
+        o["city"]      = info.city;
+        o["country"]   = info.country;
+        o["offset"]    = info.offsetMinutes;
+        o["label"]     = timezoneLabelAt(i);
+        o["supportsDst"] = timezoneSupportsDst(i);
+      }
+      serializeJson(doc, cachedPayload);
     }
-    AsyncResponseStream *res = req->beginResponseStream("application/json");
-    serializeJson(doc, *res);
+    AsyncWebServerResponse *res = req->beginResponse(200, "application/json", cachedPayload);
+    res->addHeader("Cache-Control", "public, max-age=3600");
     req->send(res);
   });
 
@@ -1171,6 +1273,128 @@ void setupWebServer() {
         }
 
         saveDateTimeSettings();
+        req->send(200, "application/json", "{\"ok\":true}");
+      }
+    }
+  );
+
+  server.on("/worldtime.json", HTTP_GET, [](AsyncWebServerRequest* req){
+    JsonDocument doc;
+    JsonArray ids = doc["ids"].to<JsonArray>();
+    JsonArray selections = doc["selections"].to<JsonArray>();
+    size_t count = worldTimeSelectionCount();
+    for (size_t i = 0; i < count; ++i) {
+      int tzIndex = worldTimeSelectionAt(i);
+      if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount())) {
+        continue;
+      }
+      const TimezoneInfo& tz = timezoneInfoAt(static_cast<size_t>(tzIndex));
+      ids.add(tz.id);
+      JsonObject item = selections.add<JsonObject>();
+      item["id"] = tz.id;
+      item["index"] = tzIndex;
+      item["city"] = tz.city;
+      item["label"] = timezoneLabelAt(static_cast<size_t>(tzIndex));
+    }
+    doc["autoCycle"] = worldTimeAutoCycleEnabled();
+    JsonArray customCities = doc["customCities"].to<JsonArray>();
+    for (size_t i = 0; i < worldTimeCustomCityCount(); ++i) {
+      WorldTimeCustomCity city;
+      if (!worldTimeGetCustomCity(i, city)) continue;
+      JsonObject c = customCities.add<JsonObject>();
+      c["name"] = city.name;
+      c["lat"] = city.lat;
+      c["lon"] = city.lon;
+      c["enabled"] = city.enabled;
+      c["tzIndex"] = city.tzIndex;
+      if (city.tzIndex >= 0 && city.tzIndex < static_cast<int>(timezoneCount())) {
+        c["tzId"] = timezoneInfoAt(static_cast<size_t>(city.tzIndex)).id;
+        c["tzLabel"] = timezoneLabelAt(static_cast<size_t>(city.tzIndex));
+      }
+    }
+    doc["count"] = selections.size();
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    serializeJson(doc, *res);
+    req->send(res);
+  });
+
+  server.on("/worldtime", HTTP_POST,
+    [](AsyncWebServerRequest*){}, nullptr,
+    [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total){
+      if (index == 0) {
+        req->_tempObject = new String();
+        ((String*)req->_tempObject)->reserve(total);
+      }
+      String* body = (String*)req->_tempObject;
+      body->concat((const char*)data, len);
+
+      if (index + len == total) {
+        JsonDocument doc;
+        if (deserializeJson(doc, *body)) {
+          delete body; req->_tempObject = nullptr;
+          req->send(400, "text/plain", "bad json");
+          return;
+        }
+        delete body; req->_tempObject = nullptr;
+
+        worldTimeClearSelections();
+        worldTimeClearCustomCities();
+        if (!doc["autoCycle"].isNull()) {
+          worldTimeSetAutoCycleEnabled(doc["autoCycle"].as<bool>());
+        }
+
+        if (doc["ids"].is<JsonArray>()) {
+          JsonArray ids = doc["ids"].as<JsonArray>();
+          for (JsonVariant v : ids) {
+            if (!v.is<const char*>()) continue;
+            const char* tzId = v.as<const char*>();
+            int tzIndex = timezoneIndexFromId(tzId);
+            if (tzIndex >= 0) {
+              worldTimeAddTimezone(tzIndex);
+            }
+          }
+        } else if (doc["indices"].is<JsonArray>()) {
+          JsonArray indices = doc["indices"].as<JsonArray>();
+          for (JsonVariant v : indices) {
+            if (!v.is<int>()) continue;
+            int tzIndex = v.as<int>();
+            if (tzIndex >= 0 && tzIndex < static_cast<int>(timezoneCount())) {
+              worldTimeAddTimezone(tzIndex);
+            }
+          }
+        }
+
+        if (doc["customCities"].is<JsonArray>()) {
+          JsonArray custom = doc["customCities"].as<JsonArray>();
+          for (JsonObject obj : custom) {
+            String name = obj["name"] | "";
+            name.trim();
+            if (name.length() == 0) continue;
+            float lat = obj["lat"] | NAN;
+            float lon = obj["lon"] | NAN;
+            if (!isfinite(lat) || !isfinite(lon)) continue;
+            lat = constrain(lat, -90.0f, 90.0f);
+            lon = constrain(lon, -180.0f, 180.0f);
+            int tzIndex = -1;
+            if (!obj["tzId"].isNull()) {
+              tzIndex = timezoneIndexFromId(obj["tzId"].as<const char*>());
+            }
+            if (tzIndex < 0 && !obj["tzIndex"].isNull()) {
+              tzIndex = obj["tzIndex"].as<int>();
+            }
+            if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount())) continue;
+            WorldTimeCustomCity city;
+            city.name = name;
+            city.lat = lat;
+            city.lon = lon;
+            city.tzIndex = tzIndex;
+            city.enabled = obj["enabled"].isNull() ? true : obj["enabled"].as<bool>();
+            worldTimeAddCustomCity(city);
+          }
+        }
+
+        worldTimeResetView();
+        saveWorldTimeSettings();
         req->send(200, "application/json", "{\"ok\":true}");
       }
     }

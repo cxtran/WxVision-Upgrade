@@ -4,20 +4,20 @@
 #include "ir_codes.h"
 #include "sensors.h"
 #include "settings.h"
+#include "ui_theme.h"
 // --- Info Modal Colors ---
-#define INFOMODAL_GREEN    dma_display->color565(255,255,255)
-#define INFOMODAL_HEADERBG dma_display->color565(0,0,120)
+#define INFOMODAL_GREEN    ui_theme::infoModalHeaderFg()
+#define INFOMODAL_HEADERBG ui_theme::infoModalHeaderBg()
 
-#define INFOMODAL_UNSELXBG dma_display->color565(110,80,133)
-#define INFOMODAL_SELXBG   dma_display->color565(255,0,0)
-#define INFOMODAL_XCOLOR   dma_display->color565(255,255,255)
-//#define INFOMODAL_ULINE    dma_display->color565(180,180,255)
-#define INFOMODAL_ULINE    dma_display->color565(255,255,255)
-#define INFOMODAL_SEL      dma_display->color565(255,255,64)
-#define INFOMODAL_UNSEL    dma_display->color565(0,255,255)
-#define INFOMODAL_BTN_BG   dma_display->color565(20,60,120)
-#define INFOMODAL_BTN_SELBG dma_display->color565(255,130,0)
-#define INFOMODAL_EDIT    dma_display->color565(255, 255, 0)  // Yellow highlight for editing
+#define INFOMODAL_UNSELXBG ui_theme::infoModalUnselXBg()
+#define INFOMODAL_SELXBG   ui_theme::infoModalSelXBg()
+#define INFOMODAL_XCOLOR   ui_theme::infoModalXColor()
+#define INFOMODAL_ULINE    ui_theme::infoModalUnderline()
+#define INFOMODAL_SEL      ui_theme::infoModalSel()
+#define INFOMODAL_UNSEL    ui_theme::infoModalUnsel()
+#define INFOMODAL_BTN_BG   ui_theme::infoModalBtnBg()
+#define INFOMODAL_BTN_SELBG ui_theme::infoModalBtnSelBg()
+#define INFOMODAL_EDIT    ui_theme::infoModalEdit()
 
 
 enum InfoFieldType { InfoLabel, InfoNumber, InfoChooser, InfoText, InfoButton };
