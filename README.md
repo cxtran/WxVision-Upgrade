@@ -53,6 +53,34 @@ VisionWX is ESP32 firmware for a 64x32 HUB75 RGB matrix weather display with on-
 3. Upload web assets (required after `data/` changes):
    - `pio run -e esp32dev -t uploadfs`
 
+## AI/ML Starter
+
+- Training/export tools are in `tools/ml/`.
+- Firmware-side inference interface:
+  - `include/ml_predictor.h`
+  - `src/ml_predictor.cpp`
+  - generated model constants in `include/ml_model_generated.h`
+- Typical offline flow:
+  1. Install deps: `pip install -r tools/ml/requirements.txt`
+  2. Download log: `python tools/ml/download_trend_log.py --host http://visionwx.local --out-dir tools/ml/data --limit 300`
+3. Run pipeline: `python tools/ml/run_training_pipeline.py --data-dir tools/ml/data --min-class-support 30 --min-enabled-classes 2`
+  4. Flash firmware: `pio run -e esp32dev -t upload`
+
+## ML Release Checklist
+
+1. Download fresh trend data (`--limit 300`) from device.
+2. Run training pipeline with gating:
+   - `python tools/ml/run_training_pipeline.py --data-dir tools/ml/data --min-class-support 30 --min-enabled-classes 2`
+   - Optional release thresholds: `--min-accuracy 0.70 --min-weighted-f1 0.75`
+3. Verify training output:
+   - At least 2 enabled classes.
+   - Review `tools/ml/data/model_metadata.json` for class support.
+4. Build and flash:
+   - `pio run -e esp32dev -t upload`
+5. Quick on-device sanity check:
+   - ML page is present.
+   - Label/confidence updates without crashes.
+
 ## Notes
 
 - Factory reset does not erase firmware; it clears persisted settings/data and reboots.

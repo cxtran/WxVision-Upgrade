@@ -6,6 +6,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <math.h>
+#include <memory>
 #include "esp_ota_ops.h"
 
 #include "settings.h"
@@ -315,16 +316,150 @@ void setupWebServer() {
   // Place dynamic endpoints before the catch-all static handler so they aren't shadowed.
   server.on("/trend.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     const auto &log = getSensorLog();
-    // Cap payload to keep client/server responsive
-    constexpr size_t kMaxTrendSamples = 200;
-    size_t sampleCount = (log.size() < kMaxTrendSamples) ? log.size() : kMaxTrendSamples;
-    size_t capacity = JSON_ARRAY_SIZE(sampleCount) + sampleCount * JSON_OBJECT_SIZE(6) + 256;
-    if (capacity < 1024) capacity = 1024;
-    DynamicJsonDocument doc(capacity);
-    sensorLogToJsonDownsample(doc, kMaxTrendSamples);
+    // Cap payload to keep client/server responsive.
+    // Optional query: /trend.json?limit=120
+    constexpr size_t kDefaultTrendSamples = 200;
+    constexpr size_t kMinTrendSamples = 20;
+    constexpr size_t kMaxTrendSamples = 1000;
+    size_t requestedSamples = kDefaultTrendSamples;
+    if (req->hasParam("limit"))
+    {
+      String raw = req->getParam("limit")->value();
+      long parsed = raw.toInt();
+      if (parsed > 0)
+      {
+        requestedSamples = static_cast<size_t>(parsed);
+      }
+    }
+    if (requestedSamples < kMinTrendSamples)
+      requestedSamples = kMinTrendSamples;
+    if (requestedSamples > kMaxTrendSamples)
+      requestedSamples = kMaxTrendSamples;
 
-    AsyncResponseStream *res = req->beginResponseStream("application/json");
-    serializeJson(doc, *res);
+    struct TrendChunkState
+    {
+      const std::vector<SensorSample> *logPtr = nullptr;
+      std::vector<size_t> indices;
+      size_t indexPos = 0;
+      bool sentOpen = false;
+      bool sentClose = false;
+      String pending;
+      size_t pendingOffset = 0;
+
+      static void formatFloat(float value, uint8_t digits, char *out, size_t outLen)
+      {
+        if (isnan(value) || !isfinite(value))
+        {
+          snprintf(out, outLen, "null");
+          return;
+        }
+        snprintf(out, outLen, "%.*f", digits, value);
+      }
+
+      void buildNextToken()
+      {
+        pending = "";
+        pendingOffset = 0;
+
+        if (!sentOpen)
+        {
+          pending = "[";
+          sentOpen = true;
+          return;
+        }
+
+        if (indexPos < indices.size())
+        {
+          const SensorSample &s = (*logPtr)[indices[indexPos]];
+          char tempBuf[24];
+          char humBuf[24];
+          char pressBuf[24];
+          char luxBuf[24];
+          char co2Buf[24];
+          formatFloat(s.temp, 5, tempBuf, sizeof(tempBuf));
+          formatFloat(s.hum, 5, humBuf, sizeof(humBuf));
+          formatFloat(s.press, 3, pressBuf, sizeof(pressBuf));
+          formatFloat(s.lux, 6, luxBuf, sizeof(luxBuf));
+          if (isnan(s.co2) || !isfinite(s.co2) || s.co2 <= 0.0f)
+            snprintf(co2Buf, sizeof(co2Buf), "null");
+          else
+            formatFloat(s.co2, 3, co2Buf, sizeof(co2Buf));
+
+          char objBuf[220];
+          snprintf(objBuf, sizeof(objBuf),
+                   "%s{\"ts\":%lu,\"temp\":%s,\"hum\":%s,\"press\":%s,\"lux\":%s,\"co2\":%s}",
+                   (indexPos == 0) ? "" : ",",
+                   static_cast<unsigned long>(s.ts),
+                   tempBuf,
+                   humBuf,
+                   pressBuf,
+                   luxBuf,
+                   co2Buf);
+          pending = objBuf;
+          ++indexPos;
+          return;
+        }
+
+        if (!sentClose)
+        {
+          pending = "]";
+          sentClose = true;
+          return;
+        }
+      }
+
+      size_t fill(uint8_t *buffer, size_t maxLen)
+      {
+        if (maxLen == 0)
+          return 0;
+
+        size_t written = 0;
+        while (written < maxLen)
+        {
+          if (pendingOffset >= pending.length())
+          {
+            buildNextToken();
+            if (pending.length() == 0)
+              break;
+          }
+
+          size_t remaining = pending.length() - pendingOffset;
+          size_t room = maxLen - written;
+          size_t chunk = (remaining < room) ? remaining : room;
+          memcpy(buffer + written, pending.c_str() + pendingOffset, chunk);
+          pendingOffset += chunk;
+          written += chunk;
+        }
+        return written;
+      }
+    };
+
+    auto state = std::make_shared<TrendChunkState>();
+    state->logPtr = &log;
+    state->indices.reserve((log.size() < requestedSamples) ? log.size() : requestedSamples);
+    if (!log.empty() && requestedSamples > 0)
+    {
+      size_t stride = (log.size() + requestedSamples - 1) / requestedSamples; // ceil
+      if (stride < 1)
+        stride = 1;
+      for (size_t i = 0; i < log.size(); i += stride)
+      {
+        state->indices.push_back(i);
+      }
+      size_t lastIndex = log.size() - 1;
+      if (state->indices.empty() || state->indices.back() != lastIndex)
+      {
+        state->indices.push_back(lastIndex);
+      }
+    }
+
+    AsyncWebServerResponse *res = req->beginChunkedResponse(
+        "application/json",
+        [state](uint8_t *buffer, size_t maxLen, size_t index) -> size_t
+        {
+          (void)index;
+          return state->fill(buffer, maxLen);
+        });
     req->send(res);
   });
 

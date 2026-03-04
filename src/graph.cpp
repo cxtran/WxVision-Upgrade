@@ -12,6 +12,7 @@
 #include "ScrollLine.h"
 #include "fonts/verdanab8pt7b.h"
 #include "ui_theme.h"
+#include "ml_predictor.h"
 
 extern int theme;
 
@@ -158,6 +159,9 @@ static int s_predictMeaningOffsetPx = 0;
 static int s_predictMeaningWidthPx = 0;
 static unsigned long s_predictMeaningLastStepMs = 0;
 static uint8_t s_predictMeaningPageIndex = 255;
+static bool s_predictStaticDirty = true;
+static uint8_t s_predictRenderedPageIndex = 255;
+static bool s_predictRenderedMono = false;
 
 static const ScreenMode kHistory24Pages[] = {
     SCREEN_TEMP_HISTORY,
@@ -372,8 +376,10 @@ static void resetPredictMeaningScroll(unsigned long nowMs)
 static void onPredictPageChanged(unsigned long nowMs)
 {
     s_predictLastSwitchMs = nowMs;
-    s_predictTransitionActive = true;
+    s_predictTransitionActive = false; // disable wipe animation to prevent visible flicker on matrix panels
     s_predictTransitionStartMs = nowMs;
+    s_predictStaticDirty = true;
+    s_predictRenderedPageIndex = 255;
     resetPredictMeaningScroll(nowMs);
 }
 
@@ -387,22 +393,29 @@ static void renderPredictPage(unsigned long nowMs)
     const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
     const uint16_t bigColor = mono ? dma_display->color565(220, 220, 120) : dma_display->color565(255, 240, 140);
     const uint16_t bodyColor = mono ? ui_theme::monoBodyText() : dma_display->color565(120, 200, 255);
-    dma_display->fillScreen(0);
-    dma_display->fillRect(0, 0, PANEL_RES_X, 8, headerBg);
 
     const PredictPage &page = s_predictPages[s_predictPageIndex];
-    dma_display->setFont(&Font5x7Uts);
-    dma_display->setTextSize(1);
-    int16_t tx1, ty1;
-    uint16_t tw, th;
-    dma_display->getTextBounds(page.title, 0, 0, &tx1, &ty1, &tw, &th);
-    int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
-    if (titleX < 0) titleX = 0;
-    dma_display->setTextColor(headerFg, headerBg);
-    dma_display->setCursor(titleX, 0);
-    dma_display->print(page.title);
+    const bool redrawStatic =
+        s_predictStaticDirty ||
+        s_predictRenderedPageIndex != s_predictPageIndex ||
+        s_predictRenderedMono != mono;
+    if (redrawStatic)
+    {
+        dma_display->fillScreen(0);
+        dma_display->fillRect(0, 0, PANEL_RES_X, 8, headerBg);
 
-    auto drawTrendArrowLikeMenu = [&](int x, int y, uint16_t color, int8_t dir) {
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+        int16_t tx1, ty1;
+        uint16_t tw, th;
+        dma_display->getTextBounds(page.title, 0, 0, &tx1, &ty1, &tw, &th);
+        int titleX = (PANEL_RES_X - static_cast<int>(tw)) / 2;
+        if (titleX < 0) titleX = 0;
+        dma_display->setTextColor(headerFg, headerBg);
+        dma_display->setCursor(titleX, 0);
+        dma_display->print(page.title);
+
+        auto drawTrendArrowLikeMenu = [&](int x, int y, uint16_t color, int8_t dir) {
         // Menu back-arrow rotated 90deg (up direction)
         if (dir > 0)
         {
@@ -425,24 +438,24 @@ static void renderPredictPage(unsigned long nowMs)
             dma_display->drawLine(x + 7, y + 3, x + 5, y + 5, color);
             dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color);
         }
-    };
+        };
 
-    // Big text: same font style used by clock main digits, fitted into 64x16 area.
-    // Center big value in the area between title bar (y:0-7) and footer line (y:25).
-    const int bigAreaTop = 9;
-    const int bigAreaH = 16; // y:9..24
-    const int arrowStride = 9;
-    const int arrowBlockW = (page.trendArrows > 0) ? static_cast<int>(page.trendArrows) * arrowStride : 0;
+        // Big text: same font style used by clock main digits, fitted into 64x16 area.
+        // Center big value in the area between title bar (y:0-7) and footer line (y:25).
+        const int bigAreaTop = 9;
+        const int bigAreaH = 16; // y:9..24
+        const int arrowStride = 9;
+        const int arrowBlockW = (page.trendArrows > 0) ? static_cast<int>(page.trendArrows) * arrowStride : 0;
 
-    dma_display->setFont(&verdanab8pt7b);
-    dma_display->setTextSize(1);
+        dma_display->setFont(&verdanab8pt7b);
+        dma_display->setTextSize(1);
 
-    int bigX = 0;
-    int bigY = 0;
-    int textDrawW = 0;
+        int bigX = 0;
+        int bigY = 0;
+        int textDrawW = 0;
 
-    if (page.id == PredictPageId::Air && strncmp(page.big, "CO2 ", 4) == 0)
-    {
+        if (page.id == PredictPageId::Air && strncmp(page.big, "CO2 ", 4) == 0)
+        {
         const char *valueText = page.big + 4; // after "CO2 "
 
         int16_t valX1, valY1;
@@ -469,9 +482,9 @@ static void renderPredictPage(unsigned long nowMs)
         dma_display->setTextSize(1);
         dma_display->setCursor(bigX, bigY);
         dma_display->print(valueText);
-    }
-    else if (page.id == PredictPageId::Temp)
-    {
+        }
+        else if (page.id == PredictPageId::Temp)
+        {
         char valueText[16] = {0};
         char unitChar = (units.temp == TempUnit::F) ? 'F' : 'C';
         size_t widx = 0;
@@ -523,9 +536,9 @@ static void renderPredictPage(unsigned long nowMs)
         dma_display->setTextSize(1);
         dma_display->setCursor(bigX + static_cast<int>(valW) + unitGap, bigAreaTop + 2);
         dma_display->print(unitText);
-    }
-    else if (page.id == PredictPageId::Humid)
-    {
+        }
+        else if (page.id == PredictPageId::Humid)
+        {
         char valueText[16] = {0};
         size_t widx = 0;
         bool hasPercent = false;
@@ -580,9 +593,9 @@ static void renderPredictPage(unsigned long nowMs)
             dma_display->setCursor(bigX + static_cast<int>(valW) + unitGap + 2, bigAreaTop + 2);
             dma_display->print(unitText);
         }
-    }
-    else
-    {
+        }
+        else
+        {
         // Auto-fit textual headlines: use big font when it fits, fallback to 5x7 for long words.
         dma_display->setFont(&verdanab8pt7b);
         dma_display->setTextSize(1);
@@ -614,10 +627,10 @@ static void renderPredictPage(unsigned long nowMs)
             dma_display->setCursor(bigX, bigY);
             dma_display->print(page.big);
         }
-    }
+        }
 
-    if (page.trendArrows > 0)
-    {
+        if (page.trendArrows > 0)
+        {
         int ax = bigX + textDrawW + 2; // 2px gap between value and trend arrow
         if (page.id == PredictPageId::Humid)
             ax += 2;
@@ -628,9 +641,15 @@ static void renderPredictPage(unsigned long nowMs)
         {
             drawTrendArrowLikeMenu(ax + static_cast<int>(i) * arrowStride, ay, bigColor, page.trendDir);
         }
+        }
+
+        s_predictStaticDirty = false;
+        s_predictRenderedPageIndex = s_predictPageIndex;
+        s_predictRenderedMono = mono;
     }
 
     // Bottom line: small scrolling explanation text.
+    dma_display->fillRect(0, 25, PANEL_RES_X, PANEL_RES_Y - 25, myBLACK);
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
     if (s_predictMeaningPageIndex != s_predictPageIndex)
@@ -1538,6 +1557,8 @@ void drawPredictionScreen()
     const auto &log = getSensorLog();
     s_predictSnapshot = PredictSnapshot{};
     s_predictPageCount = 0;
+    s_predictStaticDirty = true;
+    s_predictRenderedPageIndex = 255;
 
     if (log.size() < 2)
     {
@@ -1803,6 +1824,15 @@ void drawPredictionScreen()
             s_predictSnapshot.summaryBig,
             (String(s_predictSnapshot.summaryLine) + ". Signal " + String(s_predictSnapshot.signalPercent) + "%").c_str());
 
+    // Optional ML hint (requires a generated model in ml_model_generated.h).
+    const auto mlPred = wxv::ml::predictOutlookFromLog(log);
+    if (mlPred.available)
+    {
+        char mlLine[96];
+        snprintf(mlLine, sizeof(mlLine), "ML %s (%u%%)", mlPred.label, static_cast<unsigned>(mlPred.confidencePct));
+        addPage(PredictPageId::Outlook, "SMART WX", mlPred.label, mlLine);
+    }
+
     if (s_predictPageCount == 0)
     {
         dma_display->fillScreen(0);
@@ -2019,6 +2049,7 @@ void tickPredictionScreen()
         return;
 
     const unsigned long nowMs = millis();
+    bool shouldRender = s_predictStaticDirty;
     if (s_predictPageCount > 1 &&
         nowMs >= s_predictManualHoldUntilMs &&
         (nowMs - s_predictLastSwitchMs) >= kPredictPageAutoMs &&
@@ -2029,8 +2060,30 @@ void tickPredictionScreen()
             next = 0;
         s_predictPageIndex = static_cast<uint8_t>(next);
         onPredictPageChanged(nowMs);
+        shouldRender = true;
     }
-    renderPredictPage(nowMs);
+
+    if (!shouldRender)
+    {
+        if (s_predictTransitionActive)
+        {
+            shouldRender = true;
+        }
+        else if (s_predictMeaningPageIndex != s_predictPageIndex)
+        {
+            shouldRender = true;
+        }
+        else if (s_predictMeaningNeedsScroll &&
+                 (nowMs - s_predictMeaningLastStepMs) >= kPredictMeaningStepMs)
+        {
+            shouldRender = true;
+        }
+    }
+
+    if (shouldRender)
+    {
+        renderPredictPage(nowMs);
+    }
 }
 
 void handlePredictionDownPress()
