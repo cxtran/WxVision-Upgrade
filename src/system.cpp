@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <SPIFFS.h>
 #include "settings.h"
 #include "display.h"
 #include "notifications.h"
@@ -15,23 +16,48 @@ void startOTA() {
 }
 
 void quickRestore() {
-    Serial.println("[SYSTEM] Quick Restore to Defaults...");
+    Serial.println("[SYSTEM] Reset Settings (keep Wi-Fi + logs)...");
     wxv::notify::showNotification(wxv::notify::NotifyId::Restoring, dma_display->color565(255, 0, 0));
-    // Reset config keys but keep logs/history
+
+    // Preserve Wi-Fi credentials, reset everything else in preferences.
+    String savedSsid = "";
+    String savedPass = "";
     prefs.begin("visionwx", false);
+    savedSsid = prefs.getString("wifiSSID", "");
+    savedPass = prefs.getString("wifiPass", "");
     prefs.clear(); // clears all keys in namespace
+    if (!savedSsid.isEmpty())
+    {
+        prefs.putString("wifiSSID", savedSsid);
+        prefs.putString("wifiPass", savedPass);
+        // Keep setup flow bypass when credentials are still present.
+        prefs.putBool("setupReady", true);
+    }
     prefs.end();
+
     delay(1000);
     ESP.restart();
 }
 
 void factoryReset() {
-    Serial.println("[SYSTEM] Factory Reset EVERYTHING...");
+    Serial.println("[SYSTEM] Factory Reset (erase Wi-Fi + logs)...");
     wxv::notify::showNotification(wxv::notify::NotifyId::FactoryReset, dma_display->color565(255, 0, 0));
     delay(500);
+
+    // Clear all stored preferences, including Wi-Fi credentials.
     prefs.begin("visionwx", false);
     prefs.clear();
     prefs.end();
+
+    // Remove persisted sensor log data from SPIFFS.
+    if (SPIFFS.begin(true))
+    {
+        if (SPIFFS.exists("/sensor_log.bin"))
+        {
+            SPIFFS.remove("/sensor_log.bin");
+        }
+    }
+
     delay(1000);
     ESP.restart();
 }

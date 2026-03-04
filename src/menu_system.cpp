@@ -22,15 +22,15 @@ void showSystemModal()
         "Sound Volume (0-100)",
         "Sound Profile",
         "Set Date & Time",
-        "Unit Settings",
+        "Units",
         "Device Location",
         "Show System Info",
         "WiFi Signal Test",
         "Preview Screens",
         "Learn Remote",
         "Clear Learned Remote",
-        "Quick Restore",
-        "Factory Reset",
+        "Reset Settings",
+        "Factory Reset (Erase Wi-Fi + Logs)",
         "Reboot"};
 
     InfoFieldType types[] = {

@@ -52,6 +52,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_CLOCK,
     SCREEN_WORLD_CLOCK,
     SCREEN_OWM,
+    SCREEN_CONDITION_SCENE,
     SCREEN_UDP_DATA,
     SCREEN_CURRENT, 
     SCREEN_HOURLY, 
@@ -61,9 +62,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_TEMP_HISTORY,
     SCREEN_PREDICT,
     SCREEN_NOAA_ALERT,
-    SCREEN_CONDITION_SCENE,
     SCREEN_LUNAR_VI,
-    SCREEN_LUNAR_LUCK,
     };
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -1208,6 +1207,21 @@ void loop()
         return;
     }
     // --- END WORLD TIME FEATURE ---
+
+    // Lunar section subpage behavior:
+    // - Right from Lunar Date -> Lunar Luck
+    // - Left from Lunar Luck -> Lunar Date
+    // - Opposite direction exits section via normal rotation
+    if (key == IRCodes::WxKey::Right && currentScreen == SCREEN_LUNAR_VI)
+    {
+        transitionToScreen(SCREEN_LUNAR_LUCK);
+        return;
+    }
+    if (key == IRCodes::WxKey::Left && currentScreen == SCREEN_LUNAR_LUCK)
+    {
+        transitionToScreen(SCREEN_LUNAR_VI);
+        return;
+    }
 
     if (key == IRCodes::WxKey::Left)
     {

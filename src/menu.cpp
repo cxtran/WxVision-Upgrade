@@ -171,7 +171,7 @@ const char *tempestMenu[] = {"WF Token", "WF Station ID", "< Back"};
 const int tempestCount = sizeof(tempestMenu) / sizeof(tempestMenu[0]);
 const char *calibMenu[] = {"Temp Offset", "Hum Offset", "Light Gain", "< Back"};
 const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
-const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Unit Settings", "WiFi Signal Test", "Preview Screens", "Quick Restore", "Factory Reset", "Reboot"};
+const char *systemMenu[] = {"Show System Info", "Set Date & Time", "Units", "WiFi Signal Test", "Preview Screens", "Reset Settings", "Factory Reset (Erase Wi-Fi + Logs)", "Reboot"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
 

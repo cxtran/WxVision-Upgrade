@@ -945,6 +945,24 @@ static String ageShort(unsigned long ageMs)
     return String(days) + "d";
 }
 
+static String ageLongAgo(unsigned long ageMs)
+{
+    unsigned long sec = ageMs / 1000UL;
+    if (sec < 60UL)
+        return String(sec) + " second" + ((sec == 1UL) ? String("") : String("s")) + " ago";
+
+    unsigned long min = sec / 60UL;
+    if (min < 60UL)
+        return String(min) + " minute" + ((min == 1UL) ? String("") : String("s")) + " ago";
+
+    unsigned long hrs = min / 60UL;
+    if (hrs < 24UL)
+        return String(hrs) + " hour" + ((hrs == 1UL) ? String("") : String("s")) + " ago";
+
+    unsigned long days = hrs / 24UL;
+    return String(days) + " day" + ((days == 1UL) ? String("") : String("s")) + " ago";
+}
+
 static String compactTemp(double tempC)
 {
     return isnan(tempC) ? String("--") : fmtTemp(tempC, 1);
@@ -1275,7 +1293,7 @@ void showCurrentConditionsScreen() {
     const unsigned long cloudAgeMs = (forecast.lastUpdate > 0 && nowMs >= forecast.lastUpdate)
                                           ? (nowMs - forecast.lastUpdate)
                                           : 0UL;
-    const String sourceAge = providerShortLabel() + " " + ((forecast.lastUpdate > 0) ? ageShort(cloudAgeMs) : String("--"));
+    const String sourceAge = providerShortLabel() + " " + ((forecast.lastUpdate > 0) ? ageLongAgo(cloudAgeMs) : String("--"));
 
     String lines[8];
     int lineCount = 0;

@@ -680,12 +680,12 @@ void setupWebServer() {
 
   server.on("/action/quick-restore", HTTP_POST, [](AsyncWebServerRequest *req) {
     quickRestore();
-    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Quick restore completed.\"}");
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Settings reset complete (Wi-Fi + logs kept).\"}");
   });
 
   server.on("/action/factory-reset", HTTP_POST, [](AsyncWebServerRequest *req) {
     factoryReset();
-    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset started.\"}");
+    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset started (erasing Wi-Fi + logs).\"}");
   });
 
   server.on("/action/reboot", HTTP_POST, [](AsyncWebServerRequest *req) {

@@ -1187,71 +1187,51 @@ static uint16_t tinyVietnameseTextWidth(const String &text)
     return static_cast<uint16_t>(max(1, count * 6));
 }
 
+static uint16_t lunarUtf8TextWidth(const String &text)
+{
+    setLunarLuckUtf8Font();
+    if (lunarLuckUtf8Ready)
+    {
+        int w = static_cast<int>(lunarLuckUtf8.getUTF8Width(text.c_str()));
+        return static_cast<uint16_t>(max(1, w));
+    }
+    return tinyVietnameseTextWidth(text);
+}
+
 static void renderLunarLines(const String lines[3], const uint16_t widths[3], const int offsets[3])
 {
     dma_display->fillScreen(0);
 
-    uint16_t headerBg, headerFg, underlineColor, bodyColor;
-    uint16_t lineColors[3];
+    uint16_t lineColor;
     if (theme == 1)
     {
-        headerBg = dma_display->color565(20, 20, 40);
-        headerFg = dma_display->color565(60, 60, 120);
-        underlineColor = dma_display->color565(30, 30, 70);
-        bodyColor = dma_display->color565(90, 90, 150);
-        lineColors[0] = dma_display->color565(150, 150, 220); // day name highlight
-        lineColors[1] = dma_display->color565(110, 110, 190); // solar term
-        lineColors[2] = dma_display->color565(200, 200, 255); // marquee detail
+        lineColor = dma_display->color565(200, 200, 255);
     }
     else
     {
-        headerBg = INFOMODAL_HEADERBG;
-        headerFg = INFOMODAL_GREEN;
-        underlineColor = INFOMODAL_ULINE;
-        bodyColor = INFOMODAL_UNSEL;
-        lineColors[0] = INFOMODAL_SEL;      // bright for day name
-        lineColors[1] = bodyColor;          // standard for solar term
-        lineColors[2] = INFOMODAL_EDIT;     // accent for marquee detail
+        lineColor = INFOMODAL_EDIT;
     }
 
-    // --- Header bar ---
-    const int headerHeight = 8;
-    dma_display->fillRect(0, 0, PANEL_RES_X, headerHeight, headerBg);
-
-    dma_display->setTextColor(headerFg);
-    const char *title = "Lunar Date";
-    int tw = tinyVietnameseTextWidth(String(title));
-    int titleX = (PANEL_RES_X - tw) / 2;
-    if (titleX < 0)
-        titleX = 0;
-    drawTinyVietnameseText(titleX, 0, String(title), headerFg);
-
-    // Header underline
-    dma_display->drawFastHLine(0, headerHeight - 1, PANEL_RES_X, underlineColor);
-
-    // --- Lines below title ---
-    for (int i = 0; i < 3; ++i)
+    // Lunar Date subpage now shows only the merged detail line (line 3),
+    // centered vertically, rendered with Unicode UTF-8 font.
+    setLunarLuckUtf8Font();
+    int w = widths[2];
+    if (w > 0)
     {
-        int y = headerHeight + 8 * (i + 1) - 8; // 8,16,24
-        int w = widths[i];
-        if (w <= 0)
-            continue;
-
-        int baseX;
-        if (i < 2)
+        const int baseX = PANEL_RES_X - offsets[2];
+        int baselineY = PANEL_RES_Y / 2;
+        if (lunarLuckUtf8Ready)
         {
-            // Line 1 + 2: static centered
-            baseX = (PANEL_RES_X - w) / 2;
-            if (baseX < 0)
-                baseX = 0;
+            const int ascent = static_cast<int>(lunarLuckUtf8.getFontAscent());
+            const int descent = static_cast<int>(lunarLuckUtf8.getFontDescent());
+            const int textHeight = ascent - descent;
+            const int topY = (PANEL_RES_Y - textHeight) / 2;
+            baselineY = topY + ascent;
+            if (baselineY < 0)
+                baselineY = 0;
         }
-        else
-        {
-            // Line 3: marquee
-            baseX = PANEL_RES_X - offsets[2];
-        }
-
-        drawTinyVietnameseText(baseX, y, lines[i], lineColors[i]);
+        lunarLuckUtf8.setForegroundColor(lineColor);
+        lunarLuckUtf8.drawUTF8(baseX, baselineY, lines[2].c_str());
     }
 }
 
@@ -1276,8 +1256,8 @@ static void buildLunarLinesMerged()
 
     // Detail pieces for combined marquee line
     // e.g. "Ngay 28/10 Nam At Ty"
-    String viDetail = String("Ngay ") + ld.day + "/" + ld.month +
-                      " Nam " + stemBranchVi;
+    String viDetail = String("Ng\xC3\xA0y ") + ld.day + "/" + ld.month +
+                      " N\xC4\x83m " + stemBranchVi;
 
     // English year line: "The year of Wood Snake"
     String enDetail = String("The year of ") + yearEn;
@@ -1288,15 +1268,14 @@ static void buildLunarLinesMerged()
     String hourDetail = lunarHour + "  / " + clockTag;
 
     // Line 3: combined marquee
-    // Ngay 28/10 Nam At Ty Â¦ The year of Wood Snake Â¦ Gio Hoi  / 11:24 PM
-    lunarLines[2] = viDetail + " \xC2\xA6  " + enDetail + "  \xC2\xA6  " + hourDetail;
+    // Ngay 28/10 Nam At Ty * The year of Wood Snake Â¦ Gio Hoi / 11:24 PM
+    lunarLines[2] = viDetail + " * " + enDetail + "  \xC2\xA6  " + hourDetail;
 
-    for (int i = 0; i < 3; ++i)
-    {
-        lunarWidths[i] = tinyVietnameseTextWidth(lunarLines[i]);
-        if (lunarWidths[i] <= 0)
-            lunarWidths[i] = 1;
-    }
+    lunarWidths[0] = 0;
+    lunarWidths[1] = 0;
+    lunarWidths[2] = lunarUtf8TextWidth(lunarLines[2]);
+    if (lunarWidths[2] <= 0)
+        lunarWidths[2] = 1;
     for (int i = 0; i < 3; ++i)
         lunarOffsets[i] = 0;
     lastLunarTick = millis();
@@ -4747,6 +4726,18 @@ void drawOWMScreen()
 {
     static unsigned long s_lastOwmFetchAttemptMs = 0;
 
+    // Keep OWM text rendering deterministic even if prior screens changed font.
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextWrap(false);
+
+    // OWM layout draws in 7px text lanes (y: 0,9,17,25) plus 16x16 icon.
+    // Clear separator gaps so stale pixels cannot persist at fixed coordinates.
+    dma_display->fillRect(0, 7, PANEL_RES_X, 2, myBLACK);   // gap between temp lane and clock lane
+    dma_display->fillRect(0, 16, PANEL_RES_X, 1, myBLACK);  // gap between clock lane and date lane
+    dma_display->fillRect(0, 24, PANEL_RES_X, 1, myBLACK);  // gap between date lane and scroll lane
+    dma_display->fillRect(16, 0, 2, 16, myBLACK);           // spacer between icon and right text lane
+
     getTimeFromRTC();
     displayClock();
     displayDate();
@@ -4804,6 +4795,10 @@ void drawWeatherIcon(String iconCode)
 
 void displayClock()
 {
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextWrap(false);
+
     const bool rightJustify = (currentScreen == SCREEN_OWM);
     int hour = atoi(chr_t_hour);
     bool isPM = false;
@@ -4850,7 +4845,7 @@ void displayClock()
         dma_display->print(chr_t_minute);
         dma_display->print(":");
         dma_display->print(chr_t_second);
-        dma_display->fillRect(59, 9, 64, 16, myBLACK);
+        dma_display->fillRect(59, 9, 5, 7, myBLACK);
         if (!units.clock24h)
         {
             dma_display->setCursor(59, 9);
@@ -4913,6 +4908,10 @@ void displayDate()
 
 void displayWeatherData()
 {
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextWrap(false);
+
     if (isDataSourceNone())
     {
         dma_display->fillRect(0, 0, 64, 7, myBLACK);
@@ -4949,16 +4948,14 @@ void displayWeatherData()
     {
         String humidityText = humidityStr + "%";
         int humidityWidth = getTextWidth(humidityText.c_str());
-        int humidityX = tempX - humidityWidth - 2;
+        int humidityX = tempX - humidityWidth - 2 - 7;
+        if (humidityX < textLaneX)
+            humidityX = textLaneX;
 
-        // Render humidity only when it fits in the right-side lane.
-        if (humidityX >= textLaneX)
-        {
-            dma_display->setCursor(humidityX, 0);
-            dma_display->setTextColor((theme == 1) ? dma_display->color565(90, 90, 150)
-                                                   : dma_display->color565(150, 200, 255));
-            dma_display->print(humidityText);
-        }
+        dma_display->setCursor(humidityX, 0);
+        dma_display->setTextColor((theme == 1) ? dma_display->color565(90, 90, 150)
+                                               : dma_display->color565(150, 200, 255));
+        dma_display->print(humidityText);
     }
 }
 

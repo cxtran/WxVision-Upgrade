@@ -111,6 +111,14 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         title = "Weather Scene";
         subtitle = nullptr;
         return true;
+    case SCREEN_LUNAR_VI:
+        title = "Lunar Calendar";
+        subtitle = "Date & Luck";
+        return true;
+    case SCREEN_LUNAR_LUCK:
+        // Treat Lunar Luck as part of the same Lunar section.
+        // No extra heading page when moving between lunar screens.
+        return false;
     case SCREEN_OWM:
         return false;
     default:
@@ -307,6 +315,8 @@ void ensureCurrentScreenAllowed()
 void applyDataSourcePolicies(bool wifiConnected)
 {
     static int lastSource = -1;
+    static bool lastWifiConnected = false;
+    static bool pendingCloudBootstrapFetch = true;
     int previousSource = lastSource;
     const bool wantsUdpMulticast = wxv::provider::sourceUsesUdpMulticast(dataSource);
 
@@ -342,9 +352,8 @@ void applyDataSourcePolicies(bool wifiConnected)
         }
 
         if (wifiConnected)
-        {
             wxv::provider::fetchActiveProviderData();
-        }
+        pendingCloudBootstrapFetch = true;
         ensureCurrentScreenAllowed();
 
         if (udpScreen.isActive() || currentScreen == SCREEN_UDP_DATA)
@@ -366,6 +375,21 @@ void applyDataSourcePolicies(bool wifiConnected)
 
         lastSource = dataSource;
     }
+
+    // If source was selected while offline, or Wi-Fi just reconnected, force one
+    // bootstrap fetch for cloud-based providers so first visible values appear.
+    const bool wifiJustConnected = (wifiConnected && !lastWifiConnected);
+    if (wifiConnected && (pendingCloudBootstrapFetch || wifiJustConnected))
+    {
+        const auto caps = wxv::provider::activeProvider().capabilities();
+        if (caps.usesCloudFetch)
+        {
+            wxv::provider::fetchActiveProviderData();
+            pendingCloudBootstrapFetch = false;
+        }
+    }
+
+    lastWifiConnected = wifiConnected;
 }
 
 void rotateScreen(int direction)

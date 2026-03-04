@@ -1651,6 +1651,12 @@ function addWorldCustomCityWeb(event){
 
 async function runSystemAction(action, msgId){
   if (!action) return false;
+  if (action === 'quick-restore') {
+    if (!window.confirm('Reset settings to defaults and keep Wi-Fi + logs?')) return false;
+  }
+  if (action === 'factory-reset') {
+    if (!window.confirm('Factory reset will erase Wi-Fi credentials and sensor logs. Continue?')) return false;
+  }
   try {
     const res = await fetch('/action/' + encodeURIComponent(action), { method: 'POST' });
     let body = null;
