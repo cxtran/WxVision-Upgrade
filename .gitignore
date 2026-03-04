@@ -15,3 +15,7 @@ Thumbs.db
 *.zip
 *.o
 *.tmp
+
+# ML training artifacts
+tools/ml/data/
+!tools/ml/data/.gitkeep
