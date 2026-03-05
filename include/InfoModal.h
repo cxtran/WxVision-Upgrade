@@ -24,7 +24,7 @@ enum InfoFieldType { InfoLabel, InfoNumber, InfoChooser, InfoText, InfoButton };
 
 class InfoModal {
 public:
-    static const int MAX_LINES = 16;
+    static const int MAX_LINES = 14;
     static const int MAXCOLS = 12;
     static const int CHARH = 8;
     static const int MAXROWS = 4;

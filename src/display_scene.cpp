@@ -781,34 +781,6 @@ static void drawWeatherSceneDefault()
     drawWeatherSceneSunny();
 }
 
-// Mono-friendly scene for theme 1
-static void drawWeatherSceneMono()
-{
-    // Soft grayscale sky gradient
-    uint16_t skyColors[] = {
-        dma_display->color565(12, 12, 18),
-        dma_display->color565(20, 20, 28),
-        dma_display->color565(32, 32, 42),
-        dma_display->color565(44, 44, 56)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(35, 35, 35);
-    uint16_t horizonGlow = dma_display->color565(60, 60, 70);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 80, 90));
-
-    // Simple muted clouds
-    uint16_t cloudLight = dma_display->color565(120, 120, 130);
-    uint16_t cloudMid = dma_display->color565(90, 90, 100);
-    uint16_t cloudDark = dma_display->color565(70, 70, 80);
-
-    drawCompactCloud(PANEL_RES_X / 2, 9, cloudLight);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 3, 11, cloudMid);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 5, 13, cloudDark);
-}
-
 static const WeatherSceneRenderer WEATHER_SCENE_RENDERERS[] = {
     {WeatherSceneKind::Sunny, drawWeatherSceneSunny},
     {WeatherSceneKind::SunnyNight, drawWeatherSceneClearNight},

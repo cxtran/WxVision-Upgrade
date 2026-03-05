@@ -1025,19 +1025,52 @@ void showUdpScreen() {
                                         : 0UL;
     const String windDir = formatWindDirectionLabel(tempest.windDir);
     const String sourceAge = String("LOCAL ") + ((tempest.obsLastUpdate > 0) ? ageShort(udpAgeMs) : String("--"));
-
-    String lines[8];
+    String lines[INFOSCREEN_MAX_LINES];
     int lineCount = 0;
-    lines[lineCount++] = "Source: " + sourceAge;
-    lines[lineCount++] = "Temp:   " + compactTemp(tempest.temperature) + " Feels " + compactTemp(currentCond.feelsLike);
-    lines[lineCount++] = "Wind:   " + compactWind(tempest.windAvg, (windDir == "--") ? String("") : windDir) + " G" + (isnan(tempest.windGust) ? String("--") : fmtWind(tempest.windGust, 1));
-    lines[lineCount++] = "Press:  " + compactPress(tempest.pressure);
-    lines[lineCount++] = "Hum:    " + compactHum(isnan(tempest.humidity) ? -1 : static_cast<int>(lround(tempest.humidity)));
-    lines[lineCount++] = "Cond:   " + compactCondition(currentCond.cond);
-    if (isDataSourceWeatherFlow())
+    auto addLine = [&](const String &line) {
+        if (lineCount < INFOSCREEN_MAX_LINES)
+            lines[lineCount++] = line;
+    };
+
+    addLine("Source: " + sourceAge);
+    addLine("Obs At: " + formatWindTimestamp(tempest.obsEpoch));
+    addLine("Temp:   " + compactTemp(tempest.temperature) + " Feels " + compactTemp(currentCond.feelsLike));
+    addLine("Dew:    " + (isnan(currentCond.dewPoint) ? String("--") : fmtTemp(currentCond.dewPoint, 0)));
+    addLine("Hum:    " + compactHum(isnan(tempest.humidity) ? -1 : static_cast<int>(lround(tempest.humidity))));
+    addLine("Press:  " + compactPress(tempest.pressure));
+
+    String windLine = "Wind:   " + compactWind(tempest.windAvg, (windDir == "--") ? String("") : windDir);
+    windLine += " G" + (isnan(tempest.windGust) ? String("--") : fmtWind(tempest.windGust, 1));
+    windLine += " L" + (isnan(tempest.windLull) ? String("--") : fmtWind(tempest.windLull, 1));
+    addLine(windLine);
+
+    addLine("Sample: " + formatSampleInterval(tempest.windSampleInt) + " Rep " + String(tempest.reportInt) + "s");
+    addLine("UV:     " + (isnan(tempest.uv) ? String("--") : String(tempest.uv, 1)) +
+            " Solar " + (isnan(tempest.solar) ? String("--") : String(tempest.solar, 0) + "W"));
+    addLine("Lux:    " + (isnan(tempest.illuminance) ? String("--") : String(tempest.illuminance, 0) + "lx"));
+    addLine("Rain:   " + (isnan(tempest.rain) ? String("--") : fmtPrecip(tempest.rain, 2)) +
+            " Type " + String(tempest.precipType));
+    addLine("Strike: " + String(tempest.strikeCount) + " Dist " +
+            (isnan(tempest.strikeDist) ? String("--") : String(tempest.strikeDist, 1) + "km"));
+    addLine("Batt:   " + (isnan(tempest.battery) ? String("--") : String(tempest.battery, 2) + "V"));
+
+    if (tempest.rapidEpoch > 0)
     {
-        lines[lineCount++] = "Delta:  Cld " + deltaTempText(currentCond.temp, tempest.temperature);
+        const unsigned long rapidAgeMs = (tempest.rapidLastUpdate > 0 && nowMs >= tempest.rapidLastUpdate)
+                                             ? (nowMs - tempest.rapidLastUpdate)
+                                             : 0UL;
+        String rapidLine = "Rapid:  " + (isnan(tempest.rapidWindAvg) ? String("--") : fmtWind(tempest.rapidWindAvg, 1));
+        const String rapidDir = formatWindDirectionLabel(tempest.rapidWindDir);
+        if (rapidDir != "--")
+            rapidLine += " " + rapidDir;
+        rapidLine += " (" + ageShort(rapidAgeMs) + ")";
+        addLine(rapidLine);
     }
+
+    addLine("Cond:   " + compactCondition(currentCond.cond));
+    if (isDataSourceWeatherFlow())
+        addLine("Delta:  Cld " + deltaTempText(currentCond.temp, tempest.temperature));
+
     udpScreen.setTitle("Live Station");
 
     if (!udpScreen.isActive()) {

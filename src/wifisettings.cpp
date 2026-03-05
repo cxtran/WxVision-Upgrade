@@ -20,11 +20,6 @@
 // =======================
 
 extern bool wifiSelecting;
-extern int wifiScanCount;
-int wifiScanIndex = 0;
-String wifiScanSSIDs[20];
-String wifiScanEncr[20];
-String wifiScanRSSI[20];
 extern int menuScroll;
 extern bool menuActive;
 extern int wifiSelectIndex;

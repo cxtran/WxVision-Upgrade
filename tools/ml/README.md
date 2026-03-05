@@ -88,12 +88,27 @@ Or auto-pick the newest `trend_*.csv`:
 python tools/ml/run_training_pipeline.py --data-dir tools/ml/data
 ```
 
-By default, this pipeline removes older `trend_*.csv/json` files after a
-successful run and keeps only the input pair used for training.
-To keep all historical downloads:
+All available switches:
+
+- `-h`, `--help`: Show help.
+- `--in-csv <path>`: Raw trend CSV input. If omitted, newest `trend_*.csv` in `--data-dir` is used.
+- `--data-dir <dir>`: Directory containing downloaded trend files. Default: `tools/ml/data`.
+- `--dataset-csv <path>`: Output labeled dataset CSV. Default: `tools/ml/data/outlook_dataset.csv`.
+- `--out-header <path>`: Output firmware header. Default: `include/ml_model_generated.h`.
+- `--metadata-out <path>`: Output training metadata JSON. Default: `tools/ml/data/model_metadata.json`.
+- `--horizon-min <int>`: Future horizon (minutes) used to build labels. Default: `180`.
+- `--min-class-support <int>`: Minimum rows for a class to remain enabled in exported model. Default: `30`.
+- `--min-enabled-classes <int>`: Fail if enabled classes are fewer than this threshold. Default: `2`.
+- `--min-accuracy <float>`: Fail if test accuracy is below this value (`0..1`). Default: `0.0` (disabled).
+- `--min-weighted-f1 <float>`: Fail if weighted F1 is below this value (`0..1`). Default: `0.0` (disabled).
+- `--cleanup-old-data`: After successful training, delete older `trend_*.csv/json` in `--data-dir` and keep only the input pair. Default: disabled.
+- `--keep-old-data`: Explicitly keep all downloaded `trend_*.csv/json` files (overrides cleanup if both are passed).
+
+By default, this pipeline keeps all downloaded `trend_*.csv/json` files.
+To clean up older files after a successful run and keep only the input pair used for training:
 
 ```bash
-python tools/ml/run_training_pipeline.py --data-dir tools/ml/data --keep-old-data
+python tools/ml/run_training_pipeline.py --data-dir tools/ml/data --cleanup-old-data
 ```
 
 Use class-support gating (recommended) so low-data classes stay disabled:

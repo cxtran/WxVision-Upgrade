@@ -46,11 +46,6 @@ struct DateTimeDefaultsInit {
 };
 static DateTimeDefaultsInit s_dateTimeDefaultsInit;
 
-struct TimezoneLabelBuffer
-{
-    char text[48];
-};
-
 static const TimezoneInfo kTimezones[] = {
     {"Pacific/Honolulu",        "Honolulu",        "USA",        -600, DstRule::None,         21.3069f,  -157.8583f},
     {"America/Anchorage",       "Anchorage",       "USA",        -540, DstRule::NorthAmerica, 61.2181f,  -149.9003f},
@@ -85,8 +80,38 @@ static const TimezoneInfo kTimezones[] = {
 };
 
 static const size_t kTimezoneCount = sizeof(kTimezones) / sizeof(kTimezones[0]);
-static TimezoneLabelBuffer kTimezoneLabels[kTimezoneCount];
-static bool timezoneLabelsInit = false;
+static const char *const kTimezoneLabels[kTimezoneCount] = {
+    "Honolulu, USA (UTC-10:00)",
+    "Anchorage, USA (UTC-09:00)",
+    "Los Angeles, USA (UTC-08:00)",
+    "Denver, USA (UTC-07:00)",
+    "Chicago, USA (UTC-06:00)",
+    "New York, USA (UTC-05:00)",
+    "Halifax, Canada (UTC-04:00)",
+    "St. John's, Canada (UTC-03:30)",
+    "Garden Grove, USA (UTC-08:00)",
+    "Sao Paulo, Brazil (UTC-03:00)",
+    "Azores, Portugal (UTC-01:00)",
+    "UTC, - (UTC+00:00)",
+    "London, United Kingdom (UTC+00:00)",
+    "Berlin, Germany (UTC+01:00)",
+    "Athens, Greece (UTC+02:00)",
+    "Moscow, Russia (UTC+03:00)",
+    "Dubai, UAE (UTC+04:00)",
+    "Karachi, Pakistan (UTC+05:00)",
+    "Mumbai/Delhi, India (UTC+05:30)",
+    "Dhaka, Bangladesh (UTC+06:00)",
+    "Bangkok, Thailand (UTC+07:00)",
+    "Hanoi, Vietnam (UTC+07:00)",
+    "Saigon, Vietnam (UTC+07:00)",
+    "Hue, Vietnam (UTC+07:00)",
+    "Hong Kong, China (UTC+08:00)",
+    "Tokyo, Japan (UTC+09:00)",
+    "Adelaide, Australia (UTC+09:30)",
+    "Sydney, Australia (UTC+10:00)",
+    "Noumea, New Caledonia (UTC+11:00)",
+    "Auckland, New Zealand (UTC+12:00)"
+};
 
 static bool isLeapYear(int year)
 {
@@ -238,32 +263,6 @@ static bool isDstActiveLocal(const TimezoneInfo& tz, const DateTime& local)
     return local >= startLocal || local < endLocal;
 }
 
-static void formatUtcOffset(int offsetMinutes, char *out, size_t len)
-{
-    int absMinutes = std::abs(offsetMinutes);
-    int hours = absMinutes / 60;
-    int minutes = absMinutes % 60;
-    char sign = (offsetMinutes >= 0) ? '+' : '-';
-    snprintf(out, len, "UTC%c%02d:%02d", sign, hours, minutes);
-}
-
-static void ensureTimezoneLabels()
-{
-    if (timezoneLabelsInit)
-        return;
-    for (size_t i = 0; i < kTimezoneCount; ++i)
-    {
-        char offsetBuf[16];
-        formatUtcOffset(kTimezones[i].offsetMinutes, offsetBuf, sizeof(offsetBuf));
-        snprintf(kTimezoneLabels[i].text, sizeof(kTimezoneLabels[i].text),
-                 "%s, %s (%s)",
-                 kTimezones[i].city,
-                 kTimezones[i].country,
-                 offsetBuf);
-    }
-    timezoneLabelsInit = true;
-}
-
 size_t timezoneCount()
 {
     return kTimezoneCount;
@@ -278,10 +277,9 @@ const TimezoneInfo& timezoneInfoAt(size_t index)
 
 const char* timezoneLabelAt(size_t index)
 {
-    ensureTimezoneLabels();
     if (index >= kTimezoneCount)
         return "";
-    return kTimezoneLabels[index].text;
+    return kTimezoneLabels[index];
 }
 
 int timezoneIndexFromId(const char* id)

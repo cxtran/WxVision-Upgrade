@@ -3173,34 +3173,6 @@ static void drawWeatherSceneDefault()
     drawWeatherSceneSunny();
 }
 
-// Mono-friendly scene for theme 1
-static void drawWeatherSceneMono()
-{
-    // Soft grayscale sky gradient
-    uint16_t skyColors[] = {
-        dma_display->color565(12, 12, 18),
-        dma_display->color565(20, 20, 28),
-        dma_display->color565(32, 32, 42),
-        dma_display->color565(44, 44, 56)
-    };
-    drawSkyGradient(skyColors, sizeof(skyColors) / sizeof(skyColors[0]));
-
-    uint16_t fieldBase = dma_display->color565(35, 35, 35);
-    uint16_t horizonGlow = dma_display->color565(60, 60, 70);
-    dma_display->fillRect(0, PANEL_RES_Y - 6, PANEL_RES_X, 6, fieldBase);
-    dma_display->fillRect(0, PANEL_RES_Y - 7, PANEL_RES_X, 1, horizonGlow);
-    dma_display->drawFastHLine(0, PANEL_RES_Y - 1, PANEL_RES_X, dma_display->color565(80, 80, 90));
-
-    // Simple muted clouds
-    uint16_t cloudLight = dma_display->color565(120, 120, 130);
-    uint16_t cloudMid = dma_display->color565(90, 90, 100);
-    uint16_t cloudDark = dma_display->color565(70, 70, 80);
-
-    drawCompactCloud(PANEL_RES_X / 2, 9, cloudLight);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 3, 11, cloudMid);
-    drawCompactCloud(PANEL_RES_X - PANEL_RES_X / 5, 13, cloudDark);
-}
-
 static const WeatherSceneRenderer WEATHER_SCENE_RENDERERS[] = {
     {WeatherSceneKind::Sunny, drawWeatherSceneSunny},
     {WeatherSceneKind::SunnyNight, drawWeatherSceneClearNight},
@@ -3598,6 +3570,7 @@ static String formatIndoorHumidity()
 
     return String("--");
 }
+
 static void drawWeatherFlowIcon()
 {
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
@@ -4137,7 +4110,7 @@ const uint8_t *getWeatherIconFromCode(String code)
     if (code.startsWith("03"))
         return icon_cloudy;
     if (code.startsWith("04"))
-        return icon_overcast;
+        return code.endsWith("n") ? icon_cloud_night : icon_cloudy;
     if (code.startsWith("09") || code.startsWith("10"))
         return icon_rain;
     if (code.startsWith("11"))
@@ -4146,69 +4119,148 @@ const uint8_t *getWeatherIconFromCode(String code)
         return icon_snow;
     if (code.startsWith("50"))
         return icon_fog;
-    return icon_clear; // fallback
+    return getWeatherIconFromCondition(code); // shared fallback for non-OWM code strings
 }
 
 const uint8_t *getWeatherIconFromCondition(String condition)
 {
-    condition.toLowerCase();
-    const bool isNight = (condition.indexOf("night") >= 0) || condition.endsWith("-n");
-    if (isNight && condition.indexOf("clear") >= 0)
-        return icon_clear_night;
-    if (isNight && condition.indexOf("cloud") >= 0)
-        return icon_cloud_night;
-    if (condition.indexOf("overcast") >= 0)
-        return icon_overcast;
-    if (condition.indexOf("clear") >= 0)
-        return icon_clear;
-    if (condition.indexOf("cloud") >= 0)
-        return icon_cloudy;
-    if (condition.indexOf("rain") >= 0)
-        return icon_rain;
-    if (condition.indexOf("storm") >= 0)
+    enum class IconGroup : uint8_t
+    {
+        Clear,
+        PartlyCloudy,
+        Cloudy,
+        Overcast,
+        Fog,
+        Drizzle,
+        Rain,
+        Thunder,
+        Snow,
+        Windy,
+        Unknown
+    };
+
+    auto normalizedKey = [](String input) {
+        input.trim();
+        input.toLowerCase();
+        input.replace('_', ' ');
+        input.replace('-', ' ');
+        while (input.indexOf("  ") >= 0)
+            input.replace("  ", " ");
+        return input;
+    };
+
+    auto isNightKey = [](const String &key) {
+        return key.endsWith("n") || key.indexOf("night") >= 0;
+    };
+
+    auto classifyGroup = [](const String &k) -> IconGroup {
+        if (k.indexOf("thunder") >= 0 || k.indexOf("tstorm") >= 0 || k.indexOf("storm") >= 0 ||
+            k.indexOf("squall") >= 0 || k.indexOf("tornado") >= 0)
+            return IconGroup::Thunder;
+        if (k.indexOf("snow") >= 0 || k.indexOf("sleet") >= 0 || k.indexOf("flurr") >= 0 ||
+            k.indexOf("freezing rain") >= 0 || k.indexOf("freezing drizzle") >= 0)
+            return IconGroup::Snow;
+        if (k.indexOf("drizzle") >= 0)
+            return IconGroup::Drizzle;
+        if (k.indexOf("rain") >= 0 || k.indexOf("shower") >= 0)
+            return IconGroup::Rain;
+        if (k.indexOf("fog") >= 0 || k.indexOf("mist") >= 0 || k.indexOf("haze") >= 0 ||
+            k.indexOf("smoke") >= 0 || k.indexOf("dust") >= 0 || k.indexOf("sand") >= 0 || k.indexOf("ash") >= 0)
+            return IconGroup::Fog;
+        if (k.indexOf("overcast") >= 0)
+            return IconGroup::Overcast;
+        if (k.indexOf("partly") >= 0 || k.indexOf("few cloud") >= 0 || k.indexOf("mostly clear") >= 0 ||
+            k.indexOf("scattered cloud") >= 0)
+            return IconGroup::PartlyCloudy;
+        if (k.indexOf("cloud") >= 0 || k.indexOf("broken cloud") >= 0)
+            return IconGroup::Cloudy;
+        if (k.indexOf("wind") >= 0 || k.indexOf("breez") >= 0 || k.indexOf("gust") >= 0)
+            return IconGroup::Windy;
+        if (k.indexOf("clear") >= 0 || k.indexOf("sunny") >= 0 || k.indexOf("fair") >= 0 || k.indexOf("weather") >= 0)
+            return IconGroup::Clear;
+        return IconGroup::Unknown;
+    };
+
+    String key = normalizedKey(condition);
+    const bool night = isNightKey(key);
+    const IconGroup group = classifyGroup(key);
+
+    switch (group)
+    {
+    case IconGroup::Thunder:
         return icon_thunder;
-    if (condition.indexOf("snow") >= 0)
+    case IconGroup::Snow:
         return icon_snow;
-    if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+    case IconGroup::Drizzle:
+    case IconGroup::Rain:
+        return icon_rain;
+    case IconGroup::Fog:
         return icon_fog;
-    return icon_clear;
+    case IconGroup::Overcast:
+        return night ? icon_cloud_night : icon_cloudy;
+    case IconGroup::PartlyCloudy:
+    case IconGroup::Cloudy:
+    case IconGroup::Windy:
+        return night ? icon_cloud_night : icon_cloudy;
+    case IconGroup::Clear:
+        return night ? icon_clear_night : icon_clear;
+    case IconGroup::Unknown:
+    default:
+        return night ? icon_cloud_night : icon_clear;
+    }
 }
 
 const uint16_t getIconColorFromCondition(String condition)
 {
-    condition.toLowerCase();
-    const bool isNight = (condition.indexOf("night") >= 0) || condition.endsWith("-n");
-    if (isNight) {
-        if (condition.indexOf("clear") >= 0)
-            return myBLUE;
-        if (condition.indexOf("overcast") >= 0)
-            return dma_display->color565(135, 145, 160);
-        if (condition.indexOf("cloud") >= 0)
-            return dma_display->color565(120, 160, 220);
-        if (condition.indexOf("rain") >= 0)
-            return dma_display->color565(0, 120, 200);
-        if (condition.indexOf("storm") >= 0)
+    String key = condition;
+    key.toLowerCase();
+    key.replace('_', ' ');
+    key.replace('-', ' ');
+    const bool isNight = (key.indexOf("night") >= 0) || key.endsWith("n");
+
+    const bool thunder = (key.indexOf("thunder") >= 0) || (key.indexOf("storm") >= 0);
+    const bool snow = (key.indexOf("snow") >= 0) || (key.indexOf("sleet") >= 0) || (key.indexOf("flurr") >= 0) ||
+                      (key.indexOf("freezing rain") >= 0) || (key.indexOf("freezing drizzle") >= 0);
+    const bool rain = (key.indexOf("rain") >= 0) || (key.indexOf("drizzle") >= 0) || (key.indexOf("shower") >= 0);
+    const bool fog = (key.indexOf("fog") >= 0) || (key.indexOf("mist") >= 0) || (key.indexOf("haze") >= 0) ||
+                     (key.indexOf("smoke") >= 0) || (key.indexOf("dust") >= 0) || (key.indexOf("sand") >= 0) || (key.indexOf("ash") >= 0);
+    const bool overcast = (key.indexOf("overcast") >= 0);
+    const bool cloudy = (key.indexOf("cloud") >= 0) || (key.indexOf("partly") >= 0);
+    const bool clear = (key.indexOf("clear") >= 0) || (key.indexOf("sunny") >= 0) || (key.indexOf("fair") >= 0) || (key.indexOf("weather") >= 0);
+
+    if (isNight)
+    {
+        if (thunder)
             return dma_display->color565(180, 120, 255);
-        if (condition.indexOf("snow") >= 0)
+        if (snow)
             return dma_display->color565(170, 220, 255);
-        if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+        if (rain)
+            return dma_display->color565(0, 120, 200);
+        if (fog)
             return dma_display->color565(120, 140, 180);
+        if (overcast)
+            return dma_display->color565(135, 145, 160);
+        if (cloudy)
+            return dma_display->color565(120, 160, 220);
+        if (clear)
+            return myBLUE;
         return myBLUE;
     }
-    if (condition.indexOf("clear") >= 0)
-        return dma_display->color565(255, 255, 0); // (yellow)
-    if (condition.indexOf("overcast") >= 0)
-        return dma_display->color565(145, 150, 155);
-    if (condition.indexOf("cloud") >= 0)
-        return dma_display->color565(180, 180, 180);
-    if (condition.indexOf("rain") >= 0)
-        return dma_display->color565(0, 200, 255);
-    if (condition.indexOf("storm") >= 0)
+
+    if (thunder)
         return dma_display->color565(255, 255, 0);
-    if (condition.indexOf("snow") >= 0)
+    if (snow)
         return dma_display->color565(220, 255, 255);
-    if (condition.indexOf("fog") >= 0 || condition.indexOf("mist") >= 0)
+    if (rain)
+        return dma_display->color565(0, 200, 255);
+    if (fog)
         return dma_display->color565(180, 180, 180);
+    if (overcast)
+        return dma_display->color565(145, 150, 155);
+    if (cloudy)
+        return dma_display->color565(180, 180, 180);
+    if (clear)
+        return dma_display->color565(255, 255, 0);
     return dma_display->color565(255, 255, 0);
 }
 
@@ -4596,8 +4648,19 @@ void fetchWeatherFromOWM()
         selectedCountry = countryCode;
     }
 
-    if (apiKey.isEmpty() || selectedCity.isEmpty()) {
+    if (apiKey.isEmpty()) {
         Serial.println("[OWM] Missing API key or city; skip fetch");
+        return;
+    }
+
+    const bool hasValidCoords =
+        isfinite(noaaLatitude) && isfinite(noaaLongitude) &&
+        (noaaLatitude >= -90.0f && noaaLatitude <= 90.0f) &&
+        (noaaLongitude >= -180.0f && noaaLongitude <= 180.0f) &&
+        !(fabs(noaaLatitude) < 0.0001f && fabs(noaaLongitude) < 0.0001f);
+
+    if (!hasValidCoords && selectedCity.isEmpty()) {
+        Serial.println("[OWM] Missing city and invalid lat/lon; skip fetch");
         return;
     }
 
@@ -4605,9 +4668,14 @@ void fetchWeatherFromOWM()
     selectedCity.replace(" ", "%20");
     selectedCity.replace(",", "%2C");
 
-    String url = "http://api.openweathermap.org/data/2.5/weather?q=" + selectedCity;
-    if (!selectedCountry.isEmpty()) {
-        url += "," + selectedCountry;
+    String url = "http://api.openweathermap.org/data/2.5/weather?";
+    if (hasValidCoords) {
+        url += "lat=" + String(noaaLatitude, 4) + "&lon=" + String(noaaLongitude, 4);
+    } else {
+        url += "q=" + selectedCity;
+        if (!selectedCountry.isEmpty()) {
+            url += "," + selectedCountry;
+        }
     }
     url += "&units=" + units + "&appid=" + apiKey;
     String jsonBuffer = httpGETRequest(url.c_str());
@@ -4716,8 +4784,8 @@ void fetchWeatherFromOWM()
     forecast.lastUpdate = tempest.lastUpdate;
 
     Serial.println("Weather Updated:");
-    Serial.printf("  Temp: %.1fC | Hum: %s%% | Wind: %.2fm/s\n",
-                  tempC, str_Humd.c_str(), windSpeed);
+    Serial.printf("  Temp: %.1fC | Hum: %s%% | Wind: %.2fm/s | Source: %s\n",
+                  tempC, str_Humd.c_str(), windSpeed, hasValidCoords ? "lat/lon" : "city");
 
     needScrollRebuild = true;
 }
@@ -4784,13 +4852,59 @@ void drawOWMScreen()
 
 void drawWeatherIcon(String iconCode)
 {
+    // OWM screen: force night icon variant when Night Theme is active.
+    if (currentScreen == SCREEN_OWM && theme == 1)
+    {
+        iconCode.trim();
+        if (iconCode.length() >= 1)
+        {
+            char last = iconCode.charAt(iconCode.length() - 1);
+            if (last == 'd')
+            {
+                iconCode.setCharAt(iconCode.length() - 1, 'n');
+            }
+            else if (last != 'n')
+            {
+                iconCode += "n";
+            }
+        }
+    }
+
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
     dma_display->setCursor(1, 4);
     dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
+
     uint16_t iconColor = getDayNightColorFromCode(iconCode);
     if (theme == 1)
         iconColor = dma_display->color565(90, 90, 150);
     dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, iconColor);
+
+    // OWM few-clouds cleanup: remove known artifact lines.
+    if (iconCode.startsWith("02d") || iconCode.startsWith("02n"))
+    {
+        // Remove vertical line (3,3) -> (3,7)
+        dma_display->drawFastVLine(3, 3, 5, myBLACK);
+        // Remove horizontal line (6,10) -> (10,10)
+        dma_display->drawFastHLine(6, 10, 5, myBLACK);
+        // Make cloud body one pixel thicker.
+        dma_display->drawFastHLine(6, 11, 5, iconColor);
+    }
+
+    // Enforce crescent in the sun position for all night icons.
+    const bool isNightIcon = iconCode.endsWith("n") || iconCode.indexOf("night") >= 0;
+    if (isNightIcon)
+    {
+        uint16_t moonColor = (theme == 1) ? dma_display->color565(170, 170, 220)
+                                          : dma_display->color565(235, 235, 180);
+        // Clear likely sun area first, then draw crescent where sun normally appears.
+        const int moonX = 11;
+        const int moonY = 4;
+        // Remove residual sun rays / light beams in a wider top region.
+        dma_display->fillRect(4, 0, 12, 10, myBLACK);
+        dma_display->fillCircle(moonX, moonY, 4, myBLACK);
+        dma_display->fillCircle(moonX, moonY, 3, moonColor);
+        dma_display->fillCircle(moonX + 1, moonY - 1, 3, myBLACK);
+    }
 }
 
 void displayClock()

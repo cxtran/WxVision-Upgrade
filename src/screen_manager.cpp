@@ -77,7 +77,7 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         subtitle = nullptr;
         return true;
     case SCREEN_HOURLY:
-        title = "24-Hrs Forecast";
+        title = "24-Hour Forecast";
         subtitle = nullptr;
         return true;
     case SCREEN_CURRENT:

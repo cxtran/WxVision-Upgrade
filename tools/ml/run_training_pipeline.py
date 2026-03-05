@@ -85,8 +85,8 @@ def main() -> int:
     p.add_argument(
         "--cleanup-old-data",
         action="store_true",
-        default=True,
-        help="After successful training, delete older trend_*.csv/json in --data-dir and keep only the input pair (default: enabled).",
+        default=False,
+        help="After successful training, delete older trend_*.csv/json in --data-dir and keep only the input pair (default: disabled).",
     )
     p.add_argument(
         "--keep-old-data",

@@ -482,6 +482,15 @@ void setupWebServer() {
     uint32_t now = millis();
     bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 2000u;
     if (refreshCache) {
+      // Capture heap before request-local JSON/String allocations so this aligns
+      // with System Info style reporting.
+      size_t heapTotal = 327680; // align with System Info modal
+      size_t heapFree = ESP.getFreeHeap();
+      if (heapFree > heapTotal) {
+        heapTotal = heapFree;
+      }
+      size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
+
       JsonDocument doc;
       String dispTemp;
       String humidityValue;
@@ -511,12 +520,6 @@ void setupWebServer() {
       doc["uptimeSec"] = uptimeSec;
       doc["uptime"] = formatUptime(uptimeSec);
 
-      size_t heapTotal = 327680; // align with System Info modal
-      size_t heapFree = ESP.getFreeHeap();
-      if (heapFree > heapTotal) {
-        heapTotal = heapFree;
-      }
-      size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
       doc["freeHeap"] = heapFree; // legacy field
       doc["heapTotal"] = heapTotal;
       doc["heapFree"] = heapFree;
