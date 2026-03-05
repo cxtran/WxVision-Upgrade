@@ -68,6 +68,24 @@ Extended:
 - `rolling_std_press_3h`
 - `label` (`RAIN POSS`, `CLEARING`, `UNSETTLED`, `STEADY`, `WARMING`, `COOLING`, `HUMIDIFYING`, `DRYING`, `STORM RISK`, `FOG RISK`, `VENTILATE`, `HEAT STRESS`, `COLD STRESS`)
 
+Current training model supports 13 classes. User meaning + technical trigger:
+
+- `STORM RISK`: Weather may turn severe soon. Trigger: pressure drops hard (`<= -2.2`) and humidity rises (`>= +3`).
+- `RAIN POSS`: Rain is becoming more likely. Trigger: pressure drops (`<= -1.8`) and humidity rises (`>= +2`).
+- `CLEARING`: Conditions are improving; skies may open up. Trigger: pressure rises (`>= +1.6`) and humidity stays low-change (`<= +1`).
+- `UNSETTLED`: Weather is becoming less stable. Trigger: pressure drops (`<= -1.2`) and temperature cools (`<= -0.8`).
+- `HEAT STRESS`: Hot and humid conditions may feel uncomfortable or risky. Trigger: future temp `>= 30C` and humidity `>= 55%`.
+- `COLD STRESS`: Temperature may become unusually cold. Trigger: future temp `<= 8C`.
+- `FOG RISK`: Fog is possible. Trigger: future humidity `>= 95%` with near-flat temp change (`|delta temp| <= 0.5`).
+- `VENTILATE`: Ventilation is recommended due to stale-air risk. Trigger: future CO2 `>= 1200 ppm`.
+- `WARMING`: Temperature is trending warmer. Trigger: temp rise `>= +1.0`.
+- `COOLING`: Temperature is trending cooler. Trigger: temp drop `<= -1.0`.
+- `HUMIDIFYING`: Humidity is increasing. Trigger: humidity rise `>= +3`.
+- `DRYING`: Humidity is decreasing. Trigger: humidity drop `<= -3`.
+- `STEADY`: Conditions are relatively stable. Trigger: fallback when none of the above triggers.
+
+Important: these are all available classes, but during training some may be auto-disabled by `--min-class-support` if there is not enough data for that class.
+
 ## 2) Train + Export
 
 ```bash
