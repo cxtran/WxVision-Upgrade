@@ -828,6 +828,23 @@ void loop()
         handleResetButton();
     }
 
+    if (themeRefreshPending)
+    {
+        if (isSectionHeadingActive())
+        {
+            requestSectionHeadingRerender();
+        }
+        else if (!isScreenOff())
+        {
+            if (currentScreen == SCREEN_PREDICT)
+            {
+                resetPredictionRenderState();
+            }
+            playScreenRevealEffect(currentScreen);
+        }
+        themeRefreshPending = false;
+    }
+
     handleAutoRotate(now);
     if (isSectionHeadingActive())
     {
@@ -873,15 +890,6 @@ void loop()
         getIRCodeNonBlocking();
         delay(5);
         return;
-    }
-
-    if (themeRefreshPending)
-    {
-        if (!isScreenOff())
-        {
-            playScreenRevealEffect(currentScreen);
-        }
-        themeRefreshPending = false;
     }
 
     // Keep small-text rendering consistent on non-lunar screens.

@@ -5151,6 +5151,8 @@ void drawConditionSceneScreen()
         label = "No Data";
 
     uint16_t accent = weatherSceneAccentColor(sceneKind);
+    if (theme == 1)
+        accent = scaleColor565(accent, 0.60f);
 
     String tempTag;
     if (isDataSourceForecastModel())

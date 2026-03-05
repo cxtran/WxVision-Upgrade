@@ -97,11 +97,11 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
     case SCREEN_CO2_HISTORY:
     case SCREEN_BARO_HISTORY:
         title = "Indoor Charts";
-        subtitle = "Last 24 Hrs";
+        subtitle = "Last 24-HR";
         return true;
     case SCREEN_PREDICT:
-        title = "Prediction Summary";
-        subtitle = "Next 24 Hrs";
+        title = "Next 24-HR";
+        subtitle = "Prediction";
         return true;
     case SCREEN_NOAA_ALERT:
         title = "NOAA Alerts";
@@ -158,6 +158,7 @@ void enterScreen(ScreenMode mode)
         draw24HourSectionScreen();
         break;
     case SCREEN_PREDICT:
+        resetPredictionRenderState();
         drawPredictionScreen();
         break;
     case SCREEN_LUNAR_VI:
@@ -469,6 +470,13 @@ bool serviceSectionHeading(unsigned long now)
         noteScreenRotation(now);
     }
     return true;
+}
+
+void requestSectionHeadingRerender()
+{
+    if (!s_sectionHeadingActive)
+        return;
+    s_sectionHeadingRendered = false;
 }
 
 bool isSectionHeadingActive()

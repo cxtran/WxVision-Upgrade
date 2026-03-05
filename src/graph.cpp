@@ -162,6 +162,7 @@ static uint8_t s_predictMeaningPageIndex = 255;
 static bool s_predictStaticDirty = true;
 static uint8_t s_predictRenderedPageIndex = 255;
 static bool s_predictRenderedMono = false;
+static int s_predictLastTheme = -1;
 
 static const ScreenMode kHistory24Pages[] = {
     SCREEN_TEMP_HISTORY,
@@ -391,8 +392,9 @@ static void renderPredictPage(unsigned long nowMs)
     const bool mono = (theme == 1);
     const uint16_t headerBg = mono ? ui_theme::monoHeaderBg() : INFOMODAL_HEADERBG;
     const uint16_t headerFg = mono ? ui_theme::monoHeaderFg() : INFOMODAL_GREEN;
-    const uint16_t bigColor = mono ? dma_display->color565(220, 220, 120) : dma_display->color565(255, 240, 140);
-    const uint16_t bodyColor = mono ? ui_theme::monoBodyText() : dma_display->color565(120, 200, 255);
+    // Make day/night differences explicit on prediction subpages.
+    const uint16_t bigColor = mono ? ui_theme::infoValueHighlightMono() : ui_theme::infoLabelDay();
+    const uint16_t bodyColor = mono ? ui_theme::monoHeaderFg() : ui_theme::infoValueDay();
 
     const PredictPage &page = s_predictPages[s_predictPageIndex];
     const bool redrawStatic =
@@ -714,6 +716,15 @@ static void renderPredictPage(unsigned long nowMs)
     }
 }
 } // namespace
+
+void resetPredictionRenderState()
+{
+    s_predictStaticDirty = true;
+    s_predictRenderedPageIndex = 255;
+    s_predictRenderedMono = false;
+    s_predictMeaningPageIndex = 255;
+    s_predictLastTheme = -1;
+}
 
 void updateGraphData()
 {
@@ -1424,6 +1435,28 @@ void drawPredictionScreen()
     if (!dma_display)
         return;
 
+    if (s_predictLastTheme != theme)
+    {
+        s_predictLastTheme = theme;
+        s_predictStaticDirty = true;
+        s_predictRenderedPageIndex = 255;
+        s_predictRenderedMono = false;
+        s_predictMeaningPageIndex = 255;
+    }
+
+    PredictPageId prevPageId = PredictPageId::Count;
+    char prevMeaning[96] = {0};
+    bool hadPrevPage = false;
+    if (s_predictPageCount > 0 && s_predictPageIndex < s_predictPageCount)
+    {
+        const PredictPage &prevPage = s_predictPages[s_predictPageIndex];
+        prevPageId = prevPage.id;
+        strncpy(prevMeaning, prevPage.meaning, sizeof(prevMeaning) - 1);
+        prevMeaning[sizeof(prevMeaning) - 1] = '\0';
+        hadPrevPage = true;
+    }
+    const bool preserveActiveMarqueeText = hadPrevPage && !s_predictMeaningCycleDone;
+
     auto copyText = [](char *dst, size_t dstLen, const char *src) {
         if (!dst || dstLen == 0)
             return;
@@ -1557,8 +1590,6 @@ void drawPredictionScreen()
     const auto &log = getSensorLog();
     s_predictSnapshot = PredictSnapshot{};
     s_predictPageCount = 0;
-    s_predictStaticDirty = true;
-    s_predictRenderedPageIndex = 255;
 
     if (log.size() < 2)
     {
@@ -1833,6 +1864,20 @@ void drawPredictionScreen()
         addPage(PredictPageId::Outlook, "SMART WX", mlPred.label, mlLine);
     }
 
+    // Keep the currently visible scrolling text stable until it finishes one cycle,
+    // so periodic prediction refreshes do not cause mid-scroll jumps.
+    if (preserveActiveMarqueeText && prevPageId != PredictPageId::Count)
+    {
+        for (uint8_t i = 0; i < s_predictPageCount; ++i)
+        {
+            if (s_predictPages[i].id == prevPageId)
+            {
+                copyText(s_predictPages[i].meaning, sizeof(s_predictPages[i].meaning), prevMeaning);
+                break;
+            }
+        }
+    }
+
     if (s_predictPageCount == 0)
     {
         dma_display->fillScreen(0);
@@ -2050,6 +2095,15 @@ void tickPredictionScreen()
 
     const unsigned long nowMs = millis();
     bool shouldRender = s_predictStaticDirty;
+    if (s_predictLastTheme != theme)
+    {
+        s_predictLastTheme = theme;
+        s_predictStaticDirty = true;
+        s_predictRenderedPageIndex = 255;
+        s_predictRenderedMono = false;
+        s_predictMeaningPageIndex = 255;
+        shouldRender = true;
+    }
     if (s_predictPageCount > 1 &&
         nowMs >= s_predictManualHoldUntilMs &&
         (nowMs - s_predictLastSwitchMs) >= kPredictPageAutoMs &&

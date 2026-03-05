@@ -1112,6 +1112,20 @@ static void drawSceneReadabilityOverlay(WeatherSceneKind kind)
     dma_display->drawFastHLine(0, SCENE_H - 1, SCENE_W, divider);
 }
 
+static void applyNightThemeSceneDimmer()
+{
+    if (theme != 1)
+        return;
+
+    // Static dither dimming so the same weather scene is preserved in night theme.
+    for (int y = 0; y < SCENE_H; ++y)
+    {
+        int start = y % 3;
+        for (int x = start; x < SCENE_W; x += 3)
+            dma_display->drawPixel(x, y, myBLACK);
+    }
+}
+
 String formatConditionLabel(const String &condition)
 {
     String label = condition;
@@ -1148,23 +1162,18 @@ String formatConditionLabel(const String &condition)
 
 void drawWeatherConditionScene(WeatherSceneKind kind)
 {
-    if (theme == 1)
-    {
-        drawWeatherSceneMono();
-        drawSceneReadabilityOverlay(kind);
-        return;
-    }
-
     for (const auto &renderer : WEATHER_SCENE_RENDERERS)
     {
         if (renderer.kind == kind)
         {
             renderer.drawFn();
+            applyNightThemeSceneDimmer();
             drawSceneReadabilityOverlay(kind);
             return;
         }
     }
     drawWeatherSceneDefault();
+    applyNightThemeSceneDimmer();
     drawSceneReadabilityOverlay(kind);
 }
 

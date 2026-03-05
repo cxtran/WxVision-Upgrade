@@ -1,0 +1,87 @@
+{
+  "generatedAtUtc": "2026-03-04T23:03:41.288135+00:00",
+  "datasetCsv": "D:\\Git\\Projects\\VisionWX\\tools\\ml\\data\\outlook_dataset.csv",
+  "outputHeader": "D:\\Git\\Projects\\VisionWX\\include\\ml_model_generated.h",
+  "featureCount": 22,
+  "classCount": 13,
+  "rowCount": 225,
+  "minClassSupport": 25,
+  "minEnabledClasses": 2,
+  "enabledClassCount": 3,
+  "classSupport": {
+    "RAIN POSS": 0,
+    "CLEARING": 2,
+    "UNSETTLED": 0,
+    "STEADY": 146,
+    "WARMING": 33,
+    "COOLING": 29,
+    "HUMIDIFYING": 5,
+    "DRYING": 10,
+    "STORM RISK": 0,
+    "FOG RISK": 0,
+    "VENTILATE": 0,
+    "HEAT STRESS": 0,
+    "COLD STRESS": 0
+  },
+  "enabledClasses": [
+    {
+      "name": "STEADY",
+      "support": 146
+    },
+    {
+      "name": "WARMING",
+      "support": 33
+    },
+    {
+      "name": "COOLING",
+      "support": 29
+    }
+  ],
+  "disabledClasses": [
+    {
+      "name": "RAIN POSS",
+      "support": 0
+    },
+    {
+      "name": "CLEARING",
+      "support": 2
+    },
+    {
+      "name": "UNSETTLED",
+      "support": 0
+    },
+    {
+      "name": "HUMIDIFYING",
+      "support": 5
+    },
+    {
+      "name": "DRYING",
+      "support": 10
+    },
+    {
+      "name": "STORM RISK",
+      "support": 0
+    },
+    {
+      "name": "FOG RISK",
+      "support": 0
+    },
+    {
+      "name": "VENTILATE",
+      "support": 0
+    },
+    {
+      "name": "HEAT STRESS",
+      "support": 0
+    },
+    {
+      "name": "COLD STRESS",
+      "support": 0
+    }
+  ],
+  "metrics": {
+    "accuracy": 0.7333333333333333,
+    "weightedF1": 0.7725588202183947,
+    "macroF1": 0.2706414153222664
+  }
+}

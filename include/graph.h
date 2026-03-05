@@ -6,6 +6,7 @@ void drawHumidityHistoryScreen();
 void drawCo2HistoryScreen();
 void drawBaroHistoryScreen();
 void drawPredictionScreen();
+void resetPredictionRenderState();
 void tickTemperatureHistoryMarquee();
 void tickHumidityHistoryMarquee();
 void tickCo2HistoryMarquee();
