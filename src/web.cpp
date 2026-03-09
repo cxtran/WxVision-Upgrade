@@ -3,6 +3,7 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <ArduinoJson.h>
+#include <Arduino.h>
 #include <time.h>
 #include <stdlib.h>
 #include <math.h>
@@ -87,6 +88,25 @@ bool otaInProgress = false;
 
 AsyncWebServer server(80);
 static bool webServerRunning = false;
+static constexpr size_t kMaxSettingsBodyBytes = 8192;
+static constexpr size_t kMaxTimeBodyBytes = 2048;
+static constexpr size_t kMaxWorldTimeBodyBytes = 8192;
+
+namespace
+{
+volatile bool g_webPendingQuickRestore = false;
+volatile bool g_webPendingFactoryReset = false;
+volatile bool g_webPendingReboot = false;
+volatile uint32_t g_webRebootAtMs = 0;
+
+volatile bool g_ntpSyncRunning = false;
+volatile bool g_ntpSyncLastOk = false;
+
+bool g_wifiScanPrimed = false;
+bool g_wifiScanIncludeHidden = false;
+} // namespace
+
+static bool queueNtpSyncTask();
 
 // --- UnitPrefs helpers ---
 static void unitsToJson(JsonObject obj)
@@ -303,6 +323,65 @@ static String formatEpochLocalTime(uint32_t epoch)
   strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", ti);
   return String(buf);
 }
+
+static void ntpSyncTask(void *param)
+{
+  (void)param;
+  bool ok = syncTimeFromNTP();
+  g_ntpSyncLastOk = ok;
+  g_ntpSyncRunning = false;
+  vTaskDelete(nullptr);
+}
+
+static bool queueNtpSyncTask()
+{
+  if (g_ntpSyncRunning)
+  {
+    return false;
+  }
+
+  g_ntpSyncRunning = true;
+  g_ntpSyncLastOk = false;
+  BaseType_t created = xTaskCreatePinnedToCore(
+      ntpSyncTask,
+      "wxv-ntp-sync",
+      6144,
+      nullptr,
+      1,
+      nullptr,
+      0);
+  if (created != pdPASS)
+  {
+    g_ntpSyncRunning = false;
+    return false;
+  }
+  return true;
+}
+
+void webTick()
+{
+  if (g_webPendingReboot && static_cast<int32_t>(millis() - g_webRebootAtMs) >= 0)
+  {
+    g_webPendingReboot = false;
+    ESP.restart();
+    return;
+  }
+
+  if (g_webPendingQuickRestore)
+  {
+    g_webPendingQuickRestore = false;
+    quickRestore();
+    return;
+  }
+
+  if (g_webPendingFactoryReset)
+  {
+    g_webPendingFactoryReset = false;
+    factoryReset();
+    return;
+  }
+}
+
 void setupWebServer() {
   if (webServerRunning) {
     return;
@@ -339,8 +418,12 @@ void setupWebServer() {
     struct TrendChunkState
     {
       const std::vector<SensorSample> *logPtr = nullptr;
-      std::vector<size_t> indices;
-      size_t indexPos = 0;
+      size_t total = 0;
+      size_t stride = 1;
+      size_t nextIndex = 0;
+      size_t emittedCount = 0;
+      bool emitLastSample = false;
+      bool sentLastSample = false;
       bool sentOpen = false;
       bool sentClose = false;
       String pending;
@@ -368,9 +451,10 @@ void setupWebServer() {
           return;
         }
 
-        if (indexPos < indices.size())
+        if (logPtr && total > 0 && nextIndex < total)
         {
-          const SensorSample &s = (*logPtr)[indices[indexPos]];
+          const SensorSample &s = (*logPtr)[nextIndex];
+          nextIndex += stride;
           char tempBuf[24];
           char humBuf[24];
           char pressBuf[24];
@@ -388,7 +472,7 @@ void setupWebServer() {
           char objBuf[220];
           snprintf(objBuf, sizeof(objBuf),
                    "%s{\"ts\":%lu,\"temp\":%s,\"hum\":%s,\"press\":%s,\"lux\":%s,\"co2\":%s}",
-                   (indexPos == 0) ? "" : ",",
+                   (emittedCount == 0) ? "" : ",",
                    static_cast<unsigned long>(s.ts),
                    tempBuf,
                    humBuf,
@@ -396,7 +480,40 @@ void setupWebServer() {
                    luxBuf,
                    co2Buf);
           pending = objBuf;
-          ++indexPos;
+          ++emittedCount;
+          return;
+        }
+
+        if (logPtr && total > 0 && emitLastSample && !sentLastSample)
+        {
+          const SensorSample &s = (*logPtr)[total - 1];
+          sentLastSample = true;
+          char tempBuf[24];
+          char humBuf[24];
+          char pressBuf[24];
+          char luxBuf[24];
+          char co2Buf[24];
+          formatFloat(s.temp, 5, tempBuf, sizeof(tempBuf));
+          formatFloat(s.hum, 5, humBuf, sizeof(humBuf));
+          formatFloat(s.press, 3, pressBuf, sizeof(pressBuf));
+          formatFloat(s.lux, 6, luxBuf, sizeof(luxBuf));
+          if (isnan(s.co2) || !isfinite(s.co2) || s.co2 <= 0.0f)
+            snprintf(co2Buf, sizeof(co2Buf), "null");
+          else
+            formatFloat(s.co2, 3, co2Buf, sizeof(co2Buf));
+
+          char objBuf[220];
+          snprintf(objBuf, sizeof(objBuf),
+                   "%s{\"ts\":%lu,\"temp\":%s,\"hum\":%s,\"press\":%s,\"lux\":%s,\"co2\":%s}",
+                   (emittedCount == 0) ? "" : ",",
+                   static_cast<unsigned long>(s.ts),
+                   tempBuf,
+                   humBuf,
+                   pressBuf,
+                   luxBuf,
+                   co2Buf);
+          pending = objBuf;
+          ++emittedCount;
           return;
         }
 
@@ -436,21 +553,13 @@ void setupWebServer() {
 
     auto state = std::make_shared<TrendChunkState>();
     state->logPtr = &log;
-    state->indices.reserve((log.size() < requestedSamples) ? log.size() : requestedSamples);
-    if (!log.empty() && requestedSamples > 0)
+    state->total = log.size();
+    if (state->total > 0 && requestedSamples > 0)
     {
-      size_t stride = (log.size() + requestedSamples - 1) / requestedSamples; // ceil
-      if (stride < 1)
-        stride = 1;
-      for (size_t i = 0; i < log.size(); i += stride)
-      {
-        state->indices.push_back(i);
-      }
-      size_t lastIndex = log.size() - 1;
-      if (state->indices.empty() || state->indices.back() != lastIndex)
-      {
-        state->indices.push_back(lastIndex);
-      }
+      state->stride = (state->total + requestedSamples - 1) / requestedSamples; // ceil
+      if (state->stride < 1)
+        state->stride = 1;
+      state->emitLastSample = ((state->total - 1) % state->stride) != 0;
     }
 
     AsyncWebServerResponse *res = req->beginChunkedResponse(
@@ -687,9 +796,23 @@ void setupWebServer() {
       WiFi.disconnect(false, false);
     }
 
-    WiFi.scanDelete();
-    delay(120);
-    int found = WiFi.scanNetworks(false, includeHidden);
+    bool startScan = !g_wifiScanPrimed || (g_wifiScanIncludeHidden != includeHidden);
+    if (startScan)
+    {
+      WiFi.scanDelete();
+      WiFi.scanNetworks(true, includeHidden);
+      g_wifiScanPrimed = true;
+      g_wifiScanIncludeHidden = includeHidden;
+    }
+
+    int found = WiFi.scanComplete();
+    if (found == WIFI_SCAN_FAILED)
+    {
+      WiFi.scanDelete();
+      WiFi.scanNetworks(true, includeHidden);
+      found = 0;
+    }
+    bool scanning = (found == WIFI_SCAN_RUNNING || found == -1);
     if (found < 0)
       found = 0;
 
@@ -716,6 +839,7 @@ void setupWebServer() {
       emitted++;
     }
     doc["count"] = emitted;
+    doc["scanning"] = scanning;
     doc["connected"] = wifiConnected;
     if (wifiConnected)
     {
@@ -730,7 +854,10 @@ void setupWebServer() {
     }
     doc["timestamp"] = millis();
 
-    WiFi.scanDelete();
+    if (!scanning)
+    {
+      WiFi.scanDelete();
+    }
     if (restoreMode)
     {
       WiFi.mode(prevMode);
@@ -817,19 +944,19 @@ void setupWebServer() {
   });
 
   server.on("/action/quick-restore", HTTP_POST, [](AsyncWebServerRequest *req) {
-    quickRestore();
-    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Settings reset complete (Wi-Fi + logs kept).\"}");
+    g_webPendingQuickRestore = true;
+    req->send(202, "application/json", "{\"ok\":true,\"message\":\"Settings reset queued (Wi-Fi + logs kept).\"}");
   });
 
   server.on("/action/factory-reset", HTTP_POST, [](AsyncWebServerRequest *req) {
-    factoryReset();
-    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Factory reset started (erasing Wi-Fi + logs).\"}");
+    g_webPendingFactoryReset = true;
+    req->send(202, "application/json", "{\"ok\":true,\"message\":\"Factory reset queued (erasing Wi-Fi + logs).\"}");
   });
 
   server.on("/action/reboot", HTTP_POST, [](AsyncWebServerRequest *req) {
-    req->send(200, "application/json", "{\"ok\":true,\"message\":\"Rebooting...\"}");
-    delay(1000);
-    ESP.restart();
+    g_webPendingReboot = true;
+    g_webRebootAtMs = millis() + 150;
+    req->send(202, "application/json", "{\"ok\":true,\"message\":\"Reboot queued.\"}");
   });
 
   server.on("/action/learn-remote", HTTP_POST, [](AsyncWebServerRequest *req) {
@@ -935,8 +1062,15 @@ void setupWebServer() {
     nullptr,                              // onUpload
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
       if (index == 0) {
+        if (total > kMaxSettingsBodyBytes) {
+          req->send(413, "text/plain", "Payload too large");
+          return;
+        }
         req->_tempObject = new String();
         ((String*)req->_tempObject)->reserve(total);
+      }
+      if (!req->_tempObject) {
+        return;
       }
       String* body = (String*)req->_tempObject;
       body->concat((const char*)data, len);
@@ -952,17 +1086,32 @@ void setupWebServer() {
           return;
         }
 
+        bool dirtyDevice = false;
+        bool dirtyDisplay = false;
+        bool dirtyWeather = false;
+        bool dirtyCalibration = false;
+        bool dirtyAlarm = false;
+        bool dirtyNoaa = false;
+        bool dirtyDateTime = false;
+        bool dirtyUnits = false;
+
         // Device
         if (!doc["wifiSSID"].isNull()) {
           wifiSSID = doc["wifiSSID"] | wifiSSID;
+          dirtyDevice = true;
         }
         if (!doc["wifiPass"].isNull()) {
           wifiPass = doc["wifiPass"] | wifiPass;
+          dirtyDevice = true;
         }
-        if (!doc["units"].isNull()) jsonToUnits(doc["units"]);
+        if (!doc["units"].isNull()) {
+          jsonToUnits(doc["units"]);
+          dirtyUnits = true;
+        }
         fmt24 = units.clock24h ? 1 : 0;   // keep device clock format in sync with Unit card
         if (!doc["dayFormat"].isNull()) {
           dayFormat = doc["dayFormat"] | dayFormat;
+          dirtyDevice = true;
         }
 
         int newSource = dataSource;
@@ -972,21 +1121,29 @@ void setupWebServer() {
           newSource = doc["forecastSrc"].as<int>();
         }
         setDataSource(newSource);
+        if (!doc["dataSource"].isNull() || !doc["forecastSrc"].isNull()) {
+          dirtyDevice = true;
+          dirtyWeather = true;
+        }
         if (!doc["autoRotate"].isNull()) {
           bool autoRotateValue = (doc["autoRotate"] | autoRotate) != 0;
           setAutoRotateEnabled(autoRotateValue, false);
+          dirtyDevice = true;
         }
         if (!doc["autoRotateInterval"].isNull()) {
           int newInterval = constrain((int)(doc["autoRotateInterval"] | autoRotateInterval), 5, 300);
           setAutoRotateInterval(newInterval, false);
+          dirtyDevice = true;
         }
         if (!doc["manualScreen"].isNull()) {
           manualScreen = doc["manualScreen"] | manualScreen;
+          dirtyDevice = true;
         }
 
         // Display
         if (!doc["theme"].isNull()) {
           theme = doc["theme"] | theme;
+          dirtyDisplay = true;
         }
         int incomingAutoThemeMode = -1;
         if (!doc["autoThemeMode"].isNull()) {
@@ -995,6 +1152,7 @@ void setupWebServer() {
           if (incomingAutoThemeMode > 2) incomingAutoThemeMode = 2;
           autoThemeSchedule = (incomingAutoThemeMode == 1);
           autoThemeAmbient = (incomingAutoThemeMode == 2);
+          dirtyDisplay = true;
         }
         if (!doc["autoThemeSchedule"].isNull()) {
           JsonVariant v = doc["autoThemeSchedule"];
@@ -1009,6 +1167,7 @@ void setupWebServer() {
             autoThemeSchedule = value;
             autoThemeAmbient = false;
           }
+          dirtyDisplay = true;
         }
         // Enforce mutually-exclusive modes
         if (autoThemeAmbient) {
@@ -1016,16 +1175,20 @@ void setupWebServer() {
         }
         if (!doc["dayThemeStart"].isNull()) {
           dayThemeStartMinutes = normalizeThemeScheduleMinutes(doc["dayThemeStart"].as<int>());
+          dirtyDisplay = true;
         }
         if (!doc["nightThemeStart"].isNull()) {
           nightThemeStartMinutes = normalizeThemeScheduleMinutes(doc["nightThemeStart"].as<int>());
+          dirtyDisplay = true;
         }
         if (!doc["themeLightThreshold"].isNull()) {
           int thr = doc["themeLightThreshold"].as<int>();
           autoThemeLightThreshold = constrain(thr, 1, 5000);
+          dirtyDisplay = true;
         }
         if (!doc["brightness"].isNull()) {
           brightness = constrain((int)(doc["brightness"] | brightness), 1, 100);
+          dirtyDisplay = true;
         }
         if (!doc["autoBrightness"].isNull()) {
           JsonVariant v = doc["autoBrightness"];
@@ -1035,10 +1198,12 @@ void setupWebServer() {
             const char* s = v.as<const char*>();
             autoBrightness = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0);
           }
+          dirtyDisplay = true;
         }
           if (!doc["splashDuration"].isNull()) {
             int dur = doc["splashDuration"].as<int>();
             splashDurationSec = constrain(dur, 1, 10);
+            dirtyDisplay = true;
           }
           if (!doc["forecastUi"].isNull() && doc["forecastUi"].is<JsonObject>())
           {
@@ -1052,22 +1217,29 @@ void setupWebServer() {
               int sz = f["iconSize"].as<int>();
               forecastIconSize = (sz == 0) ? 0 : 16;
             }
+            dirtyDisplay = true;
           }
           if (!doc["buzzerVolume"].isNull()) {
             buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
+            dirtyDevice = true;
           }
         if (!doc["buzzerTone"].isNull()) {
           buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
+          dirtyDevice = true;
         }
         if (!doc["alarmSound"].isNull()) {
           alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 4);
+          dirtyAlarm = true;
+          dirtyDevice = true;
         }
         if (!doc["scrollLevel"].isNull()) {
           scrollLevel = constrain((int)(doc["scrollLevel"] | scrollLevel), 0, 9);
           scrollSpeed = scrollDelays[scrollLevel];
+          dirtyDisplay = true;
         }
         if (!doc["customMsg"].isNull()) {
           customMsg = doc["customMsg"] | customMsg;
+          dirtyDisplay = true;
         }
 
         if (!doc["ntpPreset"].isNull())
@@ -1076,6 +1248,7 @@ void setupWebServer() {
           if (preset < 0) preset = 0;
           if (preset > NTP_PRESET_CUSTOM) preset = NTP_PRESET_CUSTOM;
           ntpServerPreset = preset;
+          dirtyDateTime = true;
         }
 
         if (!doc["ntpServer"].isNull())
@@ -1107,6 +1280,7 @@ void setupWebServer() {
             strncpy(ntpServerHost, ntpPresetHost(ntpServerPreset), sizeof(ntpServerHost) - 1);
             ntpServerHost[sizeof(ntpServerHost) - 1] = '\0';
           }
+          dirtyDateTime = true;
         }
 
         // Weather
@@ -1118,6 +1292,7 @@ void setupWebServer() {
             owmSettingsChanged = true;
           }
           owmCity = updated;
+          dirtyWeather = true;
         }
         if (!doc["owmCountryIndex"].isNull()) {
           int updated = doc["owmCountryIndex"].as<int>();
@@ -1125,6 +1300,7 @@ void setupWebServer() {
             owmSettingsChanged = true;
           }
           owmCountryIndex = updated;
+          dirtyWeather = true;
         }
         if (!doc["owmCountryCustom"].isNull()) {
           String updated = doc["owmCountryCustom"].as<String>();
@@ -1133,6 +1309,7 @@ void setupWebServer() {
             owmSettingsChanged = true;
           }
           owmCountryCustom = updated;
+          dirtyWeather = true;
         }
         if (!doc["owmApiKey"].isNull()) {
           String updated = doc["owmApiKey"].as<String>();
@@ -1141,6 +1318,7 @@ void setupWebServer() {
             owmSettingsChanged = true;
           }
           owmApiKey = updated;
+          dirtyWeather = true;
         }
         bool wfCredsChanged = false;
         if (!doc["wfToken"].isNull()) {
@@ -1152,6 +1330,7 @@ void setupWebServer() {
             wfCredsChanged = true;
           }
           wfToken = updated;
+          dirtyWeather = true;
         }
         if (!doc["wfStationId"].isNull()) {
           String prev = wfStationId;
@@ -1162,6 +1341,7 @@ void setupWebServer() {
             wfCredsChanged = true;
           }
           wfStationId = updated;
+          dirtyWeather = true;
         }
 
         // Calibration (robust)
@@ -1177,14 +1357,17 @@ void setupWebServer() {
           }
           float offsetC = static_cast<float>(tempOffsetToC(incoming));
           tempOffset = constrain(offsetC, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
+          dirtyCalibration = true;
         }
         if (!doc["humOffset"].isNull()) {
           JsonVariant v = doc["humOffset"];
           humOffset = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
         }
         if (!doc["lightGain"].isNull()) {
           JsonVariant v = doc["lightGain"];
           lightGain = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
         }
         tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
         humOffset  = constrain(humOffset, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
@@ -1211,6 +1394,7 @@ void setupWebServer() {
             if (!a["weekDay"].isNull()) alarmWeeklyDay[idx] = constrain(a["weekDay"].as<int>(), 0, 6);
             idx++;
           }
+          dirtyAlarm = true;
         }
 
         // NOAA
@@ -1220,10 +1404,17 @@ void setupWebServer() {
           if (!noaa["enabled"].isNull()) noaaAlertsEnabled = noaa["enabled"].as<bool>();
           if (!noaa["lat"].isNull()) noaaLatitude = noaa["lat"].as<float>();
           if (!noaa["lon"].isNull()) noaaLongitude = noaa["lon"].as<float>();
+          dirtyNoaa = true;
         }
 
-        saveDateTimeSettings();
-        saveAllSettings();
+        if (dirtyDateTime) saveDateTimeSettings();
+        if (dirtyDevice) saveDeviceSettings();
+        if (dirtyDisplay) saveDisplaySettings();
+        if (dirtyWeather) saveWeatherSettings();
+        if (dirtyCalibration) saveCalibrationSettings();
+        if (dirtyAlarm) saveAlarmSettings();
+        if (dirtyNoaa) saveNoaaSettings();
+        if (dirtyUnits) saveUnits();
         forceAutoThemeSchedule();
         if (autoThemeAmbient)
         {
@@ -1240,19 +1431,14 @@ void setupWebServer() {
         }
 
         if (owmSettingsChanged) {
-          if (WiFi.status() == WL_CONNECTED) {
-            wxv::provider::fetchActiveProviderData();
-            requestScrollRebuild();
-            serviceScrollRebuild();
-            displayWeatherData();
-          }
+          requestScrollRebuild();
           reset_Time_and_Date_Display = true;
         }
 
         if (wfCredsChanged && isDataSourceWeatherFlow()) {
-          wxv::provider::fetchActiveProviderData();
+          reset_Time_and_Date_Display = true;
         } else if (isDataSourceOpenMeteo()) {
-          wxv::provider::fetchActiveProviderData();
+          reset_Time_and_Date_Display = true;
         }
       }
     }
@@ -1313,8 +1499,15 @@ void setupWebServer() {
     [](AsyncWebServerRequest*){}, nullptr,
     [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total){
       if (index == 0) {
+        if (total > kMaxTimeBodyBytes) {
+          req->send(413, "text/plain", "Payload too large");
+          return;
+        }
         req->_tempObject = new String();
         ((String*)req->_tempObject)->reserve(total);
+      }
+      if (!req->_tempObject) {
+        return;
       }
       String* body = (String*)req->_tempObject;
       body->concat((const char*)data, len);
@@ -1460,8 +1653,15 @@ void setupWebServer() {
     [](AsyncWebServerRequest*){}, nullptr,
     [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total){
       if (index == 0) {
+        if (total > kMaxWorldTimeBodyBytes) {
+          req->send(413, "text/plain", "Payload too large");
+          return;
+        }
         req->_tempObject = new String();
         ((String*)req->_tempObject)->reserve(total);
+      }
+      if (!req->_tempObject) {
+        return;
       }
       String* body = (String*)req->_tempObject;
       body->concat((const char*)data, len);
@@ -1549,8 +1749,18 @@ void setupWebServer() {
       saveDateTimeSettings();
     }
 
-    bool ok = syncTimeFromNTP();
-    req->send(200, "application/json", ok ? "{\"ok\":true}" : "{\"ok\":false}");
+    bool started = queueNtpSyncTask();
+    if (started)
+    {
+      req->send(202, "application/json", "{\"ok\":true,\"queued\":true}");
+      return;
+    }
+
+    req->send(200, "application/json", g_ntpSyncRunning
+                                       ? "{\"ok\":true,\"queued\":false,\"busy\":true}"
+                                       : (g_ntpSyncLastOk
+                                              ? "{\"ok\":true,\"queued\":false,\"lastResult\":true}"
+                                              : "{\"ok\":false,\"queued\":false,\"lastResult\":false}"));
   });
 
   // ---------- Status / OTA / Reboot ----------
@@ -1566,9 +1776,9 @@ void setupWebServer() {
   });
 
   server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *req) {
-    req->send(200, "text/plain", "Rebooting...");
-    delay(1000);
-    ESP.restart();
+    g_webPendingReboot = true;
+    g_webRebootAtMs = millis() + 150;
+    req->send(202, "text/plain", "Reboot queued.");
   });
 
   server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {

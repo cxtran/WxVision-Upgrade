@@ -105,6 +105,11 @@ static bool wifiReasonIsSsidNotFound(uint8_t reason)
     return static_cast<wifi_err_reason_t>(reason) == WIFI_REASON_NO_AP_FOUND;
 }
 
+static bool wifiReasonIsBeaconTimeout(uint8_t reason)
+{
+    return static_cast<wifi_err_reason_t>(reason) == WIFI_REASON_BEACON_TIMEOUT;
+}
+
 static void wifiScheduleRetry(unsigned long delayMs)
 {
     s_wifiRunState = WifiRunState::WIFI_WAIT_RETRY;
@@ -346,6 +351,9 @@ static void beginWifiConnectAttempt(bool showDisplayStatus, bool backgroundAttem
     int32_t bestChannel = 0;
     int32_t bestRssi = -127;
     bool hasCandidate = scanBestSsidCandidate(wifiSSID, bestBssid, &bestChannel, &bestRssi);
+    const bool recentBeaconTimeout =
+        wifiReasonIsBeaconTimeout(wifiLastDisconnectReason) &&
+        (millis() - wifiLastDisconnectReasonAtMs) <= 60000UL;
 
     if (hasCandidate)
     {
@@ -360,15 +368,27 @@ static void beginWifiConnectAttempt(bool showDisplayStatus, bool backgroundAttem
     }
     else
     {
-        Serial.printf("[WiFi] SSID \"%s\" not found in scan.\n", wifiSSID.c_str());
-        wifiSetStatus(WifiStatusCode::OFFLINE, WifiStatusReason::SSID_NOT_FOUND);
-        s_wifiRunState = WifiRunState::WIFI_DISCONNECTED;
-        wifiSaveLastReason();
-        if (showDisplayStatus && dma_display != nullptr && !isSplashActive())
+        if (recentBeaconTimeout)
         {
-            wxv::notify::showNotification(wxv::notify::NotifyId::WifiFail, myRED, myWHITE, "NO NET");
+            Serial.printf("[WiFi] Scan missed SSID \"%s\" after recent BEACON_TIMEOUT; treating as transient link loss.\n",
+                          wifiSSID.c_str());
+            wifiSetStatus(WifiStatusCode::OFFLINE, WifiStatusReason::ROUTER_DOWN);
+            s_wifiRunState = WifiRunState::WIFI_DISCONNECTED;
+            wifiSaveLastReason();
+            wifiScheduleBackoffRetry();
         }
-        wifiScheduleRetry(WIFI_SSID_RESCAN_MS);
+        else
+        {
+            Serial.printf("[WiFi] SSID \"%s\" not found in scan.\n", wifiSSID.c_str());
+            wifiSetStatus(WifiStatusCode::OFFLINE, WifiStatusReason::SSID_NOT_FOUND);
+            s_wifiRunState = WifiRunState::WIFI_DISCONNECTED;
+            wifiSaveLastReason();
+            if (showDisplayStatus && dma_display != nullptr && !isSplashActive())
+            {
+                wxv::notify::showNotification(wxv::notify::NotifyId::WifiFail, myRED, myWHITE, "NO NET");
+            }
+            wifiScheduleRetry(WIFI_SSID_RESCAN_MS);
+        }
         return;
     }
 
@@ -724,6 +744,15 @@ bool startBackgroundWifiReconnect(bool apActive)
 
     beginWifiConnectAttempt(false, true, apActive);
     return true;
+}
+
+bool wifiHadRecentBeaconTimeout(unsigned long windowMs)
+{
+    if (wifiLastDisconnectReason != static_cast<uint8_t>(WIFI_REASON_BEACON_TIMEOUT))
+        return false;
+
+    const unsigned long age = millis() - wifiLastDisconnectReasonAtMs;
+    return age <= windowMs;
 }
 // --- END NEW CODE ---
 

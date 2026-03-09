@@ -11,6 +11,7 @@
 #include "display_widgets.h"
 #include "display_worldtime.h"
 #include "env_quality.h"
+#include "noaa.h"
 #include "fonts/verdanab8pt7b.h"
 
 static String formatIndoorHumidity()
@@ -303,9 +304,19 @@ void drawClockDateLine(const DateTime &now)
 
 void drawClockPulseDot(int second)
 {
-    uint16_t pulseColor = (second % 2 == 0)
-                              ? dma_display->color565(0, 150, 0)
-                              : dma_display->color565(0, 60, 0);
+    uint16_t pulseColor;
+    if (noaaHasUnreadAlert())
+    {
+        pulseColor = (second % 2 == 0)
+                         ? dma_display->color565(255, 60, 60)
+                         : dma_display->color565(110, 0, 0);
+    }
+    else
+    {
+        pulseColor = (second % 2 == 0)
+                         ? dma_display->color565(0, 150, 0)
+                         : dma_display->color565(0, 60, 0);
+    }
     dma_display->fillCircle(62, 30, 1, pulseColor);
 }
 

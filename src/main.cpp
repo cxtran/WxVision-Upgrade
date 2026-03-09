@@ -62,7 +62,7 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_TEMP_HISTORY,
     SCREEN_PREDICT,
     SCREEN_NOAA_ALERT,
-    SCREEN_LUNAR_VI,
+    SCREEN_LUNAR_LUCK,
     };
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -97,6 +97,9 @@ static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
 static bool autoWifiReconnectSuppressed = false;
+static unsigned long s_nextAutoNtpSyncMs = 0;
+static constexpr unsigned long AUTO_NTP_SYNC_INTERVAL_MS = 25UL * 60UL * 60UL * 1000UL;
+static constexpr unsigned long AUTO_NTP_RETRY_MS = 30UL * 60UL * 1000UL;
 
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
@@ -239,6 +242,11 @@ static void attemptWifiReconnect(bool apActive)
     // --- END NEW CODE ---
 }
 
+static void scheduleNextAutoNtpSync(unsigned long nowMs, unsigned long delayMs)
+{
+    s_nextAutoNtpSyncMs = nowMs + delayMs;
+}
+
 static bool isSavedSsidAvailable()
 {
     if (wifiSSID.isEmpty())
@@ -335,6 +343,11 @@ static void completeStartupAfterWiFi(bool force)
         if (!syncTimeFromNTP())
         {
             Serial.println("[Setup] Initial NTP sync failed.");
+            scheduleNextAutoNtpSync(millis(), AUTO_NTP_RETRY_MS);
+        }
+        else
+        {
+            scheduleNextAutoNtpSync(millis(), AUTO_NTP_SYNC_INTERVAL_MS);
         }
     }
     else
@@ -595,6 +608,8 @@ void loop()
         return;
     }
 
+    webTick();
+
     DateTime alarmNow;
     bool haveAlarmTime = false;
     if (rtcReady)
@@ -646,14 +661,10 @@ void loop()
         udpListening = false;
     }
 
-    if (!wifiConnected && wifiHasCredentials() && !apActive && !wifiSelecting &&
-        wifiGetStatusCode() != WifiStatusCode::AUTH_FAILED)
-    {
-        if (startAccessPoint())
-        {
-            apActive = true;
-        }
-    }
+    // Do not auto-enter setup AP mode just because STA dropped temporarily.
+    // NOAA HTTPS can trigger a transient disconnect (e.g. BEACON_TIMEOUT),
+    // and the WiFi state machine should recover that in the background
+    // without kicking the device out of normal client operation.
 
     if (wifiConnected != lastWifiState || apActive != lastApState)
     {
@@ -894,7 +905,7 @@ void loop()
 
     // Keep small-text rendering consistent on non-lunar screens.
     // Large text paths explicitly set their own font and remain unchanged.
-    if (dma_display && currentScreen != SCREEN_LUNAR_LUCK && currentScreen != SCREEN_LUNAR_VI)
+    if (dma_display && currentScreen != SCREEN_LUNAR_LUCK)
     {
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
@@ -1205,6 +1216,34 @@ void loop()
         handlePredictionUpPress();
         return;
     }
+
+    if (s_nextAutoNtpSyncMs == 0)
+    {
+        scheduleNextAutoNtpSync(now, AUTO_NTP_SYNC_INTERVAL_MS);
+    }
+    else if (static_cast<long>(now - s_nextAutoNtpSyncMs) >= 0)
+    {
+        if (WiFi.status() == WL_CONNECTED)
+        {
+            bool ok = syncTimeFromNTP();
+            if (ok)
+            {
+                getTimeFromRTC();
+                reset_Time_and_Date_Display = true;
+                scheduleNextAutoNtpSync(now, AUTO_NTP_SYNC_INTERVAL_MS);
+            }
+            else
+            {
+                scheduleNextAutoNtpSync(now, AUTO_NTP_RETRY_MS);
+            }
+        }
+    }
+    if (currentScreen == SCREEN_NOAA_ALERT &&
+        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
+    {
+        stepNoaaAlertsScreen((key == IRCodes::WxKey::Down) ? 1 : -1);
+        return;
+    }
     // --- BEGIN WORLD TIME FEATURE ---
     if (currentScreen == SCREEN_WORLD_CLOCK &&
         worldTimeHasSelections() &&
@@ -1215,21 +1254,6 @@ void loop()
         return;
     }
     // --- END WORLD TIME FEATURE ---
-
-    // Lunar section subpage behavior:
-    // - Right from Lunar Date -> Lunar Luck
-    // - Left from Lunar Luck -> Lunar Date
-    // - Opposite direction exits section via normal rotation
-    if (key == IRCodes::WxKey::Right && currentScreen == SCREEN_LUNAR_VI)
-    {
-        transitionToScreen(SCREEN_LUNAR_LUCK);
-        return;
-    }
-    if (key == IRCodes::WxKey::Left && currentScreen == SCREEN_LUNAR_LUCK)
-    {
-        transitionToScreen(SCREEN_LUNAR_VI);
-        return;
-    }
 
     if (key == IRCodes::WxKey::Left)
     {
@@ -1342,7 +1366,7 @@ void loop()
             clockSensorUpdatePending = false;
         }
 
-        // Keep the pulse dot blinking every second without full redraw.
+        // Keep the pulse dot lightweight without forcing a full clock redraw.
         if (renderDue(RenderSlot::ClockPulse, now, 1000UL))
         {
             int pulseSecond = haveAlarmTime ? alarmNow.second() : static_cast<int>((now / 1000UL) % 60UL);
@@ -1369,24 +1393,6 @@ void loop()
             markRendered(RenderSlot::WorldClockMain, now);
             noteFrameDraw(now);
             needsClear = false;
-        }
-    }
-
-    if (currentScreen == SCREEN_LUNAR_VI)
-    {
-        bool forceRefresh = needsClear;
-        if (forceRefresh || renderDue(RenderSlot::LunarViMain, now, 60000UL))
-        {
-            needsClear = false;
-            drawLunarScreenVi();
-            markRendered(RenderSlot::LunarViMain, now);
-            noteFrameDraw(now);
-        }
-        if (renderDue(RenderSlot::LunarViMarquee, now, kRenderMarqueeMs))
-        {
-            tickLunarMarquee();
-            markRendered(RenderSlot::LunarViMarquee, now);
-            noteFrameDraw(now);
         }
     }
 
@@ -1539,7 +1545,30 @@ void loop()
                 exitScreen = true;
                 break;
             }
-            // Apply input before ticking so pause/step actions take effect immediately
+            if (key == IRCodes::WxKey::Up)
+            {
+                stepNoaaAlertsScreen(-1);
+                continue;
+            }
+            if (key == IRCodes::WxKey::Down)
+            {
+                stepNoaaAlertsScreen(1);
+                continue;
+            }
+            if (key == IRCodes::WxKey::Left)
+            {
+                if (stepNoaaAlertSelection(-1))
+                    continue;
+                rotateScreen(-1);
+                return;
+            }
+            if (key == IRCodes::WxKey::Right)
+            {
+                if (stepNoaaAlertSelection(1))
+                    continue;
+                rotateScreen(+1);
+                return;
+            }
             noaaAlertScreen.handleIR(IRCodes::legacyCodeForKey(key));
         }
         if (exitScreen)

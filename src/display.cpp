@@ -629,7 +629,9 @@ static constexpr bool HDR_EDGE_HIGHLIGHT = true;
 static constexpr uint16_t HDR_START_DELAY_MS = 50;
 
 static constexpr uint32_t STATIC_DWELL_MS = 4500ul;
-static constexpr uint32_t SCROLL_INTERVAL_MS = 40ul;
+static constexpr float LUNAR_LUCK_SCROLL_FACTOR = 0.72f;
+
+static unsigned long lunarLuckBaseScrollIntervalMs();
 static constexpr int16_t SCROLL_STEP_PX = 1;
 static constexpr int16_t GAP_PX = 16;
 static constexpr int LINE1_Y = 14;
@@ -4293,16 +4295,6 @@ void drawSettingsScreen()
     // Draw options, etc.
 }
 
-void drawLunarScreenVi()
-{
-    // Always rebuild so lunar time/date stay in sync with current clock
-    buildLunarLinesMerged();
-    for (int i = 0; i < 3; ++i)
-        lunarOffsets[i] = 0;
-    lastLunarTick = millis();
-    renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
-}
-
 void drawLunarLuckScreen()
 {
     if (!lunarLuckInitialized)
@@ -4451,43 +4443,6 @@ void getTimeFromRTC()
     sprintf(chr_d_year, "%04d", d_year);
 }
 
-void tickLunarMarquee()
-{
-    if (!dma_display)
-        return;
-
-    unsigned long nowMs = millis();
-
-    if (currentScreen == SCREEN_LUNAR_VI)
-    {
-        if (!lunarInitialized)
-            buildLunarLinesMerged();
-
-        // Match global marquee speed (scrollSpeed from settings), fallback to 60 ms
-        unsigned long intervalMs = (scrollSpeed > 0)
-                                       ? static_cast<unsigned long>(scrollSpeed)
-                                       : 60ul;
-
-        if (nowMs - lastLunarTick >= intervalMs)
-        {
-            lastLunarTick = nowMs;
-
-            int i = 2; // only line 3 scrolls
-            int w = lunarWidths[i];
-            if (w > 0)
-            {
-                lunarOffsets[i]++;
-
-                int baseX = PANEL_RES_X - lunarOffsets[i];
-                if (baseX + w < 0)
-                    lunarOffsets[i] = 0;
-            }
-
-            renderLunarLines(lunarLines, lunarWidths, lunarOffsets);
-        }
-    }
-}
-
 void tickLunarLuckMarquee()
 {
     if (!dma_display)
@@ -4517,10 +4472,10 @@ void tickLunarLuckMarquee()
     if (hdrState == HDR_DOOR)
         renderCurrentLunarLuckSection();
 
-    uint32_t intervalMs = SCROLL_INTERVAL_MS;
+    uint32_t intervalMs = static_cast<uint32_t>(lunarLuckBaseScrollIntervalMs());
     if (lunarLuckSpeedScale != 1.0f)
     {
-        float scaled = static_cast<float>(SCROLL_INTERVAL_MS) * lunarLuckSpeedScale;
+        float scaled = static_cast<float>(intervalMs) * lunarLuckSpeedScale;
         intervalMs = static_cast<uint32_t>(constrain(static_cast<int>(scaled), 8, 1200));
     }
 
@@ -4563,10 +4518,11 @@ void adjustLunarLuckSpeed(int delta)
         lunarLuckSpeedScale *= kSlowerPerClick;
 
     lunarLuckSpeedScale = constrain(lunarLuckSpeedScale, 0.08f, 20.0f);
-    float rawAdjustedMs = static_cast<float>(SCROLL_INTERVAL_MS) * lunarLuckSpeedScale;
+    const unsigned long baseMs = lunarLuckBaseScrollIntervalMs();
+    float rawAdjustedMs = static_cast<float>(baseMs) * lunarLuckSpeedScale;
     int effectiveMs = constrain(static_cast<int>(rawAdjustedMs), 8, 1200);
     Serial.printf("[LUNAR_LUCK] Speed effective=%dms raw=%.2fms (global=%lums, scale=%.3f)\n",
-                  effectiveMs, rawAdjustedMs, static_cast<unsigned long>(SCROLL_INTERVAL_MS), lunarLuckSpeedScale);
+                  effectiveMs, rawAdjustedMs, baseMs, lunarLuckSpeedScale);
 }
 
 bool handleLunarLuckInput(uint32_t code)
@@ -4576,20 +4532,44 @@ bool handleLunarLuckInput(uint32_t code)
 
     if (code == IR_UP)
     {
-        if (lunarDayOffset < LUNAR_OFFSET_MAX)
-            ++lunarDayOffset;
-        lunarPreviewMode = (lunarDayOffset != 0);
-        rebuildLunarForOffset();
+        if (g_sectionCount == 0)
+            return true;
+        currentSectionIndex = static_cast<uint8_t>((currentSectionIndex + 1) % g_sectionCount);
+        hdrState = HDR_IDLE;
+        hdrDoorPx = PANEL_RES_X / 2;
+        hdrDrawNew = true;
+        hdrDelayActive = false;
+        if (hdrBrightnessPulsed)
+        {
+            setPanelBrightness(hdrBrightnessSaved);
+            hdrBrightnessPulsed = false;
+        }
+        strncpy(hdrNew, g_sections[currentSectionIndex].title ? g_sections[currentSectionIndex].title : "", TITLE_MAX - 1);
+        hdrNew[TITLE_MAX - 1] = '\0';
+        setSectionStartState();
         renderCurrentLunarLuckSection();
         return true;
     }
 
     if (code == IR_DOWN)
     {
-        if (lunarDayOffset > LUNAR_OFFSET_MIN)
-            --lunarDayOffset;
-        lunarPreviewMode = (lunarDayOffset != 0);
-        rebuildLunarForOffset();
+        if (g_sectionCount == 0)
+            return true;
+        currentSectionIndex = (currentSectionIndex == 0)
+                                  ? static_cast<uint8_t>(g_sectionCount - 1)
+                                  : static_cast<uint8_t>(currentSectionIndex - 1);
+        hdrState = HDR_IDLE;
+        hdrDoorPx = PANEL_RES_X / 2;
+        hdrDrawNew = true;
+        hdrDelayActive = false;
+        if (hdrBrightnessPulsed)
+        {
+            setPanelBrightness(hdrBrightnessSaved);
+            hdrBrightnessPulsed = false;
+        }
+        strncpy(hdrNew, g_sections[currentSectionIndex].title ? g_sections[currentSectionIndex].title : "", TITLE_MAX - 1);
+        hdrNew[TITLE_MAX - 1] = '\0';
+        setSectionStartState();
         renderCurrentLunarLuckSection();
         return true;
     }
@@ -4610,7 +4590,7 @@ bool handleLunarLuckInput(uint32_t code)
         lunarLuckSpeedScale = 1.0f;
         resetLunarLuckSectionRotation();
         Serial.printf("[LUNAR_LUCK] Speed reset to default (%lums, scale=%.3f)\n",
-                      static_cast<unsigned long>(SCROLL_INTERVAL_MS), lunarLuckSpeedScale);
+                      lunarLuckBaseScrollIntervalMs(), lunarLuckSpeedScale);
         renderCurrentLunarLuckSection();
         return true;
     }
@@ -5396,4 +5376,10 @@ void applyUnitPreferences()
 {
     useImperial = (units.temp == TempUnit::F);
     notifyUnitsMaybeChanged();
+}
+static unsigned long lunarLuckBaseScrollIntervalMs()
+{
+    const int baseGlobalMs = constrain(scrollSpeed, 12, 240);
+    const float scaled = static_cast<float>(baseGlobalMs) * LUNAR_LUCK_SCROLL_FACTOR;
+    return static_cast<unsigned long>(constrain(static_cast<int>(scaled), 10, 120));
 }

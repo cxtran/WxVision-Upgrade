@@ -1,0 +1,127 @@
+{
+    "@context": [
+        "https://geojson.org/geojson-ld/geojson-context.jsonld",
+        {
+            "@version": "1.1",
+            "wx": "https://api.weather.gov/ontology#",
+            "@vocab": "https://api.weather.gov/ontology#"
+        }
+    ],
+    "type": "FeatureCollection",
+    "features": [
+        {
+            "id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.aaa83d5b1f24c3f6c82a0d2d4231e45066c251c8.001.1",
+            "type": "Feature",
+            "geometry": null,
+            "properties": {
+                "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.aaa83d5b1f24c3f6c82a0d2d4231e45066c251c8.001.1",
+                "@type": "wx:Alert",
+                "id": "urn:oid:2.49.0.1.840.0.aaa83d5b1f24c3f6c82a0d2d4231e45066c251c8.001.1",
+                "areaDesc": "San Bernardino and Riverside County Valleys-The Inland Empire; San Bernardino County Mountains; Santa Ana Mountains and Foothills; Orange County Inland",
+                "geocode": {
+                    "SAME": [
+                        "006065",
+                        "006071",
+                        "006059",
+                        "006073"
+                    ],
+                    "UGC": [
+                        "CAZ048",
+                        "CAZ055",
+                        "CAZ057",
+                        "CAZ554"
+                    ]
+                },
+                "affectedZones": [
+                    "https://api.weather.gov/zones/forecast/CAZ048",
+                    "https://api.weather.gov/zones/forecast/CAZ055",
+                    "https://api.weather.gov/zones/forecast/CAZ057",
+                    "https://api.weather.gov/zones/forecast/CAZ554"
+                ],
+                "references": [
+                    {
+                        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d4960ca96cb7ecf0d0776743e258bc9555481d00.002.1",
+                        "identifier": "urn:oid:2.49.0.1.840.0.d4960ca96cb7ecf0d0776743e258bc9555481d00.002.1",
+                        "sender": "w-nws.webmaster@noaa.gov",
+                        "sent": "2026-03-05T18:07:00-08:00"
+                    },
+                    {
+                        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.d4960ca96cb7ecf0d0776743e258bc9555481d00.003.1",
+                        "identifier": "urn:oid:2.49.0.1.840.0.d4960ca96cb7ecf0d0776743e258bc9555481d00.003.1",
+                        "sender": "w-nws.webmaster@noaa.gov",
+                        "sent": "2026-03-05T18:07:00-08:00"
+                    },
+                    {
+                        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.7aa5562f57d16283811104ad3dc291db4664ec7f.001.2",
+                        "identifier": "urn:oid:2.49.0.1.840.0.7aa5562f57d16283811104ad3dc291db4664ec7f.001.2",
+                        "sender": "w-nws.webmaster@noaa.gov",
+                        "sent": "2026-03-06T00:23:00-08:00"
+                    },
+                    {
+                        "@id": "https://api.weather.gov/alerts/urn:oid:2.49.0.1.840.0.7aa5562f57d16283811104ad3dc291db4664ec7f.004.1",
+                        "identifier": "urn:oid:2.49.0.1.840.0.7aa5562f57d16283811104ad3dc291db4664ec7f.004.1",
+                        "sender": "w-nws.webmaster@noaa.gov",
+                        "sent": "2026-03-06T00:23:00-08:00"
+                    }
+                ],
+                "sent": "2026-03-06T01:04:00-08:00",
+                "effective": "2026-03-06T01:04:00-08:00",
+                "onset": "2026-03-06T01:04:00-08:00",
+                "expires": "2026-03-06T14:00:00-08:00",
+                "ends": "2026-03-08T16:00:00-08:00",
+                "status": "Actual",
+                "messageType": "Update",
+                "category": "Met",
+                "severity": "Moderate",
+                "certainty": "Likely",
+                "urgency": "Expected",
+                "event": "Wind Advisory",
+                "sender": "w-nws.webmaster@noaa.gov",
+                "senderName": "NWS San Diego CA",
+                "headline": "Wind Advisory issued March 6 at 1:04AM PST until March 8 at 5:00PM PDT by NWS San Diego CA",
+                "description": "* WHAT...Northeast winds 20 to 30 mph with gusts to 50 mph expected.\nIsolated gusts to 65 mph.\n\n* WHERE...Orange County Inland Areas, San Bernardino County\nMountains, San Bernardino and Riverside County Valleys-The Inland\nEmpire, and Santa Ana Mountains and Foothills.\n\n* WHEN...Until 5 PM PDT Sunday.\n\n* IMPACTS...Gusty winds will blow around unsecured objects. Tree\nlimbs could be blown down and a few power outages may result.",
+                "instruction": "Winds this strong can make driving difficult, especially for high\nprofile vehicles. Use extra caution.",
+                "response": "Execute",
+                "parameters": {
+                    "AWIPSidentifier": [
+                        "NPWSGX"
+                    ],
+                    "WMOidentifier": [
+                        "WWUS76 KSGX 060904"
+                    ],
+                    "NWSheadline": [
+                        "WIND ADVISORY REMAINS IN EFFECT UNTIL 5 PM PDT SUNDAY"
+                    ],
+                    "BLOCKCHANNEL": [
+                        "EAS",
+                        "NWEM",
+                        "CMAS"
+                    ],
+                    "VTEC": [
+                        "/O.CON.KSGX.WI.Y.0010.000000T0000Z-260309T0000Z/"
+                    ],
+                    "eventEndingTime": [
+                        "2026-03-08T16:00:00-08:00"
+                    ],
+                    "expiredReferences": [
+                        "w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.224e020801d8cc32fa7c78effb6790d1b51d8fa0.002.1,2026-03-05T12:45:00-08:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.224e020801d8cc32fa7c78effb6790d1b51d8fa0.001.2,2026-03-05T12:45:00-08:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ba728ce2ee95247151e7a0adac3f7530861e3949.005.1,2026-03-05T00:55:00-08:00 w-nws.webmaster@noaa.gov,urn:oid:2.49.0.1.840.0.ba728ce2ee95247151e7a0adac3f7530861e3949.001.2,2026-03-05T00:55:00-08:00"
+                    ]
+                },
+                "scope": "Public",
+                "code": "IPAWSv1.0",
+                "language": "en-US",
+                "web": "http://www.weather.gov",
+                "eventCode": {
+                    "SAME": [
+                        "NWS"
+                    ],
+                    "NationalWeatherService": [
+                        "WIY"
+                    ]
+                }
+            }
+        }
+    ],
+    "title": "Current watches, warnings, and advisories for 33.7739 N, 117.9415 W",
+    "updated": "2026-03-06T09:05:12+00:00"
+}

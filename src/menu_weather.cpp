@@ -10,6 +10,19 @@
 #include "noaa.h"
 #include "weather_provider.h"
 
+namespace
+{
+bool s_preserveNoaaEnabledTemp = false;
+}
+
+void requestNoaaSettingsModalRefresh()
+{
+    s_preserveNoaaEnabledTemp = true;
+    noaaModal.hide();
+    pendingModalFn = showNoaaSettingsModal;
+    pendingModalTime = millis() + 10;
+}
+
 void showNoaaSettingsModal()
 {
     if (currentMenuLevel != MENU_NONE)
@@ -21,25 +34,59 @@ void showNoaaSettingsModal()
 
     static int noaaEnabledTemp = 0;
 
-    noaaEnabledTemp = noaaAlertsEnabled ? 1 : 0;
+    if (!s_preserveNoaaEnabledTemp)
+        noaaEnabledTemp = noaaAlertsEnabled ? 1 : 0;
+    s_preserveNoaaEnabledTemp = false;
 
-    String labels[] = {"Alerts"};
-    InfoFieldType types[] = {InfoChooser};
+    String labels[2];
+    InfoFieldType types[2];
+    int lineCount = 0;
+    const int alertsLineIdx = lineCount;
+    labels[lineCount] = "Alerts";
+    types[lineCount++] = InfoChooser;
+    int getAlertLineIdx = -1;
+    if (noaaEnabledTemp > 0)
+    {
+        getAlertLineIdx = lineCount;
+        labels[lineCount] = "Get Alert";
+        types[lineCount++] = InfoButton;
+    }
     int *chooserRefs[] = {&noaaEnabledTemp};
     static const char *alertsOpts[] = {"Off", "On"};
     const char *const *chooserOpts[] = {alertsOpts};
     int chooserCounts[] = {2};
 
-    noaaModal.setLines(labels, types, 1);
+    noaaModal.setLines(labels, types, lineCount);
     noaaModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    noaaModal.setKeepOpenOnSelect(true);
 
-    noaaModal.setCallback([](bool /*accepted*/, int) {
+    noaaModal.setCallback([alertsLineIdx, getAlertLineIdx](bool accepted, int btnIdx) {
+        const bool prevEnabled = noaaAlertsEnabled;
         noaaAlertsEnabled = (noaaEnabledTemp > 0);
 
-        saveNoaaSettings();
-        notifyNoaaSettingsChanged();
+        if (noaaAlertsEnabled != prevEnabled)
+        {
+            saveNoaaSettings();
+            notifyNoaaSettingsChanged();
+            Serial.printf("[NOAA] enabled=%d\n", noaaAlertsEnabled);
+        }
 
-        Serial.printf("[NOAA] enabled=%d\n", noaaAlertsEnabled);
+        if (accepted && btnIdx == getAlertLineIdx)
+        {
+            NoaaManualFetchResult result = requestNoaaManualFetch();
+            if (result == NOAA_MANUAL_FETCH_STARTED)
+                showSectionHeading("GET ALERT...", nullptr, 1200);
+            else if (result == NOAA_MANUAL_FETCH_BUSY)
+                showSectionHeading("FETCHING...", nullptr, 1200);
+            else if (result == NOAA_MANUAL_FETCH_BLOCKED)
+                showSectionHeading("WIFI BUSY", nullptr, 1200);
+            else
+                showSectionHeading("NOAA OFF", nullptr, 1200);
+            return;
+        }
+
+        if (accepted && btnIdx == alertsLineIdx)
+            return;
     });
 
     noaaModal.show();

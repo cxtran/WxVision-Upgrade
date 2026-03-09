@@ -13,6 +13,7 @@
 #include "WorldClockScreen.h"
 #include "system.h"
 #include "weather_provider.h"
+#include "noaa.h"
 
 extern ScreenMode currentScreen;
 extern InfoScreen udpScreen;
@@ -111,14 +112,10 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         title = "Weather Scene";
         subtitle = nullptr;
         return true;
-    case SCREEN_LUNAR_VI:
-        title = "Lunar Calendar";
-        subtitle = "Date & Luck";
-        return true;
     case SCREEN_LUNAR_LUCK:
-        // Treat Lunar Luck as part of the same Lunar section.
-        // No extra heading page when moving between lunar screens.
-        return false;
+        title = "Lunar Calendar";
+        subtitle = "Luck";
+        return true;
     case SCREEN_OWM:
         return false;
     default:
@@ -161,9 +158,6 @@ void enterScreen(ScreenMode mode)
         resetPredictionRenderState();
         drawPredictionScreen();
         break;
-    case SCREEN_LUNAR_VI:
-        drawLunarScreenVi();
-        break;
     case SCREEN_LUNAR_LUCK:
         drawLunarLuckScreen();
         break;
@@ -177,6 +171,7 @@ void enterScreen(ScreenMode mode)
         showHourlyForecastScreen();
         break;
     case SCREEN_NOAA_ALERT:
+        refreshNoaaAlertsForScreenEntry();
         drawNoaaAlertsScreen();
         break;
     case SCREEN_OWM:
@@ -262,9 +257,6 @@ void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_WORLD_CLOCK:
         drawWorldClockScreen();
-        break;
-    case SCREEN_LUNAR_VI:
-        drawLunarScreenVi();
         break;
     case SCREEN_LUNAR_LUCK:
         drawLunarLuckScreen();

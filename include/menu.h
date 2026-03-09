@@ -30,6 +30,7 @@ void showDeviceSettingsModal();
 void showDisplaySettingsModal();
 void showAlarmSettingsModal();
 void showNoaaSettingsModal();
+void requestNoaaSettingsModalRefresh();
 void showDeviceLocationModal();
 void showWeatherSettingsModal();
 void showWfTempestModal();

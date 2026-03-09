@@ -1413,6 +1413,12 @@ void InfoModal::handleIR(uint32_t code)
                         pendingModalTime = millis() + 10;
                         return;
                     }
+                    if (this == &noaaModal && lines[selIndex] == "Alerts")
+                    {
+                        requestNoaaSettingsModalRefresh();
+                        beep(code == IR_LEFT ? 900 : 1800);
+                        return;
+                    }
                     if (lines[selIndex].startsWith("Sound Profile"))
                     {
                         val = constrain(val, 0, 6);

@@ -465,6 +465,11 @@ function startWifiScan(event){
     .then(function(data){
       renderWifiScanResults(data);
       var count = (data && typeof data.count === 'number') ? data.count : 0;
+      if (data && data.scanning) {
+        wifiScanSetStatus('Scanning for WiFi... (working)', true);
+        setTimeout(function(){ startWifiScan(); }, 450);
+        return;
+      }
       wifiScanSetStatus(count > 0 ? ('Found ' + count + ' network' + (count === 1 ? '' : 's') + '.') : 'No WiFi networks detected.', count > 0);
     })
     .catch(function(err){

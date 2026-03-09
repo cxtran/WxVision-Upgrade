@@ -75,5 +75,6 @@ void serviceWiFiConnection();
 bool isWiFiConnectionInProgress();
 bool consumeWiFiConnectionFailure();
 bool startBackgroundWifiReconnect(bool apActive);
+bool wifiHadRecentBeaconTimeout(unsigned long windowMs);
 // --- END WIFI INDUSTRIAL REDESIGN ---
 

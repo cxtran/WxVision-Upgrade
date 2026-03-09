@@ -106,7 +106,6 @@ void drawSettingsScreen();
 void displayWeatherData();
 void fetchWeatherFromOWM();
 void createScrollingText();
-void drawLunarScreenVi();
 void drawLunarLuckScreen();
 // display.h
 void requestScrollRebuild();     // mark that the marquee text must be rebuilt
@@ -122,11 +121,12 @@ ScreenMode homeScreenForDataSource();
 void drawConditionSceneScreen();
 void drawNoaaAlertsScreen();
 void tickNoaaAlertsScreen();
+void stepNoaaAlertsScreen(int direction);
+bool stepNoaaAlertSelection(int direction);
 void showSectionHeading(const char* title, const char* subtitle = nullptr, uint16_t ms = 2000);
 void drawWeatherConditionScene(WeatherSceneKind kind);
 void drawWeatherConditionScene(const String &condition);
 void tickConditionSceneMarquee();
-void tickLunarMarquee();
 void tickLunarLuckMarquee();
 void adjustLunarLuckSpeed(int delta);
 void resetLunarLuckSectionRotation();

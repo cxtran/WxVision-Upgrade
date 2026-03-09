@@ -151,7 +151,6 @@ static unsigned long s_predictTransitionStartMs = 0;
 static constexpr unsigned long kPredictPageAutoMs = 4200UL;
 static constexpr unsigned long kPredictManualHoldMs = 5000UL;
 static constexpr unsigned long kPredictTransitionMs = 180UL;
-static constexpr unsigned long kPredictMeaningStepMs = 45UL;
 static constexpr int kPredictMeaningGapPx = 12;
 static bool s_predictMeaningCycleDone = false;
 static bool s_predictMeaningNeedsScroll = false;
@@ -163,6 +162,13 @@ static bool s_predictStaticDirty = true;
 static uint8_t s_predictRenderedPageIndex = 255;
 static bool s_predictRenderedMono = false;
 static int s_predictLastTheme = -1;
+
+static unsigned long predictMeaningStepMs()
+{
+    // Follow global marquee speed setting for consistent scrolling across screens.
+    // Lower delay => faster scroll. Clamp to stable range for panel rendering.
+    return static_cast<unsigned long>(constrain(scrollSpeed, 12, 120));
+}
 
 static const ScreenMode kHistory24Pages[] = {
     SCREEN_TEMP_HISTORY,
@@ -382,6 +388,84 @@ static void onPredictPageChanged(unsigned long nowMs)
     s_predictStaticDirty = true;
     s_predictRenderedPageIndex = 255;
     resetPredictMeaningScroll(nowMs);
+}
+
+static void drawPredictionStatusWrapped(const char *message, uint16_t color)
+{
+    if (!dma_display)
+        return;
+
+    constexpr int kScreenW = 64;
+    constexpr int kScreenH = 32;
+    constexpr int kX = 1;
+    constexpr int kLineHeight = 8;
+    constexpr int kMaxLines = 3;
+    constexpr int kMaxCharsPerLine = 10; // fits 64px with 5x7 font and spacing
+
+    dma_display->fillScreen(0);
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(color);
+
+    String text = message ? String(message) : String("");
+    text.trim();
+    if (text.isEmpty())
+        text = "No data";
+
+    String lines[kMaxLines];
+    int lineCount = 0;
+    int i = 0;
+    while (lineCount < kMaxLines && i < text.length())
+    {
+        while (i < text.length() && text[i] == ' ')
+            ++i;
+        if (i >= text.length())
+            break;
+
+        int lineStart = i;
+        int lineEnd = i;
+        int chars = 0;
+        int lastSpace = -1;
+        while (lineEnd < text.length() && chars < kMaxCharsPerLine)
+        {
+            char c = text[lineEnd];
+            if (c == ' ')
+                lastSpace = lineEnd;
+            ++lineEnd;
+            ++chars;
+        }
+
+        if (lineEnd < text.length() && lastSpace > lineStart)
+        {
+            lineEnd = lastSpace;
+        }
+
+        String chunk = text.substring(lineStart, lineEnd);
+        chunk.trim();
+        lines[lineCount++] = chunk;
+
+        i = lineEnd;
+    }
+
+    if (lineCount <= 0)
+    {
+        lines[0] = text;
+        lineCount = 1;
+    }
+
+    int blockHeight = lineCount * kLineHeight;
+    int startY = (kScreenH - blockHeight) / 2;
+    if (startY < 0)
+        startY = 0;
+
+    for (int line = 0; line < lineCount; ++line)
+    {
+        int y = startY + line * kLineHeight;
+        if (y > (kScreenH - kLineHeight))
+            break;
+        dma_display->setCursor(kX, y);
+        dma_display->print(lines[line]);
+    }
 }
 
 static void renderPredictPage(unsigned long nowMs)
@@ -675,11 +759,16 @@ static void renderPredictPage(unsigned long nowMs)
     if (s_predictMeaningWidthPx <= 0)
         s_predictMeaningWidthPx = getTextWidth(page.meaning);
 
-    if (s_predictMeaningNeedsScroll && (nowMs - s_predictMeaningLastStepMs) >= kPredictMeaningStepMs)
+    if (s_predictMeaningNeedsScroll)
     {
-        // Lunar-style: fixed 1px per tick to avoid catch-up jumps.
-        s_predictMeaningOffsetPx -= 1;
-        s_predictMeaningLastStepMs = nowMs;
+        const unsigned long stepMs = predictMeaningStepMs();
+        const unsigned long elapsed = nowMs - s_predictMeaningLastStepMs;
+        if (elapsed >= stepMs)
+        {
+            // Keep motion visually smooth: never jump by multiple pixels in one frame.
+            s_predictMeaningOffsetPx -= 1;
+            s_predictMeaningLastStepMs = nowMs;
+        }
         if (s_predictMeaningOffsetPx <= -(s_predictMeaningWidthPx + kPredictMeaningGapPx))
         {
             s_predictMeaningCycleDone = true;
@@ -1593,12 +1682,7 @@ void drawPredictionScreen()
 
     if (log.size() < 2)
     {
-        dma_display->fillScreen(0);
-        dma_display->setFont(&Font5x7Uts);
-        dma_display->setTextSize(1);
-        dma_display->setTextColor(INFOMODAL_UNSEL);
-        dma_display->setCursor(1, 12);
-        dma_display->print("Need more data");
+        drawPredictionStatusWrapped("Need more data for prediction", INFOMODAL_UNSEL);
         s_predictSnapshot.ready = false;
         return;
     }
@@ -1621,12 +1705,7 @@ void drawPredictionScreen()
 
     if (isnan(tFirst) || isnan(tLast) || isnan(hFirst) || isnan(hLast) || isnan(pFirst) || isnan(pLast))
     {
-        dma_display->fillScreen(0);
-        dma_display->setFont(&Font5x7Uts);
-        dma_display->setTextSize(1);
-        dma_display->setTextColor(INFOMODAL_UNSEL);
-        dma_display->setCursor(1, 12);
-        dma_display->print("Sensor data low");
+        drawPredictionStatusWrapped("Sensor data low", INFOMODAL_UNSEL);
         s_predictSnapshot.ready = false;
         return;
     }
@@ -2128,7 +2207,7 @@ void tickPredictionScreen()
             shouldRender = true;
         }
         else if (s_predictMeaningNeedsScroll &&
-                 (nowMs - s_predictMeaningLastStepMs) >= kPredictMeaningStepMs)
+                 (nowMs - s_predictMeaningLastStepMs) >= predictMeaningStepMs())
         {
             shouldRender = true;
         }

@@ -1,21 +1,21 @@
 {
-  "generatedAtUtc": "2026-03-05T20:21:13.173882+00:00",
+  "generatedAtUtc": "2026-03-07T08:36:12.573931+00:00",
   "datasetCsv": "D:\\Git\\Projects\\VisionWX\\tools\\ml\\data\\outlook_dataset.csv",
   "outputHeader": "D:\\Git\\Projects\\VisionWX\\include\\ml_model_generated.h",
   "featureCount": 22,
   "classCount": 13,
-  "rowCount": 72,
-  "minClassSupport": 20,
+  "rowCount": 143,
+  "minClassSupport": 25,
   "minEnabledClasses": 2,
-  "enabledClassCount": 2,
+  "enabledClassCount": 3,
   "classSupport": {
     "RAIN POSS": 0,
-    "CLEARING": 40,
-    "UNSETTLED": 3,
-    "STEADY": 20,
-    "WARMING": 4,
-    "COOLING": 5,
-    "HUMIDIFYING": 0,
+    "CLEARING": 28,
+    "UNSETTLED": 0,
+    "STEADY": 15,
+    "WARMING": 38,
+    "COOLING": 57,
+    "HUMIDIFYING": 5,
     "DRYING": 0,
     "STORM RISK": 0,
     "FOG RISK": 0,
@@ -26,11 +26,15 @@
   "enabledClasses": [
     {
       "name": "CLEARING",
-      "support": 40
+      "support": 28
     },
     {
-      "name": "STEADY",
-      "support": 20
+      "name": "WARMING",
+      "support": 38
+    },
+    {
+      "name": "COOLING",
+      "support": 57
     }
   ],
   "disabledClasses": [
@@ -40,19 +44,15 @@
     },
     {
       "name": "UNSETTLED",
-      "support": 3
+      "support": 0
     },
     {
-      "name": "WARMING",
-      "support": 4
-    },
-    {
-      "name": "COOLING",
-      "support": 5
+      "name": "STEADY",
+      "support": 15
     },
     {
       "name": "HUMIDIFYING",
-      "support": 0
+      "support": 5
     },
     {
       "name": "DRYING",
@@ -80,8 +80,8 @@
     }
   ],
   "metrics": {
-    "accuracy": 0.9333333333333333,
-    "weightedF1": 0.9305322128851541,
-    "macroF1": 0.36910148674854554
+    "accuracy": 1.0,
+    "weightedF1": 1.0,
+    "macroF1": 0.38461538461538464
   }
 }

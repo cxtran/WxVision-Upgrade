@@ -22,18 +22,18 @@ uint16_t wifiErrorText() { return rgb(255, 80, 80); }
 
 uint16_t noaaHeaderBg(int theme)
 {
-    return (theme == 1) ? rgb(18, 18, 38) : rgb(18, 52, 96);
+    return (theme == 1) ? rgb(56, 10, 10) : rgb(92, 12, 12);
 }
 
 uint16_t noaaHeaderFgFallback(int theme)
 {
-    return (theme == 1) ? rgb(190, 190, 230) : rgb(230, 245, 255);
+    return (theme == 1) ? rgb(255, 196, 120) : rgb(255, 222, 140);
 }
 
-uint16_t noaaTitleArea() { return rgb(150, 220, 255); }
-uint16_t noaaTitleWhat() { return rgb(255, 215, 120); }
-uint16_t noaaTitleDoThis() { return rgb(120, 245, 170); }
-uint16_t noaaTitleInfo() { return rgb(130, 220, 255); }
+uint16_t noaaTitleArea() { return rgb(255, 210, 120); }
+uint16_t noaaTitleWhat() { return rgb(255, 170, 90); }
+uint16_t noaaTitleDoThis() { return rgb(255, 235, 120); }
+uint16_t noaaTitleInfo() { return rgb(255, 190, 105); }
 
 uint16_t noaaSeverityExtreme() { return rgb(255, 70, 70); }
 uint16_t noaaSeveritySevere() { return rgb(255, 155, 40); }

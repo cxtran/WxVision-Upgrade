@@ -28,6 +28,7 @@ static String formatWindDirectionLabel(double degrees);
 static String formatSampleInterval(double seconds);
 static String formatWindTimestamp(uint32_t epoch);
 static String composeWindInfoLine();
+static bool shouldProcessRapidWind();
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -46,6 +47,10 @@ CurrentConditions currentCond;
 
 bool newTempestData = false;
 bool newRapidWindData = false;
+
+static bool shouldProcessRapidWind() {
+    return isDataSourceWeatherFlow() && currentScreen == SCREEN_WIND_DIR;
+}
 
 // --------- Tempest UDP JSON Parsing ----------
 void updateTempestFromUDP(const char* jsonStr) {
@@ -87,6 +92,9 @@ void updateTempestFromUDP(const char* jsonStr) {
         updateWindInfoScroll(false);
     }
     else if (type == "rapid_wind" && doc.hasOwnProperty("ob")) {
+        if (!shouldProcessRapidWind()) {
+            return;
+        }
         JSONVar ob = doc["ob"];
         if (ob.length() == 3) {
             tempest.epoch      = (uint32_t)ob[0];
