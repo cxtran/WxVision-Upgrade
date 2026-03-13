@@ -1,5 +1,6 @@
 #include "screen_manager.h"
 
+#include <cstring>
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include "display.h"
@@ -14,9 +15,12 @@
 #include "system.h"
 #include "weather_provider.h"
 #include "noaa.h"
+#include "display_astronomy.h"
+#include "display_sky_facts.h"
 
 extern ScreenMode currentScreen;
 extern InfoScreen udpScreen;
+extern InfoScreen lightningScreen;
 extern InfoScreen forecastScreen;
 extern InfoScreen envQualityScreen;
 extern InfoScreen currentCondScreen;
@@ -31,6 +35,13 @@ void hideAllInfoScreens();
 
 namespace
 {
+struct TemporaryHeadingAlert
+{
+    char text[40];
+    uint16_t durationMs;
+    uint32_t signature;
+};
+
 unsigned long s_lastAutoRotateMillis = 0;
 bool s_sectionHeadingActive = false;
 bool s_sectionHeadingRendered = false;
@@ -39,6 +50,65 @@ uint16_t s_sectionHeadingDurationMs = 4000;
 ScreenMode s_sectionHeadingTarget = SCREEN_CLOCK;
 const char *s_sectionHeadingTitle = nullptr;
 const char *s_sectionHeadingSubtitle = nullptr;
+
+static constexpr uint8_t kTemporaryAlertQueueCapacity = 4;
+TemporaryHeadingAlert s_temporaryAlertQueue[kTemporaryAlertQueueCapacity] = {};
+uint8_t s_temporaryAlertHead = 0;
+uint8_t s_temporaryAlertCount = 0;
+bool s_temporaryAlertActive = false;
+bool s_temporaryAlertRendered = false;
+unsigned long s_temporaryAlertStartMs = 0;
+uint16_t s_temporaryAlertDurationMs = 0;
+char s_temporaryAlertText[40] = {0};
+uint32_t s_temporaryAlertSignature = 0;
+
+bool isRotationBlocked();
+bool isAlertDuplicate(const char *text, uint32_t signature)
+{
+    if (s_temporaryAlertActive)
+    {
+        if (signature != 0 && s_temporaryAlertSignature == signature)
+            return true;
+        if (signature == 0 && strncmp(s_temporaryAlertText, text, sizeof(s_temporaryAlertText)) == 0)
+            return true;
+    }
+
+    for (uint8_t i = 0; i < s_temporaryAlertCount; ++i)
+    {
+        const uint8_t idx = static_cast<uint8_t>((s_temporaryAlertHead + i) % kTemporaryAlertQueueCapacity);
+        const TemporaryHeadingAlert &queued = s_temporaryAlertQueue[idx];
+        if (signature != 0 && queued.signature == signature)
+            return true;
+        if (signature == 0 && strncmp(queued.text, text, sizeof(queued.text)) == 0)
+            return true;
+    }
+    return false;
+}
+
+void activateTemporaryAlert(const TemporaryHeadingAlert &alert, unsigned long now)
+{
+    s_temporaryAlertActive = true;
+    s_temporaryAlertRendered = false;
+    s_temporaryAlertStartMs = now;
+    s_temporaryAlertDurationMs = alert.durationMs;
+    s_temporaryAlertSignature = alert.signature;
+    strncpy(s_temporaryAlertText, alert.text, sizeof(s_temporaryAlertText) - 1);
+    s_temporaryAlertText[sizeof(s_temporaryAlertText) - 1] = '\0';
+}
+
+bool beginNextTemporaryAlert(unsigned long now)
+{
+    if (s_temporaryAlertActive || s_sectionHeadingActive || s_temporaryAlertCount == 0 || isRotationBlocked())
+        return false;
+
+    // Alerts are displayed one at a time and deferred until section-heading
+    // navigation finishes so normal rotation flow stays predictable.
+    const TemporaryHeadingAlert alert = s_temporaryAlertQueue[s_temporaryAlertHead];
+    s_temporaryAlertHead = static_cast<uint8_t>((s_temporaryAlertHead + 1) % kTemporaryAlertQueueCapacity);
+    s_temporaryAlertCount--;
+    activateTemporaryAlert(alert, now);
+    return true;
+}
 
 bool isRotationBlocked()
 {
@@ -69,8 +139,20 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
     subtitle = nullptr;
     switch (mode)
     {
+    case SCREEN_CLOCK:
+        title = "Local Time";
+        subtitle = "Clock";
+        return true;
+    case SCREEN_OWM:
+        title = "Local Time";
+        subtitle = "Weather";
+        return true;
     case SCREEN_UDP_DATA:
         title = "Outdoor Conditions";
+        subtitle = "Tempest";
+        return true;
+    case SCREEN_LIGHTNING:
+        title = "Lightning";
         subtitle = "Tempest";
         return true;
     case SCREEN_UDP_FORECAST:
@@ -112,12 +194,22 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         title = "Weather Scene";
         subtitle = nullptr;
         return true;
+    case SCREEN_WORLD_CLOCK:
+        title = "World Time";
+        subtitle = nullptr;
+        return true;
+    case SCREEN_ASTRONOMY:
+        title = "Astronomy";
+        subtitle = "Sun & Moon";
+        return true;
+    case SCREEN_SKY_BRIEF:
+        title = "Sky Brief";
+        subtitle = "Summary";
+        return true;
     case SCREEN_LUNAR_LUCK:
         title = "Lunar Calendar";
         subtitle = "Luck";
         return true;
-    case SCREEN_OWM:
-        return false;
     default:
         return false;
     }
@@ -134,8 +226,19 @@ void enterScreen(ScreenMode mode)
     case SCREEN_WORLD_CLOCK:
         drawWorldClockScreen();
         break;
+    case SCREEN_ASTRONOMY:
+        resetAstronomyScreenState();
+        drawAstronomyScreen();
+        break;
+    case SCREEN_SKY_BRIEF:
+        resetSkyBriefScreenState();
+        drawSkyBriefScreen();
+        break;
     case SCREEN_UDP_DATA:
         showUdpScreen();
+        break;
+    case SCREEN_LIGHTNING:
+        showLightningScreen();
         break;
     case SCREEN_UDP_FORECAST:
         showForecastScreen();
@@ -221,6 +324,9 @@ void renderScreenContents(ScreenMode mode)
     case SCREEN_UDP_DATA:
         udpScreen.tick();
         break;
+    case SCREEN_LIGHTNING:
+        lightningScreen.tick();
+        break;
     case SCREEN_UDP_FORECAST:
         forecastScreen.tick();
         break;
@@ -257,6 +363,12 @@ void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_WORLD_CLOCK:
         drawWorldClockScreen();
+        break;
+    case SCREEN_ASTRONOMY:
+        drawAstronomyScreen();
+        break;
+    case SCREEN_SKY_BRIEF:
+        drawSkyBriefScreen();
         break;
     case SCREEN_LUNAR_LUCK:
         drawLunarLuckScreen();
@@ -351,6 +463,8 @@ void applyDataSourcePolicies(bool wifiConnected)
 
         if (udpScreen.isActive() || currentScreen == SCREEN_UDP_DATA)
             showUdpScreen();
+        if (lightningScreen.isActive() || currentScreen == SCREEN_LIGHTNING)
+            showLightningScreen();
         if (forecastScreen.isActive() || currentScreen == SCREEN_UDP_FORECAST)
             showForecastScreen();
         if (currentCondScreen.isActive() || currentScreen == SCREEN_CURRENT)
@@ -421,7 +535,7 @@ void transitionToScreen(ScreenMode target)
 
 void handleAutoRotate(unsigned long now)
 {
-    if (s_sectionHeadingActive)
+    if (s_sectionHeadingActive || s_temporaryAlertActive)
         return;
 
     if (autoRotate == 0)
@@ -466,9 +580,14 @@ bool serviceSectionHeading(unsigned long now)
 
 void requestSectionHeadingRerender()
 {
-    if (!s_sectionHeadingActive)
-        return;
-    s_sectionHeadingRendered = false;
+    if (s_sectionHeadingActive)
+    {
+        s_sectionHeadingRendered = false;
+    }
+    if (s_temporaryAlertActive)
+    {
+        s_temporaryAlertRendered = false;
+    }
 }
 
 bool isSectionHeadingActive()
@@ -530,4 +649,69 @@ void skipSectionHeading(unsigned long now)
     enterScreen(s_sectionHeadingTarget);
     playScreenRevealEffect(currentScreen);
     noteScreenRotation(now);
+}
+
+void queueTemporaryAlertHeading(const char *text, uint16_t durationMs, uint32_t signature)
+{
+    if (!text || !text[0])
+        return;
+    if (durationMs == 0)
+        durationMs = 2000;
+    if (isAlertDuplicate(text, signature))
+        return;
+
+    TemporaryHeadingAlert alert = {};
+    strncpy(alert.text, text, sizeof(alert.text) - 1);
+    alert.text[sizeof(alert.text) - 1] = '\0';
+    alert.durationMs = durationMs;
+    alert.signature = signature;
+
+    if (!s_temporaryAlertActive && !s_sectionHeadingActive && s_temporaryAlertCount == 0)
+    {
+        activateTemporaryAlert(alert, millis());
+        return;
+    }
+
+    if (s_temporaryAlertCount >= kTemporaryAlertQueueCapacity)
+    {
+        const uint8_t tail = static_cast<uint8_t>((s_temporaryAlertHead + s_temporaryAlertCount - 1) % kTemporaryAlertQueueCapacity);
+        s_temporaryAlertQueue[tail] = alert;
+        return;
+    }
+
+    const uint8_t insertIdx = static_cast<uint8_t>((s_temporaryAlertHead + s_temporaryAlertCount) % kTemporaryAlertQueueCapacity);
+    s_temporaryAlertQueue[insertIdx] = alert;
+    s_temporaryAlertCount++;
+}
+
+bool isTemporaryAlertActive()
+{
+    return s_temporaryAlertActive;
+}
+
+bool serviceTemporaryAlertHeading(unsigned long now)
+{
+    if (!s_temporaryAlertActive)
+    {
+        if (!beginNextTemporaryAlert(now))
+            return false;
+    }
+
+    if (!s_temporaryAlertRendered)
+    {
+        showSectionHeading(s_temporaryAlertText, nullptr, s_temporaryAlertDurationMs);
+        s_temporaryAlertRendered = true;
+    }
+
+    if (now - s_temporaryAlertStartMs >= static_cast<unsigned long>(s_temporaryAlertDurationMs))
+    {
+        s_temporaryAlertActive = false;
+        s_temporaryAlertRendered = false;
+        s_temporaryAlertText[0] = '\0';
+        s_temporaryAlertSignature = 0;
+        playScreenRevealEffect(currentScreen);
+        noteScreenRotation(now);
+        beginNextTemporaryAlert(now);
+    }
+    return true;
 }

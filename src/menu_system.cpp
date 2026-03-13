@@ -21,10 +21,10 @@ void showSystemModal()
     String labels[] = {
         "Sound Volume (0-100)",
         "Sound Profile",
-        "Set Date & Time",
+        "Date & Time",
         "Units",
         "Device Location",
-        "Show System Info",
+        "System Info",
         "WiFi Signal Test",
         "Preview Screens",
         "Learn Remote",

@@ -5,7 +5,7 @@
 #include <math.h>
 
 namespace {
-constexpr size_t kRamMaxSamples = 1000;    // keep ~3-4 days in RAM, full history on flash
+constexpr size_t kRamMaxSamples = 500;     // keep ~1.5-2 days in RAM, full history on flash
 constexpr const char *kLogPath = "/sensor_log.bin";
 std::vector<SensorSample> s_log;
 bool s_spiffsReady = false;

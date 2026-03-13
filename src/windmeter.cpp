@@ -1,6 +1,7 @@
 #include "windmeter.h"
 #include <math.h>
 #include "display.h"
+#include "ui_theme.h"
 
 extern int theme;
 
@@ -146,23 +147,15 @@ void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSp
     float drawDirDeg = fmodf(windDirDeg + 180.0f, 360.0f);
 
     const uint8_t activeR = 255, activeG = 255, activeB = 0;
-    const uint16_t highlightColor = (theme == 1)
-        ? dma_display->color565(90, 90, 150)
-        : dma_display->color565(activeR, activeG, activeB);
+    const uint16_t highlightColor = ui_theme::applyGraphicColor(dma_display->color565(activeR, activeG, activeB));
 
     uint8_t dimR = static_cast<uint8_t>(activeR * 0.2f);
     uint8_t dimG = static_cast<uint8_t>(activeG * 0.2f);
     uint8_t dimB = static_cast<uint8_t>(activeB * 0.2f);
-    const uint16_t dimColor = (theme == 1)
-        ? dma_display->color565(40, 40, 90)
-        : dma_display->color565(dimR, dimG, dimB);
+    const uint16_t dimColor = ui_theme::applyGraphicColor(dma_display->color565(dimR, dimG, dimB));
 
-    const uint16_t pixelColor = (theme == 1)
-        ? dma_display->color565(140, 140, 200)
-        : dma_display->color565(255, 100, 100);
-    const uint16_t centerColor = (theme == 1)
-        ? dma_display->color565(60, 60, 120)
-        : dma_display->color565(40, 180, 180);
+    const uint16_t pixelColor = ui_theme::applyGraphicColor(dma_display->color565(255, 100, 100));
+    const uint16_t centerColor = ui_theme::applyGraphicColor(dma_display->color565(40, 180, 180));
 
     dma_display->fillScreen(0);
 
@@ -182,9 +175,7 @@ void WindMeter::drawWindDirection(int cx, int cy, float windDirDeg, float windSp
 
     // highlight chosen spoke + arrow head pointing TO direction
     drawDirectionLine(cx, cy, nearestDir, highlightColor);
-    const uint16_t arrowColor = (theme == 1)
-        ? dma_display->color565(128, 128, 220)
-        : dma_display->color565(255, 220, 100);
+    const uint16_t arrowColor = ui_theme::applyGraphicColor(dma_display->color565(255, 220, 100));
     drawArrowHead(cx, cy, nearestDir, arrowColor);
 
     // center and moving pixel

@@ -68,6 +68,7 @@ extern String customMsg;
 extern int scrollLevel;      // <-- fixed name (was scrollingLevel)
 extern int verticalScrollLevel;
 extern bool autoBrightness;
+extern bool sceneClockEnabled;
 extern int splashDurationSec; // minimum splash display time
 extern bool themeRefreshPending;
 // --- Forecast UI (WeatherFlow) ---

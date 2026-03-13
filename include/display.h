@@ -27,6 +27,7 @@ enum ScreenMode {
     SCREEN_OWM = 0,
     SCREEN_UDP_FORECAST,
     SCREEN_UDP_DATA,
+    SCREEN_LIGHTNING,
     SCREEN_WIND_DIR, 
     SCREEN_ENV_INDEX,
     SCREEN_TEMP_HISTORY,
@@ -39,6 +40,9 @@ enum ScreenMode {
     SCREEN_HOURLY,
     SCREEN_CLOCK,
     SCREEN_WORLD_CLOCK,
+    SCREEN_ASTRONOMY,
+    SCREEN_SKY_FACTS,
+    SCREEN_SKY_BRIEF,
     SCREEN_LUNAR_VI,
     SCREEN_LUNAR_LUCK,
     SCREEN_NOAA_ALERT,
@@ -100,6 +104,9 @@ void drawClockTimeLine(const DateTime &now, bool alarmActive);
 void drawClockDateLine(const DateTime &now);
 void drawClockPulseDot(int second);
 void tickClockWorldTimeMarquee();
+void drawAstronomyScreen();
+void drawSkyFactsScreen();
+void drawSkyBriefScreen();
 void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();
@@ -119,6 +126,9 @@ ScreenMode enforceAllowedScreen(ScreenMode desired);
 ScreenMode homeScreenForDataSource();
 
 void drawConditionSceneScreen();
+void tickAstronomyScreen();
+void tickSkyFactsScreen();
+void tickSkyBriefScreen();
 void drawNoaaAlertsScreen();
 void tickNoaaAlertsScreen();
 void stepNoaaAlertsScreen(int direction);
@@ -131,6 +141,15 @@ void tickLunarLuckMarquee();
 void adjustLunarLuckSpeed(int delta);
 void resetLunarLuckSectionRotation();
 bool handleLunarLuckInput(uint32_t code);
+void handleAstronomyDownPress();
+void handleAstronomyUpPress();
+void handleAstronomySelectPress();
+void resetAstronomyScreenState();
+void resetSkyBriefScreenState();
+void handleSkyFactsDownPress();
+void handleSkyFactsUpPress();
+void handleSkyFactsSelectPress();
+void resetSkyFactsScreenState();
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);

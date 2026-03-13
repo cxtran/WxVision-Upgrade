@@ -38,7 +38,6 @@ namespace
 
     static uint32_t s_alertSig = 0;
     static size_t s_alertCountCached = 0;
-    static size_t s_alertIndex = 0;
     static uint8_t s_alertPageIndex = 0;
     static int s_alertScrollOffsetPx = 0;
     static bool s_alertEndPause = false;
@@ -89,15 +88,13 @@ namespace
     static uint32_t noaaUiSignature()
     {
         uint32_t h = 2166136261u;
-        size_t count = noaaAlertCount();
+        const size_t count = noaaAlertCount();
         h ^= static_cast<uint32_t>(count & 0xFFu);
         h *= 16777619u;
         h = hashAppend(h, noaaLastCheckHHMM());
         NwsAlert a;
-        for (size_t i = 0; i < count; ++i)
+        if (count > 0 && noaaGetAlert(0, a))
         {
-            if (!noaaGetAlert(i, a))
-                continue;
             h = hashAppend(h, a.event);
             h = hashAppend(h, a.severity);
             h = hashAppend(h, a.urgency);
@@ -812,10 +809,8 @@ namespace
             return;
         }
 
-        if (s_alertIndex >= count)
-            s_alertIndex = 0;
         NwsAlert a;
-        if (!noaaGetAlert(s_alertIndex, a))
+        if (!noaaGetAlert(0, a))
             return;
 
         AlertPage pages[5];
@@ -854,7 +849,7 @@ namespace
     {
         resetAlertPageState(nowMs);
 
-        size_t count = noaaAlertCount();
+        const size_t count = noaaAlertCount();
         if (count == 0)
         {
             s_alertPageIndex = static_cast<uint8_t>((s_alertPageIndex + 1) % 2);
@@ -866,11 +861,7 @@ namespace
         if (s_alertPageIndex >= 5)
         {
             s_alertPageIndex = 0;
-            if (count > 0)
-            {
-                s_alertIndex = (s_alertIndex + 1) % count;
-                rebuildAlertPagesForCurrentAlert();
-            }
+            rebuildAlertPagesForCurrentAlert();
         }
     }
 
@@ -895,8 +886,6 @@ namespace
             return;
         }
 
-        if (s_alertIndex >= count)
-            s_alertIndex = 0;
         rebuildAlertPagesForCurrentAlert();
     }
 
@@ -1077,8 +1066,6 @@ void drawNoaaAlertsScreen()
     {
         s_alertSig = sig;
         s_alertCountCached = alertCount;
-        if (alertCount > 0 && s_alertIndex >= alertCount)
-            s_alertIndex = 0;
         resetAlertPager(nowMs);
     }
 
@@ -1209,17 +1196,6 @@ bool stepNoaaAlertSelection(int direction)
     if (!dma_display)
         return false;
 
-    size_t count = noaaAlertCount();
-    if (count <= 1)
-        return false;
-
-    int next = static_cast<int>(s_alertIndex) + ((direction >= 0) ? 1 : -1);
-    if (next < 0 || next >= static_cast<int>(count))
-        return false;
-
-    s_alertIndex = static_cast<size_t>(next);
-
-    resetAlertPager(millis());
-    renderNoaaPage();
-    return true;
+    (void)direction;
+    return false;
 }

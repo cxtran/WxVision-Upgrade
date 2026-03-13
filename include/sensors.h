@@ -14,6 +14,9 @@ extern float aht20_temp;
 extern float aht20_hum;
 extern float bmp280_temp;
 extern float bmp280_pressure;
+extern bool scd40Ready;
+extern bool aht20Ready;
+extern bool bmp280Ready;
 
 extern bool newAirQualityData;
 extern bool newAHT20_BMP280Data;

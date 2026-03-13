@@ -76,7 +76,8 @@ namespace
             combined += field;
         };
 
-        appendField(formatConditionSceneTimeTagLocal());
+        if (!sceneClockEnabled)
+            appendField(formatConditionSceneTimeTagLocal());
 
         bool feelsAppended = false;
 

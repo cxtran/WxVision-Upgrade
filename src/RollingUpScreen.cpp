@@ -3,6 +3,7 @@
 #include "Font5x7Uts.h"
 #include "fonts/verdanab8pt7b.h"
 #include "settings.h" // for verticalScrollSpeed default
+#include "ui_theme.h"
 
 extern int getTextWidth(const char *text);
 
@@ -526,7 +527,7 @@ void RollingUpScreen::draw(Adafruit_GFX &display, int x, int y, int height, uint
 
     const bool mono = (theme == 1);
     // Use a consistent mono accent when in mono theme; otherwise honor caller color
-    const uint16_t themeColor = mono ? 0x6B6D /* soft blue-grey */ : color;
+    const uint16_t themeColor = mono ? ui_theme::applyGraphicColor(color) : color;
 
     int h = (height > 0) ? height : _defaultHeight;
     if (h <= 0) return;
@@ -803,6 +804,8 @@ void RollingUpScreen::draw(Adafruit_GFX &display, int x, int y, int height, uint
     drawPass(startY);
     // Second pass follows after totalHeight + gap to keep continuity with minimal blank time
     drawPass(startY + direction * (totalHeight + gap));
+
+    ui_theme::applyGraphicThemeToBuffer(canvas.getBuffer(), static_cast<size_t>(_width) * static_cast<size_t>(h));
 
     // Blit the body canvas onto the display; header remains untouched.
     display.drawRGBBitmap(x, y, canvas.getBuffer(), _width, h);

@@ -22,6 +22,16 @@
 
 enum InfoFieldType { InfoLabel, InfoNumber, InfoChooser, InfoText, InfoButton };
 
+struct NumberFieldConfig {
+    int step = 1;
+    int minValue = 0;
+    int maxValue = 0;
+    bool hasBounds = false;
+    bool wrap = false;
+    bool accelerateOnHold = false;
+    bool useDateDayRange = false;
+};
+
 class InfoModal {
 public:
     static const int MAX_LINES = 16;
@@ -50,6 +60,8 @@ public:
     void setTextRefs(char* textRefsIn[], int count);  // ✅ fixed: uses char* not const char*
     void setButtons(const String btns[], int btnCount);
     void setCallback(const std::function<void(bool, int)>& cb);
+    void clearNumberFieldConfigs();
+    void setNumberFieldConfig(int lineIndex, const NumberFieldConfig& config);
     void setShowNumberArrows(bool enable);
     void setShowChooserArrows(bool enable);
     void setShowForwardArrow(bool enable);
@@ -81,6 +93,9 @@ private:
     void draw();
     void drawHeader();
     String getChooserLabel(int idx);
+    void resetHeldAdjustState();
+    bool applyConfiguredNumberEdit(int lineIndex, int direction);
+    int adjustedStepForHold(const NumberFieldConfig& config, int direction) const;
 
     String modalTitle;
     String lines[MAX_LINES];
@@ -89,6 +104,7 @@ private:
 
     // Number fields
     int* intRefs[MAX_LINES];
+    NumberFieldConfig numberFieldConfigs[MAX_LINES];
 
     // Chooser fields
     int* chooserRefs[MAX_LINES];
@@ -130,5 +146,9 @@ private:
     bool scrollPaused = false;           // --- PATCH
     int forwardArrowOnlyIndex = -1;
     bool keepOpenOnSelect = false;
+    uint32_t heldAdjustKey = 0;
+    unsigned long heldAdjustStartMs = 0;
+    unsigned long heldAdjustLastMs = 0;
+    int heldAdjustRepeatCount = 0;
 
 };

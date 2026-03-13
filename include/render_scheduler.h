@@ -8,6 +8,12 @@ enum class RenderSlot : uint8_t
     ClockPulse,
     ClockMarquee,
     WorldClockMain,
+    AstronomyMain,
+    AstronomyTick,
+    SkyFactsMain,
+    SkyFactsTick,
+    SkyBriefMain,
+    SkyBriefTick,
     LunarViMain,
     LunarViMarquee,
     LunarLuckMain,
@@ -38,6 +44,7 @@ void noteFrameDraw(unsigned long now);
 void noteFullClear();
 
 constexpr unsigned long kRenderMarqueeMs = 40UL;     // 25 FPS
+constexpr unsigned long kRenderSkySummaryMs = 8UL;   // higher cadence for smoother summary marquee motion
 constexpr unsigned long kRenderWorldClockMs = 40UL;  // 25 FPS for long-run stability
 constexpr unsigned long kRenderChartMs = 15000UL;    // preserve existing behavior
 constexpr unsigned long kRenderConditionMs = 5000UL; // preserve existing behavior

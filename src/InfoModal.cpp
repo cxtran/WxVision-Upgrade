@@ -14,6 +14,7 @@
 #include "system.h"
 #include "default_values.h"
 #include "ui_theme.h"
+#include <limits.h>
 
 extern InfoModal alarmModal;
 extern InfoModal setupPromptModal;
@@ -30,6 +31,7 @@ extern bool reset_Time_and_Date_Display;
 extern int dtTimezoneIndex;
 extern int dtManualOffset;
 extern int dtAutoDst;
+extern int dtYear, dtMonth, dtDay, dtHour, dtMinute, dtSecond;
 extern void getTimeFromRTC();
 extern void setSystemTimeFromDateTime(const DateTime &dt);
 
@@ -117,6 +119,7 @@ InfoModal::InfoModal(const String &title)
     : modalTitle(title)
 {
     memset(intRefs, 0, sizeof(intRefs));
+    memset(numberFieldConfigs, 0, sizeof(numberFieldConfigs));
     memset(chooserRefs, 0, sizeof(chooserRefs));
     memset(chooserOptions, 0, sizeof(chooserOptions));
     memset(chooserOptionCounts, 0, sizeof(chooserOptionCounts));
@@ -129,6 +132,7 @@ InfoModal::InfoModal(const String &title)
     btnCount = 0;
     btnSel = 0;
     inButtonBar = false;
+    clearNumberFieldConfigs();
 }
 
 void InfoModal::setLines(const String _lines[], const InfoFieldType _types[], int count)
@@ -146,6 +150,7 @@ void InfoModal::setLines(const String _lines[], const InfoFieldType _types[], in
 
         // Reset
         intRefs[i] = nullptr;
+        numberFieldConfigs[i] = NumberFieldConfig{};
         chooserRefs[i] = nullptr;
         chooserOptions[i] = nullptr;
         chooserOptionCounts[i] = 0;
@@ -180,6 +185,7 @@ void InfoModal::setLines(const String _lines[], const InfoFieldType _types[], in
         }
     }
 }
+
 void InfoModal::setValueRefs(
     int *intRefs[], int refCount,
     int *chooserRefs[], int chooserCount,
@@ -272,6 +278,21 @@ void InfoModal::setButtons(const String btns[], int count)
 
 void InfoModal::setCallback(const std::function<void(bool, int)> &cb) { callback = cb; }
 
+void InfoModal::clearNumberFieldConfigs()
+{
+    for (int i = 0; i < MAX_LINES; ++i)
+    {
+        numberFieldConfigs[i] = NumberFieldConfig{};
+    }
+}
+
+void InfoModal::setNumberFieldConfig(int lineIndex, const NumberFieldConfig &config)
+{
+    if (lineIndex < 0 || lineIndex >= MAX_LINES)
+        return;
+    numberFieldConfigs[lineIndex] = config;
+}
+
 void InfoModal::setShowNumberArrows(bool enable)
 {
     showNumberArrows = enable;
@@ -310,6 +331,7 @@ void InfoModal::show()
     editIndex = -1;
     btnSel = 0;
     inButtonBar = (this == &setupPromptModal && btnCount > 0);
+    resetHeldAdjustState();
     active = true;
     draw();
 }
@@ -320,7 +342,11 @@ void InfoModal::redraw()
     draw();
 }
 
-void InfoModal::hide() { active = false; }
+void InfoModal::hide()
+{
+    active = false;
+    resetHeldAdjustState();
+}
 
 bool InfoModal::isActive() const { return active; }
 
@@ -726,6 +752,7 @@ void InfoModal::setSelIndex(int idx)
     int visibleRows = (btnCount > 0) ? DATA_ROWS : DATA_ROWS_FULL;
     if (selIndex >= scrollY + visibleRows)
         scrollY = selIndex - visibleRows + 1;
+    resetHeldAdjustState();
 }
 
 void InfoModal::tick()
@@ -869,6 +896,124 @@ void InfoModal::resetState()
     atClose = false;
     inEdit = false;
     editIndex = -1;
+    resetHeldAdjustState();
+}
+
+void InfoModal::resetHeldAdjustState()
+{
+    heldAdjustKey = 0;
+    heldAdjustStartMs = 0;
+    heldAdjustLastMs = 0;
+    heldAdjustRepeatCount = 0;
+}
+
+int InfoModal::adjustedStepForHold(const NumberFieldConfig &config, int direction) const
+{
+    if (config.step <= 0)
+        return 1;
+
+    const uint32_t adjustKey = (direction < 0) ? IR_LEFT : IR_RIGHT;
+    unsigned long now = millis();
+    bool continuingHold = (heldAdjustKey == adjustKey) &&
+                          (heldAdjustLastMs > 0) &&
+                          ((now - heldAdjustLastMs) <= 450UL);
+
+    if (!continuingHold)
+    {
+        return config.step;
+    }
+
+    unsigned long heldMs = (heldAdjustStartMs > 0) ? (now - heldAdjustStartMs) : 0;
+    int multiplier = 1;
+    if (config.accelerateOnHold)
+    {
+        if (heldAdjustRepeatCount >= 8 || heldMs >= 1200UL)
+            multiplier = 5;
+        else if (heldAdjustRepeatCount >= 4 || heldMs >= 600UL)
+            multiplier = 2;
+    }
+    return config.step * multiplier;
+}
+
+bool InfoModal::applyConfiguredNumberEdit(int lineIndex, int direction)
+{
+    if (lineIndex < 0 || lineIndex >= MAX_LINES || direction == 0)
+        return false;
+
+    int nidx = numberFieldIndices[lineIndex];
+    if (nidx < 0 || nidx >= MAX_LINES || !intRefs[nidx])
+        return false;
+
+    NumberFieldConfig config = numberFieldConfigs[lineIndex];
+    if (config.step <= 0)
+        config.step = 1;
+
+    int *ptr = intRefs[nidx];
+    int step = adjustedStepForHold(config, direction);
+    int candidate = *ptr + (direction < 0 ? -step : step);
+
+    if (config.useDateDayRange)
+    {
+        int maxDay = daysInMonthForYearMonth(dtYear, dtMonth);
+        if (config.wrap)
+        {
+            if (candidate < 1)
+                candidate = maxDay;
+            else if (candidate > maxDay)
+                candidate = 1;
+        }
+        else
+        {
+            candidate = constrain(candidate, 1, maxDay);
+        }
+    }
+    else if (config.hasBounds)
+    {
+        if (config.wrap)
+        {
+            if (candidate < config.minValue)
+                candidate = config.maxValue;
+            else if (candidate > config.maxValue)
+                candidate = config.minValue;
+        }
+        else
+        {
+            candidate = constrain(candidate, config.minValue, config.maxValue);
+        }
+    }
+
+    *ptr = candidate;
+
+    if (this == &dateModal)
+    {
+        if (lines[lineIndex] == "Year")
+        {
+            dtDay = constrain(dtDay, 1, daysInMonthForYearMonth(dtYear, dtMonth));
+        }
+        else if (lines[lineIndex] == "Month")
+        {
+            dtDay = constrain(dtDay, 1, daysInMonthForYearMonth(dtYear, dtMonth));
+        }
+    }
+
+    unsigned long now = millis();
+    const uint32_t adjustKey = (direction < 0) ? IR_LEFT : IR_RIGHT;
+    bool continuingHold = (heldAdjustKey == adjustKey) &&
+                          (heldAdjustLastMs > 0) &&
+                          ((now - heldAdjustLastMs) <= 450UL);
+    if (!continuingHold)
+    {
+        heldAdjustKey = adjustKey;
+        heldAdjustStartMs = now;
+        heldAdjustRepeatCount = 0;
+    }
+    else
+    {
+        ++heldAdjustRepeatCount;
+    }
+    heldAdjustLastMs = now;
+
+    return true;
 }
 
 void InfoModal::handleIR(uint32_t code)
@@ -1049,6 +1194,7 @@ void InfoModal::handleIR(uint32_t code)
 
     if (code == IR_UP)
     {
+        resetHeldAdjustState();
         scrollPaused = false;
         scrollPauseTime = 0;
         if (atClose)
@@ -1070,6 +1216,7 @@ void InfoModal::handleIR(uint32_t code)
     }
     else if (code == IR_DOWN)
     {
+        resetHeldAdjustState();
         scrollPaused = false;
         scrollPauseTime = 0;
         if (atClose)
@@ -1104,50 +1251,45 @@ void InfoModal::handleIR(uint32_t code)
         scrollPauseTime = millis(); // --- PATCH
 
         InfoFieldType type = fieldTypes[selIndex];
+        int direction = (code == IR_LEFT) ? -1 : 1;
 
         if (type == InfoNumber)
         {
+            bool handledByConfig = applyConfiguredNumberEdit(selIndex, direction);
             int nidx = numberFieldIndices[selIndex];
-            if (nidx >= 0 && intRefs[nidx])
+            if ((handledByConfig || (nidx >= 0 && intRefs[nidx])))
             {
-                int *ptr = intRefs[nidx];
+                int *ptr = (nidx >= 0 && nidx < MAX_LINES) ? intRefs[nidx] : nullptr;
                 const String &label = lines[selIndex];
-                int step = 1;
-                if (label == "Day Theme Start" || label == "Night Theme Start")
+                if (!handledByConfig && ptr)
                 {
-                    step = 5;
-                }
-                if (this == &dateModal && selIndex == 6)
-                {
-                    step = 15;
-                }
-
-                if (code == IR_LEFT)
-                    (*ptr) -= step;
-                else
-                    (*ptr) += step;
-
-                if (this == &dateModal && selIndex == 6)
-                {
-                    int remainder = *ptr % 15;
-                    if (remainder != 0)
+                    int step = 1;
+                    if (label == "Day Theme Start" || label == "Night Theme Start")
                     {
-                        if (remainder < 0)
-                            remainder += 15;
-                        *ptr -= remainder;
+                        step = 5;
                     }
+
+                    if (code == IR_LEFT)
+                        (*ptr) -= step;
+                    else
+                        (*ptr) += step;
                 }
 
                 // --- Date/time field constraints ---
 
-                if (this == &dateModal)
+                if (!ptr)
+                {
+                    return;
+                }
+
+                if (!handledByConfig && this == &dateModal)
                 {
                     if (label == "Year")
-                        *ptr = constrain(*ptr, 2000, 2099);
+                        *ptr = constrain(*ptr, 2020, 2099);
                     else if (label == "Month")
                         *ptr = constrain(*ptr, 1, 12);
                     else if (label == "Day")
-                        *ptr = constrain(*ptr, 1, 31);
+                        *ptr = constrain(*ptr, 1, daysInMonthForYearMonth(dtYear, dtMonth));
                     else if (label == "Hour")
                         *ptr = constrain(*ptr, 0, 23);
                     else if (label == "Minute")
@@ -1251,6 +1393,7 @@ void InfoModal::handleIR(uint32_t code)
 
         else if (type == InfoChooser)
         {
+            resetHeldAdjustState();
             int cidx = chooserFieldIndices[selIndex];
             if (cidx >= 0 && chooserRefs[cidx])
             {
@@ -1333,8 +1476,8 @@ void InfoModal::handleIR(uint32_t code)
                         else
                         {
                             selectTimezoneByIndex(dtTimezoneIndex);
-                            setTimezoneAutoDst(dtAutoDst != 0);
                             dtManualOffset = tzStandardOffset;
+                            dtAutoDst = tzAutoDst ? 1 : 0;
                         }
                         saveDateTimeSettings();
                         DateTime utcNow;
@@ -1444,6 +1587,8 @@ void InfoModal::handleIR(uint32_t code)
         }
         return;
     }
+
+    resetHeldAdjustState();
 
     if (code == IR_OK)
     {

@@ -4,6 +4,9 @@
 #include "display_scene.h"
 #include "datetimesettings.h"
 #include "settings.h"
+#include "ui_theme.h"
+
+#define SCENE_RGB(r, g, b) ui_theme::applyGraphicColor(dma_display->color565((r), (g), (b)))
 
 uint16_t scaleColor565(uint16_t color, float intensity)
 {
@@ -225,9 +228,9 @@ static void clearConditionSceneArea()
 static void fillDayBackground()
 {
     // Pixel-art style (banded) sky like the reference image.
-    uint16_t top = dma_display->color565(10, 120, 255);
-    uint16_t mid = dma_display->color565(40, 165, 255);
-    uint16_t bot = dma_display->color565(85, 205, 255);
+    uint16_t top = SCENE_RGB(10, 120, 255);
+    uint16_t mid = SCENE_RGB(40, 165, 255);
+    uint16_t bot = SCENE_RGB(85, 205, 255);
     for (int y = 0; y < SCENE_H; ++y)
     {
         uint16_t c = (y < 8) ? top : (y < 16 ? mid : bot);
@@ -238,16 +241,16 @@ static void fillDayBackground()
 static void fillNightBackground(int starShiftX = 0)
 {
     // Deep blue + stars like the reference image.
-    uint16_t top = dma_display->color565(2, 6, 28);
-    uint16_t mid = dma_display->color565(4, 10, 40);
-    uint16_t bot = dma_display->color565(7, 16, 58);
+    uint16_t top = SCENE_RGB(2, 6, 28);
+    uint16_t mid = SCENE_RGB(4, 10, 40);
+    uint16_t bot = SCENE_RGB(7, 16, 58);
     for (int y = 0; y < SCENE_H; ++y)
     {
         uint16_t c = (y < 8) ? top : (y < 16 ? mid : bot);
         dma_display->drawFastHLine(0, y, SCENE_W, c);
     }
 
-    uint16_t star = dma_display->color565(230, 240, 255);
+    uint16_t star = SCENE_RGB(230, 240, 255);
     // Fixed starfield (no flicker)
     const uint8_t stars[][2] = {
         {6, 3},  {13, 6}, {18, 2}, {28, 5}, {36, 3}, {44, 7},
@@ -273,9 +276,9 @@ static void fillNightBackground(int starShiftX = 0)
 static void drawPixelSun(int cx, int cy)
 {
     // Compact pixel sun with orange edge + yellow center
-    uint16_t edge = dma_display->color565(255, 170, 0);
-    uint16_t fill = dma_display->color565(255, 235, 70);
-    uint16_t hi = dma_display->color565(255, 255, 150);
+    uint16_t edge = SCENE_RGB(255, 170, 0);
+    uint16_t fill = SCENE_RGB(255, 235, 70);
+    uint16_t hi = SCENE_RGB(255, 255, 150);
     const int r = 6;
     for (int dy = -r; dy <= r; ++dy)
     {
@@ -308,9 +311,9 @@ static void drawPixelSun(int cx, int cy)
 static void drawPixelMoon(int cx, int cy)
 {
     // Crescent moon (filled disc minus offset disc), tuned for pixel art.
-    uint16_t moon = dma_display->color565(255, 235, 95);
-    uint16_t rim = dma_display->color565(255, 210, 40);
-    uint16_t skyCut = dma_display->color565(4, 10, 40);
+    uint16_t moon = SCENE_RGB(255, 235, 95);
+    uint16_t rim = SCENE_RGB(255, 210, 40);
+    uint16_t skyCut = SCENE_RGB(4, 10, 40);
     const int r = 7;
     for (int dy = -r; dy <= r; ++dy)
     {
@@ -347,10 +350,10 @@ static void drawPixelMoon(int cx, int cy)
 static void drawPixelCloud(int x, int y, bool night)
 {
     // Alternate style: smoother silhouette cloud using scanline spans.
-    uint16_t outline = night ? dma_display->color565(92, 112, 150) : dma_display->color565(110, 132, 168);
-    uint16_t fill = night ? dma_display->color565(176, 192, 220) : dma_display->color565(236, 243, 250);
-    uint16_t shade = night ? dma_display->color565(128, 146, 184) : dma_display->color565(192, 208, 226);
-    uint16_t hi = night ? dma_display->color565(214, 226, 246) : dma_display->color565(254, 255, 255);
+    uint16_t outline = night ? SCENE_RGB(92, 112, 150) : SCENE_RGB(110, 132, 168);
+    uint16_t fill = night ? SCENE_RGB(176, 192, 220) : SCENE_RGB(236, 243, 250);
+    uint16_t shade = night ? SCENE_RGB(128, 146, 184) : SCENE_RGB(192, 208, 226);
+    uint16_t hi = night ? SCENE_RGB(214, 226, 246) : SCENE_RGB(254, 255, 255);
 
     // left edge offset + run length for each row (about 24x11 cloud)
     const uint8_t spans[][2] = {
@@ -394,24 +397,32 @@ static void drawPixelCloud(int x, int y, bool night)
 
 static void drawPixelRain(int x, int y, int w, bool night)
 {
-    uint16_t drop = night ? dma_display->color565(80, 170, 255) : dma_display->color565(0, 200, 255);
-    uint16_t drop2 = night ? dma_display->color565(40, 120, 220) : dma_display->color565(0, 140, 220);
-    int phase = (millis() / 130) % 6;
-    for (int col = x; col < x + w; col += 4)
+    uint16_t drop = night ? SCENE_RGB(80, 170, 255) : SCENE_RGB(0, 200, 255);
+    uint16_t drop2 = night ? SCENE_RGB(40, 120, 220) : SCENE_RGB(0, 140, 220);
+    const int columnSpacing = 5;
+    const int rowSpacing = 4;
+    const int laneCount = 3;
+    const int patternHeight = rowSpacing * laneCount;
+    const int phase = (millis() / 130) % patternHeight;
+
+    for (int col = x; col < x + w; col += columnSpacing)
     {
-        for (int i = 0; i < 6; ++i)
+        const int laneShift = ((col - x) / columnSpacing) % laneCount;
+        for (int lane = 0; lane < laneCount; ++lane)
         {
-            int yy = y + ((i * 3 + (col / 4) + phase) % 12);
-            if (yy >= SCENE_H - 1) continue;
-            dma_display->drawPixel(col, yy, (i % 2 == 0) ? drop : drop2);
-            dma_display->drawPixel(col - 1, yy + 1, (i % 2 == 0) ? drop : drop2);
+            const uint16_t color = ((lane + laneShift) % 2 == 0) ? drop : drop2;
+            int yy = y + ((lane * rowSpacing + laneShift + phase) % patternHeight);
+            if (yy >= SCENE_H - 1)
+                continue;
+            dma_display->drawPixel(col, yy, color);
+            dma_display->drawPixel(col - 1, yy + 1, color);
         }
     }
 }
 
 static void drawPixelSnow(int x, int y, int w, bool night)
 {
-    uint16_t snow = night ? dma_display->color565(200, 220, 255) : dma_display->color565(240, 255, 255);
+    uint16_t snow = night ? SCENE_RGB(200, 220, 255) : SCENE_RGB(240, 255, 255);
     int phase = (millis() / 250) % 8;
     for (int col = x; col < x + w; col += 7)
     {
@@ -430,8 +441,8 @@ static void drawPixelSnow(int x, int y, int w, bool night)
 
 static void drawPixelBolt(int x, int y)
 {
-    uint16_t bolt = dma_display->color565(255, 210, 40);
-    uint16_t hi = dma_display->color565(255, 255, 180);
+    uint16_t bolt = SCENE_RGB(255, 210, 40);
+    uint16_t hi = SCENE_RGB(255, 255, 180);
     // thick zig-zag bolt
     dma_display->drawLine(x, y, x - 4, y + 7, bolt);
     dma_display->drawLine(x + 1, y, x - 3, y + 7, bolt);
@@ -503,7 +514,7 @@ static void drawSunWithGlow(int cx, int cy, int r, uint16_t sunColor)
     uint16_t glow = scaleColor565(sunColor, 0.45f);
     dma_display->fillCircle(cx, cy, r + 2, glow);
     dma_display->fillCircle(cx, cy, r, sunColor);
-    dma_display->fillCircle(cx, cy, r - 3, dma_display->color565(255, 255, 160));
+    dma_display->fillCircle(cx, cy, r - 3, SCENE_RGB(255, 255, 160));
     dma_display->drawCircle(cx, cy, r, scaleColor565(sunColor, 0.75f));
 
     uint16_t ray = scaleColor565(sunColor, 0.80f);
@@ -545,8 +556,8 @@ static void drawCloudIconLarge(int x, int y, uint16_t cLight, uint16_t cMid, uin
 static void drawRainStreaks(int x0, int y0, int w, int yMax)
 {
     int phase = (millis() / 120) % 6;
-    uint16_t dropA = dma_display->color565(170, 245, 255);
-    uint16_t dropB = dma_display->color565(80, 170, 230);
+    uint16_t dropA = SCENE_RGB(170, 245, 255);
+    uint16_t dropB = SCENE_RGB(80, 170, 230);
     for (int x = x0; x < x0 + w; x += 4)
     {
         for (int i = 0; i < 10; ++i)
@@ -633,9 +644,9 @@ static void drawWeatherSceneOvercast()
     clearConditionSceneArea();
     // Flat muted sky for overcast.
     const uint16_t overcastSky[] = {
-        dma_display->color565(118, 138, 156),
-        dma_display->color565(130, 148, 165),
-        dma_display->color565(142, 158, 174)
+        SCENE_RGB(118, 138, 156),
+        SCENE_RGB(130, 148, 165),
+        SCENE_RGB(142, 158, 174)
     };
     drawSceneSkyGradient(overcastSky, 3);
     drawPixelCloud(19, 7, false);
@@ -646,9 +657,9 @@ static void drawWeatherSceneOvercastNight()
 {
     clearConditionSceneArea();
     const uint16_t overcastNight[] = {
-        dma_display->color565(12, 18, 34),
-        dma_display->color565(16, 24, 42),
-        dma_display->color565(20, 30, 50)
+        SCENE_RGB(12, 18, 34),
+        SCENE_RGB(16, 24, 42),
+        SCENE_RGB(20, 30, 50)
     };
     drawSceneSkyGradient(overcastNight, 3);
     drawPixelCloud(19, 7, true);
@@ -660,7 +671,7 @@ static void drawWeatherSceneFog()
     clearConditionSceneArea();
     fillDayBackground();
     drawPixelCloud(24, 8, false);
-    const uint16_t fog = dma_display->color565(205, 218, 230);
+    const uint16_t fog = SCENE_RGB(205, 218, 230);
     dma_display->drawFastHLine(16, 15, 44, fog);
     dma_display->drawFastHLine(14, 18, 46, fog);
     dma_display->drawFastHLine(18, 21, 40, fog);
@@ -672,7 +683,7 @@ static void drawWeatherSceneFogNight()
     fillNightBackground();
     drawPixelMoon(50, 8);
     drawPixelCloud(24, 8, true);
-    const uint16_t fog = dma_display->color565(145, 165, 195);
+    const uint16_t fog = SCENE_RGB(145, 165, 195);
     dma_display->drawFastHLine(16, 15, 44, fog);
     dma_display->drawFastHLine(14, 18, 46, fog);
     dma_display->drawFastHLine(18, 21, 40, fog);
@@ -683,7 +694,7 @@ static void drawWeatherSceneWindy()
     clearConditionSceneArea();
     fillDayBackground();
     drawPixelCloud(24, 8, false);
-    const uint16_t gust = dma_display->color565(235, 245, 255);
+    const uint16_t gust = SCENE_RGB(235, 245, 255);
     dma_display->drawLine(18, 16, 36, 16, gust);
     dma_display->drawLine(14, 19, 42, 19, gust);
     dma_display->drawLine(20, 22, 46, 22, gust);
@@ -695,7 +706,7 @@ static void drawWeatherSceneWindyNight()
     fillNightBackground();
     drawPixelMoon(50, 8);
     drawPixelCloud(24, 8, true);
-    const uint16_t gust = dma_display->color565(170, 196, 230);
+    const uint16_t gust = SCENE_RGB(170, 196, 230);
     dma_display->drawLine(18, 16, 36, 16, gust);
     dma_display->drawLine(14, 19, 42, 19, gust);
     dma_display->drawLine(20, 22, 46, 22, gust);
@@ -708,7 +719,7 @@ static void drawWeatherSceneRain()
     drawPixelCloud(22, 6, false);
     drawPixelRain(20, 14, 40, false);
     drawPixelRain(4, 14, 12, false);   // left side band
-    drawPixelRain(52, 15, 10, false);  // right side band
+    drawPixelRain(51, 15, 13, false);  // right side band reaches lower-right corner
 }
 
 static void drawWeatherSceneRainNight()
@@ -719,7 +730,7 @@ static void drawWeatherSceneRainNight()
     drawPixelCloud(22, 7, true);
     drawPixelRain(20, 14, 40, true);
     drawPixelRain(4, 14, 12, true);    // left side band
-    drawPixelRain(52, 15, 10, true);   // right side band
+    drawPixelRain(51, 15, 13, true);   // right side band reaches lower-right corner
 }
 
 static void drawWeatherSceneThunderstorm()
@@ -730,7 +741,7 @@ static void drawWeatherSceneThunderstorm()
     drawPixelBolt(42, 5);
     drawPixelRain(20, 14, 40, false);
     drawPixelRain(4, 14, 12, false);   // left side band
-    drawPixelRain(52, 15, 10, false);  // right side band
+    drawPixelRain(51, 15, 13, false);  // right side band reaches lower-right corner
 }
 
 static void drawWeatherSceneThunderstormNight()
@@ -742,7 +753,7 @@ static void drawWeatherSceneThunderstormNight()
     drawPixelBolt(42, 5);
     drawPixelRain(20, 14, 40, true);
     drawPixelRain(4, 14, 12, true);    // left side band
-    drawPixelRain(52, 15, 10, true);   // right side band
+    drawPixelRain(51, 15, 13, true);   // right side band reaches lower-right corner
 }
 
 static void drawWeatherSceneSnow()
@@ -767,7 +778,7 @@ static void drawWeatherSceneClearNight()
     clearConditionSceneArea();
     fillNightBackground();
     // Clear Night: moon + stars only (like reference)
-    drawPixelMoon(54, 9);
+    drawPixelMoon(50, 9);
 }
 
 struct WeatherSceneRenderer
@@ -949,45 +960,45 @@ uint16_t weatherSceneAccentColor(WeatherSceneKind kind)
     switch (kind)
     {
     case WeatherSceneKind::Sunny:
-        return dma_display->color565(235, 185, 60);
+        return ui_theme::applyGraphicColor(dma_display->color565(235, 185, 60));
     case WeatherSceneKind::SunnyNight:
-        return dma_display->color565(180, 190, 240);
+        return ui_theme::applyGraphicColor(dma_display->color565(180, 190, 240));
     case WeatherSceneKind::PartlyCloudy:
-        return dma_display->color565(210, 205, 150);
+        return ui_theme::applyGraphicColor(dma_display->color565(210, 205, 150));
     case WeatherSceneKind::PartlyCloudyNight:
-        return dma_display->color565(170, 185, 220);
+        return ui_theme::applyGraphicColor(dma_display->color565(170, 185, 220));
     case WeatherSceneKind::Cloudy:
-        return dma_display->color565(190, 200, 220);
+        return ui_theme::applyGraphicColor(dma_display->color565(190, 200, 220));
     case WeatherSceneKind::CloudyNight:
-        return dma_display->color565(150, 170, 210);
+        return ui_theme::applyGraphicColor(dma_display->color565(150, 170, 210));
     case WeatherSceneKind::Overcast:
-        return dma_display->color565(176, 188, 202);
+        return ui_theme::applyGraphicColor(dma_display->color565(176, 188, 202));
     case WeatherSceneKind::OvercastNight:
-        return dma_display->color565(126, 144, 172);
+        return ui_theme::applyGraphicColor(dma_display->color565(126, 144, 172));
     case WeatherSceneKind::Fog:
-        return dma_display->color565(205, 210, 220);
+        return ui_theme::applyGraphicColor(dma_display->color565(205, 210, 220));
     case WeatherSceneKind::FogNight:
-        return dma_display->color565(145, 165, 190);
+        return ui_theme::applyGraphicColor(dma_display->color565(145, 165, 190));
     case WeatherSceneKind::Windy:
-        return dma_display->color565(180, 210, 230);
+        return ui_theme::applyGraphicColor(dma_display->color565(180, 210, 230));
     case WeatherSceneKind::WindyNight:
-        return dma_display->color565(135, 175, 215);
+        return ui_theme::applyGraphicColor(dma_display->color565(135, 175, 215));
     case WeatherSceneKind::Rain:
-        return dma_display->color565(120, 170, 210);
+        return ui_theme::applyGraphicColor(dma_display->color565(120, 170, 210));
     case WeatherSceneKind::RainNight:
-        return dma_display->color565(100, 150, 200);
+        return ui_theme::applyGraphicColor(dma_display->color565(100, 150, 200));
     case WeatherSceneKind::Thunderstorm:
-        return dma_display->color565(220, 180, 50);
+        return ui_theme::applyGraphicColor(dma_display->color565(220, 180, 50));
     case WeatherSceneKind::ThunderstormNight:
-        return dma_display->color565(200, 160, 70);
+        return ui_theme::applyGraphicColor(dma_display->color565(200, 160, 70));
     case WeatherSceneKind::Snow:
-        return dma_display->color565(210, 220, 235);
+        return ui_theme::applyGraphicColor(dma_display->color565(210, 220, 235));
     case WeatherSceneKind::SnowNight:
-        return dma_display->color565(180, 190, 220);
+        return ui_theme::applyGraphicColor(dma_display->color565(180, 190, 220));
     case WeatherSceneKind::ClearNight:
-        return dma_display->color565(160, 180, 220);
+        return ui_theme::applyGraphicColor(dma_display->color565(160, 180, 220));
     default:
-        return dma_display->color565(200, 200, 210);
+        return ui_theme::applyGraphicColor(dma_display->color565(200, 200, 210));
     }
 }
 
@@ -1011,23 +1022,23 @@ uint16_t weatherSceneTempBgColor(WeatherSceneKind kind)
     switch (kind)
     {
     case WeatherSceneKind::Sunny:
-        return dma_display->color565(45, 170, 255);
+        return ui_theme::applyGraphicColor(dma_display->color565(45, 170, 255));
     case WeatherSceneKind::PartlyCloudy:
-        return dma_display->color565(95, 175, 235);
+        return ui_theme::applyGraphicColor(dma_display->color565(95, 175, 235));
     case WeatherSceneKind::Cloudy:
-        return dma_display->color565(120, 165, 210);
+        return ui_theme::applyGraphicColor(dma_display->color565(120, 165, 210));
     case WeatherSceneKind::Overcast:
-        return dma_display->color565(128, 145, 165);
+        return ui_theme::applyGraphicColor(dma_display->color565(128, 145, 165));
     case WeatherSceneKind::Fog:
-        return dma_display->color565(160, 185, 205);
+        return ui_theme::applyGraphicColor(dma_display->color565(160, 185, 205));
     case WeatherSceneKind::Windy:
-        return dma_display->color565(85, 165, 225);
+        return ui_theme::applyGraphicColor(dma_display->color565(85, 165, 225));
     case WeatherSceneKind::Rain:
-        return dma_display->color565(55, 110, 175);
+        return ui_theme::applyGraphicColor(dma_display->color565(55, 110, 175));
     case WeatherSceneKind::Thunderstorm:
-        return dma_display->color565(38, 74, 128);
+        return ui_theme::applyGraphicColor(dma_display->color565(38, 74, 128));
     case WeatherSceneKind::Snow:
-        return dma_display->color565(175, 210, 240);
+        return ui_theme::applyGraphicColor(dma_display->color565(175, 210, 240));
     case WeatherSceneKind::SunnyNight:
     case WeatherSceneKind::PartlyCloudyNight:
     case WeatherSceneKind::CloudyNight:
@@ -1038,9 +1049,9 @@ uint16_t weatherSceneTempBgColor(WeatherSceneKind kind)
     case WeatherSceneKind::ThunderstormNight:
     case WeatherSceneKind::SnowNight:
     case WeatherSceneKind::ClearNight:
-        return dma_display->color565(8, 16, 52);
+        return ui_theme::applyGraphicColor(dma_display->color565(8, 16, 52));
     default:
-        return dma_display->color565(36, 78, 134);
+        return ui_theme::applyGraphicColor(dma_display->color565(36, 78, 134));
     }
 }
 
@@ -1086,16 +1097,7 @@ static void drawSceneReadabilityOverlay(WeatherSceneKind kind)
 
 static void applyNightThemeSceneDimmer()
 {
-    if (theme != 1)
-        return;
-
-    // Static dither dimming so the same weather scene is preserved in night theme.
-    for (int y = 0; y < SCENE_H; ++y)
-    {
-        int start = y % 3;
-        for (int x = start; x < SCENE_W; x += 3)
-            dma_display->drawPixel(x, y, myBLACK);
-    }
+    // Scene colors are already routed through the shared night-theme mono transform.
 }
 
 String formatConditionLabel(const String &condition)

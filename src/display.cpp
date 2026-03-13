@@ -22,10 +22,12 @@
 #include "ir_codes.h"
 #include "worldtime.h"
 #include "display_runtime.h"
+#include "display_seven_segment.h"
 #include "display_lunar_luck_sections.h"
 #include "display_lunar_luck_nen_tranh.h"
 #include "display_condition.h"
 #include "app_state.h"
+#include "ui_theme.h"
 
 static AppState &app = appState();
 #define scrollLevel app.scrollLevel
@@ -592,6 +594,7 @@ static int16_t marqueeOffsetPx = 0;
 static uint32_t lastScrollMs = 0;
 static uint32_t sectionStartMs = 0;
 static bool marqueeActive = false;
+static bool lunarLuckRotationPaused = false;
 static bool lunarPreviewMode = false;
 static int16_t lunarDayOffset = 0; // 0=today, +N future day, -N past day
 static constexpr int16_t LUNAR_OFFSET_MIN = -30;
@@ -2689,7 +2692,7 @@ static void drawCompactCloud(int cx, int cy, uint16_t color)
 
 // Condition Scene (64x24) helpers ------------------------------------------------
 static constexpr int SCENE_W = PANEL_RES_X;
-static constexpr int SCENE_H = 24; // top area used for the scene; bottom is reserved for marquee/status
+static constexpr int SCENE_H = 25; // top area used for the scene; bottom is reserved for marquee/status
 
 static void clearConditionSceneArea()
 {
@@ -3391,6 +3394,103 @@ static bool weatherSceneIsNight(WeatherSceneKind kind)
            kind == WeatherSceneKind::ClearNight;
 }
 
+static uint16_t weatherSceneTempBgColor(WeatherSceneKind kind);
+static uint16_t weatherSceneAdaptiveTempTextColor(WeatherSceneKind kind, uint16_t accent, bool secondary);
+
+static void conditionSceneClockBounds(int &x, int &y, int &w, int &h)
+{
+    wxv::seg7::Metrics metrics;
+    metrics.digitWidth = 3;
+    metrics.digitHeight = 5;
+    metrics.colonWidth = 1;
+    metrics.spacing = 1;
+
+    x = 2;
+    y = SCENE_H - metrics.digitHeight - 3;
+    w = wxv::seg7::measureTime(t_hour, t_minute, units.clock24h, 1, &metrics);
+    h = metrics.digitHeight;
+}
+
+static int drawConditionSceneClockText(int x, int y, int hour24, int minute, bool use24h,
+                                       const wxv::seg7::Metrics &metrics,
+                                       uint16_t digitColor)
+{
+    int displayHour = hour24 % 24;
+    char suffix = '\0';
+    if (!use24h)
+    {
+        suffix = (displayHour >= 12) ? 'P' : 'A';
+        if (displayHour == 0)
+            displayHour = 12;
+        else if (displayHour > 12)
+            displayHour -= 12;
+    }
+
+    if (minute < 0)
+        minute = 0;
+    if (minute > 59)
+        minute = 59;
+
+    char buf[8];
+    if (use24h)
+        snprintf(buf, sizeof(buf), "%02d:%02d", displayHour, minute);
+    else
+        snprintf(buf, sizeof(buf), "%02d:%02d%c", displayHour, minute, suffix);
+
+    int cursorX = x;
+    bool afterColon = false;
+    for (int i = 0; buf[i] != '\0'; ++i)
+    {
+        char c = buf[i];
+        if (c == ':')
+        {
+            cursorX -= 1;
+            wxv::seg7::drawColon(cursorX, y, digitColor, 1, metrics);
+            cursorX += metrics.colonWidth + metrics.spacing;
+            afterColon = true;
+            continue;
+        }
+
+        if (afterColon)
+        {
+            cursorX += 1;
+            afterColon = false;
+        }
+
+        wxv::seg7::drawDigit(cursorX, y, c, digitColor, 1, metrics);
+        cursorX += metrics.digitWidth + metrics.spacing;
+    }
+
+    return cursorX - x;
+}
+
+static void drawConditionSceneClockOverlay(WeatherSceneKind kind)
+{
+    if (!sceneClockEnabled)
+        return;
+
+    int clockX = 0;
+    int clockY = 0;
+    int clockWidth = 0;
+    int clockHeight = 0;
+    conditionSceneClockBounds(clockX, clockY, clockWidth, clockHeight);
+
+    wxv::seg7::Metrics metrics;
+    metrics.digitWidth = 3;
+    metrics.digitHeight = 5;
+    metrics.colonWidth = 1;
+    metrics.spacing = 1;
+
+    const uint16_t accent = weatherSceneAccentColor(kind);
+    const uint16_t timeColor = weatherSceneAdaptiveTempTextColor(kind, accent, false);
+    const uint16_t shadow = scaleColor565(weatherSceneTempBgColor(kind), weatherSceneIsNight(kind) ? 0.45f : 0.72f);
+
+    drawConditionSceneClockText(clockX + 1, clockY + 1, t_hour, t_minute, units.clock24h,
+                                metrics, shadow);
+    drawConditionSceneClockText(clockX, clockY, t_hour, t_minute, units.clock24h,
+                                metrics, timeColor);
+}
+
 static uint16_t weatherSceneTempBgColor(WeatherSceneKind kind)
 {
     // Approximate top-right sky color for each scene (where temp is rendered).
@@ -3466,7 +3566,6 @@ static void drawSceneReadabilityOverlay(WeatherSceneKind kind)
     const uint16_t accent = weatherSceneAccentColor(kind);
     const uint16_t divider = scaleColor565(accent, night ? 0.55f : 0.72f);
 
-    // Thin divider between scene and status/marquee zone.
     dma_display->drawFastHLine(0, SCENE_H - 1, SCENE_W, divider);
 }
 
@@ -3609,7 +3708,7 @@ static void drawWeatherFlowIcon()
 
     const uint8_t *icon = getWeatherIconFromCondition(key);
     uint16_t color = getIconColorFromCondition(key);
-    dma_display->drawBitmap(0, 0, icon, 16, 16, color);
+    ui_theme::drawBitmapThemed(0, 0, icon, 16, 16, color);
 }
 static bool splashActive = false;
 static bool splashShownThisBoot = false;
@@ -4095,36 +4194,44 @@ void showSectionHeading(const char *title, const char *subtitle, uint16_t ms)
         y += lineHeights[i] + lineGap;
     }
 
+    ui_theme::applyGraphicThemeToBuffer(canvas.getBuffer(), PANEL_RES_X * PANEL_RES_Y);
     dma_display->drawRGBBitmap(0, 0, canvas.getBuffer(), PANEL_RES_X, PANEL_RES_Y);
 }
 
-const uint8_t *getWeatherIconFromCode(String code)
+namespace
 {
-    // Serial.printf("Code: %s", code);
-    if (code.startsWith("01n"))
-        return icon_clear_night;
-    if (code.startsWith("02n"))
-        return icon_cloud_night;
-    if (code.startsWith("01d"))
-        return icon_clear;
-    if (code.startsWith("02d"))
-        return icon_cloudy;
-    if (code.startsWith("03"))
-        return icon_cloudy;
-    if (code.startsWith("04"))
-        return code.endsWith("n") ? icon_cloud_night : icon_cloudy;
-    if (code.startsWith("09") || code.startsWith("10"))
-        return icon_rain;
-    if (code.startsWith("11"))
-        return icon_thunder;
-    if (code.startsWith("13"))
-        return icon_snow;
-    if (code.startsWith("50"))
-        return icon_fog;
-    return getWeatherIconFromCondition(code); // shared fallback for non-OWM code strings
+struct WeatherIconVariant
+{
+    const uint8_t *day;
+    const uint8_t *night;
+};
+
+String normalizeWeatherIconKey(String input)
+{
+    input.trim();
+    input.toLowerCase();
+    input.replace('_', ' ');
+    input.replace('-', ' ');
+    while (input.indexOf("  ") >= 0)
+        input.replace("  ", " ");
+    return input;
 }
 
-const uint8_t *getWeatherIconFromCondition(String condition)
+bool isNightWeatherIconKey(const String &key)
+{
+    return key.endsWith("n") || key.indexOf("night") >= 0;
+}
+
+const uint8_t *selectWeatherIconVariant(const WeatherIconVariant &variant, bool actualNight)
+{
+    if (actualNight && variant.night != nullptr)
+        return variant.night;
+    if (variant.day != nullptr)
+        return variant.day;
+    return actualNight ? variant.night : variant.day;
+}
+
+WeatherIconVariant weatherIconVariantFromGroup(const String &key)
 {
     enum class IconGroup : uint8_t
     {
@@ -4139,20 +4246,6 @@ const uint8_t *getWeatherIconFromCondition(String condition)
         Snow,
         Windy,
         Unknown
-    };
-
-    auto normalizedKey = [](String input) {
-        input.trim();
-        input.toLowerCase();
-        input.replace('_', ' ');
-        input.replace('-', ' ');
-        while (input.indexOf("  ") >= 0)
-            input.replace("  ", " ");
-        return input;
-    };
-
-    auto isNightKey = [](const String &key) {
-        return key.endsWith("n") || key.indexOf("night") >= 0;
     };
 
     auto classifyGroup = [](const String &k) -> IconGroup {
@@ -4183,33 +4276,64 @@ const uint8_t *getWeatherIconFromCondition(String condition)
         return IconGroup::Unknown;
     };
 
-    String key = normalizedKey(condition);
-    const bool night = isNightKey(key);
-    const IconGroup group = classifyGroup(key);
-
-    switch (group)
+    switch (classifyGroup(key))
     {
     case IconGroup::Thunder:
-        return icon_thunder;
+        return {icon_thunder, nullptr};
     case IconGroup::Snow:
-        return icon_snow;
+        return {icon_snow, nullptr};
     case IconGroup::Drizzle:
     case IconGroup::Rain:
-        return icon_rain;
+        return {icon_rain, nullptr};
     case IconGroup::Fog:
-        return icon_fog;
+        return {icon_fog, nullptr};
     case IconGroup::Overcast:
-        return night ? icon_cloud_night : icon_cloudy;
+        return {icon_overcast, nullptr};
     case IconGroup::PartlyCloudy:
     case IconGroup::Cloudy:
     case IconGroup::Windy:
-        return night ? icon_cloud_night : icon_cloudy;
+        return {icon_cloudy, icon_cloud_night};
     case IconGroup::Clear:
-        return night ? icon_clear_night : icon_clear;
+        return {icon_clear, icon_clear_night};
     case IconGroup::Unknown:
     default:
-        return night ? icon_cloud_night : icon_clear;
+        return {icon_clear, icon_clear_night};
     }
+}
+
+WeatherIconVariant weatherIconVariantFromCodeKey(const String &key)
+{
+    if (key.startsWith("01"))
+        return {icon_clear, icon_clear_night};
+    if (key.startsWith("02") || key.startsWith("03"))
+        return {icon_cloudy, icon_cloud_night};
+    if (key.startsWith("04"))
+        return {icon_overcast, nullptr};
+    if (key.startsWith("09") || key.startsWith("10"))
+        return {icon_rain, nullptr};
+    if (key.startsWith("11"))
+        return {icon_thunder, nullptr};
+    if (key.startsWith("13"))
+        return {icon_snow, nullptr};
+    if (key.startsWith("50"))
+        return {icon_fog, nullptr};
+    return {nullptr, nullptr};
+}
+} // namespace
+
+const uint8_t *getWeatherIconFromCode(String code)
+{
+    const String key = normalizeWeatherIconKey(code);
+    const WeatherIconVariant variant = weatherIconVariantFromCodeKey(key);
+    if (variant.day != nullptr || variant.night != nullptr)
+        return selectWeatherIconVariant(variant, isNightWeatherIconKey(key));
+    return getWeatherIconFromCondition(key); // shared fallback for non-OWM code strings
+}
+
+const uint8_t *getWeatherIconFromCondition(String condition)
+{
+    const String key = normalizeWeatherIconKey(condition);
+    return selectWeatherIconVariant(weatherIconVariantFromGroup(key), isNightWeatherIconKey(key));
 }
 
 const uint16_t getIconColorFromCondition(String condition)
@@ -4315,6 +4439,7 @@ void resetLunarLuckSectionRotation()
 {
     if (g_sectionCount == 0)
         return;
+    lunarLuckRotationPaused = false;
     upLastPressMs = 0;
     downLastPressMs = 0;
     currentSectionIndex = 0;
@@ -4481,6 +4606,9 @@ void tickLunarLuckMarquee()
 
     if (marqueeActive)
     {
+        if (lunarLuckRotationPaused)
+            return;
+
         if (nowMs - lastScrollMs >= intervalMs)
         {
             marqueeOffsetPx -= SCROLL_STEP_PX;
@@ -4497,6 +4625,9 @@ void tickLunarLuckMarquee()
     }
     else
     {
+        if (lunarLuckRotationPaused)
+            return;
+
         if (nowMs - sectionStartMs >= STATIC_DWELL_MS)
         {
             advanceSection();
@@ -4574,23 +4705,14 @@ bool handleLunarLuckInput(uint32_t code)
         return true;
     }
 
-    if (code == IR_OK && lunarPreviewMode)
-    {
-        lunarLuckSpeedScale = 1.0f;
-        lunarDayOffset = 0;
-        lunarPreviewMode = false;
-        rebuildLunarForOffset();
-        resetLunarLuckSectionRotation();
-        renderCurrentLunarLuckSection();
-        return true;
-    }
-
     if (code == IR_OK)
     {
-        lunarLuckSpeedScale = 1.0f;
-        resetLunarLuckSectionRotation();
-        Serial.printf("[LUNAR_LUCK] Speed reset to default (%lums, scale=%.3f)\n",
-                      lunarLuckBaseScrollIntervalMs(), lunarLuckSpeedScale);
+        lunarLuckRotationPaused = !lunarLuckRotationPaused;
+        if (!lunarLuckRotationPaused)
+        {
+            sectionStartMs = millis();
+            lastScrollMs = sectionStartMs;
+        }
         renderCurrentLunarLuckSection();
         return true;
     }
@@ -4689,6 +4811,19 @@ void fetchWeatherFromOWM()
             return NAN;
         return double(v);
     };
+    auto buildOwmQuery = [&]() -> String {
+        String q;
+        if (hasValidCoords) {
+            q += "lat=" + String(noaaLatitude, 4) + "&lon=" + String(noaaLongitude, 4);
+        } else {
+            q += "q=" + selectedCity;
+            if (!selectedCountry.isEmpty()) {
+                q += "," + selectedCountry;
+            }
+        }
+        q += "&units=" + units + "&appid=" + apiKey;
+        return q;
+    };
 
     JSONVar mainBlock = data["main"];
     JSONVar windBlock = data["wind"];
@@ -4767,6 +4902,190 @@ void fetchWeatherFromOWM()
     Serial.printf("  Temp: %.1fC | Hum: %s%% | Wind: %.2fm/s | Source: %s\n",
                   tempC, str_Humd.c_str(), windSpeed, hasValidCoords ? "lat/lon" : "city");
 
+    String forecastUrl = "http://api.openweathermap.org/data/2.5/forecast?" + buildOwmQuery();
+    String forecastJson = httpGETRequest(forecastUrl.c_str());
+    if (forecastJson != "{}") {
+        auto sanitizeBools = [](String &s) {
+            s.replace(":true", ":1");
+            s.replace(":false", ":0");
+        };
+        auto extractJsonObjectLocal = [](const String &src, const char *key) -> String {
+            int keyIdx = src.indexOf(key);
+            if (keyIdx < 0) return "";
+            int start = src.indexOf('{', keyIdx);
+            if (start < 0) return "";
+            int depth = 1;
+            bool inString = false;
+            bool escaped = false;
+            for (int i = start + 1; i < src.length(); ++i) {
+                char c = src[i];
+                if (inString) {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') inString = true;
+                else if (c == '{') depth++;
+                else if (c == '}') {
+                    depth--;
+                    if (depth == 0) return src.substring(start, i + 1);
+                }
+            }
+            return "";
+        };
+        auto extractJsonArrayLocal = [](const String &src, const char *key) -> String {
+            int keyIdx = src.indexOf(key);
+            if (keyIdx < 0) return "";
+            int start = src.indexOf('[', keyIdx);
+            if (start < 0) return "";
+            int depth = 0;
+            bool inString = false;
+            bool escaped = false;
+            for (int i = start; i < src.length(); ++i) {
+                char c = src[i];
+                if (inString) {
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') inString = false;
+                    continue;
+                }
+                if (c == '"') inString = true;
+                else if (c == '[') depth++;
+                else if (c == ']') {
+                    depth--;
+                    if (depth == 0) return src.substring(start, i + 1);
+                }
+            }
+            return "";
+        };
+
+        String cityObjStr = extractJsonObjectLocal(forecastJson, "\"city\"");
+        uint32_t citySunrise = 0;
+        uint32_t citySunset = 0;
+        if (cityObjStr.length() > 0) {
+            sanitizeBools(cityObjStr);
+            JSONVar cityBlock = JSON.parse(cityObjStr);
+            if (JSON.typeof_(cityBlock) == "object") {
+                citySunrise = static_cast<uint32_t>(readNumber(cityBlock, "sunrise"));
+                citySunset = static_cast<uint32_t>(readNumber(cityBlock, "sunset"));
+            }
+        }
+
+        String listArrayStr = extractJsonArrayLocal(forecastJson, "\"list\"");
+        if (listArrayStr.length() == 0) {
+            Serial.println("[OWM] Forecast list missing");
+        } else {
+            forecast.numHours = 0;
+            forecast.numDays = 0;
+            forecast.hourlyKeyPresent = true;
+
+            int dayBestNoonDelta[MAX_FORECAST_DAYS];
+            for (int i = 0; i < MAX_FORECAST_DAYS; ++i) {
+                dayBestNoonDelta[i] = 9999;
+            }
+
+            auto upsertDay = [&](const ForecastHour &hour, double highC, double lowC, int rainChance, const String &cond, const String &icon) {
+                time_t tt = static_cast<time_t>(hour.time);
+                struct tm *ti = localtime(&tt);
+                if (!ti) return;
+
+                int dayIdx = -1;
+                for (int i = 0; i < forecast.numDays; ++i) {
+                    if (forecast.days[i].yearNum == ti->tm_year + 1900 &&
+                        forecast.days[i].monthNum == ti->tm_mon + 1 &&
+                        forecast.days[i].dayNum == ti->tm_mday) {
+                        dayIdx = i;
+                        break;
+                    }
+                }
+                if (dayIdx < 0) {
+                    if (forecast.numDays >= MAX_FORECAST_DAYS) return;
+                    dayIdx = forecast.numDays++;
+                    forecast.days[dayIdx] = ForecastDay{};
+                    forecast.days[dayIdx].dayNum = ti->tm_mday;
+                    forecast.days[dayIdx].monthNum = ti->tm_mon + 1;
+                    forecast.days[dayIdx].yearNum = ti->tm_year + 1900;
+                    forecast.days[dayIdx].highTemp = NAN;
+                    forecast.days[dayIdx].lowTemp = NAN;
+                    forecast.days[dayIdx].rainChance = -1;
+                    forecast.days[dayIdx].sunrise = citySunrise;
+                    forecast.days[dayIdx].sunset = citySunset;
+                }
+
+                ForecastDay &day = forecast.days[dayIdx];
+                if (isnan(day.highTemp) || (!isnan(highC) && highC > day.highTemp)) day.highTemp = highC;
+                if (isnan(day.lowTemp) || (!isnan(lowC) && lowC < day.lowTemp)) day.lowTemp = lowC;
+                if (rainChance > day.rainChance) day.rainChance = rainChance;
+
+                const int noonDelta = abs(ti->tm_hour * 60 + ti->tm_min - (12 * 60));
+                if (day.conditions.length() == 0 || noonDelta < dayBestNoonDelta[dayIdx]) {
+                    dayBestNoonDelta[dayIdx] = noonDelta;
+                    day.conditions = cond;
+                    day.icon = icon;
+                }
+            };
+
+            const int n = listArrayStr.length();
+            int i = 0;
+            while (i < n) {
+                while (i < n && listArrayStr[i] != '{') ++i;
+                if (i >= n) break;
+                int start = i;
+                int depth = 0;
+                bool inString = false;
+                bool escaped = false;
+                for (; i < n; ++i) {
+                    char c = listArrayStr[i];
+                    if (inString) {
+                        if (escaped) escaped = false;
+                        else if (c == '\\') escaped = true;
+                        else if (c == '"') inString = false;
+                        continue;
+                    }
+                    if (c == '"') inString = true;
+                    else if (c == '{') depth++;
+                    else if (c == '}') {
+                        depth--;
+                        if (depth == 0) {
+                            String objStr = listArrayStr.substring(start, i + 1);
+                            sanitizeBools(objStr);
+                            JSONVar item = JSON.parse(objStr);
+                            if (JSON.typeof_(item) == "object") {
+                                JSONVar itemMain = item["main"];
+                                JSONVar weather0 = item["weather"][0];
+                                uint32_t when = static_cast<uint32_t>(readNumber(item, "dt"));
+                                if (when > 0) {
+                                    ForecastHour hour;
+                                    hour.time = when;
+                                    hour.temp = toCelsius(readNumber(itemMain, "temp"));
+                                    double pop = readNumber(item, "pop");
+                                    hour.rainChance = isnan(pop) ? -1 : static_cast<int>(lround(pop * 100.0));
+                                    hour.conditions = (JSON.typeof_(weather0["description"]) == "string") ? String((const char*)weather0["description"]) : "";
+                                    hour.icon = (JSON.typeof_(weather0["icon"]) == "string") ? String((const char*)weather0["icon"]) : "";
+
+                                    if (forecast.numHours < MAX_FORECAST_HOURS) {
+                                        forecast.hours[forecast.numHours++] = hour;
+                                    }
+
+                                    double highC = toCelsius(readNumber(itemMain, "temp_max"));
+                                    double lowC = toCelsius(readNumber(itemMain, "temp_min"));
+                                    if (isnan(highC)) highC = hour.temp;
+                                    if (isnan(lowC)) lowC = hour.temp;
+                                    upsertDay(hour, highC, lowC, hour.rainChance, hour.conditions, hour.icon);
+                                }
+                            }
+                            ++i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        Serial.println("[OWM] Forecast request returned empty payload");
+    }
+
     needScrollRebuild = true;
 }
 
@@ -4832,32 +5151,12 @@ void drawOWMScreen()
 
 void drawWeatherIcon(String iconCode)
 {
-    // OWM screen: force night icon variant when Night Theme is active.
-    if (currentScreen == SCREEN_OWM && theme == 1)
-    {
-        iconCode.trim();
-        if (iconCode.length() >= 1)
-        {
-            char last = iconCode.charAt(iconCode.length() - 1);
-            if (last == 'd')
-            {
-                iconCode.setCharAt(iconCode.length() - 1, 'n');
-            }
-            else if (last != 'n')
-            {
-                iconCode += "n";
-            }
-        }
-    }
-
     dma_display->fillRect(0, 0, 16, 16, myBLACK);
     dma_display->setCursor(1, 4);
     dma_display->setTextColor(theme == 1 ? dma_display->color565(110, 110, 180) : myYELLOW);
 
     uint16_t iconColor = getDayNightColorFromCode(iconCode);
-    if (theme == 1)
-        iconColor = dma_display->color565(90, 90, 150);
-    dma_display->drawBitmap(0, 0, getWeatherIconFromCode(iconCode), 16, 16, iconColor);
+    ui_theme::drawBitmapThemed(0, 0, getWeatherIconFromCode(iconCode), 16, 16, iconColor);
 
     // OWM few-clouds cleanup: remove known artifact lines.
     if (iconCode.startsWith("02d") || iconCode.startsWith("02n"))
@@ -4874,8 +5173,7 @@ void drawWeatherIcon(String iconCode)
     const bool isNightIcon = iconCode.endsWith("n") || iconCode.indexOf("night") >= 0;
     if (isNightIcon)
     {
-        uint16_t moonColor = (theme == 1) ? dma_display->color565(170, 170, 220)
-                                          : dma_display->color565(235, 235, 180);
+        uint16_t moonColor = ui_theme::applyGraphicColor(dma_display->color565(235, 235, 180));
         // Clear likely sun area first, then draw crescent where sun normally appears.
         const int moonX = 11;
         const int moonY = 4;
@@ -5334,6 +5632,8 @@ void drawConditionSceneScreen()
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
     }
+
+    drawConditionSceneClockOverlay(sceneKind);
 
     // Use the shared scene-marquee state engine so draw/tick update the same buffer.
     conditionSceneSyncMarquee(label, accent);

@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "display.h"
 #include "display_widgets.h"
+#include "ui_theme.h"
 namespace
 {
     int wifiSignalLevelFromRssi(int rssi)
@@ -16,6 +17,7 @@ namespace
 }
 void drawSunIcon(int x, int y, uint16_t color)
 {
+    color = ui_theme::applyGraphicColor(color);
     dma_display->drawLine(x + 3, y, x + 3, y + 6, color);
     dma_display->drawLine(x, y + 3, x + 6, y + 3, color);
     dma_display->drawLine(x + 1, y + 1, x + 5, y + 5, color);
@@ -23,6 +25,7 @@ void drawSunIcon(int x, int y, uint16_t color)
 }
 void drawHouseIcon(int x, int y, uint16_t color)
 {
+    color = ui_theme::applyGraphicColor(color);
     dma_display->drawPixel(x + 4, 0, color);
     dma_display->drawLine(x + 2, y + 2, x + 6, y + 2, color);
     dma_display->drawLine(x + 1, y + 3, x + 7, y + 3, color);
@@ -32,6 +35,7 @@ void drawHouseIcon(int x, int y, uint16_t color)
 }
 void drawHumidityIcon(int x, int y, uint16_t color)
 {
+    color = ui_theme::applyGraphicColor(color);
     dma_display->drawPixel(x + 3, y, color);
     dma_display->drawLine(x + 2, y + 1, x + 4, y + 1, color);
     dma_display->drawLine(x + 1, y + 2, x + 5, y + 2, color);
@@ -42,6 +46,8 @@ void drawHumidityIcon(int x, int y, uint16_t color)
 void drawWiFiIcon(int x, int y, uint16_t dimColor, uint16_t activeColor, int rssi)
 {
     int level = wifiSignalLevelFromRssi(rssi);
+    dimColor = ui_theme::applyGraphicColor(dimColor);
+    activeColor = ui_theme::applyGraphicColor(activeColor);
     dma_display->drawPixel(x + 3, y + 4, dimColor);
     dma_display->drawLine(x + 3, y + 4, x + 3, y + 6, dimColor);
     dma_display->drawLine(x + 2, y + 3, x + 4, y + 3, dimColor);
@@ -58,6 +64,7 @@ void drawWiFiIcon(int x, int y, uint16_t dimColor, uint16_t activeColor, int rss
 }
 void drawAlarmIcon(int x, int y, uint16_t color)
 {
+    color = ui_theme::applyGraphicColor(color);
     dma_display->drawLine(x + 2, y + 0, x + 3, y + 0, color);
     dma_display->drawLine(x + 1, y + 1, x + 4, y + 1, color);
     dma_display->drawLine(x + 1, y + 2, x + 4, y + 2, color);

@@ -146,6 +146,7 @@ static uint8_t s_predictPageCount = 0;
 static uint8_t s_predictPageIndex = 0;
 static unsigned long s_predictLastSwitchMs = 0;
 static unsigned long s_predictManualHoldUntilMs = 0;
+static bool s_predictRotationPaused = false;
 static bool s_predictTransitionActive = false;
 static unsigned long s_predictTransitionStartMs = 0;
 static constexpr unsigned long kPredictPageAutoMs = 4200UL;
@@ -179,6 +180,7 @@ static constexpr uint8_t kHistory24PageCount = sizeof(kHistory24Pages) / sizeof(
 static uint8_t s_history24PageIndex = 0;
 static unsigned long s_history24LastSwitchMs = 0;
 static unsigned long s_history24ManualHoldUntilMs = 0;
+static bool s_history24RotationPaused = false;
 static bool s_history24WaitForMarqueeCycle = false;
 static int8_t s_history24ArmedPageIndex = -1;
 
@@ -362,6 +364,13 @@ void drawChartScaffold(int graphLeft, int graphTop, int graphWidth, int graphHei
         int x = graphLeft + (graphWidth * i) / 4;
         dma_display->drawFastVLine(x, graphTop, graphHeight, gridColor);
     }
+}
+
+uint16_t currentChartPointColor()
+{
+    return (theme == 1)
+               ? dma_display->color565(220, 190, 255)
+               : dma_display->color565(255, 96, 180);
 }
 
 void draw24HourSectionPageBar(uint8_t activePage)
@@ -813,6 +822,7 @@ void resetPredictionRenderState()
     s_predictRenderedMono = false;
     s_predictMeaningPageIndex = 255;
     s_predictLastTheme = -1;
+    s_predictRotationPaused = false;
 }
 
 void updateGraphData()
@@ -949,8 +959,6 @@ void drawTemperatureHistoryScreen()
 
     // Line chart for clearer trend
     // Smooth line chart with per-pixel segments
-    static bool blinkOn = true;
-    static unsigned long lastBlinkToggle = 0;
 
     auto points = buildUniquePoints(tempsC, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
@@ -968,27 +976,11 @@ void drawTemperatureHistoryScreen()
         prev = pt;
     }
 
-    // Vertical guide from axis to top (through latest point)
-    if (!tempsC.empty())
-    {
-        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
-        Point last = mapSampleToPoint(tempsC.back().ts, dayStart, tempsC.back().value, minVal, maxVal,
-                                      graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
-    }
-
-    // Blink current-time marker every 0.5s
-    unsigned long now = millis();
-    if (now - lastBlinkToggle >= 500)
-    {
-        blinkOn = !blinkOn;
-        lastBlinkToggle = now;
-    }
     if (!tempsC.empty())
     {
         Point last = mapSampleToPoint(tempsC.back().ts, dayStart, tempsC.back().value, minVal, maxVal,
                                       graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
+        dma_display->drawPixel(last.x, last.y, currentChartPointColor());
     }
 
     // No current marker/label on the chart per request
@@ -1119,23 +1111,6 @@ void drawHumidityHistoryScreen()
     uint16_t afternoonTickColor = mono ? dma_display->color565(108, 94, 148) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    // Dim vertical guide at current time through the full chart height
-    if (!hums.empty() && dayStart != 0)
-    {
-        uint32_t delta = (hums.back().ts > dayStart) ? (hums.back().ts - dayStart) : 0;
-        if (delta > 86400) delta = 86400;
-        float frac = static_cast<float>(delta) / 86400.0f;
-        int curX = graphLeft + static_cast<int>((graphWidth - 1) * frac + 0.5f);
-        curX = constrain(curX, graphLeft, graphLeft + graphWidth - 1);
-        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
-        Point last = mapSampleToPoint(hums.back().ts, dayStart, hums.back().value, minVal, maxVal,
-                                      graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawLine(curX, axisY, curX, lineTop, dma_display->color565(20, 40, 90));
-    }
-
-    static bool blinkOn = true;
-    static unsigned long lastBlinkToggle = 0;
-
     auto points = buildUniquePoints(hums, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
     Point prev{-1, -1};
@@ -1152,17 +1127,11 @@ void drawHumidityHistoryScreen()
         prev = pt;
     }
 
-    unsigned long now = millis();
-    if (now - lastBlinkToggle >= 500)
-    {
-        blinkOn = !blinkOn;
-        lastBlinkToggle = now;
-    }
     if (!hums.empty())
     {
         Point last = mapSampleToPoint(hums.back().ts, dayStart, hums.back().value, minVal, maxVal,
                                       graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
+        dma_display->drawPixel(last.x, last.y, currentChartPointColor());
     }
 
     // No current marker/label on the chart per request
@@ -1292,23 +1261,6 @@ void drawBaroHistoryScreen()
     uint16_t afternoonTickColor = mono ? dma_display->color565(108, 94, 148) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    // Dim vertical guide at current time through the full chart height
-    if (!pressVals.empty() && dayStart != 0)
-    {
-        uint32_t delta = (pressVals.back().ts > dayStart) ? (pressVals.back().ts - dayStart) : 0;
-        if (delta > 86400) delta = 86400;
-        float frac = static_cast<float>(delta) / 86400.0f;
-        int curX = graphLeft + static_cast<int>((graphWidth - 1) * frac + 0.5f);
-        curX = constrain(curX, graphLeft, graphLeft + graphWidth - 1);
-        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
-        Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
-                                      graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawLine(curX, axisY, curX, lineTop, dma_display->color565(20, 40, 90));
-    }
-
-    static bool blinkOn = true;
-    static unsigned long lastBlinkToggle = 0;
-
     auto points = buildUniquePoints(pressVals, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
     Point prev{-1, -1};
@@ -1325,26 +1277,11 @@ void drawBaroHistoryScreen()
         prev = pt;
     }
 
-    // Vertical guide from axis to top (through latest point)
-    if (!pressVals.empty())
-    {
-        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
-        Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
-                                      graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
-    }
-
-    unsigned long now = millis();
-    if (now - lastBlinkToggle >= 500)
-    {
-        blinkOn = !blinkOn;
-        lastBlinkToggle = now;
-    }
     if (!pressVals.empty())
     {
         Point last = mapSampleToPoint(pressVals.back().ts, dayStart, pressVals.back().value, minVal, maxVal,
                                       graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
+        dma_display->drawPixel(last.x, last.y, currentChartPointColor());
     }
 
     // No current marker/label on the chart per request
@@ -1475,9 +1412,6 @@ void drawCo2HistoryScreen()
     uint16_t afternoonTickColor = mono ? dma_display->color565(120, 120, 168) : dma_display->color565(120, 120, 168);
     drawXAxisTicks(graphLeft, graphWidth, axisY, morningTickColor, afternoonTickColor);
 
-    static bool blinkOn = true;
-    static unsigned long lastBlinkToggle = 0;
-
     auto points = buildUniquePoints(co2Vals, dayStart, minVal, maxVal,
                                     graphLeft, graphWidth, graphTop, graphHeight);
     Point prev{-1, -1};
@@ -1494,26 +1428,11 @@ void drawCo2HistoryScreen()
         prev = pt;
     }
 
-    // Vertical guide from axis to slightly above top (through latest point)
-    if (!co2Vals.empty())
-    {
-        int lineTop = (graphTop > 0) ? (graphTop - 1) : 0;
-        Point last = mapSampleToPoint(co2Vals.back().ts, dayStart, co2Vals.back().value, minVal, maxVal,
-                                      graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawLine(last.x, axisY, last.x, lineTop, dma_display->color565(20, 40, 90));
-    }
-
-    unsigned long now = millis();
-    if (now - lastBlinkToggle >= 500)
-    {
-        blinkOn = !blinkOn;
-        lastBlinkToggle = now;
-    }
     if (!co2Vals.empty())
     {
         Point last = mapSampleToPoint(co2Vals.back().ts, dayStart, co2Vals.back().value, minVal, maxVal,
                                       graphLeft, graphWidth, graphTop, graphHeight);
-        dma_display->drawPixel(last.x, last.y, blinkOn ? maxColor : lineColor);
+        dma_display->drawPixel(last.x, last.y, currentChartPointColor());
     }
 
     // No current marker/label on the chart per request
@@ -2085,6 +2004,7 @@ void draw24HourSectionScreen()
     }
 
     s_history24ArmedPageIndex = currentPage;
+    s_history24RotationPaused = false;
 
     if (s_history24LastSwitchMs == 0)
         s_history24LastSwitchMs = millis();
@@ -2119,7 +2039,7 @@ void tick24HourSection()
         break;
     }
 
-    if (kHistory24PageCount <= 1 || nowMs < s_history24ManualHoldUntilMs)
+    if (kHistory24PageCount <= 1 || s_history24RotationPaused || nowMs < s_history24ManualHoldUntilMs)
         return;
 
     bool canAdvance = false;
@@ -2167,6 +2087,14 @@ void handle24HourSectionUpPress()
     draw24HourSectionScreen();
 }
 
+void handle24HourSectionSelectPress()
+{
+    s_history24RotationPaused = !s_history24RotationPaused;
+    if (!s_history24RotationPaused)
+        s_history24LastSwitchMs = millis();
+    draw24HourSectionScreen();
+}
+
 void tickPredictionScreen()
 {
     if (!dma_display || !s_predictSnapshot.ready || s_predictPageCount == 0)
@@ -2183,7 +2111,8 @@ void tickPredictionScreen()
         s_predictMeaningPageIndex = 255;
         shouldRender = true;
     }
-    if (s_predictPageCount > 1 &&
+    if (!s_predictRotationPaused &&
+        s_predictPageCount > 1 &&
         nowMs >= s_predictManualHoldUntilMs &&
         (nowMs - s_predictLastSwitchMs) >= kPredictPageAutoMs &&
         s_predictMeaningCycleDone)
@@ -2243,4 +2172,12 @@ void handlePredictionUpPress()
     unsigned long nowMs = millis();
     s_predictManualHoldUntilMs = nowMs + kPredictManualHoldMs;
     onPredictPageChanged(nowMs);
+}
+
+void handlePredictionSelectPress()
+{
+    s_predictRotationPaused = !s_predictRotationPaused;
+    if (!s_predictRotationPaused)
+        s_predictLastSwitchMs = millis();
+    renderPredictPage(millis());
 }

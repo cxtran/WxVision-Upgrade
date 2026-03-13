@@ -49,6 +49,7 @@ const int scrollDelays[] = {
     wxv::defaults::kScrollDelays[6], wxv::defaults::kScrollDelays[7], wxv::defaults::kScrollDelays[8],
     wxv::defaults::kScrollDelays[9]};
 bool autoBrightness = wxv::defaults::kDefaults.autoBrightnessEnabled;
+bool sceneClockEnabled = wxv::defaults::kDefaults.sceneClockEnabled;
 int splashDurationSec = wxv::defaults::kDefaults.splashDurationSec;
 bool themeRefreshPending = false;
 int buzzerVolume = wxv::defaults::kDefaults.buzzerVolume;
@@ -171,6 +172,7 @@ void loadSettings() {
     verticalScrollSpeed = scrollDelays[verticalScrollLevel];
     customMsg    = prefs.getString("customMsg", "");
     autoBrightness = prefs.getBool("autoBrightness", wxv::defaults::kDefaults.autoBrightnessEnabled);
+      sceneClockEnabled = prefs.getBool("sceneClock", wxv::defaults::kDefaults.sceneClockEnabled);
       splashDurationSec = prefs.getInt("splashDur", wxv::defaults::kDefaults.splashDurationSec);
       splashDurationSec = constrain(splashDurationSec, 1, 10);
       buzzerVolume = constrain(prefs.getInt("buzzVol", wxv::defaults::kDefaults.buzzerVolume), 0, 100);
@@ -236,6 +238,7 @@ void saveDisplaySettings() {
         prefs.putInt("dayThemeStart", normalizeThemeScheduleMinutes(dayThemeStartMinutes));
         prefs.putInt("nightThemeStart", normalizeThemeScheduleMinutes(nightThemeStartMinutes));
         prefs.putBool("autoBrightness", autoBrightness);
+        prefs.putBool("sceneClock", sceneClockEnabled);
         prefs.putInt("brightness", brightness);
         prefs.putInt("scrollLevel", scrollLevel);  // persist level only
         prefs.putInt("vScrollLevel", verticalScrollLevel);

@@ -5,6 +5,7 @@
 #include "pins.h"
 #include "settings.h"
 #include "menu.h"
+#include "InfoModal.h"
 #include "ir_codes.h"
 #include "sensors.h" // for enqueueVirtualIRKey
 #include "buzzer.h"
@@ -14,6 +15,7 @@
 // Explicit forward declarations to satisfy compilation order
 extern bool isAlarmCurrentlyActive();
 extern void cancelActiveAlarm();
+extern InfoModal dateModal;
 
 void setupButtons() {
    
@@ -35,6 +37,10 @@ void getButton(){
   static unsigned long lastLeftEdgeMs = 0;
   static unsigned long lastRightEdgeMs = 0;
   static unsigned long lastCtrEdgeMs = 0;
+  static unsigned long leftHoldStartMs = 0;
+  static unsigned long rightHoldStartMs = 0;
+  static unsigned long lastLeftRepeatMs = 0;
+  static unsigned long lastRightRepeatMs = 0;
   const unsigned long now = millis();
   const unsigned long debounceMs = 120;
   if (warmupUntilMs == 0) {
@@ -56,6 +62,10 @@ void getButton(){
     lastLeft = left;
     lastRight = right;
     lastCtr = ctr;
+    leftHoldStartMs = 0;
+    rightHoldStartMs = 0;
+    lastLeftRepeatMs = 0;
+    lastRightRepeatMs = 0;
     return;
   }
 
@@ -77,6 +87,8 @@ void getButton(){
   }
   if (lastLeft == HIGH && left == LOW && (now - lastLeftEdgeMs) >= debounceMs) {
     lastLeftEdgeMs = now;
+    leftHoldStartMs = now;
+    lastLeftRepeatMs = now;
     Serial.println("LEFT button pressed");
     playBuzzerTone(900, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
@@ -84,6 +96,8 @@ void getButton(){
   }
   if (lastRight == HIGH && right == LOW && (now - lastRightEdgeMs) >= debounceMs) {
     lastRightEdgeMs = now;
+    rightHoldStartMs = now;
+    lastRightRepeatMs = now;
     Serial.println("RIGHT button pressed");
     playBuzzerTone(1800, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
@@ -106,6 +120,51 @@ void getButton(){
     {
       enqueueVirtualIRKey(IRCodes::WxKey::Ok);
     }
+  }
+
+  auto repeatIntervalForHold = [](unsigned long heldMs) -> unsigned long {
+    if (heldMs >= 1500UL) return 55UL;
+    if (heldMs >= 800UL) return 90UL;
+    return 140UL;
+  };
+
+  bool allowDateModalHoldRepeat = dateModal.isActive();
+  if (allowDateModalHoldRepeat && left == LOW && lastLeft == LOW)
+  {
+    if (leftHoldStartMs == 0)
+      leftHoldStartMs = now;
+    if ((now - leftHoldStartMs) >= 350UL)
+    {
+      unsigned long interval = repeatIntervalForHold(now - leftHoldStartMs);
+      if ((now - lastLeftRepeatMs) >= interval)
+      {
+        lastLeftRepeatMs = now;
+        enqueueVirtualIRKey(IRCodes::WxKey::Left);
+      }
+    }
+  }
+  if (allowDateModalHoldRepeat && right == LOW && lastRight == LOW)
+  {
+    if (rightHoldStartMs == 0)
+      rightHoldStartMs = now;
+    if ((now - rightHoldStartMs) >= 350UL)
+    {
+      unsigned long interval = repeatIntervalForHold(now - rightHoldStartMs);
+      if ((now - lastRightRepeatMs) >= interval)
+      {
+        lastRightRepeatMs = now;
+        enqueueVirtualIRKey(IRCodes::WxKey::Right);
+      }
+    }
+  }
+
+  if (left == HIGH) {
+    leftHoldStartMs = 0;
+    lastLeftRepeatMs = 0;
+  }
+  if (right == HIGH) {
+    rightHoldStartMs = 0;
+    lastRightRepeatMs = 0;
   }
 
   lastUp = up;

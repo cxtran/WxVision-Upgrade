@@ -144,6 +144,7 @@ struct DefaultConfig {
   int nightThemeStartMinutes;
   int scrollLevel;            // 0..9
   bool autoBrightnessEnabled;
+  bool sceneClockEnabled;
   int splashDurationSec;      // 1..10
   int buzzerVolume;           // 0..100
   int buzzerToneSet;          // 0..6
@@ -237,7 +238,7 @@ static const DefaultConfig kDefaults = {
     60000,      // wifiRetryMaxMs
     60000,      // wifiSsidNotFoundScanMs
     20000,      // wifiConnectTimeoutMs
-    3600000,    // ntpSyncIntervalMs
+    86400000,   // ntpSyncIntervalMs
     600000,     // weatherUpdateIntervalMs
 
     "time.google.com",
@@ -259,6 +260,7 @@ static const DefaultConfig kDefaults = {
     20 * 60,    // nightThemeStartMinutes
     7,          // scrollLevel
     true,       // autoBrightnessEnabled
+    true,       // sceneClockEnabled
     3,          // splashDurationSec
     kSoundVolumeDefault,        // buzzerVolume
     static_cast<int>(kSoundProfileDefault),          // buzzerToneSet

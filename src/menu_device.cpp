@@ -12,21 +12,20 @@ void showDeviceSettingsModal()
     menuActive = true;
 
     // Settings without Wi-Fi setup
-    String labels[] = {"Day Format", "Data Source", "Manual Screen"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser};
+    String labels[] = {"Data Source", "Manual Screen"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser};
 
-    int *chooserRefs[] = {&dayFormat, &dataSource, &manualScreen};
-    static const char *dayFmtOpt[] = {"MM/DD", "DD/MM"};
+    int *chooserRefs[] = {&dataSource, &manualScreen};
     static const char *dataSourceOpt[] = {"OWM", "WeatherFlow", "None", "Open-Meteo"};
     static const char *manualOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {dayFmtOpt, dataSourceOpt, manualOpt};
-    int chooserCounts[] = {2, 4, 2};
+    const char *const *chooserOpts[] = {dataSourceOpt, manualOpt};
+    int chooserCounts[] = {4, 2};
 
     // Configure modal (no text fields, no Wi-Fi choosers)
-    deviceModal.setLines(labels, types, 3);
+    deviceModal.setLines(labels, types, 2);
     deviceModal.setValueRefs(
         nullptr, 0,                 // no numeric fields
-        chooserRefs, 3,             // 3 chooser fields
+        chooserRefs, 2,             // 2 chooser fields
         chooserOpts, chooserCounts, // their options/counts
         nullptr, 0, nullptr         // no text fields
     );

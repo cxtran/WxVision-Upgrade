@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
 namespace ui_theme
@@ -17,6 +18,10 @@ struct Layout
 };
 
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b);
+bool isNightTheme();
+uint16_t applyGraphicColor(uint16_t color);
+void applyGraphicThemeToBuffer(uint16_t *buffer, size_t count);
+void drawBitmapThemed(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t color);
 
 uint16_t monoHeaderBg();
 uint16_t monoHeaderFg();

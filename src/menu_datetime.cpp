@@ -185,6 +185,51 @@ void showDateTimeModal()
     dateModal.setValueRefs(intRefs, 7, chooserRefs, 5,
                            chooserOptPtrs, chooserOptCounts,
                            textRefs, 1, textSizes);
+    dateModal.clearNumberFieldConfigs();
+    NumberFieldConfig yearConfig;
+    yearConfig.step = 1;
+    yearConfig.minValue = 2020;
+    yearConfig.maxValue = 2099;
+    yearConfig.hasBounds = true;
+    dateModal.setNumberFieldConfig(4, yearConfig);
+
+    NumberFieldConfig monthConfig;
+    monthConfig.step = 1;
+    monthConfig.minValue = 1;
+    monthConfig.maxValue = 12;
+    monthConfig.hasBounds = true;
+    monthConfig.wrap = true;
+    monthConfig.accelerateOnHold = true;
+    dateModal.setNumberFieldConfig(5, monthConfig);
+
+    NumberFieldConfig dayConfig;
+    dayConfig.step = 1;
+    dayConfig.minValue = 1;
+    dayConfig.maxValue = 31;
+    dayConfig.hasBounds = true;
+    dayConfig.wrap = true;
+    dayConfig.accelerateOnHold = true;
+    dayConfig.useDateDayRange = true;
+    dateModal.setNumberFieldConfig(6, dayConfig);
+
+    NumberFieldConfig hourConfig;
+    hourConfig.step = 1;
+    hourConfig.minValue = 0;
+    hourConfig.maxValue = 23;
+    hourConfig.hasBounds = true;
+    hourConfig.wrap = true;
+    hourConfig.accelerateOnHold = true;
+    dateModal.setNumberFieldConfig(7, hourConfig);
+
+    NumberFieldConfig minuteConfig;
+    minuteConfig.step = 1;
+    minuteConfig.minValue = 0;
+    minuteConfig.maxValue = 59;
+    minuteConfig.hasBounds = true;
+    minuteConfig.wrap = true;
+    minuteConfig.accelerateOnHold = true;
+    dateModal.setNumberFieldConfig(8, minuteConfig);
+    dateModal.setNumberFieldConfig(9, minuteConfig);
     dateModal.setShowNumberArrows(true);
 
     dateModal.setCallback([](bool accepted, int /*btnIdx*/) {
@@ -207,7 +252,6 @@ void showDateTimeModal()
             else
             {
                 selectTimezoneByIndex(dtTimezoneIndex);
-                setTimezoneAutoDst(dtAutoDst != 0);
                 dtManualOffset = tzStandardOffset;
                 dtAutoDst = tzAutoDst ? 1 : 0;
             }
@@ -276,8 +320,8 @@ void showDateTimeModal()
         else
         {
             selectTimezoneByIndex(dtTimezoneIndex);
-            setTimezoneAutoDst(dtAutoDst != 0);
             dtManualOffset = tzStandardOffset;
+            dtAutoDst = tzAutoDst ? 1 : 0;
         }
 
         DateTime manualLocal(dtYear, dtMonth, dtDay,

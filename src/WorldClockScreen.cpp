@@ -34,6 +34,7 @@ size_t s_knownSelectionCount = 0;
 unsigned long s_phaseStartMs = 0;
 unsigned long s_lastScrollStepMs = 0;
 unsigned long s_pauseUntilMs = 0;
+bool s_rotationPaused = false;
 int s_scrollX = PANEL_RES_X;
 int s_cityTextWidth = 0;
 int s_weatherTextWidth = 0;
@@ -220,6 +221,9 @@ void updateBannerState(unsigned long nowMs)
         stepToCity(0, nowMs, false);
         return;
     }
+
+    if (s_rotationPaused)
+        return;
 
     if (nowMs < s_pauseUntilMs)
         return;
@@ -427,6 +431,7 @@ void resetWorldClockScreenState()
     s_phaseStartMs = 0;
     s_lastScrollStepMs = 0;
     s_pauseUntilMs = 0;
+    s_rotationPaused = false;
     s_scrollX = PANEL_RES_X;
     s_cityScrollX = 0;
     s_cityTextWidth = 0;
@@ -446,6 +451,12 @@ bool worldClockHandleStep(int delta)
         return false;
     stepToCity(delta, millis(), true);
     return true;
+}
+
+void handleWorldClockSelectPress()
+{
+    s_rotationPaused = !s_rotationPaused;
+    s_pauseUntilMs = 0;
 }
 
 void drawWorldClockScreen()

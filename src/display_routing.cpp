@@ -9,14 +9,23 @@ bool screenIsAllowed(ScreenMode mode)
         return isDataSourceOwm() || isDataSourceForecastModel();
     case SCREEN_UDP_DATA:
         return isDataSourceWeatherFlow();
+    case SCREEN_LIGHTNING:
+        return isDataSourceWeatherFlow();
     case SCREEN_UDP_FORECAST:
+        return isDataSourceForecastModel() || isDataSourceWeatherFlow() || isDataSourceOwm();
     case SCREEN_WIND_DIR:
+        return isDataSourceWeatherFlow();
     case SCREEN_HOURLY:
-        return isDataSourceForecastModel();
+        return isDataSourceForecastModel() || isDataSourceWeatherFlow() || isDataSourceOwm();
     case SCREEN_CURRENT:
-        return isDataSourceForecastModel() || isDataSourceOwm();
+        return isDataSourceForecastModel() || isDataSourceOwm() || isDataSourceWeatherFlow();
     case SCREEN_CONDITION_SCENE:
         return !isDataSourceNone();
+    case SCREEN_ASTRONOMY:
+    case SCREEN_SKY_BRIEF:
+        return true;
+    case SCREEN_SKY_FACTS:
+        return false;
     case SCREEN_NOAA_ALERT:
         return noaaAlertsEnabled;
     default:

@@ -23,10 +23,13 @@
 // SCD40
 uint16_t SCD40_co2 = 0;
 float SCD40_temp = NAN, SCD40_hum = NAN;
+bool scd40Ready = false;
 
 // aht20 and bmp280
 float aht20_temp = NAN, aht20_hum = NAN;
 float bmp280_temp = NAN, bmp280_pressure = NAN;
+bool aht20Ready = false;
+bool bmp280Ready = false;
 
 // Infrared Receiver
 const uint16_t kRecvPin = IR_RECEIVE_PIN; // GPIO 34
@@ -407,29 +410,35 @@ void setupSensors()
   // --- SCD40 ---
   scd4x.begin(Wire, 0x62);
   scd4x.startPeriodicMeasurement();
+  scd40Ready = true;
   Serial.println(F("SCD40 initialized"));
 
   // --- AHT20 ---
   if (aht20.begin())
   {
+    aht20Ready = true;
     Serial.println(F("AHT20 found"));
   }
   else
   {
+    aht20Ready = false;
     Serial.println(F("Could not find AHT20!"));
   }
 
   // --- BMP280 (try both addresses) ---
   if (bmp280.begin(0x76))
   {
+    bmp280Ready = true;
     Serial.println(F("BMP280 found at 0x76"));
   }
   else if (bmp280.begin(0x77))
   {
+    bmp280Ready = true;
     Serial.println(F("BMP280 found at 0x77"));
   }
   else
   {
+    bmp280Ready = false;
     Serial.println(F("Could not find BMP280!"));
   }
 }

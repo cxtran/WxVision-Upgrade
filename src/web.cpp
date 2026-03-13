@@ -24,6 +24,7 @@
 #include "default_values.h"
 #include "notifications.h"
 #include "menu.h"
+#include "noaa.h"
 #include "worldtime.h"
 #include "app_state.h"
 #include "weather_provider.h"
@@ -198,10 +199,18 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Clock";
   case SCREEN_WORLD_CLOCK:
     return "World Clock";
+  case SCREEN_ASTRONOMY:
+    return "Astronomy";
+  case SCREEN_SKY_FACTS:
+    return "Sky Facts";
+  case SCREEN_SKY_BRIEF:
+    return "Sky Brief";
   case SCREEN_OWM:
     return "Forecast (OWM)";
   case SCREEN_UDP_DATA:
-    return "UDP Live Weather";
+      return "UDP Live Weather";
+  case SCREEN_LIGHTNING:
+      return "Lightning";
   case SCREEN_UDP_FORECAST:
     return "UDP Forecast";
   case SCREEN_WIND_DIR:
@@ -1413,7 +1422,11 @@ void setupWebServer() {
         if (dirtyWeather) saveWeatherSettings();
         if (dirtyCalibration) saveCalibrationSettings();
         if (dirtyAlarm) saveAlarmSettings();
-        if (dirtyNoaa) saveNoaaSettings();
+        if (dirtyNoaa)
+        {
+          saveNoaaSettings();
+          notifyNoaaSettingsChanged();
+        }
         if (dirtyUnits) saveUnits();
         forceAutoThemeSchedule();
         if (autoThemeAmbient)

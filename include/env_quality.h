@@ -9,3 +9,4 @@ enum class EnvBand : int {
 };
 
 void showEnvironmentalQualityScreen();
+void serviceEnvironmentalAlerts();

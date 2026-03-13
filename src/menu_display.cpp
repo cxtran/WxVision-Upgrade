@@ -38,6 +38,8 @@ void showDisplaySettingsModal()
     lightThresholdTemp = autoThemeLightThreshold;
     static int autoBrightnessInt;
     autoBrightnessInt = autoBrightness ? 1 : 0;
+    static int sceneClockInt;
+    sceneClockInt = sceneClockEnabled ? 1 : 0;
     static int brightnessTemp = brightness;
     static int scrollLevelTemp = 3;
     static int vScrollLevelTemp = 3;
@@ -138,6 +140,7 @@ void showDisplaySettingsModal()
     }
 
     addChooserLine("Auto Brightness", &autoBrightnessInt, autoOpts, 2);
+    addChooserLine("Scene Clock", &sceneClockInt, autoOpts, 2);
     addNumberLine("Brightness", &brightnessTemp);
     addChooserLine("Scroll Speed", &scrollLevelTemp, speedOpts, 10);
     addChooserLine("Vert Scroll", &vScrollLevelTemp, speedOpts, 10);
@@ -160,6 +163,7 @@ void showDisplaySettingsModal()
     displayModal.setCallback([](bool /*accepted*/, int) {
         brightness = constrain(brightnessTemp, 1, 100);
         autoBrightness = (autoBrightnessInt > 0);
+        sceneClockEnabled = (sceneClockInt > 0);
         scrollLevel = constrain(scrollLevelTemp, 0, 9);
         scrollSpeed = scrollDelays[scrollLevel];
         verticalScrollLevel = constrain(vScrollLevelTemp, 0, 9);

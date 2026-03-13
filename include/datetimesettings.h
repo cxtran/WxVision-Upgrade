@@ -45,6 +45,8 @@ const char *ntpPresetHost(int index);
 void setNtpServerFromHostString(const String& host);
 
 bool syncTimeFromNTP();
+void restartAutomaticTimeSync();
+void servicePendingTimeSync();
 bool getLocalDateTime(DateTime &out);
 void setSystemTimeFromDateTime(const DateTime &dt);
 
@@ -81,4 +83,5 @@ const char* currentTimezoneId();
 void applyTimeZoneOffset(struct tm& tminfo, int offsetMins);
 
 // Optionally: Validate and clamp time fields
+int daysInMonthForYearMonth(int year, int month);
 void clampDateTimeFields(int& year, int& month, int& day, int& hour, int& min, int& sec);

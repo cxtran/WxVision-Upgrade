@@ -46,14 +46,19 @@
 #include "screen_manager.h"
 #include "render_scheduler.h"
 #include "weather_provider.h"
+#include "display_astronomy.h"
+#include "display_sky_facts.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
     SCREEN_CLOCK,
-    SCREEN_WORLD_CLOCK,
     SCREEN_OWM,
+    SCREEN_WORLD_CLOCK,
+    SCREEN_ASTRONOMY,
+    SCREEN_SKY_BRIEF,
     SCREEN_CONDITION_SCENE,
     SCREEN_UDP_DATA,
+    SCREEN_LIGHTNING,
     SCREEN_CURRENT, 
     SCREEN_HOURLY, 
     SCREEN_UDP_FORECAST,
@@ -70,6 +75,7 @@ const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 ScreenMode currentScreen = SCREEN_CLOCK;
 
 InfoScreen udpScreen("Live Weather", SCREEN_UDP_DATA);
+InfoScreen lightningScreen("Lightning", SCREEN_LIGHTNING);
 InfoScreen forecastScreen("Next 10 Days", SCREEN_UDP_FORECAST);
 InfoScreen envQualityScreen("Air Quality", SCREEN_ENV_INDEX);
 InfoScreen currentCondScreen("Current", SCREEN_CURRENT);
@@ -97,9 +103,6 @@ static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
 static bool autoWifiReconnectSuppressed = false;
-static unsigned long s_nextAutoNtpSyncMs = 0;
-static constexpr unsigned long AUTO_NTP_SYNC_INTERVAL_MS = 25UL * 60UL * 60UL * 1000UL;
-static constexpr unsigned long AUTO_NTP_RETRY_MS = 30UL * 60UL * 1000UL;
 
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
@@ -141,6 +144,7 @@ void scrollWeatherTick()
 void hideAllInfoScreens()
 {
     udpScreen.hide();
+    lightningScreen.hide();
     forecastScreen.hide();
     envQualityScreen.hide();
     currentCondScreen.hide();
@@ -242,11 +246,6 @@ static void attemptWifiReconnect(bool apActive)
     // --- END NEW CODE ---
 }
 
-static void scheduleNextAutoNtpSync(unsigned long nowMs, unsigned long delayMs)
-{
-    s_nextAutoNtpSyncMs = nowMs + delayMs;
-}
-
 static bool isSavedSsidAvailable()
 {
     if (wifiSSID.isEmpty())
@@ -338,16 +337,21 @@ static void completeStartupAfterWiFi(bool force)
     {
         WiFi.setSleep(false);
         Serial.println("WiFi done.");
+
+        // Fetch NOAA before OTA/web/mDNS allocate additional heap so TLS gets
+        // the best chance at a large contiguous block during startup.
+        if (noaaAlertsEnabled)
+        {
+            NoaaManualFetchResult noaaStartupFetch = requestNoaaManualFetch();
+            if (noaaStartupFetch == NOAA_MANUAL_FETCH_STARTED)
+                tickNoaaAlerts(millis());
+        }
+
         refreshNetworkServices(true);
         Serial.println("Displaying Time...");
         if (!syncTimeFromNTP())
         {
             Serial.println("[Setup] Initial NTP sync failed.");
-            scheduleNextAutoNtpSync(millis(), AUTO_NTP_RETRY_MS);
-        }
-        else
-        {
-            scheduleNextAutoNtpSync(millis(), AUTO_NTP_SYNC_INTERVAL_MS);
         }
     }
     else
@@ -523,6 +527,7 @@ void setup()
 
     // InfoScreen highlight preferences
     udpScreen.setHighlightEnabled(true);
+    lightningScreen.setHighlightEnabled(true);
     forecastScreen.setHighlightEnabled(true);
     envQualityScreen.setHighlightEnabled(false);
     currentCondScreen.setHighlightEnabled(true);
@@ -661,6 +666,8 @@ void loop()
         udpListening = false;
     }
 
+    servicePendingTimeSync();
+
     // Do not auto-enter setup AP mode just because STA dropped temporarily.
     // NOAA HTTPS can trigger a transient disconnect (e.g. BEACON_TIMEOUT),
     // and the WiFi state machine should recover that in the background
@@ -671,6 +678,10 @@ void loop()
         if (wifiConnected || apActive)
         {
             refreshNetworkServices(wifiConnected);
+            if (wifiConnected)
+            {
+                restartAutomaticTimeSync();
+            }
         }
         else
         {
@@ -701,6 +712,10 @@ void loop()
             resetLunarLuckSectionRotation();
         if (currentScreen == SCREEN_WORLD_CLOCK)
             resetWorldClockScreenState();
+        if (currentScreen == SCREEN_ASTRONOMY)
+            resetAstronomyScreenState();
+        if (currentScreen == SCREEN_SKY_BRIEF)
+            resetSkyBriefScreenState();
     }
 
     // === [1] --- Always-on background tasks --- ===
@@ -720,6 +735,17 @@ void loop()
         {
             wxv::provider::fetchActiveProviderData();
             lastOpenMeteoBootstrapTry = now;
+        }
+    }
+
+    static unsigned long lastOwmBootstrapTry = 0;
+    if (wifiConnected && isDataSourceOwm())
+    {
+        bool missingOwmData = (forecast.numDays <= 0 && forecast.numHours <= 0) || isnan(currentCond.temp);
+        if (missingOwmData && (now - lastOwmBootstrapTry > 60000UL))
+        {
+            wxv::provider::fetchActiveProviderData();
+            lastOwmBootstrapTry = now;
         }
     }
 
@@ -810,6 +836,8 @@ void loop()
         clockSensorUpdatePending = true;
     }
 
+    serviceEnvironmentalAlerts();
+
     // === [2] --- UI/modal/menu/infoscreen handling --- ===
 
     // Only check physical reset if NO modal, NO keyboard, and NOT in WiFi select
@@ -845,6 +873,10 @@ void loop()
         {
             requestSectionHeadingRerender();
         }
+        else if (isTemporaryAlertActive())
+        {
+            requestSectionHeadingRerender();
+        }
         else if (!isScreenOff())
         {
             if (currentScreen == SCREEN_PREDICT)
@@ -857,6 +889,11 @@ void loop()
     }
 
     handleAutoRotate(now);
+    if (serviceTemporaryAlertHeading(now))
+    {
+        delay(5);
+        return;
+    }
     if (isSectionHeadingActive())
     {
         IRCodes::WxKey headingKey = getIRCodeDebounced();
@@ -1131,6 +1168,27 @@ void loop()
         return;
     }
 
+    if (lightningScreen.isActive())
+    {
+        if (newTempestData)
+        {
+            showLightningScreen();
+            newTempestData = false;
+        }
+        IRCodes::WxKey key = getIRCodeDebounced();
+        if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
+        {
+            hideAllInfoScreens();
+            showMainMenuModal();
+            playBuzzerTone(3000, 100);
+            return;
+        }
+        lightningScreen.tick();
+        lightningScreen.handleIR(IRCodes::legacyCodeForKey(key));
+        delay(5);
+        return;
+    }
+
     if (forecastScreen.isActive())
     {
         IRCodes::WxKey key = getIRCodeDebounced();
@@ -1217,27 +1275,6 @@ void loop()
         return;
     }
 
-    if (s_nextAutoNtpSyncMs == 0)
-    {
-        scheduleNextAutoNtpSync(now, AUTO_NTP_SYNC_INTERVAL_MS);
-    }
-    else if (static_cast<long>(now - s_nextAutoNtpSyncMs) >= 0)
-    {
-        if (WiFi.status() == WL_CONNECTED)
-        {
-            bool ok = syncTimeFromNTP();
-            if (ok)
-            {
-                getTimeFromRTC();
-                reset_Time_and_Date_Display = true;
-                scheduleNextAutoNtpSync(now, AUTO_NTP_SYNC_INTERVAL_MS);
-            }
-            else
-            {
-                scheduleNextAutoNtpSync(now, AUTO_NTP_RETRY_MS);
-            }
-        }
-    }
     if (currentScreen == SCREEN_NOAA_ALERT &&
         (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
     {
@@ -1247,13 +1284,49 @@ void loop()
     // --- BEGIN WORLD TIME FEATURE ---
     if (currentScreen == SCREEN_WORLD_CLOCK &&
         worldTimeHasSelections() &&
-        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
+        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down || key == IRCodes::WxKey::Ok))
     {
-        worldClockHandleStep((key == IRCodes::WxKey::Up) ? -1 : 1);
+        if (key == IRCodes::WxKey::Ok)
+            handleWorldClockSelectPress();
+        else
+            worldClockHandleStep((key == IRCodes::WxKey::Up) ? -1 : 1);
         drawWorldClockScreen();
         return;
     }
     // --- END WORLD TIME FEATURE ---
+    if (currentScreen == SCREEN_ASTRONOMY &&
+        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down || key == IRCodes::WxKey::Ok))
+    {
+        if (key == IRCodes::WxKey::Down)
+            handleAstronomyDownPress();
+        else if (key == IRCodes::WxKey::Up)
+            handleAstronomyUpPress();
+        else
+            handleAstronomySelectPress();
+        return;
+    }
+
+    if (currentScreen == SCREEN_SKY_BRIEF &&
+        (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down || key == IRCodes::WxKey::Ok))
+    {
+        if (key == IRCodes::WxKey::Down)
+            handleSkyBriefDownPress();
+        else if (key == IRCodes::WxKey::Up)
+            handleSkyBriefUpPress();
+        return;
+    }
+
+    if (is24HourSectionScreen(currentScreen) && key == IRCodes::WxKey::Ok)
+    {
+        handle24HourSectionSelectPress();
+        return;
+    }
+
+    if (currentScreen == SCREEN_PREDICT && key == IRCodes::WxKey::Ok)
+    {
+        handlePredictionSelectPress();
+        return;
+    }
 
     if (key == IRCodes::WxKey::Left)
     {
@@ -1293,6 +1366,7 @@ void loop()
         manageTzModal.isActive() ||
         inKeyboardMode ||
         udpScreen.isActive() ||
+        lightningScreen.isActive() ||
         forecastScreen.isActive() ||
         envQualityScreen.isActive() ||
         currentCondScreen.isActive() ||
@@ -1310,6 +1384,10 @@ void loop()
     case SCREEN_UDP_DATA:
         if (!udpScreen.isActive())
             showUdpScreen();
+        break;
+    case SCREEN_LIGHTNING:
+        if (!lightningScreen.isActive())
+            showLightningScreen();
         break;
     case SCREEN_ENV_INDEX:
         if (!envQualityScreen.isActive())
@@ -1393,6 +1471,40 @@ void loop()
             markRendered(RenderSlot::WorldClockMain, now);
             noteFrameDraw(now);
             needsClear = false;
+        }
+    }
+
+    if (currentScreen == SCREEN_ASTRONOMY)
+    {
+        if (needsClear || renderDue(RenderSlot::AstronomyMain, now, 60000UL))
+        {
+            drawAstronomyScreen();
+            markRendered(RenderSlot::AstronomyMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
+        }
+        if (!needsClear && renderDue(RenderSlot::AstronomyTick, now, kRenderMarqueeMs))
+        {
+            tickAstronomyScreen();
+            markRendered(RenderSlot::AstronomyTick, now);
+            noteFrameDraw(now);
+        }
+    }
+
+    if (currentScreen == SCREEN_SKY_BRIEF)
+    {
+        if (needsClear || renderDue(RenderSlot::SkyBriefMain, now, 60000UL))
+        {
+            drawSkyBriefScreen();
+            markRendered(RenderSlot::SkyBriefMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
+        }
+        if (!needsClear && renderDue(RenderSlot::SkyBriefTick, now, kRenderSkySummaryMs))
+        {
+            tickSkyBriefScreen();
+            markRendered(RenderSlot::SkyBriefTick, now);
+            noteFrameDraw(now);
         }
     }
 

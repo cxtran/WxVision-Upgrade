@@ -18,6 +18,7 @@ extern int theme;
 static RollingUpScreen s_hourlyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_dailyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_liveRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
+static RollingUpScreen s_lightningRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_noaaRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static std::vector<String> s_hourlyHeaders;
@@ -438,6 +439,49 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         s_liveRoll.setExitHoldMs(4000);
         s_liveRoll.setBlockSizePx(InfoScreen::CHARH * 2);
     }
+    else if (_screenMode == SCREEN_LIGHTNING) {
+        std::vector<String> vec;
+        std::vector<uint16_t> colors;
+        std::vector<int> offsets;
+        std::vector<uint8_t> marqueeFlags;
+        vec.reserve(_lineCount * 2);
+        const bool monoTheme = (theme == 1);
+        const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
+        const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
+        const int valueIndentPx = 4;
+        for (int i = 0; i < _lineCount; ++i) {
+            String raw = _lines[i];
+            int colon = raw.indexOf(':');
+            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
+            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
+            label.trim();
+            value.trim();
+            if (label.length()) {
+                vec.push_back(label);
+                colors.push_back(labelColor);
+                offsets.push_back(0);
+                marqueeFlags.push_back(0);
+            }
+            vec.push_back(value);
+            colors.push_back(valueColor);
+            offsets.push_back(valueIndentPx);
+            marqueeFlags.push_back(value.length() ? 1 : 0);
+        }
+        if (vec.empty()) {
+            vec.push_back("No lightning");
+            colors.push_back(valueColor);
+            offsets.push_back(0);
+            marqueeFlags.push_back(0);
+        }
+        s_lightningRoll.setLines(vec, resetPosition);
+        s_lightningRoll.setLineColors(colors);
+        s_lightningRoll.setLineOffsets(offsets);
+        s_lightningRoll.setLineMarqueeFlags(marqueeFlags);
+        s_lightningRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_lightningRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
+        s_lightningRoll.setExitHoldMs(3500);
+        s_lightningRoll.setBlockSizePx(InfoScreen::CHARH * 2);
+    }
     else if (_screenMode == SCREEN_CURRENT) {
         // Current conditions as vertical scroll-up
         std::vector<String> vec;
@@ -627,6 +671,7 @@ void InfoScreen::draw() {
     const bool isVerticalScrollScreen =
         (_screenMode == SCREEN_HOURLY) ||
         (_screenMode == SCREEN_UDP_DATA) ||
+        (_screenMode == SCREEN_LIGHTNING) ||
         (_screenMode == SCREEN_UDP_FORECAST) ||
         (_screenMode == SCREEN_CURRENT) ||
         (_screenMode == SCREEN_NOAA_ALERT);
@@ -673,6 +718,12 @@ void InfoScreen::draw() {
     if (_screenMode == SCREEN_UDP_DATA) {
         int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
         s_liveRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
+        drawHeader();
+        return;
+    }
+    if (_screenMode == SCREEN_LIGHTNING) {
+        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
+        s_lightningRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
         drawHeader();
         return;
     }
@@ -841,6 +892,18 @@ void InfoScreen::tick() {
         draw();
         return;
     }
+    if (_screenMode == SCREEN_LIGHTNING) {
+        static unsigned long s_lastLightningDrawMs = 0;
+        const unsigned long nowMs = millis();
+        if (nowMs - s_lastLightningDrawMs < 33UL) {
+            return;
+        }
+        s_lastLightningDrawMs = nowMs;
+        s_lightningRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
+        s_lightningRoll.update();
+        draw();
+        return;
+    }
     if (_screenMode == SCREEN_CURRENT) {
         static unsigned long s_lastCurrentDrawMs = 0;
         const unsigned long nowMs = millis();
@@ -925,6 +988,7 @@ void InfoScreen::handleIR(uint32_t code) {
         if (_screenMode == SCREEN_HOURLY) return &s_hourlyRoll;
         if (_screenMode == SCREEN_UDP_FORECAST) return &s_dailyRoll;
         if (_screenMode == SCREEN_UDP_DATA) return &s_liveRoll;
+        if (_screenMode == SCREEN_LIGHTNING) return &s_lightningRoll;
         if (_screenMode == SCREEN_CURRENT) return &s_currentRoll;
         if (_screenMode == SCREEN_NOAA_ALERT) return &s_noaaRoll;
         return nullptr;

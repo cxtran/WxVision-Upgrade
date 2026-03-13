@@ -51,7 +51,7 @@ public:
     {
         WeatherProviderCapabilities caps;
         caps.hasCurrent = true;
-        caps.hasForecast = false;
+        caps.hasForecast = true;
         caps.usesCloudFetch = true;
         return caps;
     }

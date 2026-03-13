@@ -1,12 +1,63 @@
 #include "ui_theme.h"
 
 #include "display.h"
+#include "settings.h"
 
 namespace ui_theme
 {
 uint16_t rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     return dma_display ? dma_display->color565(r, g, b) : 0;
+}
+
+bool isNightTheme()
+{
+    return theme == 1;
+}
+
+static uint16_t compose565(uint8_t r, uint8_t g, uint8_t b)
+{
+    if (dma_display)
+        return dma_display->color565(r, g, b);
+    return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
+}
+
+uint16_t applyGraphicColor(uint16_t color)
+{
+    if (!isNightTheme() || color == 0)
+        return color;
+
+    const uint8_t r = static_cast<uint8_t>(((color >> 11) & 0x1F) * 255 / 31);
+    const uint8_t g = static_cast<uint8_t>(((color >> 5) & 0x3F) * 255 / 63);
+    const uint8_t b = static_cast<uint8_t>((color & 0x1F) * 255 / 31);
+    const int luma = (r * 30 + g * 59 + b * 11) / 100;
+
+    // Keep one neutral matrix tone while preserving relative contrast between bright/dark art.
+    constexpr uint8_t kToneR = 172;
+    constexpr uint8_t kToneG = 186;
+    constexpr uint8_t kToneB = 214;
+    const float level = 0.16f + (static_cast<float>(luma) / 255.0f) * 0.48f;
+
+    const uint8_t nr = static_cast<uint8_t>(kToneR * level + 0.5f);
+    const uint8_t ng = static_cast<uint8_t>(kToneG * level + 0.5f);
+    const uint8_t nb = static_cast<uint8_t>(kToneB * level + 0.5f);
+    return compose565(nr, ng, nb);
+}
+
+void applyGraphicThemeToBuffer(uint16_t *buffer, size_t count)
+{
+    if (!isNightTheme() || buffer == nullptr)
+        return;
+
+    for (size_t i = 0; i < count; ++i)
+        buffer[i] = applyGraphicColor(buffer[i]);
+}
+
+void drawBitmapThemed(int16_t x, int16_t y, const uint8_t *bitmap, int16_t w, int16_t h, uint16_t color)
+{
+    if (!dma_display || bitmap == nullptr)
+        return;
+    dma_display->drawBitmap(x, y, bitmap, w, h, applyGraphicColor(color));
 }
 
 uint16_t monoHeaderBg() { return rgb(20, 20, 40); }

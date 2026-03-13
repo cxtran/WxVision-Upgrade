@@ -9,11 +9,13 @@
 #include <math.h>
 #include <time.h>
 #include "ScrollLine.h"
+#include "screen_manager.h"
 #include "units.h"
 #include "settings.h"
 
 extern WiFiUDP udp;
 extern InfoScreen udpScreen;
+extern InfoScreen lightningScreen;
 extern InfoScreen forecastScreen;
 extern InfoScreen currentCondScreen;
 extern InfoScreen hourlyScreen;
@@ -23,12 +25,26 @@ extern ScrollLine scrollLine;
 extern ScrollLine windInfo;
 extern int scrollSpeed;
 extern int theme;
+extern bool useImperial;
 
 static String formatWindDirectionLabel(double degrees);
 static String formatSampleInterval(double seconds);
 static String formatWindTimestamp(uint32_t epoch);
 static String composeWindInfoLine();
 static bool shouldProcessRapidWind();
+static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, unsigned long timeoutMs);
+static String formatLightningDistance(double km);
+static bool isLightningSummaryFresh(unsigned long nowMs);
+static bool isLightningEventFresh(unsigned long nowMs);
+static String lightningAgeShort(unsigned long nowMs, unsigned long updateMs);
+static void handleLightningAlertForEvent(uint32_t epoch, double distanceKm, uint32_t energy);
+
+static constexpr unsigned long kLightningStaleTimeoutMs = 15UL * 60UL * 1000UL;
+static constexpr unsigned long kLightningRetriggerCooldownMs = 2UL * 60UL * 1000UL;
+static constexpr uint16_t kLightningAlertDisplayMs = 2800;
+static constexpr double kLightningNearbyThresholdKm = 16.0;
+static constexpr size_t kOpenMeteoMaxBodyBytes = 24576;
+static constexpr size_t kWeatherFlowForecastMaxBodyBytes = 49152;
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -47,9 +63,90 @@ CurrentConditions currentCond;
 
 bool newTempestData = false;
 bool newRapidWindData = false;
+static uint32_t s_lastLightningAlertEpoch = 0;
+static unsigned long s_lastLightningAlertMs = 0;
 
 static bool shouldProcessRapidWind() {
     return isDataSourceWeatherFlow() && currentScreen == SCREEN_WIND_DIR;
+}
+
+static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, unsigned long timeoutMs)
+{
+    bodyOut = "";
+
+    const int contentLength = http.getSize();
+    if (contentLength > 0)
+    {
+        if (contentLength > static_cast<int>(maxBytes))
+        {
+            Serial.printf("[HTTP] Payload too large: %d bytes\n", contentLength);
+            return false;
+        }
+        bodyOut.reserve(static_cast<unsigned>(contentLength + 1));
+    }
+    else
+    {
+        bodyOut.reserve(static_cast<unsigned>(min<size_t>(4096, maxBytes)));
+    }
+
+    WiFiClient *stream = http.getStreamPtr();
+    if (!stream)
+    {
+        Serial.println("[HTTP] Stream pointer unavailable");
+        return false;
+    }
+
+    char buffer[257];
+    unsigned long lastDataMs = millis();
+    unsigned long startMs = lastDataMs;
+    bool receivedAnyBytes = false;
+    while (http.connected() || stream->available() > 0)
+    {
+        int available = stream->available();
+        if (available <= 0)
+        {
+            if ((millis() - lastDataMs) >= timeoutMs)
+            {
+                Serial.printf("[HTTP] Body read timeout after %lu ms (connected=%d)\n",
+                              millis() - startMs,
+                              http.connected() ? 1 : 0);
+                break;
+            }
+            delay(1);
+            continue;
+        }
+
+        int toRead = available;
+        if (toRead > static_cast<int>(sizeof(buffer) - 1))
+            toRead = static_cast<int>(sizeof(buffer) - 1);
+
+        int n = stream->readBytes(buffer, static_cast<size_t>(toRead));
+        if (n <= 0)
+            continue;
+
+        lastDataMs = millis();
+        receivedAnyBytes = true;
+        buffer[n] = '\0';
+
+        if ((bodyOut.length() + static_cast<unsigned>(n)) > maxBytes)
+        {
+            Serial.printf("[HTTP] Body exceeded %u bytes\n", static_cast<unsigned>(maxBytes));
+            return false;
+        }
+
+        bodyOut += buffer;
+        if (contentLength > 0 && bodyOut.length() >= static_cast<unsigned>(contentLength))
+            break;
+    }
+
+    if (!receivedAnyBytes)
+    {
+        Serial.printf("[HTTP] No body bytes received (contentLength=%d connected=%d)\n",
+                      contentLength,
+                      http.connected() ? 1 : 0);
+    }
+
+    return bodyOut.length() > 0;
 }
 
 // --------- Tempest UDP JSON Parsing ----------
@@ -80,6 +177,8 @@ void updateTempestFromUDP(const char* jsonStr) {
         tempest.precipType    = (int)obs[13];
         tempest.strikeCount   = (int)obs[14];
         tempest.strikeDist    = (double)obs[15];
+        tempest.lightningSummaryEpoch = tempest.epoch;
+        tempest.lightningSummaryLastUpdate = millis();
         tempest.battery       = (double)obs[16];
         tempest.reportInt     = (int)obs[17];
         tempest.lastObsTime   = String((uint32_t)obs[0]);
@@ -90,6 +189,19 @@ void updateTempestFromUDP(const char* jsonStr) {
         tempest.obsLastUpdate = tempest.lastUpdate;
         newTempestData = true;
         updateWindInfoScroll(false);
+    }
+    else if (type == "evt_strike" && doc.hasOwnProperty("evt")) {
+        JSONVar evt = doc["evt"];
+        if (evt.length() >= 3) {
+            tempest.lightningLastEventEpoch = (uint32_t)evt[0];
+            tempest.lightningLastEventDistanceKm = (double)evt[1];
+            tempest.lightningLastEventEnergy = (uint32_t)(double)evt[2];
+            tempest.lightningLastEventUpdate = millis();
+            newTempestData = true;
+            handleLightningAlertForEvent(tempest.lightningLastEventEpoch,
+                                         tempest.lightningLastEventDistanceKm,
+                                         tempest.lightningLastEventEnergy);
+        }
     }
     else if (type == "rapid_wind" && doc.hasOwnProperty("ob")) {
         if (!shouldProcessRapidWind()) {
@@ -129,9 +241,23 @@ String extractJsonObject(const String& src, const char* key) {
     if (start < 0) return "";
     int brace = 1;
     int i = start + 1;
+    bool inString = false;
+    bool escaped = false;
     while (i < src.length() && brace > 0) {
-        if (src[i] == '{') ++brace;
-        else if (src[i] == '}') --brace;
+        char c = src[i];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                inString = false;
+            }
+        } else {
+            if (c == '"') inString = true;
+            else if (c == '{') ++brace;
+            else if (c == '}') --brace;
+        }
         ++i;
     }
     if (brace == 0) return src.substring(start, i);
@@ -144,9 +270,26 @@ String extractJsonArray(const String& json, const String& key) {
     int arrayStart = json.indexOf('[', keyIdx);
     if (arrayStart < 0) return "";
     int depth = 0, arrayEnd = -1;
+    bool inString = false;
+    bool escaped = false;
     for (int i = arrayStart; i < json.length(); ++i) {
-        if (json[i] == '[') depth++;
-        else if (json[i] == ']') {
+        char c = json[i];
+        if (inString) {
+            if (escaped) {
+                escaped = false;
+            } else if (c == '\\') {
+                escaped = true;
+            } else if (c == '"') {
+                inString = false;
+            }
+            continue;
+        }
+        if (c == '"') {
+            inString = true;
+            continue;
+        }
+        if (c == '[') depth++;
+        else if (c == ']') {
             depth--;
             if (depth == 0) {
                 arrayEnd = i;
@@ -294,6 +437,165 @@ void updateDailyForecastFromJson(const String& jsonStr) {
     ForecastDay parsed[MAX_FORECAST_DAYS];
     int parsedDays = 0;
 
+    auto parseDailyObject = [&](JSONVar d) {
+            if (JSON.typeof_(d) != "object") {
+                return;
+            }
+            ForecastDay f;
+            f.highTemp   = (JSON.typeof_(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
+            f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
+            f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
+            f.conditions = (JSON.typeof_(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
+            f.icon       = (JSON.typeof_(d["icon"])       == "string") ? (const char*)d["icon"]       : "";
+            f.sunrise    = (JSON.typeof_(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
+            f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
+            f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
+            f.monthNum   = (JSON.typeof_(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
+            f.yearNum    = (JSON.typeof_(d["year_num"])   == "number") ? (int)d["year_num"]   : 0;
+            if (f.yearNum <= 0)
+            {
+                uint32_t dayEpoch = (JSON.typeof_(d["time"]) == "number") ? (uint32_t)(double)d["time"] : 0;
+                if (dayEpoch > 0)
+                {
+                    time_t tt = static_cast<time_t>(dayEpoch);
+                    struct tm *ti = localtime(&tt);
+                    if (ti)
+                    {
+                        f.yearNum = ti->tm_year + 1900;
+                        if (f.monthNum <= 0) f.monthNum = ti->tm_mon + 1;
+                        if (f.dayNum <= 0) f.dayNum = ti->tm_mday;
+                    }
+                }
+            }
+            parsed[parsedDays++] = f;
+    };
+
+    auto parseDailyJsonArray = [&](JSONVar daily) {
+        int days = min((int)daily.length(), MAX_FORECAST_DAYS);
+        for (int i = 0; i < days; ++i) {
+            parseDailyObject(daily[i]);
+        }
+    };
+
+    auto parseDailyArrayString = [&](const String& dailyArrayStr) {
+        if (dailyArrayStr.length() == 0) {
+            return;
+        }
+
+        const int n = dailyArrayStr.length();
+        int i = 0;
+        while (i < n && parsedDays < MAX_FORECAST_DAYS) {
+            while (i < n && dailyArrayStr[i] != '{') {
+                ++i;
+            }
+            if (i >= n) break;
+
+            int start = i;
+            int braceDepth = 0;
+            bool inString = false;
+            bool escaped = false;
+            for (; i < n; ++i) {
+                char c = dailyArrayStr[i];
+                if (inString) {
+                    if (escaped) {
+                        escaped = false;
+                    } else if (c == '\\') {
+                        escaped = true;
+                    } else if (c == '"') {
+                        inString = false;
+                    }
+                    continue;
+                }
+                if (c == '"') {
+                    inString = true;
+                    continue;
+                }
+                if (c == '{') {
+                    ++braceDepth;
+                } else if (c == '}') {
+                    --braceDepth;
+                    if (braceDepth == 0) {
+                        String objStr = dailyArrayStr.substring(start, i + 1);
+                        _sanitizeBools(objStr);
+                        JSONVar d = JSON.parse(objStr);
+                        parseDailyObject(d);
+                        ++i;
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
+    auto parseDailyIndexedObject = [&](JSONVar daily) {
+        for (int i = 0; i < MAX_FORECAST_DAYS; ++i) {
+            JSONVar d = daily[i];
+            if (JSON.typeof_(d) != "object") break;
+            parseDailyObject(d);
+        }
+    };
+
+    auto parseDailyFieldObject = [&](JSONVar daily) {
+        auto arrLen = [](JSONVar arr) -> int {
+            return (JSON.typeof_(arr) == "array") ? static_cast<int>(arr.length()) : 0;
+        };
+        auto arrNum = [](JSONVar arr, int idx) -> double {
+            if (JSON.typeof_(arr) != "array" || idx < 0 || idx >= static_cast<int>(arr.length())) return NAN;
+            JSONVar v = arr[idx];
+            return (JSON.typeof_(v) == "number") ? static_cast<double>(v) : NAN;
+        };
+        auto arrStr = [](JSONVar arr, int idx) -> String {
+            if (JSON.typeof_(arr) != "array" || idx < 0 || idx >= static_cast<int>(arr.length())) return "";
+            JSONVar v = arr[idx];
+            return (JSON.typeof_(v) == "string") ? String((const char*)v) : String("");
+        };
+
+        JSONVar timeArr = daily["day_start_local"];
+        if (arrLen(timeArr) == 0) timeArr = daily["time"];
+        JSONVar hiArr = daily["air_temp_high"];
+        JSONVar loArr = daily["air_temp_low"];
+        JSONVar precipArr = daily["precip_probability"];
+        if (arrLen(precipArr) == 0) precipArr = daily["precip_probability_max"];
+        JSONVar condArr = daily["conditions"];
+        JSONVar iconArr = daily["icon"];
+        JSONVar sunriseArr = daily["sunrise"];
+        JSONVar sunsetArr = daily["sunset"];
+
+        int days = arrLen(timeArr);
+        if (days == 0) days = arrLen(hiArr);
+        if (days == 0) days = arrLen(loArr);
+        days = min(days, MAX_FORECAST_DAYS);
+
+        for (int i = 0; i < days; ++i) {
+            ForecastDay f;
+            f.highTemp = arrNum(hiArr, i);
+            f.lowTemp = arrNum(loArr, i);
+            double precip = arrNum(precipArr, i);
+            f.rainChance = isnan(precip) ? -1 : static_cast<int>(precip);
+            f.conditions = arrStr(condArr, i);
+            f.icon = arrStr(iconArr, i);
+            double sunrise = arrNum(sunriseArr, i);
+            double sunset = arrNum(sunsetArr, i);
+            f.sunrise = isnan(sunrise) ? 0U : static_cast<uint32_t>(sunrise);
+            f.sunset = isnan(sunset) ? 0U : static_cast<uint32_t>(sunset);
+
+            double dayEpoch = arrNum(timeArr, i);
+            if (!isnan(dayEpoch) && dayEpoch > 0)
+            {
+                time_t tt = static_cast<time_t>(dayEpoch);
+                struct tm *ti = localtime(&tt);
+                if (ti)
+                {
+                    f.dayNum = ti->tm_mday;
+                    f.monthNum = ti->tm_mon + 1;
+                    f.yearNum = ti->tm_year + 1900;
+                }
+            }
+
+            parsed[parsedDays++] = f;
+        }
+    };
+
     int forecastIdx = jsonStr.indexOf("\"forecast\"");
     if (forecastIdx < 0) {
         Serial.println("[ERROR] No 'forecast' found (daily) - keeping previous daily data");
@@ -306,46 +608,67 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         return;
     }
 
-    String dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
-    if (dailyArrayStr.length() == 0) {
-        Serial.println("[ERROR] Could not find daily array - keeping previous daily data");
-        return;
-    }
-    _sanitizeBools(dailyArrayStr);
+    JSONVar daily = nullptr;
 
-    JSONVar daily = JSON.parse(dailyArrayStr);
-    if (JSON.typeof_(daily) != "array") {
-        Serial.println("[ERROR] Parsed daily forecast is not an array - keeping previous daily data");
-        return;
-    }
-
-    int days = min((int)daily.length(), MAX_FORECAST_DAYS);
-    for (int i = 0; i < days; i++) {
-        JSONVar d = daily[i];
-        ForecastDay f;
-        f.highTemp   = (JSON.typeof_(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
-        f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
-        f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
-        f.conditions = (JSON.typeof_(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
-        f.icon       = (JSON.typeof_(d["icon"])       == "string") ? (const char*)d["icon"]       : "";
-        f.sunrise    = (JSON.typeof_(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
-        f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
-        f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
-        f.monthNum   = (JSON.typeof_(d["month_num"])  == "number") ? (int)d["month_num"]  : 0;
-        f.yearNum    = (JSON.typeof_(d["year_num"])   == "number") ? (int)d["year_num"]   : 0;
-        if (f.yearNum <= 0)
-        {
-            uint32_t dayEpoch = (JSON.typeof_(d["time"]) == "number") ? (uint32_t)(double)d["time"] : 0;
-            if (dayEpoch > 0)
-            {
-                time_t tt = static_cast<time_t>(dayEpoch);
-                struct tm *ti = localtime(&tt);
-                if (ti)
-                    f.yearNum = ti->tm_year + 1900;
+    String forecastObjStr = extractJsonObject(jsonStr, "\"forecast\"");
+    String dailyArrayStr;
+    if (forecastObjStr.length() > 0) {
+        dailyArrayStr = extractJsonArray(forecastObjStr, "\"daily\"");
+        parseDailyArrayString(dailyArrayStr);
+        if (parsedDays > 0) {
+            forecast.numDays = parsedDays;
+            for (int i = 0; i < parsedDays; ++i) {
+                forecast.days[i] = parsed[i];
             }
+            Serial.print("[FORECAST] Parsed ");
+            Serial.print(forecast.numDays);
+            Serial.println(" daily entries");
+            return;
         }
-        parsed[i] = f;
-        parsedDays++;
+        _sanitizeBools(forecastObjStr);
+        JSONVar forecastObj = JSON.parse(forecastObjStr);
+        if (JSON.typeof_(forecastObj) == "object") {
+            daily = forecastObj["daily"];
+        }
+    }
+
+    if (JSON.typeof_(daily) == "undefined" || daily == nullptr) {
+        dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
+        parseDailyArrayString(dailyArrayStr);
+        if (parsedDays > 0) {
+            forecast.numDays = parsedDays;
+            for (int i = 0; i < parsedDays; ++i) {
+                forecast.days[i] = parsed[i];
+            }
+            Serial.print("[FORECAST] Parsed ");
+            Serial.print(forecast.numDays);
+            Serial.println(" daily entries");
+            return;
+        }
+        if (dailyArrayStr.length() > 0) {
+            _sanitizeBools(dailyArrayStr);
+            daily = JSON.parse(dailyArrayStr);
+        }
+    }
+
+    if (JSON.typeof_(daily) == "undefined" || daily == nullptr) {
+        String dailyObjStr = extractJsonObject(jsonStr, "\"daily\"");
+        if (dailyObjStr.length() > 0) {
+            _sanitizeBools(dailyObjStr);
+            daily = JSON.parse(dailyObjStr);
+        }
+    }
+
+    if (JSON.typeof_(daily) == "array") {
+        parseDailyJsonArray(daily);
+    } else if (JSON.typeof_(daily) == "object") {
+        parseDailyFieldObject(daily);
+        if (parsedDays <= 0 && JSON.typeof_(daily[0]) == "object") {
+            parseDailyIndexedObject(daily);
+        }
+    } else {
+        Serial.println("[ERROR] Parsed daily forecast block invalid - keeping previous daily data");
+        return;
     }
 
     if (parsedDays <= 0) {
@@ -792,7 +1115,10 @@ static void fetchOpenMeteoForecastData() {
             return false;
         }
 
-        payloadOut = http.getString();
+        if (!readHttpBody(http, payloadOut, kOpenMeteoMaxBodyBytes, 15000UL)) {
+            http.end();
+            return false;
+        }
         http.end();
         return payloadOut.length() > 0;
     };
@@ -878,7 +1204,11 @@ void fetchForecastData() {
         return;
     }
 
-    String payload = http.getString();
+    String payload;
+    if (!readHttpBody(http, payload, kWeatherFlowForecastMaxBodyBytes, 15000UL)) {
+        http.end();
+        return;
+    }
     http.end();
     updateForecastFromJson(payload);
     requestScrollRebuild();
@@ -905,15 +1235,23 @@ void resetForecastModelData() {
     tempest.solar = NAN;
     tempest.rain = NAN;
     tempest.strikeDist = NAN;
+    tempest.lightningLastEventDistanceKm = NAN;
     tempest.battery = NAN;
     tempest.obsWindAvg = NAN;
     tempest.obsWindDir = NAN;
     tempest.rapidWindAvg = NAN;
     tempest.rapidWindDir = NAN;
     tempest.lastObsTime = "";
+    tempest.lightningSummaryEpoch = 0;
+    tempest.lightningSummaryLastUpdate = 0;
+    tempest.lightningLastEventEpoch = 0;
+    tempest.lightningLastEventUpdate = 0;
+    tempest.lightningLastEventEnergy = 0;
 
     newTempestData = false;
     newRapidWindData = false;
+    s_lastLightningAlertEpoch = 0;
+    s_lastLightningAlertMs = 0;
     updateWindInfoScroll(true);
 }
 
@@ -933,7 +1271,9 @@ String getTempestField(const char* field) {
     if (!strcmp(field, "lull"))        return isnan(tempest.windLull)    ? "--" : fmtWind(tempest.windLull, 1);
     if (!strcmp(field, "preciptype"))  return String(tempest.precipType);
     if (!strcmp(field, "strikes"))     return String(tempest.strikeCount);
-    if (!strcmp(field, "strikedist"))  return isnan(tempest.strikeDist)  ? "--" : String(tempest.strikeDist, 1) + "km";
+    if (!strcmp(field, "strikedist"))  return formatLightningDistance(tempest.strikeDist);
+    if (!strcmp(field, "strike_last")) return formatWindTimestamp(tempest.lightningLastEventEpoch);
+    if (!strcmp(field, "strike_age"))  return lightningAgeShort(millis(), tempest.lightningLastEventUpdate);
     if (!strcmp(field, "obs_time"))    return tempest.lastObsTime;
     return "";
 }
@@ -969,6 +1309,54 @@ static String ageLongAgo(unsigned long ageMs)
 
     unsigned long days = hrs / 24UL;
     return String(days) + " day" + ((days == 1UL) ? String("") : String("s")) + " ago";
+}
+
+static String formatLightningDistance(double km)
+{
+    if (isnan(km))
+        return "--";
+
+    const bool imperialDistance = useImperial;
+    const double displayValue = imperialDistance ? (km * 0.621371) : km;
+    return String(displayValue, 1) + (imperialDistance ? "mi" : "km");
+}
+
+static bool isLightningSummaryFresh(unsigned long nowMs)
+{
+    return tempest.lightningSummaryLastUpdate > 0 &&
+           nowMs >= tempest.lightningSummaryLastUpdate &&
+           (nowMs - tempest.lightningSummaryLastUpdate) <= kLightningStaleTimeoutMs;
+}
+
+static bool isLightningEventFresh(unsigned long nowMs)
+{
+    return tempest.lightningLastEventUpdate > 0 &&
+           nowMs >= tempest.lightningLastEventUpdate &&
+           (nowMs - tempest.lightningLastEventUpdate) <= kLightningStaleTimeoutMs;
+}
+
+static String lightningAgeShort(unsigned long nowMs, unsigned long updateMs)
+{
+    if (updateMs == 0 || nowMs < updateMs)
+        return "--";
+    return ageShort(nowMs - updateMs);
+}
+
+static void handleLightningAlertForEvent(uint32_t epoch, double distanceKm, uint32_t energy)
+{
+    (void)energy;
+    const unsigned long nowMs = millis();
+    const bool sameEvent = (epoch != 0 && epoch == s_lastLightningAlertEpoch);
+    const bool withinCooldown = (s_lastLightningAlertMs > 0 && (nowMs - s_lastLightningAlertMs) < kLightningRetriggerCooldownMs);
+    if (sameEvent || withinCooldown)
+        return;
+
+    const bool nearby = !isnan(distanceKm) && distanceKm <= kLightningNearbyThresholdKm;
+    queueTemporaryAlertHeading(nearby ? "Lightning Nearby..." : "Lightning Detected",
+                               kLightningAlertDisplayMs,
+                               (epoch != 0) ? epoch : static_cast<uint32_t>(nowMs));
+    s_lastLightningAlertEpoch = epoch;
+    s_lastLightningAlertMs = nowMs;
 }
 
 static String compactTemp(double tempC)
@@ -1059,7 +1447,7 @@ void showUdpScreen() {
     addLine("Rain:   " + (isnan(tempest.rain) ? String("--") : fmtPrecip(tempest.rain, 2)) +
             " Type " + String(tempest.precipType));
     addLine("Strike: " + String(tempest.strikeCount) + " Dist " +
-            (isnan(tempest.strikeDist) ? String("--") : String(tempest.strikeDist, 1) + "km"));
+            formatLightningDistance(tempest.strikeDist));
     addLine("Batt:   " + (isnan(tempest.battery) ? String("--") : String(tempest.battery, 2) + "V"));
 
     if (tempest.rapidEpoch > 0)
@@ -1087,6 +1475,42 @@ void showUdpScreen() {
     } else {
         udpScreen.setLines(lines, lineCount, false);
     }
+}
+
+void showLightningScreen() {
+    const unsigned long nowMs = millis();
+    const bool summaryFresh = isLightningSummaryFresh(nowMs);
+    const bool eventFresh = isLightningEventFresh(nowMs);
+    const String sourceAge = String("LOCAL ") + lightningAgeShort(nowMs, tempest.lightningSummaryLastUpdate);
+
+    String lines[INFOSCREEN_MAX_LINES];
+    int lineCount = 0;
+    auto addLine = [&](const String &line) {
+        if (lineCount < INFOSCREEN_MAX_LINES)
+            lines[lineCount++] = line;
+    };
+
+    addLine("Source: " + sourceAge);
+    addLine("Strikes: " + (summaryFresh ? String(tempest.strikeCount) : String("--")));
+    addLine("Near: " + (summaryFresh ? formatLightningDistance(tempest.strikeDist) : String("--")));
+    addLine("Last: " + (eventFresh ? ageShort(nowMs - tempest.lightningLastEventUpdate) : String("--")));
+    addLine("At: " + (eventFresh ? formatWindTimestamp(tempest.lightningLastEventEpoch) : String("--")));
+    addLine("Evt Near: " + (eventFresh ? formatLightningDistance(tempest.lightningLastEventDistanceKm) : String("--")));
+    addLine("Energy: " + (eventFresh ? String(tempest.lightningLastEventEnergy) : String("--")));
+
+    if (!summaryFresh && !eventFresh)
+        addLine("Status: Stale");
+    else if (eventFresh && !isnan(tempest.lightningLastEventDistanceKm) && tempest.lightningLastEventDistanceKm <= kLightningNearbyThresholdKm)
+        addLine("Status: Nearby");
+    else if (summaryFresh && tempest.strikeCount > 0)
+        addLine("Status: Active");
+    else
+        addLine("Status: Clear");
+
+    lightningScreen.setTitle("Lightning");
+    const bool reset = !lightningScreen.isActive();
+    lightningScreen.setLines(lines, lineCount, reset);
+    lightningScreen.show([](){ currentScreen = homeScreenForDataSource(); });
 }
 
 void showForecastScreen() {

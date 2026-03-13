@@ -6,7 +6,9 @@
 #include "InfoScreen.h"
 #include "settings.h"
 #include "sensors.h"
+#include "screen_manager.h"
 #include "units.h"
+#include "ui_theme.h"
 #include "utils.h"
 
 extern InfoScreen envQualityScreen;
@@ -41,6 +43,17 @@ static EnvBand s_detailsBandTemp = EnvBand::Unknown;
 static EnvBand s_detailsBandHumidity = EnvBand::Unknown;
 static EnvBand s_detailsBandBaro = EnvBand::Unknown;
 static String s_lineTexts[3];
+static bool s_prevCo2HighAlert = false;
+static bool s_prevTempHighAlert = false;
+static bool s_prevHumidityAlert = false;
+static bool s_prevSensorFailureAlert = false;
+static unsigned long s_lastCo2AlertMs = 0;
+static unsigned long s_lastTempAlertMs = 0;
+static unsigned long s_lastHumidityAlertMs = 0;
+static unsigned long s_lastSensorFailureAlertMs = 0;
+
+static constexpr unsigned long kEnvAlertCooldownMs = 5UL * 60UL * 1000UL;
+static constexpr uint16_t kEnvAlertDisplayMs = 2400;
 
 static void updateDetailsBands(EnvBand overall, EnvBand co2, EnvBand temp, EnvBand humidity, EnvBand pressure)
 {
@@ -149,6 +162,21 @@ static EnvBand bandFromPressure(float pressure)
     if ((pressure >= 970.0f && pressure < 985.0f) || (pressure > 1035.0f && pressure <= 1045.0f))
         return EnvBand::Poor;
     return EnvBand::Critical;
+}
+
+static bool shouldRetriggerEnvAlert(bool active, bool &previousActive, unsigned long &lastAlertMs, unsigned long nowMs)
+{
+    const bool risingEdge = active && !previousActive;
+    const bool cooldownElapsed = active && (lastAlertMs == 0 || (nowMs - lastAlertMs) >= kEnvAlertCooldownMs);
+    previousActive = active;
+    if (!active)
+        return false;
+    if (risingEdge || cooldownElapsed)
+    {
+        lastAlertMs = nowMs;
+        return true;
+    }
+    return false;
 }
 
 static uint16_t colorForBand(EnvBand band)
@@ -432,6 +460,8 @@ static void renderStatusEmojiBitmap(EnvBand band)
     }
     const int co2SegmentCount = static_cast<int>(sizeof(co2Segments) / sizeof(co2Segments[0]));
     drawValueBar(co2Norm, s_co2Band, co2BarTop, false, co2Segments, co2SegmentCount, false, 1.0f);
+
+    ui_theme::applyGraphicThemeToBuffer(s_iconBitmap, 16 * 16);
 
     s_iconBitmapValid = true;
     s_iconBitmapBand = band;
@@ -1196,6 +1226,56 @@ void showEnvironmentalQualityScreen()
     if (preferredLine >= 0)
     {
         envQualityScreen.setSelectedLine(preferredLine);
+    }
+}
+
+void serviceEnvironmentalAlerts()
+{
+    const unsigned long nowMs = millis();
+
+    float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
+    float tempC = NAN;
+    if (!isnan(SCD40_temp))
+        tempC = SCD40_temp + tempOffset;
+    else if (!isnan(aht20_temp))
+        tempC = aht20_temp + tempOffset;
+
+    float humidity = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
+    if (!isnan(humidity))
+    {
+        humidity += static_cast<float>(humOffset);
+        if (humidity < 0.0f)
+            humidity = 0.0f;
+        if (humidity > 100.0f)
+            humidity = 100.0f;
+    }
+
+    const EnvBand co2Band = bandFromCo2(co2Raw);
+    const EnvBand tempBand = bandFromTemp(tempC);
+    const EnvBand humBand = bandFromHumidity(humidity);
+
+    const bool co2High = !isnan(co2Raw) && co2Raw > 1200.0f && (co2Band == EnvBand::Poor || co2Band == EnvBand::Critical);
+    const bool tempHigh = !isnan(tempC) && tempC > 26.0f && (tempBand == EnvBand::Poor || tempBand == EnvBand::Critical);
+    const bool humidityWarn = !isnan(humidity) &&
+                              ((humidity < 30.0f) || (humidity > 60.0f)) &&
+                              (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
+    const bool sensorFailure = !scd40Ready || !aht20Ready || !bmp280Ready;
+
+    if (shouldRetriggerEnvAlert(co2High, s_prevCo2HighAlert, s_lastCo2AlertMs, nowMs))
+    {
+        queueTemporaryAlertHeading("CO2 Too High", kEnvAlertDisplayMs, 0x434F3201UL);
+    }
+    if (shouldRetriggerEnvAlert(tempHigh, s_prevTempHighAlert, s_lastTempAlertMs, nowMs))
+    {
+        queueTemporaryAlertHeading("Temperature Too High", kEnvAlertDisplayMs, 0x54454D01UL);
+    }
+    if (shouldRetriggerEnvAlert(humidityWarn, s_prevHumidityAlert, s_lastHumidityAlertMs, nowMs))
+    {
+        queueTemporaryAlertHeading("Humidity Warning", kEnvAlertDisplayMs, 0x48554D01UL);
+    }
+    if (shouldRetriggerEnvAlert(sensorFailure, s_prevSensorFailureAlert, s_lastSensorFailureAlertMs, nowMs))
+    {
+        queueTemporaryAlertHeading("Sensor Failure", kEnvAlertDisplayMs, 0x53454E01UL);
     }
 }
 

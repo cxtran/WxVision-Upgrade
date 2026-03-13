@@ -50,6 +50,12 @@ struct TempestData {
     int    precipType;
     int    strikeCount;
     double strikeDist;
+    uint32_t lightningSummaryEpoch = 0;
+    unsigned long lightningSummaryLastUpdate = 0;
+    uint32_t lightningLastEventEpoch = 0;
+    unsigned long lightningLastEventUpdate = 0;
+    double lightningLastEventDistanceKm = NAN;
+    uint32_t lightningLastEventEnergy = 0;
     double battery;
     int    reportInt;
     String lastObsTime;
@@ -137,6 +143,7 @@ void showUdpScreen();
 void showForecastScreen();
 void showHourlyForecastScreen();
 void showCurrentConditionsScreen();
+void showLightningScreen();
 void showWindDirectionScreen();
 
 // ---- Time formatting ----

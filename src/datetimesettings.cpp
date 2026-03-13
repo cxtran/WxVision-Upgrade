@@ -9,13 +9,16 @@
 #include <cstdio>
 #include <strings.h>
 #include <algorithm>
+#include <esp_sntp.h>
 #include "display.h"
+#include "display_runtime.h"
 #include "default_values.h"
 
 
 int tzOffset = 0;      // Effective offset (minutes)
 int tzStandardOffset = 0; // Base offset without DST (minutes)
 bool tzAutoDst = false;
+static bool s_tzAutoDstPreferred = false;
 int fmt24 = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
 int dateFmt = wxv::defaults::kDefaults.dateFormatStorage;
 extern RTC_DS3231 rtc;
@@ -37,6 +40,15 @@ static void refreshNtpHostCache();
 static void applySystemTimezone();
 static void updateTimezoneOffsetInternal(const DateTime* referenceUtc);
 static bool getUtcNow(DateTime &out);
+static bool applySyncedTimeToRtc(bool emitLog);
+static void ensureSntpConfigured(bool restartClient);
+static void resetSntpSyncTracking();
+static bool waitForNtpSync(uint32_t timeoutMs);
+
+static constexpr uint32_t kNtpSyncTimeoutMs = 15000UL;
+static constexpr time_t kMinValidNtpEpoch = 1577836800; // 2020-01-01T00:00:00Z
+static volatile bool s_ntpSyncPending = false;
+static volatile time_t s_lastNtpSyncEpoch = 0;
 
 struct DateTimeDefaultsInit {
     DateTimeDefaultsInit() {
@@ -129,6 +141,15 @@ static int daysInMonth(int year, int month)
     if (month == 2 && isLeapYear(year))
         days = 29;
     return days;
+}
+
+int daysInMonthForYearMonth(int year, int month)
+{
+    if (month < 1)
+        month = 1;
+    if (month > 12)
+        month = 12;
+    return daysInMonth(year, month);
 }
 
 static int nthWeekdayOfMonth(int year, int month, int weekday, int nth)
@@ -336,9 +357,7 @@ void selectTimezoneByIndex(int index)
         return;
 
     setTimezoneInternal(index);
-
-    if (!timezoneSupportsDst(index))
-        tzAutoDst = false;
+    tzAutoDst = timezoneSupportsDst(index) ? s_tzAutoDstPreferred : false;
 
     updateTimezoneOffsetInternal(nullptr);
 }
@@ -355,6 +374,8 @@ void setCustomTimezoneOffset(int offsetMinutes)
 
 void setTimezoneAutoDst(bool enable)
 {
+    s_tzAutoDstPreferred = enable;
+
     if (tzSelectedIndex < 0)
         enable = false;
     else if (!timezoneSupportsDst(static_cast<size_t>(tzSelectedIndex)))
@@ -658,13 +679,14 @@ void loadDateTimeSettings()
         tzStandardOffset = storedStd;
     }
 
+    s_tzAutoDstPreferred = storedAutoDst;
     if (tzSelectedIndex < 0)
     {
         tzAutoDst = false;
     }
     else
     {
-        tzAutoDst = storedAutoDst && timezoneSupportsDst(static_cast<size_t>(tzSelectedIndex));
+        tzAutoDst = s_tzAutoDstPreferred && timezoneSupportsDst(static_cast<size_t>(tzSelectedIndex));
     }
 
     if (ntpServerPreset < 0 || ntpServerPreset > NTP_PRESET_CUSTOM)
@@ -719,7 +741,7 @@ void saveDateTimeSettings()
 
     prefs.putInt("tz_offset", tzOffset);
     prefs.putInt("tz_std", tzStandardOffset);
-    prefs.putBool("tz_dst_auto", tzAutoDst);
+    prefs.putBool("tz_dst_auto", s_tzAutoDstPreferred);
     prefs.putString("tz_name", timezoneIsCustom() ? "" : tzName);
     prefs.putInt("date_fmt", dateFmt);
     prefs.putInt("time_24h", fmt24);
@@ -774,7 +796,7 @@ void clampDateTimeFields(int& year, int& month, int& day, int& hour, int& min, i
     if (year > 2099) year = 2099;
     if (month < 1) month = 1;
     if (month > 12) month = 12;
-    int maxDay = daysInMonth(year, month);
+    int maxDay = daysInMonthForYearMonth(year, month);
     if (day < 1) day = 1;
     if (day > maxDay) day = maxDay;
     if (hour < 0) hour = 0;
@@ -804,117 +826,60 @@ static void refreshNtpHostCache()
     }
 }
 
+static bool isValidNtpEpoch(time_t epoch)
+{
+    return epoch >= kMinValidNtpEpoch;
+}
 
+static void onNtpTimeSync(struct timeval *tv)
+{
+    if (!tv)
+        return;
 
-bool syncTimeFromNTP() {
-    if (WiFi.status() != WL_CONNECTED)
+    s_lastNtpSyncEpoch = tv->tv_sec;
+    s_ntpSyncPending = true;
+}
+
+static void resetSntpSyncTracking()
+{
+    s_ntpSyncPending = false;
+    if (sntp_enabled())
     {
-        Serial.println("[NTP] Sync skipped (WiFi not connected)");
-        return false;
+        sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
     }
+}
 
-    Serial.println("Syncing time from NTP...");
-
+static void ensureSntpConfigured(bool restartClient)
+{
     refreshNtpHostCache();
-    const char *primary = ntpServerHost;
-    const char *fallbacks[] = {"time.google.com", "time.nist.gov", "pool.ntp.org"};
+    resetSntpSyncTracking();
 
-    struct tm timeinfo{};
-    bool success = false;
+    sntp_set_time_sync_notification_cb(onNtpTimeSync);
+    sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
+    sntp_set_sync_interval(std::max<uint32_t>(15000UL, wxv::defaults::kDefaults.ntpSyncIntervalMs));
+    sntp_setservername(0, ntpServerHost);
+    sntp_setservername(1, "time.google.com");
+    sntp_setservername(2, "time.nist.gov");
 
-    auto attemptHost = [&](const char *host) -> bool {
-        if (!host || host[0] == '\0')
-            return false;
+    if (sntp_enabled())
+    {
+        if (restartClient)
+            sntp_restart();
+        return;
+    }
 
-        Serial.print("  trying host: ");
-        Serial.println(host);
+    sntp_init();
+}
 
-        setenv("TZ", "UTC0", 1);
-        tzset();
-        configTime(0, 0, host, "time.nist.gov", "pool.ntp.org");
-
-        memset(&timeinfo, 0, sizeof(timeinfo));
-        const int maxAttempts = 15;
-        time_t base = time(nullptr);
-        for (int attempt = 0; attempt < maxAttempts; ++attempt)
-        {
-            time_t candidate = time(nullptr);
-            bool timeChanged = (base <= 0 || candidate <= 0)
-                ? false
-                : (llabs((long long)candidate - (long long)base) > 30);
-
-            if (getLocalTime(&timeinfo))
-            {
-                if (timeChanged ||
-                    (timeinfo.tm_year + 1900 >= 2020 && (base <= 0 || candidate <= 0)))
-                {
-                    return true;
-                }
-            }
-            delay(200);
-        }
-        Serial.println("  host timed out");
+static bool applySyncedTimeToRtc(bool emitLog)
+{
+    time_t nowUtc = time(nullptr);
+    if (!isValidNtpEpoch(nowUtc))
         return false;
-    };
 
-    const char *candidates[4] = {nullptr};
-    size_t candidateCount = 0;
-
-    auto addCandidate = [&](const char *host) {
-        if (!host || host[0] == '\0')
-            return;
-        for (size_t i = 0; i < candidateCount; ++i)
-        {
-            if (strcmp(candidates[i], host) == 0)
-                return;
-        }
-        if (candidateCount < sizeof(candidates) / sizeof(candidates[0]))
-        {
-            candidates[candidateCount++] = host;
-        }
-    };
-
-    addCandidate(primary);
-    for (const char *fallback : fallbacks)
-    {
-        addCandidate(fallback);
-    }
-
-    for (size_t i = 0; i < candidateCount; ++i)
-    {
-        if (attemptHost(candidates[i]))
-        {
-            success = true;
-            break;
-        }
-    }
-
-    if (!success)
-    {
-        Serial.println("[NTP] Sync failed for all servers");
-        applySystemTimezone();
-        return false;
-    }
-
-    int year = timeinfo.tm_year + 1900;
-    if (year < 2000 || year > 2099)
-    {
-        Serial.printf("[NTP] Invalid year from server: %d\n", year);
-        applySystemTimezone();
-        return false;
-    }
-
-    DateTime newUtc(
-        year,
-        timeinfo.tm_mon + 1,
-        timeinfo.tm_mday,
-        timeinfo.tm_hour,
-        timeinfo.tm_min,
-        timeinfo.tm_sec
-    );
-
+    DateTime newUtc(static_cast<uint32_t>(nowUtc));
     updateTimezoneOffsetWithUtc(newUtc);
-    DateTime localTime = utcToLocal(newUtc, tzOffset);
+    applySystemTimezone();
 
     bool rtcOk = rtcReady;
     if (!rtcOk)
@@ -927,22 +892,102 @@ bool syncTimeFromNTP() {
     {
         rtc.adjust(newUtc);
     }
-    else
+    else if (emitLog)
     {
         Serial.println("[NTP] RTC not detected; using system clock only");
     }
 
-    setSystemTimeFromDateTime(newUtc);
-    applySystemTimezone();
+    if (emitLog)
+    {
+        DateTime localTime = utcToLocal(newUtc, tzOffset);
+        Serial.printf("[NTP] Time set (local): %04d-%02d-%02d %02d:%02d:%02d\n",
+                      localTime.year(), localTime.month(), localTime.day(),
+                      localTime.hour(), localTime.minute(), localTime.second());
+        Serial.printf("[NTP] Stored UTC: %04d-%02d-%02d %02d:%02d:%02d\n",
+                      newUtc.year(), newUtc.month(), newUtc.day(),
+                      newUtc.hour(), newUtc.minute(), newUtc.second());
+    }
 
-    Serial.printf("[NTP] Time set (local): %04d-%02d-%02d %02d:%02d:%02d\n",
-                  localTime.year(), localTime.month(), localTime.day(),
-                 localTime.hour(), localTime.minute(), localTime.second());
-    Serial.printf("[NTP] Stored UTC: %04d-%02d-%02d %02d:%02d:%02d\n",
-                  newUtc.year(), newUtc.month(), newUtc.day(),
-                  newUtc.hour(), newUtc.minute(), newUtc.second());
-
-    refreshNtpHostCache();
-
+    reset_Time_and_Date_Display = true;
     return true;
+}
+
+static bool waitForNtpSync(uint32_t timeoutMs)
+{
+    uint32_t startMs = millis();
+    while (static_cast<uint32_t>(millis() - startMs) < timeoutMs)
+    {
+        if (s_ntpSyncPending)
+        {
+            servicePendingTimeSync();
+            return isValidNtpEpoch(time(nullptr));
+        }
+
+        if (sntp_enabled())
+        {
+            sntp_sync_status_t syncStatus = sntp_get_sync_status();
+            if (syncStatus == SNTP_SYNC_STATUS_COMPLETED)
+            {
+                return applySyncedTimeToRtc(false);
+            }
+            if (syncStatus == SNTP_SYNC_STATUS_IN_PROGRESS && isValidNtpEpoch(time(nullptr)))
+            {
+                return applySyncedTimeToRtc(false);
+            }
+        }
+
+        delay(200);
+    }
+    return false;
+}
+
+bool syncTimeFromNTP() {
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        Serial.println("[NTP] Sync skipped (WiFi not connected)");
+        return false;
+    }
+
+    Serial.println("Syncing time from NTP...");
+
+    restartAutomaticTimeSync();
+    if (!waitForNtpSync(kNtpSyncTimeoutMs))
+    {
+        Serial.println("[NTP] Sync timed out");
+        applySystemTimezone();
+        return false;
+    }
+
+    servicePendingTimeSync();
+    if (!isValidNtpEpoch(time(nullptr)))
+    {
+        Serial.println("[NTP] Sync failed to produce a valid clock");
+        applySystemTimezone();
+        return false;
+    }
+
+    return applySyncedTimeToRtc(true);
+}
+
+void restartAutomaticTimeSync()
+{
+    if (WiFi.status() != WL_CONNECTED)
+        return;
+
+    ensureSntpConfigured(true);
+    Serial.printf("[NTP] SNTP configured: primary=%s interval=%lu ms\n",
+                  ntpServerHost,
+                  static_cast<unsigned long>(sntp_get_sync_interval()));
+}
+
+void servicePendingTimeSync()
+{
+    if (!s_ntpSyncPending)
+        return;
+
+    s_ntpSyncPending = false;
+    if (!applySyncedTimeToRtc(true))
+    {
+        Serial.printf("[NTP] Ignoring invalid sync epoch: %ld\n", static_cast<long>(s_lastNtpSyncEpoch));
+    }
 }
