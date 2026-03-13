@@ -28,6 +28,7 @@
 #include "display_condition.h"
 #include "app_state.h"
 #include "ui_theme.h"
+#include "display_widgets.h"
 
 static AppState &app = appState();
 #define scrollLevel app.scrollLevel
@@ -4905,6 +4906,48 @@ void fetchWeatherFromOWM()
     String forecastUrl = "http://api.openweathermap.org/data/2.5/forecast?" + buildOwmQuery();
     String forecastJson = httpGETRequest(forecastUrl.c_str());
     if (forecastJson != "{}") {
+        auto extractJsonStringValueLocal = [](const String &src, const char *key) -> String {
+            String needle = "\"" + String(key) + "\"";
+            int keyIdx = src.indexOf(needle);
+            if (keyIdx < 0) return "";
+            int colonIdx = src.indexOf(':', keyIdx + needle.length());
+            if (colonIdx < 0) return "";
+            int pos = colonIdx + 1;
+            while (pos < src.length() && (src[pos] == ' ' || src[pos] == '\t' || src[pos] == '\r' || src[pos] == '\n')) ++pos;
+            if (pos >= src.length()) return "";
+
+            if (src[pos] == '"') {
+                ++pos;
+                int end = pos;
+                bool escaped = false;
+                while (end < src.length()) {
+                    char c = src[end];
+                    if (escaped) escaped = false;
+                    else if (c == '\\') escaped = true;
+                    else if (c == '"') break;
+                    ++end;
+                }
+                if (end <= src.length()) return src.substring(pos, end);
+                return "";
+            }
+
+            int end = pos;
+            while (end < src.length() && src[end] != ',' && src[end] != '}' && src[end] != '\r' && src[end] != '\n') ++end;
+            String out = src.substring(pos, end);
+            out.trim();
+            return out;
+        };
+
+        String forecastCod = extractJsonStringValueLocal(forecastJson, "cod");
+        String forecastMsg = extractJsonStringValueLocal(forecastJson, "message");
+        if (forecastCod.length() > 0 && forecastCod != "200") {
+            Serial.printf("[OWM] Forecast API error cod=%s message=%s\n",
+                          forecastCod.c_str(),
+                          forecastMsg.c_str());
+            needScrollRebuild = true;
+            return;
+        }
+
         auto sanitizeBools = [](String &s) {
             s.replace(":true", ":1");
             s.replace(":false", ":0");
@@ -4974,7 +5017,9 @@ void fetchWeatherFromOWM()
 
         String listArrayStr = extractJsonArrayLocal(forecastJson, "\"list\"");
         if (listArrayStr.length() == 0) {
-            Serial.println("[OWM] Forecast list missing");
+            Serial.printf("[OWM] Forecast list missing cod=%s message=%s\n",
+                          forecastCod.length() ? forecastCod.c_str() : "n/a",
+                          forecastMsg.length() ? forecastMsg.c_str() : "n/a");
         } else {
             forecast.numHours = 0;
             forecast.numDays = 0;
@@ -5214,20 +5259,39 @@ void displayClock()
     dma_display->setTextColor(clockLineColor);
     if (rightJustify)
     {
-        char buf[16];
-        if (units.clock24h)
-            snprintf(buf, sizeof(buf), "%02d:%s:%s", hour, chr_t_minute, chr_t_second);
-        else
-            snprintf(buf, sizeof(buf), "%02d:%s:%s%c", hour, chr_t_minute, chr_t_second, isPM ? 'P' : 'A');
+        char hmBuf[8];
+        snprintf(hmBuf, sizeof(hmBuf), "%02d:%s", hour, chr_t_minute);
 
-        int w = getTextWidth(buf);
-        int x = 64 - w;
+        const int hmW = getTextWidth(hmBuf);
+        const int secondGap = 1;
+        const int secondW = 7; // 2x 3px digits + 1px gap
+        const int ampmW = units.clock24h ? 0 : 3;
+        const int ampmGap = units.clock24h ? 0 : 1;
+        const int totalW = hmW + secondGap + secondW + ampmGap + ampmW;
+        int x = 64 - totalW;
+        x -= 1;
         if (x < 0)
             x = 0;
 
         dma_display->fillRect(0, 9, 64, 7, myBLACK);
         dma_display->setCursor(x, 9);
-        dma_display->print(buf);
+        dma_display->print(hmBuf);
+
+        const int secondX = x + hmW + secondGap;
+        const int secondY = 11;
+        wxv::seg7::Metrics secondMetrics;
+        secondMetrics.digitWidth = 3;
+        secondMetrics.digitHeight = 5;
+        secondMetrics.colonWidth = 1;
+        secondMetrics.spacing = 1;
+        wxv::seg7::drawDigit(secondX, secondY, chr_t_second[0], clockLineColor, 1, secondMetrics);
+        wxv::seg7::drawDigit(secondX + 4, secondY, chr_t_second[1], clockLineColor, 1, secondMetrics);
+
+        if (!units.clock24h)
+        {
+            wxv::seg7::drawDigit(secondX + secondW + ampmGap, secondY, isPM ? 'P' : 'A',
+                                 clockLineColor, 1, secondMetrics);
+        }
     }
     else
     {
@@ -5271,10 +5335,40 @@ void displayDate()
     int16_t x1, y1;
     uint16_t w, h;
     dma_display->getTextBounds(dateStr, 0, 0, &x1, &y1, &w, &h);
+    const int wifiIconW = 7;
+    const int wifiIconGap = 2;
+    const bool showWifiIcon = rightJustify && (WiFi.status() == WL_CONNECTED);
+    const int reservedWifiW = showWifiIcon ? (wifiIconW + wifiIconGap) : 0;
     int dateX = rightJustify ? (64 - static_cast<int>(w))
                              : ((64 - static_cast<int>(w)) / 2);
     if (dateX < 0)
         dateX = 0;
+    if (showWifiIcon)
+    {
+        dateX -= reservedWifiW;
+        if (dateX < 0)
+            dateX = 0;
+    }
+    if (rightJustify)
+    {
+        dateX -= 1;
+        if (dateX < 0)
+            dateX = 0;
+    }
+
+    if (showWifiIcon)
+    {
+        const int wifiX = dateX;
+        const int wifiY = 17;
+        uint16_t wifiDim = (theme == 1)
+                               ? dma_display->color565(35, 35, 60)
+                               : dma_display->color565(80, 80, 80);
+        uint16_t wifiActive = (theme == 1)
+                                  ? dma_display->color565(90, 140, 200)
+                                  : dma_display->color565(100, 255, 120);
+        drawWiFiIcon(wifiX, wifiY, wifiDim, wifiActive, WiFi.RSSI());
+        dateX += reservedWifiW;
+    }
 
     dma_display->setCursor(dateX, 17);
     if (d_daysOfTheWeek == 0)
@@ -5327,6 +5421,8 @@ void displayWeatherData()
     String outdoorTemp = formatOutdoorTemperature();
     int tempWidth = getTextWidth(outdoorTemp.c_str());
     int tempX = 64 - tempWidth;
+    if (currentScreen == SCREEN_OWM)
+        tempX -= 1;
     if (tempX < textLaneX)
         tempX = textLaneX;
 

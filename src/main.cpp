@@ -675,15 +675,16 @@ void loop()
 
     if (wifiConnected != lastWifiState || apActive != lastApState)
     {
-        if (wifiConnected || apActive)
+        const bool wifiReconnected = (wifiConnected && !lastWifiState);
+        const bool wifiDisconnected = (!wifiConnected && lastWifiState);
+        const bool haveStaIp = wifiConnected && (WiFi.localIP() != IPAddress(static_cast<uint32_t>(0)));
+
+        if (wifiReconnected && haveStaIp)
         {
-            refreshNetworkServices(wifiConnected);
-            if (wifiConnected)
-            {
-                restartAutomaticTimeSync();
-            }
+            refreshNetworkServices(true);
+            restartAutomaticTimeSync();
         }
-        else
+        else if (wifiDisconnected)
         {
             stopMdnsService();
         }

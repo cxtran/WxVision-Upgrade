@@ -15,6 +15,7 @@
 #include "system.h"
 #include "weather_provider.h"
 #include "noaa.h"
+#include "display_runtime.h"
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
 
@@ -422,6 +423,8 @@ void applyDataSourcePolicies(bool wifiConnected)
     static int lastSource = -1;
     static bool lastWifiConnected = false;
     static bool pendingCloudBootstrapFetch = true;
+    static unsigned long earliestCloudBootstrapFetchMs = 0;
+    bool deferBootstrapFetchUntilNextPass = false;
     int previousSource = lastSource;
     const bool wantsUdpMulticast = wxv::provider::sourceUsesUdpMulticast(dataSource);
 
@@ -451,14 +454,32 @@ void applyDataSourcePolicies(bool wifiConnected)
     {
         bool prevWasForecastModel = wxv::provider::sourceIsForecastModel(previousSource);
         bool nowIsForecastModel = wxv::provider::sourceIsForecastModel(dataSource);
+        const auto caps = wxv::provider::activeProvider().capabilities();
         if (prevWasForecastModel || nowIsForecastModel)
         {
             resetForecastModelData();
         }
 
-        if (wifiConnected)
+        if (wifiConnected && caps.usesUdpMulticast)
+        {
+            // WeatherFlow switches are more memory- and timing-sensitive because
+            // UDP, screen refresh, and a large cloud forecast fetch all start at once.
+            // Give the source change a short settle window before the cloud fetch starts.
+            pendingCloudBootstrapFetch = caps.usesCloudFetch;
+            earliestCloudBootstrapFetchMs = millis() + 3000UL;
+            deferBootstrapFetchUntilNextPass = pendingCloudBootstrapFetch;
+        }
+        else if (wifiConnected)
+        {
             wxv::provider::fetchActiveProviderData();
-        pendingCloudBootstrapFetch = true;
+            pendingCloudBootstrapFetch = false;
+            earliestCloudBootstrapFetchMs = 0;
+        }
+        else
+        {
+            pendingCloudBootstrapFetch = caps.usesCloudFetch;
+            earliestCloudBootstrapFetchMs = 0;
+        }
         ensureCurrentScreenAllowed();
 
         if (udpScreen.isActive() || currentScreen == SCREEN_UDP_DATA)
@@ -479,6 +500,7 @@ void applyDataSourcePolicies(bool wifiConnected)
         {
             serviceScrollRebuild();
         }
+        reset_Time_and_Date_Display = true;
 
         lastSource = dataSource;
     }
@@ -486,13 +508,21 @@ void applyDataSourcePolicies(bool wifiConnected)
     // If source was selected while offline, or Wi-Fi just reconnected, force one
     // bootstrap fetch for cloud-based providers so first visible values appear.
     const bool wifiJustConnected = (wifiConnected && !lastWifiConnected);
-    if (wifiConnected && (pendingCloudBootstrapFetch || wifiJustConnected))
+    if (!deferBootstrapFetchUntilNextPass && wifiConnected && (pendingCloudBootstrapFetch || wifiJustConnected))
     {
+        if (earliestCloudBootstrapFetchMs != 0 &&
+            static_cast<int32_t>(millis() - earliestCloudBootstrapFetchMs) < 0)
+        {
+            lastWifiConnected = wifiConnected;
+            return;
+        }
+
         const auto caps = wxv::provider::activeProvider().capabilities();
         if (caps.usesCloudFetch)
         {
             wxv::provider::fetchActiveProviderData();
             pendingCloudBootstrapFetch = false;
+            earliestCloudBootstrapFetchMs = 0;
         }
     }
 

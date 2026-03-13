@@ -527,6 +527,95 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         }
     };
 
+    auto parseDailyArrayFromSource = [&](const String& src, int keyIdx) {
+        if (keyIdx < 0) {
+            return;
+        }
+        const int arrayStart = src.indexOf('[', keyIdx);
+        if (arrayStart < 0) {
+            return;
+        }
+
+        int depth = 0;
+        int arrayEnd = -1;
+        bool inString = false;
+        bool escaped = false;
+        for (int i = arrayStart; i < src.length(); ++i) {
+            char c = src[i];
+            if (inString) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == '\\') {
+                    escaped = true;
+                } else if (c == '"') {
+                    inString = false;
+                }
+                continue;
+            }
+            if (c == '"') {
+                inString = true;
+                continue;
+            }
+            if (c == '[') {
+                ++depth;
+            } else if (c == ']') {
+                --depth;
+                if (depth == 0) {
+                    arrayEnd = i;
+                    break;
+                }
+            }
+        }
+
+        if (arrayEnd < 0) {
+            return;
+        }
+
+        const int n = arrayEnd;
+        int i = arrayStart + 1;
+        while (i < n && parsedDays < MAX_FORECAST_DAYS) {
+            while (i < n && src[i] != '{') {
+                ++i;
+            }
+            if (i >= n) break;
+
+            int start = i;
+            int braceDepth = 0;
+            bool inObjString = false;
+            bool objEscaped = false;
+            for (; i < n; ++i) {
+                char c = src[i];
+                if (inObjString) {
+                    if (objEscaped) {
+                        objEscaped = false;
+                    } else if (c == '\\') {
+                        objEscaped = true;
+                    } else if (c == '"') {
+                        inObjString = false;
+                    }
+                    continue;
+                }
+                if (c == '"') {
+                    inObjString = true;
+                    continue;
+                }
+                if (c == '{') {
+                    ++braceDepth;
+                } else if (c == '}') {
+                    --braceDepth;
+                    if (braceDepth == 0) {
+                        String objStr = src.substring(start, i + 1);
+                        _sanitizeBools(objStr);
+                        JSONVar d = JSON.parse(objStr);
+                        parseDailyObject(d);
+                        ++i;
+                        break;
+                    }
+                }
+            }
+        }
+    };
+
     auto parseDailyIndexedObject = [&](JSONVar daily) {
         for (int i = 0; i < MAX_FORECAST_DAYS; ++i) {
             JSONVar d = daily[i];
@@ -608,65 +697,8 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         return;
     }
 
-    JSONVar daily = nullptr;
-
-    String forecastObjStr = extractJsonObject(jsonStr, "\"forecast\"");
-    String dailyArrayStr;
-    if (forecastObjStr.length() > 0) {
-        dailyArrayStr = extractJsonArray(forecastObjStr, "\"daily\"");
-        parseDailyArrayString(dailyArrayStr);
-        if (parsedDays > 0) {
-            forecast.numDays = parsedDays;
-            for (int i = 0; i < parsedDays; ++i) {
-                forecast.days[i] = parsed[i];
-            }
-            Serial.print("[FORECAST] Parsed ");
-            Serial.print(forecast.numDays);
-            Serial.println(" daily entries");
-            return;
-        }
-        _sanitizeBools(forecastObjStr);
-        JSONVar forecastObj = JSON.parse(forecastObjStr);
-        if (JSON.typeof_(forecastObj) == "object") {
-            daily = forecastObj["daily"];
-        }
-    }
-
-    if (JSON.typeof_(daily) == "undefined" || daily == nullptr) {
-        dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
-        parseDailyArrayString(dailyArrayStr);
-        if (parsedDays > 0) {
-            forecast.numDays = parsedDays;
-            for (int i = 0; i < parsedDays; ++i) {
-                forecast.days[i] = parsed[i];
-            }
-            Serial.print("[FORECAST] Parsed ");
-            Serial.print(forecast.numDays);
-            Serial.println(" daily entries");
-            return;
-        }
-        if (dailyArrayStr.length() > 0) {
-            _sanitizeBools(dailyArrayStr);
-            daily = JSON.parse(dailyArrayStr);
-        }
-    }
-
-    if (JSON.typeof_(daily) == "undefined" || daily == nullptr) {
-        String dailyObjStr = extractJsonObject(jsonStr, "\"daily\"");
-        if (dailyObjStr.length() > 0) {
-            _sanitizeBools(dailyObjStr);
-            daily = JSON.parse(dailyObjStr);
-        }
-    }
-
-    if (JSON.typeof_(daily) == "array") {
-        parseDailyJsonArray(daily);
-    } else if (JSON.typeof_(daily) == "object") {
-        parseDailyFieldObject(daily);
-        if (parsedDays <= 0 && JSON.typeof_(daily[0]) == "object") {
-            parseDailyIndexedObject(daily);
-        }
-    } else {
+    parseDailyArrayFromSource(jsonStr, dailyIdx);
+    if (parsedDays <= 0) {
         Serial.println("[ERROR] Parsed daily forecast block invalid - keeping previous daily data");
         return;
     }
