@@ -28,15 +28,6 @@ static constexpr unsigned long kWorldWeatherStartGapMs = 5000UL;
 static constexpr size_t kWorldWeatherMaxPayload = 2300;
 static constexpr size_t kWorldTimeCustomJsonBaseCapacity = 512;
 
-static void logWorldWeatherHeap(const char *phase, size_t payloadBytes = 0)
-{
-    Serial.printf("[WorldWX] Heap %s free=%u maxAlloc=%u payload=%u\n",
-                  phase ? phase : "",
-                  static_cast<unsigned>(ESP.getFreeHeap()),
-                  static_cast<unsigned>(ESP.getMaxAllocHeap()),
-                  static_cast<unsigned>(payloadBytes));
-}
-
 enum class WorldWeatherFetchState : uint8_t
 {
     Idle = 0,
@@ -351,7 +342,6 @@ static bool startWorldWeatherRequest(bool custom, int index, unsigned long nowMs
 
     s_worldWeatherReq.client.stop();
     s_worldWeatherReq.client.setTimeout(20);
-    logWorldWeatherHeap("before fetch");
     if (!s_worldWeatherReq.client.connect(kWorldWeatherHost, kWorldWeatherPort, kWorldWeatherConnectTimeoutMs))
     {
         if (custom)
@@ -359,7 +349,6 @@ static bool startWorldWeatherRequest(bool custom, int index, unsigned long nowMs
         else
             s_worldWeatherRetryAfter[static_cast<size_t>(index)] = nowMs + kWorldWeatherRetryMs;
         s_worldWeatherNextStartMs = nowMs + kWorldWeatherStartGapMs;
-        logWorldWeatherHeap("connect failed");
         return false;
     }
 
@@ -461,11 +450,9 @@ static void completeWorldWeatherRequest(unsigned long nowMs)
     float temp = NAN;
     if (!parseOpenMeteoPayload(s_worldWeatherReq.response, condition, temp))
     {
-        logWorldWeatherHeap("parse failed", s_worldWeatherReq.response.length());
         failWorldWeatherRequest(nowMs);
         return;
     }
-    logWorldWeatherHeap("after parse", s_worldWeatherReq.response.length());
 
     if (s_worldWeatherReq.custom)
     {
@@ -918,14 +905,9 @@ void worldTimeWeatherTick(bool allowStart)
             s_worldWeatherReq.lastRxAt = nowMs;
             buf[n] = '\0';
             s_worldWeatherReq.response += buf;
-            if ((s_worldWeatherReq.response.length() % 512U) == 0U)
-            {
-                logWorldWeatherHeap("reading", s_worldWeatherReq.response.length());
-            }
 
             if (s_worldWeatherReq.response.length() > kWorldWeatherMaxPayload)
             {
-                logWorldWeatherHeap("payload too large", s_worldWeatherReq.response.length());
                 failWorldWeatherRequest(nowMs);
                 return;
             }
@@ -936,7 +918,6 @@ void worldTimeWeatherTick(bool allowStart)
         if ((nowMs - s_worldWeatherReq.lastRxAt) > kWorldWeatherTimeoutMs ||
             (nowMs - s_worldWeatherReq.startedAt) > (kWorldWeatherTimeoutMs * 2UL))
         {
-            logWorldWeatherHeap("timeout", s_worldWeatherReq.response.length());
             failWorldWeatherRequest(nowMs);
             return;
         }

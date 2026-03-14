@@ -65,16 +65,33 @@ public:
         out = WeatherSnapshot{};
         out.provider = id();
         CurrentWeatherSnapshot cur;
-        cur.tempC = toFloatOrNan(str_Temp);
-        cur.feelsLikeC = toFloatOrNan(str_Feels_like);
-        cur.humidityPct = toIntOrNegOne(str_Humd);
-        cur.pressureHpa = toFloatOrNan(str_Pressure);
-        cur.windSpeedMps = toFloatOrNan(str_Wind_Speed);
-        cur.condition = str_Weather_Conditions;
-        cur.icon = "";
-        cur.updatedMs = millis();
+        cur.tempC = isnan(currentCond.temp) ? toFloatOrNan(str_Temp) : static_cast<float>(currentCond.temp);
+        cur.feelsLikeC = isnan(currentCond.feelsLike) ? toFloatOrNan(str_Feels_like) : static_cast<float>(currentCond.feelsLike);
+        cur.humidityPct = (currentCond.humidity >= 0) ? currentCond.humidity : toIntOrNegOne(str_Humd);
+        cur.pressureHpa = isnan(currentCond.pressure) ? toFloatOrNan(str_Pressure) : static_cast<float>(currentCond.pressure);
+        cur.windSpeedMps = isnan(currentCond.windAvg) ? toFloatOrNan(str_Wind_Speed) : static_cast<float>(currentCond.windAvg);
+        cur.condition = (currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
+        cur.icon = currentCond.icon;
+        cur.updatedMs = forecast.lastUpdate;
         out.current = cur;
-        out.hasCurrent = true;
+        out.hasCurrent = (!isnan(cur.tempC) || cur.condition.length() > 0);
+
+        out.dailyCount = forecast.numDays;
+        if (out.dailyCount < 0)
+            out.dailyCount = 0;
+        if (out.dailyCount > MAX_FORECAST_DAYS)
+            out.dailyCount = MAX_FORECAST_DAYS;
+        for (int i = 0; i < out.dailyCount; ++i)
+            out.daily[i] = forecast.days[i];
+
+        out.hourlyCount = forecast.numHours;
+        if (out.hourlyCount < 0)
+            out.hourlyCount = 0;
+        if (out.hourlyCount > MAX_FORECAST_HOURS)
+            out.hourlyCount = MAX_FORECAST_HOURS;
+        for (int i = 0; i < out.hourlyCount; ++i)
+            out.hourly[i] = forecast.hours[i];
+
         out.updatedMs = cur.updatedMs;
         return true;
     }

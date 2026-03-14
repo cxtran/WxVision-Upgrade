@@ -338,15 +338,6 @@ static void completeStartupAfterWiFi(bool force)
         WiFi.setSleep(false);
         Serial.println("WiFi done.");
 
-        // Fetch NOAA before OTA/web/mDNS allocate additional heap so TLS gets
-        // the best chance at a large contiguous block during startup.
-        if (noaaAlertsEnabled)
-        {
-            NoaaManualFetchResult noaaStartupFetch = requestNoaaManualFetch();
-            if (noaaStartupFetch == NOAA_MANUAL_FETCH_STARTED)
-                tickNoaaAlerts(millis());
-        }
-
         refreshNetworkServices(true);
         Serial.println("Displaying Time...");
         if (!syncTimeFromNTP())
@@ -890,32 +881,41 @@ void loop()
     }
 
     handleAutoRotate(now);
-    if (serviceTemporaryAlertHeading(now))
-    {
-        delay(5);
-        return;
-    }
-    if (isSectionHeadingActive())
+    const bool temporaryAlertActive = isTemporaryAlertActive();
+    const bool sectionHeadingActive = isSectionHeadingActive();
+    if (sectionHeadingActive)
     {
         IRCodes::WxKey headingKey = getIRCodeDebounced();
-        if (headingKey == IRCodes::WxKey::Ok)
+        if (headingKey == IRCodes::WxKey::Cancel || headingKey == IRCodes::WxKey::Menu)
+        {
+            skipSectionHeading(now);
+            showMainMenuModal();
+            delay(5);
+            return;
+        }
+        if (sectionHeadingActive && headingKey == IRCodes::WxKey::Ok)
         {
             skipSectionHeading(now);
             delay(5);
             return;
         }
-        if (headingKey == IRCodes::WxKey::Left)
+        if (sectionHeadingActive && headingKey == IRCodes::WxKey::Left)
         {
             stepSectionHeading(-1, now);
             delay(5);
             return;
         }
-        if (headingKey == IRCodes::WxKey::Right)
+        if (sectionHeadingActive && headingKey == IRCodes::WxKey::Right)
         {
             stepSectionHeading(+1, now);
             delay(5);
             return;
         }
+    }
+    if (serviceTemporaryAlertHeading(now))
+    {
+        delay(5);
+        return;
     }
     if (serviceSectionHeading(now))
     {
@@ -1666,6 +1666,22 @@ void loop()
             if (key == IRCodes::WxKey::Down)
             {
                 stepNoaaAlertsScreen(1);
+                continue;
+            }
+            if (key == IRCodes::WxKey::Ok)
+            {
+                NoaaManualFetchResult result = requestNoaaManualFetch();
+                if (result == NOAA_MANUAL_FETCH_STARTED)
+                {
+                    drawNoaaAlertsScreen();
+                    queueTemporaryAlertHeading("GETTING ALERT...", 1200);
+                }
+                else if (result == NOAA_MANUAL_FETCH_BUSY)
+                    showSectionHeading("FETCHING...", nullptr, 1200);
+                else if (result == NOAA_MANUAL_FETCH_BLOCKED)
+                    showSectionHeading("WIFI BUSY", nullptr, 1200);
+                else
+                    showSectionHeading("NOAA OFF", nullptr, 1200);
                 continue;
             }
             if (key == IRCodes::WxKey::Left)

@@ -157,7 +157,6 @@ void updateTempestFromUDP(const char* jsonStr) {
     JSONVar doc = JSON.parse(jsonStr);
     if (JSON.typeof_(doc) == "undefined") return;
     String type = (const char*)doc["type"];
-    Serial.print("Received UDP type: "); Serial.println(type);
 
     if (type == "obs_st" && doc.hasOwnProperty("obs")) {
         JSONVar obs = doc["obs"][0];
@@ -219,13 +218,6 @@ void updateTempestFromUDP(const char* jsonStr) {
             tempest.rapidLastUpdate = tempest.lastUpdate;
             newRapidWindData   = true;
 
-            // was: Serial.printf("rapid_wind: epoch=%lu windAvg=%.2f windDir=%.1f\n", ...)
-            Serial.print("rapid_wind: epoch=");
-            Serial.print((unsigned long)tempest.epoch);
-            Serial.print(" windAvg=");
-            Serial.print(tempest.windAvg, 2);
-            Serial.print(" windDir=");
-            Serial.println(tempest.windDir, 1);
             updateWindInfoScroll(false);
         } else {
             Serial.println("rapid_wind: ob array not length 3!");

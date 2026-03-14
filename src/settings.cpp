@@ -484,11 +484,6 @@ void tickAutoThemeAmbient(float lux, bool persist, bool force)
     }
 
     int desiredTheme = (lux < autoThemeLightThreshold) ? 1 : 0;
-    Serial.printf("[ThemeAmbient] lux=%.2f thr=%d desired=%s current=%s\n",
-                  lux,
-                  autoThemeLightThreshold,
-                  desiredTheme == 1 ? "Night" : "Day",
-                  theme == 1 ? "Night" : "Day");
     if (desiredTheme != theme)
     {
         theme = desiredTheme;
@@ -507,3 +502,4 @@ void forceAutoThemeSchedule()
     s_lastAppliedScheduledTheme = -1;
     tickAutoThemeSchedule();
 }
+

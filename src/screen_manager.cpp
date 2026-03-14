@@ -39,6 +39,7 @@ namespace
 struct TemporaryHeadingAlert
 {
     char text[40];
+    char subtitle[40];
     uint16_t durationMs;
     uint32_t signature;
 };
@@ -61,9 +62,11 @@ bool s_temporaryAlertRendered = false;
 unsigned long s_temporaryAlertStartMs = 0;
 uint16_t s_temporaryAlertDurationMs = 0;
 char s_temporaryAlertText[40] = {0};
+char s_temporaryAlertSubtitle[40] = {0};
 uint32_t s_temporaryAlertSignature = 0;
 
 bool isRotationBlocked();
+bool isTemporaryAlertBlocked();
 bool isAlertDuplicate(const char *text, uint32_t signature)
 {
     if (s_temporaryAlertActive)
@@ -95,11 +98,21 @@ void activateTemporaryAlert(const TemporaryHeadingAlert &alert, unsigned long no
     s_temporaryAlertSignature = alert.signature;
     strncpy(s_temporaryAlertText, alert.text, sizeof(s_temporaryAlertText) - 1);
     s_temporaryAlertText[sizeof(s_temporaryAlertText) - 1] = '\0';
+    strncpy(s_temporaryAlertSubtitle, alert.subtitle, sizeof(s_temporaryAlertSubtitle) - 1);
+    s_temporaryAlertSubtitle[sizeof(s_temporaryAlertSubtitle) - 1] = '\0';
+
+    if (!isScreenOff() && !isTemporaryAlertBlocked())
+    {
+        showSectionHeading(s_temporaryAlertText,
+                           s_temporaryAlertSubtitle[0] ? s_temporaryAlertSubtitle : nullptr,
+                           s_temporaryAlertDurationMs);
+        s_temporaryAlertRendered = true;
+    }
 }
 
 bool beginNextTemporaryAlert(unsigned long now)
 {
-    if (s_temporaryAlertActive || s_sectionHeadingActive || s_temporaryAlertCount == 0 || isRotationBlocked())
+    if (s_temporaryAlertActive || s_sectionHeadingActive || s_temporaryAlertCount == 0 || isTemporaryAlertBlocked())
         return false;
 
     // Alerts are displayed one at a time and deferred until section-heading
@@ -126,6 +139,31 @@ bool isRotationBlocked()
            weatherModal.isActive() ||
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
+           systemModal.isActive() ||
+           locationModal.isActive() ||
+           worldTimeModal.isActive() ||
+           manageTzModal.isActive() ||
+           scenePreviewModal.isActive() ||
+           isWeatherScenePreviewActive();
+}
+
+bool isTemporaryAlertBlocked()
+{
+    return inKeyboardMode ||
+           wifiSelecting ||
+           setupPromptModal.isActive() ||
+           sysInfoModal.isActive() ||
+           wifiInfoModal.isActive() ||
+           dateModal.isActive() ||
+           mainMenuModal.isActive() ||
+           deviceModal.isActive() ||
+           wifiSettingsModal.isActive() ||
+           displayModal.isActive() ||
+           alarmModal.isActive() ||
+           weatherModal.isActive() ||
+           tempestModal.isActive() ||
+           calibrationModal.isActive() ||
+           noaaModal.isActive() ||
            systemModal.isActive() ||
            locationModal.isActive() ||
            worldTimeModal.isActive() ||
@@ -681,7 +719,7 @@ void skipSectionHeading(unsigned long now)
     noteScreenRotation(now);
 }
 
-void queueTemporaryAlertHeading(const char *text, uint16_t durationMs, uint32_t signature)
+void queueTemporaryAlertHeading(const char *text, uint16_t durationMs, uint32_t signature, const char *subtitle)
 {
     if (!text || !text[0])
         return;
@@ -693,10 +731,18 @@ void queueTemporaryAlertHeading(const char *text, uint16_t durationMs, uint32_t 
     TemporaryHeadingAlert alert = {};
     strncpy(alert.text, text, sizeof(alert.text) - 1);
     alert.text[sizeof(alert.text) - 1] = '\0';
+    if (subtitle && subtitle[0])
+    {
+        strncpy(alert.subtitle, subtitle, sizeof(alert.subtitle) - 1);
+        alert.subtitle[sizeof(alert.subtitle) - 1] = '\0';
+    }
     alert.durationMs = durationMs;
     alert.signature = signature;
 
-    if (!s_temporaryAlertActive && !s_sectionHeadingActive && s_temporaryAlertCount == 0)
+    if (!s_temporaryAlertActive &&
+        !s_sectionHeadingActive &&
+        s_temporaryAlertCount == 0 &&
+        !isTemporaryAlertBlocked())
     {
         activateTemporaryAlert(alert, millis());
         return;
@@ -719,25 +765,46 @@ bool isTemporaryAlertActive()
     return s_temporaryAlertActive;
 }
 
+void skipTemporaryAlertHeading(unsigned long now)
+{
+    if (!s_temporaryAlertActive)
+        return;
+
+    s_temporaryAlertActive = false;
+    s_temporaryAlertRendered = false;
+    s_temporaryAlertText[0] = '\0';
+    s_temporaryAlertSubtitle[0] = '\0';
+    s_temporaryAlertSignature = 0;
+    playScreenRevealEffect(currentScreen);
+    noteScreenRotation(now);
+}
+
 bool serviceTemporaryAlertHeading(unsigned long now)
 {
+    bool activatedThisPass = false;
     if (!s_temporaryAlertActive)
     {
         if (!beginNextTemporaryAlert(now))
             return false;
+        activatedThisPass = true;
     }
 
     if (!s_temporaryAlertRendered)
     {
-        showSectionHeading(s_temporaryAlertText, nullptr, s_temporaryAlertDurationMs);
+        showSectionHeading(s_temporaryAlertText, s_temporaryAlertSubtitle[0] ? s_temporaryAlertSubtitle : nullptr, s_temporaryAlertDurationMs);
         s_temporaryAlertRendered = true;
     }
 
-    if (now - s_temporaryAlertStartMs >= static_cast<unsigned long>(s_temporaryAlertDurationMs))
+    if (activatedThisPass)
+        return true;
+
+    if (now >= s_temporaryAlertStartMs &&
+        (now - s_temporaryAlertStartMs) >= static_cast<unsigned long>(s_temporaryAlertDurationMs))
     {
         s_temporaryAlertActive = false;
         s_temporaryAlertRendered = false;
         s_temporaryAlertText[0] = '\0';
+        s_temporaryAlertSubtitle[0] = '\0';
         s_temporaryAlertSignature = 0;
         playScreenRevealEffect(currentScreen);
         noteScreenRotation(now);

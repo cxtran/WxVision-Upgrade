@@ -22,9 +22,9 @@ namespace
 
     static constexpr unsigned long PAGE_DWELL_MS = 2200UL;
     static constexpr unsigned long SCROLL_STEP_MS = 55UL;
-    static constexpr unsigned long SCROLL_PAUSE_END_MS = 500UL;
-    static constexpr unsigned long ALERT_STAGE_DWELL_MS = 2000UL;
-    static constexpr unsigned long PAGE_SCROLL_START_DELAY_MS = 2000UL;
+    static constexpr unsigned long SCROLL_PAUSE_END_MS = 4000UL;
+    static constexpr unsigned long ALERT_STAGE_DWELL_MS = 3000UL;
+    static constexpr unsigned long PAGE_SCROLL_START_DELAY_MS = 3000UL;
     static constexpr unsigned long ALERT_ROTATE_EXTRA_MS = 0UL;
     static constexpr int ALERT_TITLE_H = ui_theme::Layout::kTitleBarH;
     static constexpr int ALERT_BODY_Y = ui_theme::Layout::kBodyY;
@@ -48,6 +48,9 @@ namespace
     static size_t s_alertStageIndex = 0;
     static bool s_alertStageAnimating = false;
     static int s_alertStageScrollOffsetPx = 0;
+    static int s_alertStageContentOffsetPx = 0;
+    static bool s_alertStageEndPause = false;
+    static unsigned long s_alertStagePauseStartMs = 0;
 
     static uint32_t hashAppend(uint32_t h, const String &s)
     {
@@ -92,13 +95,19 @@ namespace
         h ^= static_cast<uint32_t>(count & 0xFFu);
         h *= 16777619u;
         h = hashAppend(h, noaaLastCheckHHMM());
-        NwsAlert a;
-        if (count > 0 && noaaGetAlert(0, a))
+        for (size_t i = 0; i < count; ++i)
         {
+            NwsAlert a;
+            if (!noaaGetAlert(i, a))
+                continue;
             h = hashAppend(h, a.event);
             h = hashAppend(h, a.severity);
+            h = hashAppend(h, a.certainty);
             h = hashAppend(h, a.urgency);
+            h = hashAppend(h, a.response);
             h = hashAppend(h, a.areaDesc);
+            h = hashAppend(h, a.onset);
+            h = hashAppend(h, a.ends);
             h = hashAppend(h, a.expires);
             h = hashAppend(h, a.headline);
             h = hashAppend(h, a.description);
@@ -208,6 +217,20 @@ namespace
     static String fullUrgency(const String &urgencyRaw)
     {
         String s = normalizeAlertText(urgencyRaw);
+        s.trim();
+        return s.length() ? titleCaseWord(s) : "Unknown";
+    }
+
+    static String fullCertainty(const String &certaintyRaw)
+    {
+        String s = normalizeAlertText(certaintyRaw);
+        s.trim();
+        return s.length() ? titleCaseWord(s) : "Unknown";
+    }
+
+    static String fullResponse(const String &responseRaw)
+    {
+        String s = normalizeAlertText(responseRaw);
         s.trim();
         return s.length() ? titleCaseWord(s) : "Unknown";
     }
@@ -330,11 +353,11 @@ namespace
         return true;
     }
 
-    static String formatExpiresLocalDateTime(const String &expiresRaw)
+    static String formatLocalDateTime(const String &valueRaw)
     {
-        String expires = normalizeAlertText(expiresRaw);
+        String value = normalizeAlertText(valueRaw);
         DateTime utc;
-        if (parseIsoDateTime(expires, utc))
+        if (parseIsoDateTime(value, utc))
         {
             int offsetMinutes = timezoneIsCustom() ? tzStandardOffset : timezoneOffsetForUtc(utc);
             int64_t localEpoch = static_cast<int64_t>(utc.unixtime()) + static_cast<int64_t>(offsetMinutes) * 60;
@@ -346,17 +369,17 @@ namespace
             return String(buf);
         }
 
-        if (expires.length() >= 16 &&
-            isdigit((unsigned char)expires.charAt(5)) &&
-            isdigit((unsigned char)expires.charAt(6)) &&
-            isdigit((unsigned char)expires.charAt(8)) &&
-            isdigit((unsigned char)expires.charAt(9)) &&
-            isdigit((unsigned char)expires.charAt(11)) &&
-            isdigit((unsigned char)expires.charAt(12)) &&
-            isdigit((unsigned char)expires.charAt(14)) &&
-            isdigit((unsigned char)expires.charAt(15)))
+        if (value.length() >= 16 &&
+            isdigit((unsigned char)value.charAt(5)) &&
+            isdigit((unsigned char)value.charAt(6)) &&
+            isdigit((unsigned char)value.charAt(8)) &&
+            isdigit((unsigned char)value.charAt(9)) &&
+            isdigit((unsigned char)value.charAt(11)) &&
+            isdigit((unsigned char)value.charAt(12)) &&
+            isdigit((unsigned char)value.charAt(14)) &&
+            isdigit((unsigned char)value.charAt(15)))
         {
-            return expires.substring(5, 10) + " " + expires.substring(11, 16);
+            return value.substring(5, 10) + " " + value.substring(11, 16);
         }
         return "--/-- --:--";
     }
@@ -605,10 +628,43 @@ namespace
         return "SEE DETAILS";
     }
 
+    static int noaaTextWidthPx(const String &text)
+    {
+        if (!dma_display || text.length() == 0)
+            return static_cast<int>(text.length()) * 6;
+
+        int16_t x1, y1;
+        uint16_t w, h;
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->getTextBounds(text.c_str(), 0, 0, &x1, &y1, &w, &h);
+        return static_cast<int>(w);
+    }
+
+    static int preferredWrapSplit(const String &word, int maxWidthPx)
+    {
+        const int wordLen = static_cast<int>(word.length());
+        for (int i = wordLen; i >= 2; --i)
+        {
+            const char c = word.charAt(i - 1);
+            if ((c == '-' || c == '/' || c == ',' || c == ';') &&
+                noaaTextWidthPx(word.substring(0, i)) <= maxWidthPx)
+                return i;
+        }
+
+        for (int i = wordLen; i >= 2; --i)
+        {
+            if (noaaTextWidthPx(word.substring(0, i)) <= maxWidthPx)
+                return i;
+        }
+
+        return 1;
+    }
+
     static std::vector<String> wrapTextToLines(const String &textRaw, int maxCharsPerLine)
     {
         std::vector<String> lines;
         String text = normalizeAlertText(textRaw);
+        const int maxWidthPx = PANEL_RES_X - 2;
         if (text.length() == 0)
         {
             lines.push_back("--");
@@ -630,23 +686,25 @@ namespace
                 ++pos;
             String word = text.substring(start, pos);
 
-            while (word.length() > maxCharsPerLine)
+            while (noaaTextWidthPx(word) > maxWidthPx)
             {
-                String chunk = word.substring(0, maxCharsPerLine);
+                const int splitAt = preferredWrapSplit(word, maxWidthPx);
+                String chunk = word.substring(0, splitAt);
                 if (line.length() > 0)
                 {
                     lines.push_back(line);
                     line = "";
                 }
                 lines.push_back(chunk);
-                word = word.substring(maxCharsPerLine);
+                word = word.substring(splitAt);
+                word.trim();
             }
 
             if (line.length() == 0)
             {
                 line = word;
             }
-            else if ((line.length() + 1 + word.length()) <= maxCharsPerLine)
+            else if (noaaTextWidthPx(line + " " + word) <= maxWidthPx)
             {
                 line += " ";
                 line += word;
@@ -675,8 +733,51 @@ namespace
         return p;
     }
 
-    static void buildAlertPages(const NwsAlert &a, AlertPage outPages[5])
+    static AlertPage makeLinesPage(const String &title, const std::vector<String> &rawLines)
     {
+        AlertPage p;
+        p.title = title;
+        for (const String &rawLine : rawLines)
+        {
+            const String normalized = normalizeAlertText(rawLine);
+            if (normalized.length() == 0)
+                continue;
+            std::vector<String> wrapped = wrapTextToLines(normalized, ALERT_WRAP_CHARS);
+            p.lines.insert(p.lines.end(), wrapped.begin(), wrapped.end());
+        }
+        if (p.lines.empty())
+            p.lines.push_back("--");
+        p.lineColors.assign(p.lines.size(), 0);
+        p.scrollable = static_cast<int>(p.lines.size()) > ALERT_VISIBLE_LINES;
+        return p;
+    }
+
+    static AlertPage makeSummaryPage()
+    {
+        const size_t count = noaaAlertCount();
+        AlertPage p;
+        p.title = "NOAA ALERTS";
+        p.titleColor = ui_theme::noaaTitleInfo();
+
+        p.lines.push_back(String(count) + " ACTIVE ALERTS");
+        p.lineColors.push_back(ui_theme::noaaLinePrimary());
+
+        for (size_t i = 0; i < count; ++i)
+        {
+            NwsAlert a;
+            if (!noaaGetAlert(i, a))
+                continue;
+            p.lines.push_back(String(i + 1) + " " + shortEventName(a.event));
+            p.lineColors.push_back(noaaSeverityColorUi(a.severity));
+        }
+
+        p.scrollable = static_cast<int>(p.lines.size()) > ALERT_VISIBLE_LINES;
+        return p;
+    }
+
+    static void buildAlertPages(const NwsAlert &a, size_t alertIndex, size_t totalAlerts, std::vector<AlertPage> &outPages)
+    {
+        outPages.clear();
         String whatSection = extractBulletSection(a.description, "WHAT");
         String whereSection = extractBulletSection(a.description, "WHERE");
         String whenSection = extractBulletSection(a.description, "WHEN");
@@ -707,22 +808,21 @@ namespace
         if (preparedness.length() == 0)
             preparedness = extractSectionByHeader(a.description, "PREPAREDNESS ACTIONS");
 
-        String details;
-        appendSectionText(details, hazard.length() > 0 ? "Hazard" : "", hazard);
-        appendSectionText(details, impacts.length() > 0 ? "Impacts" : "", impacts);
-        appendSectionText(details, additionalDetails.length() > 0 ? "Additional Details" : "", additionalDetails);
-        if (details.length() == 0)
-            details = extractHazardImpact(a.description);
-        if (details == "SEE DETAILS")
-            details = normalizeAlertText(a.description);
+        String detailsFallback;
+        appendSectionText(detailsFallback, hazard.length() > 0 ? "Hazard" : "", hazard);
+        appendSectionText(detailsFallback, impacts.length() > 0 ? "Impacts" : "", impacts);
+        if (detailsFallback.length() == 0)
+            detailsFallback = extractHazardImpact(a.description);
+        if (detailsFallback == "SEE DETAILS")
+            detailsFallback = normalizeAlertText(a.description);
         if (a.note.length() > 0)
         {
-            if (details.length() > 0)
-                details += " ";
-            details += "Note: " + normalizeAlertText(a.note);
+            if (detailsFallback.length() > 0)
+                detailsFallback += " ";
+            detailsFallback += "Note: " + normalizeAlertText(a.note);
         }
-        if (details.length() == 0)
-            details = "No details provided.";
+        if (detailsFallback.length() == 0)
+            detailsFallback = "No details provided.";
         String action = extractAction(a.instruction, a.description);
         if (preparedness.length() > 0)
         {
@@ -734,46 +834,93 @@ namespace
             action = normalizeAlertText(a.note);
         uint16_t sevColor = noaaSeverityColorUi(a.severity);
 
-        AlertPage p0;
-        p0.title = "ALERT";
-        p0.staged = true;
-        p0.stages.push_back("Event: " + normalizeAlertText(a.event));
-        p0.stages.push_back("Severity: " + fullSeverity(a.severity));
-        p0.stages.push_back("Urgency: " + fullUrgency(a.urgency));
-        p0.stages.push_back("Expires: " + formatExpiresLocalDateTime(a.expires));
-        p0.lines = wrapTextToLines(p0.stages[0], ALERT_WRAP_CHARS);
-        p0.lineColors.push_back(ui_theme::noaaLinePrimary());
-        p0.lineColors.push_back(sevColor);
-        p0.lineColors.push_back(ui_theme::noaaLineSecondary());
-        p0.scrollable = false;
-        p0.titleColor = sevColor;
+        const String pageSuffix = String(alertIndex + 1) + "/" + String(totalAlerts);
+        AlertPage summaryPage;
+        summaryPage.title = "SUMMARY " + pageSuffix;
+        summaryPage.staged = true;
+        summaryPage.stages.push_back("Event: " + normalizeAlertText(a.event));
+        summaryPage.stages.push_back("Severity: " + fullSeverity(a.severity));
+        summaryPage.stages.push_back("Urgency: " + fullUrgency(a.urgency));
+        if (a.response.length() > 0)
+            summaryPage.stages.push_back("Response: " + fullResponse(a.response));
+        if (a.onset.length() > 0)
+            summaryPage.stages.push_back("Starts: " + formatLocalDateTime(a.onset));
+        if (a.ends.length() > 0)
+            summaryPage.stages.push_back("Ends: " + formatLocalDateTime(a.ends));
+        else
+            summaryPage.stages.push_back("Expires: " + formatLocalDateTime(a.expires));
+        summaryPage.lines = wrapTextToLines(summaryPage.stages[0], ALERT_WRAP_CHARS);
+        summaryPage.lineColors.push_back(ui_theme::noaaLinePrimary());
+        summaryPage.lineColors.push_back(sevColor);
+        summaryPage.lineColors.push_back(ui_theme::noaaLineSecondary());
+        summaryPage.scrollable = false;
+        summaryPage.titleColor = sevColor;
+        outPages.push_back(summaryPage);
 
-        outPages[0] = p0;
-        String area = whereSection.length() > 0 ? whereSection : (a.areaDesc.length() ? a.areaDesc : "N/A");
-        if (whenSection.length() > 0)
+        if (action.length() > 0 && action != "SEE DETAILS")
         {
-            if (area.length() > 0)
-                area += " ";
-            area += "When: " + whenSection;
+            AlertPage actionPage = makePage("DO THIS " + pageSuffix, action);
+            actionPage.titleColor = ui_theme::noaaTitleDoThis();
+            for (size_t i = 0; i < actionPage.lineColors.size(); ++i)
+                actionPage.lineColors[i] = ui_theme::noaaTitleDoThis();
+            outPages.push_back(actionPage);
         }
-        outPages[1] = makePage("AREA", area);
-        outPages[2] = makePage("WHAT", what);
-        outPages[3] = makePage("DETAILS", details);
-        outPages[4] = makePage("DO THIS", action);
 
-        outPages[1].titleColor = ui_theme::noaaTitleArea();
-        outPages[2].titleColor = ui_theme::noaaTitleWhat();
-        outPages[3].titleColor = sevColor;
-        outPages[4].titleColor = ui_theme::noaaTitleDoThis();
+        if (what.length() > 0)
+        {
+            AlertPage whatPage = makePage("WHAT " + pageSuffix, what);
+            whatPage.titleColor = ui_theme::noaaTitleWhat();
+            for (size_t i = 0; i < whatPage.lineColors.size(); ++i)
+                whatPage.lineColors[i] = ui_theme::noaaLineWhat();
+            outPages.push_back(whatPage);
+        }
 
-        for (size_t i = 0; i < outPages[1].lineColors.size(); ++i)
-            outPages[1].lineColors[i] = ui_theme::noaaTitleArea();
-        for (size_t i = 0; i < outPages[2].lineColors.size(); ++i)
-            outPages[2].lineColors[i] = ui_theme::noaaLineWhat();
-        for (size_t i = 0; i < outPages[3].lineColors.size(); ++i)
-            outPages[3].lineColors[i] = sevColor;
-        for (size_t i = 0; i < outPages[4].lineColors.size(); ++i)
-            outPages[4].lineColors[i] = ui_theme::noaaTitleDoThis();
+        String area = whereSection.length() > 0 ? whereSection : (a.areaDesc.length() ? a.areaDesc : "");
+        if (area.length() > 0)
+        {
+            AlertPage areaPage = makePage("WHERE " + pageSuffix, area);
+            areaPage.titleColor = ui_theme::noaaTitleArea();
+            for (size_t i = 0; i < areaPage.lineColors.size(); ++i)
+                areaPage.lineColors[i] = ui_theme::noaaTitleArea();
+            outPages.push_back(areaPage);
+        }
+
+        String whenBody;
+        if (whenSection.length() > 0)
+            whenBody = whenSection;
+        if (a.onset.length() > 0)
+            appendSectionText(whenBody, whenBody.length() > 0 ? "Starts" : "Starts", formatLocalDateTime(a.onset));
+        if (a.ends.length() > 0)
+            appendSectionText(whenBody, "Ends", formatLocalDateTime(a.ends));
+        else if (a.expires.length() > 0)
+            appendSectionText(whenBody, "Expires", formatLocalDateTime(a.expires));
+        if (whenBody.length() > 0)
+        {
+            AlertPage whenPage = makePage("WHEN " + pageSuffix, whenBody);
+            whenPage.titleColor = ui_theme::noaaLineSecondary();
+            for (size_t i = 0; i < whenPage.lineColors.size(); ++i)
+                whenPage.lineColors[i] = ui_theme::noaaLineSecondary();
+            outPages.push_back(whenPage);
+        }
+
+        String impactsBody = impacts.length() > 0 ? impacts : detailsFallback;
+        if (impactsBody.length() > 0)
+        {
+            AlertPage impactsPage = makePage("IMPACTS " + pageSuffix, impactsBody);
+            impactsPage.titleColor = sevColor;
+            for (size_t i = 0; i < impactsPage.lineColors.size(); ++i)
+                impactsPage.lineColors[i] = sevColor;
+            outPages.push_back(impactsPage);
+        }
+
+        if (additionalDetails.length() > 0)
+        {
+            AlertPage morePage = makePage("ADDITIONAL " + pageSuffix, additionalDetails);
+            morePage.titleColor = ui_theme::noaaTitleWhat();
+            for (size_t i = 0; i < morePage.lineColors.size(); ++i)
+                morePage.lineColors[i] = ui_theme::noaaLineWhat();
+            outPages.push_back(morePage);
+        }
     }
 
     static void rebuildAlertPagesForCurrentAlert()
@@ -809,14 +956,17 @@ namespace
             return;
         }
 
-        NwsAlert a;
-        if (!noaaGetAlert(0, a))
-            return;
+        for (size_t alertIndex = 0; alertIndex < count; ++alertIndex)
+        {
+            NwsAlert a;
+            if (!noaaGetAlert(alertIndex, a))
+                continue;
 
-        AlertPage pages[5];
-        buildAlertPages(a, pages);
-        for (int i = 0; i < 5; ++i)
-            s_alertPages.push_back(pages[i]);
+            std::vector<AlertPage> pages;
+            buildAlertPages(a, alertIndex, count, pages);
+            for (const AlertPage &page : pages)
+                s_alertPages.push_back(page);
+        }
     }
 
     static void resetAlertPager(unsigned long nowMs)
@@ -830,6 +980,9 @@ namespace
         s_alertStageIndex = 0;
         s_alertStageAnimating = false;
         s_alertStageScrollOffsetPx = 0;
+        s_alertStageContentOffsetPx = 0;
+        s_alertStageEndPause = false;
+        s_alertStagePauseStartMs = 0;
         rebuildAlertPagesForCurrentAlert();
     }
 
@@ -843,6 +996,9 @@ namespace
         s_alertStageIndex = 0;
         s_alertStageAnimating = false;
         s_alertStageScrollOffsetPx = 0;
+        s_alertStageContentOffsetPx = 0;
+        s_alertStageEndPause = false;
+        s_alertStagePauseStartMs = 0;
     }
 
     static void advanceAlertPage(unsigned long nowMs)
@@ -857,18 +1013,15 @@ namespace
             return;
         }
 
-        s_alertPageIndex++;
-        if (s_alertPageIndex >= 5)
-        {
-            s_alertPageIndex = 0;
-            rebuildAlertPagesForCurrentAlert();
-        }
+        const size_t totalPages = s_alertPages.size();
+        s_alertPageIndex = static_cast<uint8_t>((s_alertPageIndex + 1u) % totalPages);
+        rebuildAlertPagesForCurrentAlert();
     }
 
     static void stepAlertPageManual(int direction, unsigned long nowMs)
     {
         size_t count = noaaAlertCount();
-        const size_t pageCount = (count == 0) ? 2u : 5u;
+        const size_t pageCount = s_alertPages.empty() ? ((count == 0) ? 2u : 1u) : s_alertPages.size();
         if (pageCount == 0)
             return;
 
@@ -1019,7 +1172,7 @@ namespace
             }
             else
             {
-                drawStageAt(page.stages[stageIndex], stageIndex, currentBaseY, 0, bodyFg, headerFg);
+                drawStageAt(page.stages[stageIndex], stageIndex, currentBaseY, s_alertStageContentOffsetPx, bodyFg, headerFg);
             }
         }
         else
@@ -1093,19 +1246,63 @@ void tickNoaaAlertsScreen()
         bool changed = false;
         if (!s_alertStageAnimating)
         {
-            if ((nowMs - s_alertPageStartMs) >= ALERT_STAGE_DWELL_MS)
+            const int stageHeightPx = stageBlockHeightPx(page.stages[s_alertStageIndex]);
+            int maxStageOffset = stageHeightPx - ALERT_VISIBLE_H;
+            if (maxStageOffset < 0)
+                maxStageOffset = 0;
+
+            if (maxStageOffset <= 0)
             {
-                if ((s_alertStageIndex + 1) < page.stages.size())
+                if ((nowMs - s_alertPageStartMs) >= ALERT_STAGE_DWELL_MS)
                 {
-                    s_alertStageAnimating = true;
-                    s_alertStageScrollOffsetPx = 0;
+                    if ((s_alertStageIndex + 1) < page.stages.size())
+                    {
+                        s_alertStageAnimating = true;
+                        s_alertStageScrollOffsetPx = 0;
+                        s_alertLastScrollMs = nowMs;
+                    }
+                    else
+                    {
+                        advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
+                    }
+                    changed = true;
+                }
+            }
+            else if (s_alertStageContentOffsetPx < maxStageOffset)
+            {
+                if (s_alertStageContentOffsetPx == 0 && (nowMs - s_alertPageStartMs) < PAGE_SCROLL_START_DELAY_MS)
+                {
+                    // Hold the initial stage view long enough to read before scrolling begins.
+                }
+                else if ((nowMs - s_alertLastScrollMs) >= SCROLL_STEP_MS)
+                {
                     s_alertLastScrollMs = nowMs;
+                    s_alertStageContentOffsetPx++;
+                    changed = true;
                 }
-                else
+            }
+            else
+            {
+                if (!s_alertStageEndPause)
                 {
-                    advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
+                    s_alertStageEndPause = true;
+                    s_alertStagePauseStartMs = nowMs;
                 }
-                changed = true;
+                else if ((nowMs - s_alertStagePauseStartMs) >= SCROLL_PAUSE_END_MS)
+                {
+                    s_alertStageEndPause = false;
+                    if ((s_alertStageIndex + 1) < page.stages.size())
+                    {
+                        s_alertStageAnimating = true;
+                        s_alertStageScrollOffsetPx = 0;
+                        s_alertLastScrollMs = nowMs;
+                    }
+                    else
+                    {
+                        advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
+                    }
+                    changed = true;
+                }
             }
         }
         else if ((nowMs - s_alertLastScrollMs) >= SCROLL_STEP_MS)
@@ -1122,6 +1319,9 @@ void tickNoaaAlertsScreen()
                 {
                     ++s_alertStageIndex;
                     s_alertPageStartMs = nowMs;
+                    s_alertStageContentOffsetPx = 0;
+                    s_alertStageEndPause = false;
+                    s_alertStagePauseStartMs = 0;
                 }
                 else
                 {
@@ -1196,6 +1396,10 @@ bool stepNoaaAlertSelection(int direction)
     if (!dma_display)
         return false;
 
+    if (direction > 0)
+        return false;
+
     (void)direction;
+
     return false;
 }

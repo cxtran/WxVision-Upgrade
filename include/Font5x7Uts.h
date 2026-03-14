@@ -41,7 +41,7 @@ const uint8_t Font5x7UtsBitmaps[] PROGMEM = {
 };
 
 const GFXglyph Font5x7UtsGlyphs[] PROGMEM = {
-  {     0,   5,   7,   6,    0,    0 },   // 0x20 ' '
+  {     0,   3,   7,   3,    0,    0 },   // 0x20 ' '
   {     5,   1,   7,   3,    1,    0 },   // 0x21 '!'
   {     6,   3,   7,   5,    1,    0 },   // 0x22 '"'
   {    10,   5,   7,   6,    0,    0 },   // 0x23 '#'

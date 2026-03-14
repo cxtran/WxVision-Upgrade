@@ -4113,20 +4113,17 @@ void showSectionHeading(const char *title, const char *subtitle, uint16_t ms)
         return;
 
     GFXcanvas16 canvas(PANEL_RES_X, PANEL_RES_Y);
-    canvas.fillScreen(0);
     canvas.setFont(&Font5x7Uts);
     canvas.setTextWrap(false);
     canvas.setTextSize(1);
 
     const bool mono = (theme == 1);
-    const uint16_t borderColor = mono ? dma_display->color565(150, 150, 180) : dma_display->color565(80, 190, 255);
-    const uint16_t titleColor = mono ? dma_display->color565(240, 240, 250) : dma_display->color565(220, 245, 255);
-    const uint16_t subtitleColor = mono ? dma_display->color565(175, 175, 200) : dma_display->color565(125, 190, 235);
-    const uint16_t decoColor = mono ? dma_display->color565(95, 95, 130) : dma_display->color565(65, 125, 175);
-
-    canvas.drawRect(1, 1, PANEL_RES_X - 2, PANEL_RES_Y - 2, borderColor);
-
-    (void)decoColor;
+    const uint16_t borderColor = ui_theme::applyGraphicColor(mono ? dma_display->color565(150, 150, 180)
+                                                                   : dma_display->color565(80, 190, 255));
+    const uint16_t titleColor = ui_theme::applyGraphicColor(mono ? dma_display->color565(240, 240, 250)
+                                                                  : dma_display->color565(220, 245, 255));
+    const uint16_t subtitleColor = ui_theme::applyGraphicColor(mono ? dma_display->color565(175, 175, 200)
+                                                                     : dma_display->color565(125, 190, 235));
 
     char titleLine1[48];
     char titleLine2[48];
@@ -4148,9 +4145,9 @@ void showSectionHeading(const char *title, const char *subtitle, uint16_t ms)
         if (x < 2)
             x = 2;
         int baselineY = topY - y1;
-        canvas.setTextColor(color, 0);
-        canvas.setCursor(x, baselineY);
-        canvas.print(text);
+        dma_display->setTextColor(color, 0);
+        dma_display->setCursor(x, baselineY);
+        dma_display->print(text);
     };
 
     const char *lines[3];
@@ -4189,14 +4186,18 @@ void showSectionHeading(const char *title, const char *subtitle, uint16_t ms)
     int y = innerTop + (innerH - totalTextH) / 2;
     if (y < innerTop)
         y = innerTop;
+
+    dma_display->fillScreen(0);
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextWrap(false);
+    dma_display->setTextSize(1);
+    dma_display->drawRect(1, 1, PANEL_RES_X - 2, PANEL_RES_Y - 2, borderColor);
+
     for (uint8_t i = 0; i < lineCount; ++i)
     {
         drawCenteredAtTop(lines[i], y, lineColors[i]);
         y += lineHeights[i] + lineGap;
     }
-
-    ui_theme::applyGraphicThemeToBuffer(canvas.getBuffer(), PANEL_RES_X * PANEL_RES_Y);
-    dma_display->drawRGBBitmap(0, 0, canvas.getBuffer(), PANEL_RES_X, PANEL_RES_Y);
 }
 
 namespace
@@ -5021,9 +5022,8 @@ void fetchWeatherFromOWM()
                           forecastCod.length() ? forecastCod.c_str() : "n/a",
                           forecastMsg.length() ? forecastMsg.c_str() : "n/a");
         } else {
-            forecast.numHours = 0;
-            forecast.numDays = 0;
-            forecast.hourlyKeyPresent = true;
+            ForecastData parsedForecast{};
+            parsedForecast.lastUpdate = forecast.lastUpdate;
 
             int dayBestNoonDelta[MAX_FORECAST_DAYS];
             for (int i = 0; i < MAX_FORECAST_DAYS; ++i) {
@@ -5036,29 +5036,29 @@ void fetchWeatherFromOWM()
                 if (!ti) return;
 
                 int dayIdx = -1;
-                for (int i = 0; i < forecast.numDays; ++i) {
-                    if (forecast.days[i].yearNum == ti->tm_year + 1900 &&
-                        forecast.days[i].monthNum == ti->tm_mon + 1 &&
-                        forecast.days[i].dayNum == ti->tm_mday) {
+                for (int i = 0; i < parsedForecast.numDays; ++i) {
+                    if (parsedForecast.days[i].yearNum == ti->tm_year + 1900 &&
+                        parsedForecast.days[i].monthNum == ti->tm_mon + 1 &&
+                        parsedForecast.days[i].dayNum == ti->tm_mday) {
                         dayIdx = i;
                         break;
                     }
                 }
                 if (dayIdx < 0) {
-                    if (forecast.numDays >= MAX_FORECAST_DAYS) return;
-                    dayIdx = forecast.numDays++;
-                    forecast.days[dayIdx] = ForecastDay{};
-                    forecast.days[dayIdx].dayNum = ti->tm_mday;
-                    forecast.days[dayIdx].monthNum = ti->tm_mon + 1;
-                    forecast.days[dayIdx].yearNum = ti->tm_year + 1900;
-                    forecast.days[dayIdx].highTemp = NAN;
-                    forecast.days[dayIdx].lowTemp = NAN;
-                    forecast.days[dayIdx].rainChance = -1;
-                    forecast.days[dayIdx].sunrise = citySunrise;
-                    forecast.days[dayIdx].sunset = citySunset;
+                    if (parsedForecast.numDays >= MAX_FORECAST_DAYS) return;
+                    dayIdx = parsedForecast.numDays++;
+                    parsedForecast.days[dayIdx] = ForecastDay{};
+                    parsedForecast.days[dayIdx].dayNum = ti->tm_mday;
+                    parsedForecast.days[dayIdx].monthNum = ti->tm_mon + 1;
+                    parsedForecast.days[dayIdx].yearNum = ti->tm_year + 1900;
+                    parsedForecast.days[dayIdx].highTemp = NAN;
+                    parsedForecast.days[dayIdx].lowTemp = NAN;
+                    parsedForecast.days[dayIdx].rainChance = -1;
+                    parsedForecast.days[dayIdx].sunrise = citySunrise;
+                    parsedForecast.days[dayIdx].sunset = citySunset;
                 }
 
-                ForecastDay &day = forecast.days[dayIdx];
+                ForecastDay &day = parsedForecast.days[dayIdx];
                 if (isnan(day.highTemp) || (!isnan(highC) && highC > day.highTemp)) day.highTemp = highC;
                 if (isnan(day.lowTemp) || (!isnan(lowC) && lowC < day.lowTemp)) day.lowTemp = lowC;
                 if (rainChance > day.rainChance) day.rainChance = rainChance;
@@ -5109,8 +5109,8 @@ void fetchWeatherFromOWM()
                                     hour.conditions = (JSON.typeof_(weather0["description"]) == "string") ? String((const char*)weather0["description"]) : "";
                                     hour.icon = (JSON.typeof_(weather0["icon"]) == "string") ? String((const char*)weather0["icon"]) : "";
 
-                                    if (forecast.numHours < MAX_FORECAST_HOURS) {
-                                        forecast.hours[forecast.numHours++] = hour;
+                                    if (parsedForecast.numHours < MAX_FORECAST_HOURS) {
+                                        parsedForecast.hours[parsedForecast.numHours++] = hour;
                                     }
 
                                     double highC = toCelsius(readNumber(itemMain, "temp_max"));
@@ -5125,6 +5125,17 @@ void fetchWeatherFromOWM()
                         }
                     }
                 }
+            }
+
+            parsedForecast.hourlyKeyPresent = (parsedForecast.numHours > 0);
+            if (parsedForecast.numDays > 0 || parsedForecast.numHours > 0) {
+                parsedForecast.lastUpdate = forecast.lastUpdate;
+                forecast = parsedForecast;
+                Serial.printf("[OWM] Forecast parsed days=%d hours=%d\n",
+                              forecast.numDays,
+                              forecast.numHours);
+            } else {
+                Serial.println("[OWM] Forecast parse produced no usable entries; keeping previous forecast");
             }
         }
     } else {
@@ -5153,6 +5164,7 @@ void drawOWMScreen()
     getTimeFromRTC();
     displayClock();
     displayDate();
+    displayWeatherData();
 
     // Detect any change across temp/wind/press/precip/clock24h
     const uint16_t curSig = unitSignature();

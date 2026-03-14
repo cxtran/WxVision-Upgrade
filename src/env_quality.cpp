@@ -53,7 +53,7 @@ static unsigned long s_lastHumidityAlertMs = 0;
 static unsigned long s_lastSensorFailureAlertMs = 0;
 
 static constexpr unsigned long kEnvAlertCooldownMs = 5UL * 60UL * 1000UL;
-static constexpr uint16_t kEnvAlertDisplayMs = 2400;
+static constexpr uint16_t kEnvAlertDisplayMs = 4000;
 
 static void updateDetailsBands(EnvBand overall, EnvBand co2, EnvBand temp, EnvBand humidity, EnvBand pressure)
 {
@@ -1254,28 +1254,39 @@ void serviceEnvironmentalAlerts()
     const EnvBand tempBand = bandFromTemp(tempC);
     const EnvBand humBand = bandFromHumidity(humidity);
 
-    const bool co2High = !isnan(co2Raw) && co2Raw > 1200.0f && (co2Band == EnvBand::Poor || co2Band == EnvBand::Critical);
-    const bool tempHigh = !isnan(tempC) && tempC > 26.0f && (tempBand == EnvBand::Poor || tempBand == EnvBand::Critical);
-    const bool humidityWarn = !isnan(humidity) &&
+    // Drive the alert directly from the measured ppm threshold so it does not
+    // depend on a secondary band classification near the cutoff.
+    const bool co2High = !isnan(co2Raw) && co2Raw >= 1200.0f;
+    const bool tempHighRaw = !isnan(tempC) && tempC > 26.5f && (tempBand == EnvBand::Poor || tempBand == EnvBand::Critical);
+    const bool humidityWarnRaw = !isnan(humidity) &&
                               ((humidity < 30.0f) || (humidity > 60.0f)) &&
                               (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
     const bool sensorFailure = !scd40Ready || !aht20Ready || !bmp280Ready;
+    const bool tempHigh = !co2High && tempHighRaw;
+    const bool humidityWarn = !co2High && !tempHigh && humidityWarnRaw;
 
-    if (shouldRetriggerEnvAlert(co2High, s_prevCo2HighAlert, s_lastCo2AlertMs, nowMs))
+    const bool queueSensorFailure = shouldRetriggerEnvAlert(sensorFailure, s_prevSensorFailureAlert, s_lastSensorFailureAlertMs, nowMs);
+    const bool queueCo2 = shouldRetriggerEnvAlert(co2High, s_prevCo2HighAlert, s_lastCo2AlertMs, nowMs);
+    const bool queueTemp = shouldRetriggerEnvAlert(tempHigh, s_prevTempHighAlert, s_lastTempAlertMs, nowMs);
+    const bool queueHumidity = shouldRetriggerEnvAlert(humidityWarn, s_prevHumidityAlert, s_lastHumidityAlertMs, nowMs);
+
+    // Queue at most one environmental alert per pass so the highest-priority
+    // condition is readable instead of being immediately followed by others.
+    if (queueSensorFailure)
+    {
+        queueTemporaryAlertHeading("Sensor Failure", kEnvAlertDisplayMs, 0x53454E01UL);
+    }
+    else if (queueCo2)
     {
         queueTemporaryAlertHeading("CO2 Too High", kEnvAlertDisplayMs, 0x434F3201UL);
     }
-    if (shouldRetriggerEnvAlert(tempHigh, s_prevTempHighAlert, s_lastTempAlertMs, nowMs))
+    else if (queueTemp)
     {
         queueTemporaryAlertHeading("Temperature Too High", kEnvAlertDisplayMs, 0x54454D01UL);
     }
-    if (shouldRetriggerEnvAlert(humidityWarn, s_prevHumidityAlert, s_lastHumidityAlertMs, nowMs))
+    else if (queueHumidity)
     {
         queueTemporaryAlertHeading("Humidity Warning", kEnvAlertDisplayMs, 0x48554D01UL);
-    }
-    if (shouldRetriggerEnvAlert(sensorFailure, s_prevSensorFailureAlert, s_lastSensorFailureAlertMs, nowMs))
-    {
-        queueTemporaryAlertHeading("Sensor Failure", kEnvAlertDisplayMs, 0x53454E01UL);
     }
 }
 

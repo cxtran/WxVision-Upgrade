@@ -8,6 +8,7 @@
 #include "weather_countries.h"
 #include "tempest.h"
 #include "noaa.h"
+#include "screen_manager.h"
 #include "weather_provider.h"
 
 namespace
@@ -75,7 +76,12 @@ void showNoaaSettingsModal()
         {
             NoaaManualFetchResult result = requestNoaaManualFetch();
             if (result == NOAA_MANUAL_FETCH_STARTED)
-                showSectionHeading("GET ALERT...", nullptr, 1200);
+            {
+                noaaModal.hide();
+                menuActive = false;
+                currentMenuLevel = MENU_NONE;
+                queueTemporaryAlertHeading("GETTING ALERT...", 1200);
+            }
             else if (result == NOAA_MANUAL_FETCH_BUSY)
                 showSectionHeading("FETCHING...", nullptr, 1200);
             else if (result == NOAA_MANUAL_FETCH_BLOCKED)

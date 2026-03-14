@@ -1,55 +1,59 @@
 #include "noaa.h"
-#include <WiFiClientSecure.h>
+#include <algorithm>
+#include <vector>
+#include <ArduinoJson.h>
+#include <HTTPClient.h>
+#include <WiFi.h>
 #include <time.h>
-#include <ESP.h>
 #include "settings.h"
 #include "datetimesettings.h"
 #include "display.h"
 #include "InfoScreen.h"
+#include "screen_manager.h"
 #include "tempest.h"
 
 extern InfoScreen noaaAlertScreen;
-extern WiFiUDP udp;
-extern bool udpListening;
-extern int localPort;
 
 static bool s_hasAlert = false;
 static bool s_screenDirty = true;
 static bool s_forceImmediateFetch = false;
 static bool s_fetchInProgress = false;
 static bool s_prevEnabled = false;
-static NwsAlert s_alert;
+static bool s_prevWifiConnected = false;
+static bool s_unreadAlert = false;
+static bool s_manualFetchPending = false;
+static std::vector<NwsAlert> s_alerts;
 static size_t s_alertCount = 0;
 static String s_lastCheckHHMM = "--:--";
-static String s_activeAlertUrl;
-static String s_lastDetailedAlertUrl;
-static String s_lastReadAlertUrl;
+static String s_activeAlertId;
+static String s_lastReadAlertId;
+static bool s_suppressClearHeading = false;
 static unsigned long s_lastFetchAttempt = 0;
 static unsigned long s_nextScheduledFetchMs = 0;
 static unsigned long s_nextFetchAllowedMs = 0;
-static bool s_prevWifiConnected = false;
 static unsigned long s_wifiConnectedSinceMs = 0;
-static bool s_detailFetchPending = false;
-static bool s_unreadAlert = false;
-static bool s_manualFetchPending = false;
 
 static constexpr unsigned long NOAA_FETCH_INTERVAL_MS = 15UL * 60UL * 1000UL;
 static constexpr unsigned long NOAA_RETRY_BACKOFF_MS = 30000UL;
 static constexpr unsigned long NOAA_CONNECT_FAIL_BACKOFF_MS = 300000UL;
 static constexpr unsigned long NOAA_WIFI_STABLE_MS = 5000UL;
 static constexpr unsigned long NOAA_WIFI_RECONNECT_QUIET_MS = 5000UL;
-static constexpr size_t NOAA_MAX_BODY_BYTES = 16384;
-static constexpr const char *NOAA_HOST = "api.weather.gov";
-static constexpr uint16_t NOAA_PORT = 443;
-static constexpr unsigned long NOAA_CONNECT_TIMEOUT_MS = 5000UL;
-static constexpr unsigned long NOAA_READ_TIMEOUT_MS = 12000UL;
-static constexpr uint8_t NOAA_CONNECT_RETRIES = 1;
-static constexpr uint32_t NOAA_MIN_FREE_HEAP = 70000UL;
-static constexpr uint32_t NOAA_MIN_MAX_ALLOC = 45000UL;
+static constexpr const char *NOAA_BASE_URL = "http://noaa.photokia.com";
+static constexpr const char *NOAA_ALERTS_ACTIVE_PATH = "/api/alerts/active";
+static constexpr uint16_t NOAA_HTTP_TIMEOUT_MS = 12000U;
+static constexpr uint16_t NOAA_ALERT_HEADING_MS = 4000U;
+static constexpr uint16_t NOAA_MANUAL_RESULT_HEADING_MS = 1800U;
 
 static bool parseNoaaIsoUtc(const String &isoRaw, DateTime &utcOut);
 static bool noaaCurrentUtc(DateTime &utcOut);
-static bool noaaNeedsDetailFetch();
+
+static void lockNoaaState()
+{
+}
+
+static void unlockNoaaState()
+{
+}
 
 static bool noaaCoordsValid(float lat, float lon)
 {
@@ -61,7 +65,6 @@ static bool noaaCoordsValid(float lat, float lon)
 
 static bool resolveNoaaCoordinates(float &lat, float &lon)
 {
-    // Prefer the device's configured location first.
     if (noaaCoordsValid(noaaLatitude, noaaLongitude))
     {
         lat = noaaLatitude;
@@ -69,8 +72,6 @@ static bool resolveNoaaCoordinates(float &lat, float &lon)
         return true;
     }
 
-    // Fall back to the current timezone/city coordinates when device location
-    // has not been configured yet.
     int tzIdx = timezoneCurrentIndex();
     if (tzIdx >= 0 && tzIdx < static_cast<int>(timezoneCount()))
     {
@@ -84,30 +85,6 @@ static bool resolveNoaaCoordinates(float &lat, float &lon)
     }
 
     return false;
-}
-
-static bool pauseUdpTrafficForNoaa()
-{
-    if (!udpListening)
-        return false;
-    udp.stop();
-    udpListening = false;
-    Serial.println("[NOAA] Paused UDP listener for NOAA fetch");
-    delay(150);
-    return true;
-}
-
-static void resumeUdpTrafficAfterNoaa(bool pausedUdp)
-{
-    if (!pausedUdp)
-        return;
-    if (WiFi.status() != WL_CONNECTED)
-        return;
-    if (udp.begin(localPort))
-    {
-        udpListening = true;
-        Serial.println("[NOAA] Resumed UDP listener after NOAA fetch");
-    }
 }
 
 static void stampLastCheckNow()
@@ -135,18 +112,25 @@ static void stampLastCheckNow()
             return;
         }
     }
+
     s_lastCheckHHMM = "--:--";
 }
 
-static void clearAlertCache()
+static void clearAlertState()
 {
+    s_hasAlert = false;
     s_alertCount = 0;
-    s_alert = NwsAlert{};
+    s_alerts.clear();
+    s_activeAlertId = "";
 }
 
-static void clearAlertFields()
+static const char *noaaAlertEventText(const NwsAlert &alert)
 {
-    s_activeAlertUrl = "";
+    if (alert.event.length())
+        return alert.event.c_str();
+    if (alert.headline.length())
+        return alert.headline.c_str();
+    return "NOAA ALERT";
 }
 
 static bool noaaAlertExpiryUtc(const NwsAlert &alert, DateTime &expiryUtcOut)
@@ -160,161 +144,61 @@ static bool noaaAlertExpiryUtc(const NwsAlert &alert, DateTime &expiryUtcOut)
 
 static bool noaaAlertIsActiveNow(const NwsAlert &alert, const DateTime &nowUtc)
 {
-    if (alert.status.length() > 0 && !alert.status.equalsIgnoreCase("Actual"))
-        return false;
-    if (alert.messageType.equalsIgnoreCase("Cancel"))
-        return false;
-
     DateTime expiryUtc;
     if (noaaAlertExpiryUtc(alert, expiryUtc))
         return nowUtc.unixtime() <= expiryUtc.unixtime();
-
     return true;
 }
 
 static void pruneExpiredCachedAlerts()
 {
-    if (s_alertCount == 0)
+    if (!s_hasAlert || s_alertCount == 0)
         return;
 
     DateTime nowUtc;
     if (!noaaCurrentUtc(nowUtc))
         return;
 
-    size_t writeIndex = 0;
-    for (size_t readIndex = 0; readIndex < s_alertCount; ++readIndex)
+    std::vector<NwsAlert> activeAlerts;
+    activeAlerts.reserve(s_alerts.size());
+    for (const NwsAlert &alert : s_alerts)
     {
-        if (!noaaAlertIsActiveNow(s_alert, nowUtc))
-            continue;
-        ++writeIndex;
+        if (noaaAlertIsActiveNow(alert, nowUtc))
+            activeAlerts.push_back(alert);
     }
 
-    if (writeIndex == s_alertCount)
+    if (activeAlerts.size() == s_alerts.size())
         return;
 
-    s_alertCount = writeIndex;
+    const bool hadUnread = s_unreadAlert;
+    const size_t previousCount = s_alertCount;
+    s_alerts = activeAlerts;
+    s_alertCount = s_alerts.size();
     s_hasAlert = (s_alertCount > 0);
-    s_activeAlertUrl = s_hasAlert ? s_alert.url : "";
-    if (!s_hasAlert)
-    {
-        s_lastDetailedAlertUrl = "";
-        s_unreadAlert = false;
-        s_detailFetchPending = false;
-    }
-    else
-    {
-        s_detailFetchPending = noaaNeedsDetailFetch();
-        if (s_activeAlertUrl == s_lastReadAlertUrl)
-            s_unreadAlert = false;
-    }
+    s_activeAlertId = s_hasAlert ? s_alerts.front().id : "";
+    s_unreadAlert = s_hasAlert && hadUnread;
     s_screenDirty = true;
-}
-
-static void initNoaaStringStorage()
-{
-    // Keep NOAA state lazy-allocated so TLS has the largest contiguous heap
-    // window possible when WiFiClientSecure starts the handshake.
-}
-
-static void lockNoaaState()
-{
-}
-
-static void unlockNoaaState()
-{
+    if (!s_hasAlert)
+        s_unreadAlert = false;
+    if (!s_suppressClearHeading)
+    {
+        if (!s_hasAlert && !hadUnread)
+            queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
+        else if (previousCount > s_alertCount && s_hasAlert)
+            queueTemporaryAlertHeading("ALERT CLEARED",
+                                       NOAA_MANUAL_RESULT_HEADING_MS,
+                                       0,
+                                       (String(s_alertCount) + " REMAIN").c_str());
+    }
 }
 
 static void markNoaaAlertRead()
 {
     lockNoaaState();
     s_unreadAlert = false;
-    if (s_activeAlertUrl.length() > 0)
-        s_lastReadAlertUrl = s_activeAlertUrl;
+    if (s_activeAlertId.length() > 0)
+        s_lastReadAlertId = s_activeAlertId;
     unlockNoaaState();
-}
-
-static void cleanRawExtractInPlace(String &raw)
-{
-    raw.trim();
-    if (raw.length() >= 2 && raw[0] == '"' && raw[raw.length() - 1] == '"')
-    {
-        raw = raw.substring(1, raw.length() - 1);
-    }
-    raw.replace("\\n", " ");
-    raw.replace("\\r", " ");
-    raw.replace("\\\"", "\"");
-    while (raw.indexOf("  ") != -1)
-    {
-        raw.replace("  ", " ");
-    }
-    raw.trim();
-}
-
-static String extractRawFieldAfter(const String &payload, const String &key, int searchFrom)
-{
-    String needle = "\"" + key + "\"";
-    int pos = payload.indexOf(needle, searchFrom);
-    if (pos < 0)
-        return "";
-    pos = payload.indexOf(':', pos + needle.length());
-    if (pos < 0)
-        return "";
-    // Move past ':' then skip whitespace/newlines
-    pos++;
-    while (pos < (int)payload.length() && (payload[pos] == ' ' || payload[pos] == '\t' || payload[pos] == '\n' || payload[pos] == '\r'))
-        pos++;
-    if (pos >= (int)payload.length())
-        return "";
-    // Expect a quoted string
-    if (pos >= (int)payload.length() - 1 || payload[pos] != '"')
-        return "";
-    int start = pos;
-    int end = -1;
-    for (int i = start + 1; i < (int)payload.length(); ++i)
-    {
-        if (payload[i] == '"' && payload[i - 1] != '\\')
-        {
-            end = i;
-            break;
-        }
-    }
-    if (end == -1)
-        return "";
-    return payload.substring(start + 1, end);
-}
-
-static void assignRawField(String &dest, const String &payload, const String &key, int searchFrom)
-{
-    dest = extractRawFieldAfter(payload, key, searchFrom);
-    cleanRawExtractInPlace(dest);
-}
-
-static int skipJsonWhitespace(const String &payload, int pos)
-{
-    while (pos < payload.length())
-    {
-        char c = payload.charAt(pos);
-        if (c != ' ' && c != '\t' && c != '\r' && c != '\n')
-            break;
-        ++pos;
-    }
-    return pos;
-}
-
-static bool rawArrayKeyIsEmpty(const String &payload, const String &key, int searchFrom)
-{
-    String needle = "\"" + key + "\"";
-    int pos = payload.indexOf(needle, searchFrom);
-    if (pos < 0)
-        return false;
-    pos = payload.indexOf(':', pos + needle.length());
-    if (pos < 0)
-        return false;
-    pos = skipJsonWhitespace(payload, pos + 1);
-    if (pos >= payload.length() || payload.charAt(pos) != '[')
-        return false;
-    pos = skipJsonWhitespace(payload, pos + 1);
-    return (pos < payload.length() && payload.charAt(pos) == ']');
 }
 
 static uint16_t severityColor(const String &severity)
@@ -339,7 +223,7 @@ static bool snapshotPrimaryAlert(NwsAlert &out)
 {
     if (!s_hasAlert || s_alertCount == 0)
         return false;
-    out = s_alert;
+    out = s_alerts.front();
     return true;
 }
 
@@ -349,83 +233,53 @@ static void applyNoaaLines(bool forceReset)
     uint16_t colors[INFOSCREEN_MAX_LINES] = {0};
     int count = 0;
     bool useColors = false;
-    bool alertsEnabled = false;
-    bool fetchInProgress = false;
-    bool hasAlert = false;
-    String lastCheck;
     NwsAlert primary;
     bool havePrimary = false;
-
-    lockNoaaState();
-    alertsEnabled = noaaAlertsEnabled;
-    fetchInProgress = s_fetchInProgress;
-    hasAlert = s_hasAlert;
-    lastCheck = s_lastCheckHHMM;
-    havePrimary = snapshotPrimaryAlert(primary);
-    unlockNoaaState();
 
     auto push = [&](const String &label, const String &value, uint16_t color) {
         if (count >= INFOSCREEN_MAX_LINES)
             return;
-        String line;
-        if (label.length())
-            line = label + ": " + value;
-        else
-            line = value;
-        lines[count] = line;
+        lines[count] = label.length() ? (label + ": " + value) : value;
         colors[count] = color;
         if (color != 0)
             useColors = true;
-        count++;
+        ++count;
     };
 
-    if (!alertsEnabled)
+    lockNoaaState();
+    havePrimary = snapshotPrimaryAlert(primary);
+    unlockNoaaState();
+
+    if (!noaaAlertsEnabled)
     {
         push("", "Alerts Disabled", 0);
         push("Severity", "--", 0);
         push("", "Enable NOAA alerts in menu.", 0);
     }
-    else if (fetchInProgress)
+    else if (s_fetchInProgress)
     {
         push("", "Get Alert info ...", 0);
-        push("Status", "Checking NOAA feed", 0);
-        push("Last", lastCheck, 0);
+        push("Status", "Checking relay", 0);
+        push("Last", s_lastCheckHHMM, 0);
     }
-    else if (!hasAlert)
+    else if (!s_hasAlert || !havePrimary)
     {
         push("", "No Active Alert", 0);
         push("Severity", "None", 0);
-        push("", "Monitoring NOAA feed...", 0);
+        push("", "Monitoring relay...", 0);
     }
     else
     {
-        if (!havePrimary)
-            primary = NwsAlert{};
         push("Event", primary.event.length() ? primary.event : "Alert", dma_display ? dma_display->color565(255, 255, 255) : 0);
         push("Severity", primary.severity.length() ? primary.severity : "Unknown", severityColor(primary.severity));
         if (primary.headline.length())
             push("Headline", primary.headline, 0);
         if (primary.areaDesc.length())
             push("Area", primary.areaDesc, 0);
-        if (primary.senderName.length())
-            push("Sender", primary.senderName, 0);
-        if (primary.urgency.length())
-            push("Urgency", primary.urgency, 0);
-        if (primary.certainty.length())
-            push("Certainty", primary.certainty, 0);
-        if (primary.response.length())
-            push("Response", primary.response, 0);
-        if (primary.effective.length())
-            push("Effective", primary.effective, 0);
         if (primary.expires.length())
             push("Expires", primary.expires, 0);
-        if (primary.ends.length())
-            push("Ends", primary.ends, 0);
-        push("Description", primary.description.length() ? primary.description : "No description provided.", dma_display ? dma_display->color565(150, 200, 255) : 0);
-        if (primary.instruction.length())
-            push("Instruction", primary.instruction, dma_display ? dma_display->color565(150, 200, 255) : 0);
-        if (primary.note.length())
-            push("Note", primary.note, dma_display ? dma_display->color565(150, 200, 255) : 0);
+        if (primary.description.length() && primary.description != primary.headline)
+            push("Description", primary.description, dma_display ? dma_display->color565(150, 200, 255) : 0);
     }
 
     if (count == 0)
@@ -436,102 +290,6 @@ static void applyNoaaLines(bool forceReset)
 
     bool resetPosition = forceReset || !noaaAlertScreen.isActive();
     noaaAlertScreen.setLines(lines, count, resetPosition, useColors ? colors : nullptr);
-}
-
-static bool waitForClientData(WiFiClientSecure &client, unsigned long timeoutMs)
-{
-    unsigned long startMs = millis();
-    while ((millis() - startMs) < timeoutMs)
-    {
-        if (WiFi.status() != WL_CONNECTED)
-            return false;
-        if (client.available() > 0)
-            return true;
-        if (!client.connected())
-            return false;
-        delay(1);
-    }
-    return client.available() > 0;
-}
-
-static bool noaaHandshakeHeapOkay()
-{
-    const uint32_t freeHeap = ESP.getFreeHeap();
-    const uint32_t maxAlloc = ESP.getMaxAllocHeap();
-    if (freeHeap < NOAA_MIN_FREE_HEAP || maxAlloc < NOAA_MIN_MAX_ALLOC)
-    {
-        Serial.printf("[NOAA] Skip fetch, heap low free=%u/%u maxAlloc=%u/%u\n",
-                      static_cast<unsigned>(freeHeap),
-                      static_cast<unsigned>(NOAA_MIN_FREE_HEAP),
-                      static_cast<unsigned>(maxAlloc),
-                      static_cast<unsigned>(NOAA_MIN_MAX_ALLOC));
-        return false;
-    }
-    return true;
-}
-
-static void logNoaaFetchDiagnostics(const char *phase)
-{
-    Serial.printf("[NOAA] Diag %s RSSI=%d dBm ch=%d freeHeap=%u maxAlloc=%u wifi=%d\n",
-                  phase ? phase : "",
-                  WiFi.RSSI(),
-                  WiFi.channel(),
-                  static_cast<unsigned>(ESP.getFreeHeap()),
-                  static_cast<unsigned>(ESP.getMaxAllocHeap()),
-                  static_cast<int>(WiFi.status()));
-}
-
-static void deferNoaaUntil(unsigned long whenMs)
-{
-    if (s_nextFetchAllowedMs == 0 || static_cast<long>(whenMs - s_nextFetchAllowedMs) > 0)
-        s_nextFetchAllowedMs = whenMs;
-}
-
-static bool summaryPayloadHasFullAlertText(const String &description, const String &instruction)
-{
-    return description.length() > 0 || instruction.length() > 0;
-}
-
-static bool parseNoaaAlertFromPropertiesSlice(const String &propsPayload, NwsAlert &alertOut, String &alertUrlOut)
-{
-    alertOut = NwsAlert{};
-    alertUrlOut = "";
-
-    assignRawField(alertUrlOut, propsPayload, "@id", 0);
-    alertOut.url = alertUrlOut;
-    assignRawField(alertOut.id, propsPayload, "id", 0);
-    if (alertOut.id.length() == 0)
-        alertOut.id = alertUrlOut;
-    assignRawField(alertOut.sent, propsPayload, "sent", 0);
-    assignRawField(alertOut.effective, propsPayload, "effective", 0);
-    assignRawField(alertOut.onset, propsPayload, "onset", 0);
-    assignRawField(alertOut.event, propsPayload, "event", 0);
-    if (alertOut.event.length() == 0)
-        alertOut.event = "NOAA Alert";
-    assignRawField(alertOut.status, propsPayload, "status", 0);
-    assignRawField(alertOut.messageType, propsPayload, "messageType", 0);
-    assignRawField(alertOut.category, propsPayload, "category", 0);
-    assignRawField(alertOut.severity, propsPayload, "severity", 0);
-    assignRawField(alertOut.certainty, propsPayload, "certainty", 0);
-    assignRawField(alertOut.urgency, propsPayload, "urgency", 0);
-    assignRawField(alertOut.areaDesc, propsPayload, "areaDesc", 0);
-    assignRawField(alertOut.sender, propsPayload, "sender", 0);
-    assignRawField(alertOut.senderName, propsPayload, "senderName", 0);
-    assignRawField(alertOut.headline, propsPayload, "headline", 0);
-    assignRawField(alertOut.description, propsPayload, "description", 0);
-    assignRawField(alertOut.instruction, propsPayload, "instruction", 0);
-    assignRawField(alertOut.response, propsPayload, "response", 0);
-    assignRawField(alertOut.note, propsPayload, "note", 0);
-    assignRawField(alertOut.expires, propsPayload, "expires", 0);
-    assignRawField(alertOut.ends, propsPayload, "ends", 0);
-    assignRawField(alertOut.scope, propsPayload, "scope", 0);
-    assignRawField(alertOut.language, propsPayload, "language", 0);
-    assignRawField(alertOut.web, propsPayload, "web", 0);
-
-    if (alertOut.description.length() == 0)
-        alertOut.description = alertOut.headline.length() ? alertOut.headline : "Detail update pending.";
-
-    return alertOut.event.length() > 0 || alertOut.headline.length() > 0 || alertOut.description.length() > 0;
 }
 
 static bool parseNoaaIsoUtc(const String &isoRaw, DateTime &utcOut)
@@ -608,6 +366,7 @@ static bool parseNoaaIsoUtc(const String &isoRaw, DateTime &utcOut)
     int64_t utcEpoch = static_cast<int64_t>(src.unixtime()) - static_cast<int64_t>(srcOffsetMinutes) * 60;
     if (utcEpoch < 0)
         return false;
+
     utcOut = DateTime(static_cast<uint32_t>(utcEpoch));
     return true;
 }
@@ -628,573 +387,272 @@ static bool noaaCurrentUtc(DateTime &utcOut)
     return true;
 }
 
-static int findMatchingBrace(const String &payload, int openBracePos)
+static void deferNoaaUntil(unsigned long whenMs)
 {
-    if (openBracePos < 0 || openBracePos >= payload.length() || payload.charAt(openBracePos) != '{')
-        return -1;
-
-    bool inString = false;
-    bool escape = false;
-    int depth = 0;
-    for (int i = openBracePos; i < payload.length(); ++i)
-    {
-        char c = payload.charAt(i);
-        if (inString)
-        {
-            if (escape)
-            {
-                escape = false;
-            }
-            else if (c == '\\')
-            {
-                escape = true;
-            }
-            else if (c == '"')
-            {
-                inString = false;
-            }
-            continue;
-        }
-
-        if (c == '"')
-        {
-            inString = true;
-            continue;
-        }
-        if (c == '{')
-        {
-            ++depth;
-            continue;
-        }
-        if (c == '}')
-        {
-            --depth;
-            if (depth == 0)
-                return i;
-        }
-    }
-    return -1;
+    if (s_nextFetchAllowedMs == 0 || static_cast<long>(whenMs - s_nextFetchAllowedMs) > 0)
+        s_nextFetchAllowedMs = whenMs;
 }
 
-static int findMatchingBracket(const String &payload, int openBracketPos)
+static uint32_t noaaAlertSignature(const String &id)
 {
-    if (openBracketPos < 0 || openBracketPos >= payload.length() || payload.charAt(openBracketPos) != '[')
-        return -1;
-
-    bool inString = false;
-    bool escape = false;
-    int depth = 0;
-    for (int i = openBracketPos; i < payload.length(); ++i)
+    uint32_t hash = 2166136261UL;
+    for (size_t i = 0; i < id.length(); ++i)
     {
-        char c = payload.charAt(i);
-        if (inString)
-        {
-            if (escape)
-                escape = false;
-            else if (c == '\\')
-                escape = true;
-            else if (c == '"')
-                inString = false;
-            continue;
-        }
-
-        if (c == '"')
-        {
-            inString = true;
-            continue;
-        }
-        if (c == '[')
-        {
-            ++depth;
-            continue;
-        }
-        if (c == ']')
-        {
-            --depth;
-            if (depth == 0)
-                return i;
-        }
+        hash ^= static_cast<uint8_t>(id.charAt(i));
+        hash *= 16777619UL;
     }
-    return -1;
+    return hash ? hash : 0x4E4F4141UL; // "NOAA"
 }
 
-static bool extractPropertiesPayloadFromFeature(const String &featurePayload, String &propsPayloadOut)
+static int noaaSeverityRank(const String &severity)
 {
-    propsPayloadOut = "";
-    const int propsPos = featurePayload.indexOf("\"properties\"");
-    if (propsPos < 0)
-        return false;
-
-    int colonPos = featurePayload.indexOf(':', propsPos);
-    if (colonPos < 0)
-        return false;
-    int bracePos = skipJsonWhitespace(featurePayload, colonPos + 1);
-    if (bracePos < 0 || bracePos >= featurePayload.length() || featurePayload.charAt(bracePos) != '{')
-        return false;
-
-    int closePos = findMatchingBrace(featurePayload, bracePos);
-    if (closePos < 0)
-        return false;
-
-    propsPayloadOut = featurePayload.substring(bracePos, closePos + 1);
-    return true;
+    String s = severity;
+    s.toLowerCase();
+    if (s == "extreme")
+        return 0;
+    if (s == "severe")
+        return 1;
+    if (s == "moderate")
+        return 2;
+    if (s == "minor")
+        return 3;
+    return 4;
 }
 
-static bool parseNoaaSummaryPayload(const String &payload)
+static int noaaUrgencyRank(const String &urgency)
 {
-    const int featuresPos = payload.indexOf("\"features\"");
-    if (featuresPos < 0)
+    String s = urgency;
+    s.toLowerCase();
+    if (s == "immediate")
+        return 0;
+    if (s == "expected")
+        return 1;
+    if (s == "future")
+        return 2;
+    if (s == "past")
+        return 3;
+    return 4;
+}
+
+static uint32_t noaaExpiryEpoch(const NwsAlert &alert)
+{
+    DateTime expiryUtc;
+    if (noaaAlertExpiryUtc(alert, expiryUtc))
+        return expiryUtc.unixtime();
+    return 0xFFFFFFFFUL;
+}
+
+static bool noaaAlertPriorityLess(const NwsAlert &lhs, const NwsAlert &rhs)
+{
+    const int lhsSeverity = noaaSeverityRank(lhs.severity);
+    const int rhsSeverity = noaaSeverityRank(rhs.severity);
+    if (lhsSeverity != rhsSeverity)
+        return lhsSeverity < rhsSeverity;
+
+    const int lhsUrgency = noaaUrgencyRank(lhs.urgency);
+    const int rhsUrgency = noaaUrgencyRank(rhs.urgency);
+    if (lhsUrgency != rhsUrgency)
+        return lhsUrgency < rhsUrgency;
+
+    const uint32_t lhsExpiry = noaaExpiryEpoch(lhs);
+    const uint32_t rhsExpiry = noaaExpiryEpoch(rhs);
+    if (lhsExpiry != rhsExpiry)
+        return lhsExpiry < rhsExpiry;
+
+    return lhs.event < rhs.event;
+}
+
+static String relayField(JsonObject obj, const char *fullKey, const char *compactKey)
+{
+    const char *fullValue = obj[fullKey] | "";
+    if (fullValue && fullValue[0] != '\0')
+        return String(fullValue);
+    const char *compactValue = obj[compactKey] | "";
+    return String(compactValue ? compactValue : "");
+}
+
+static bool relayTopLevelBool(JsonDocument &doc, const char *fullKey, const char *compactKey, bool defaultValue = false)
+{
+    JsonVariant fullValue = doc[fullKey];
+    if (!fullValue.isNull())
+        return fullValue.as<bool>();
+
+    JsonVariant compactValue = doc[compactKey];
+    if (!compactValue.isNull())
+        return compactValue.as<bool>();
+
+    return defaultValue;
+}
+
+static bool parseRelayAlertsPayload(const String &payload)
+{
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err)
+    {
+        Serial.printf("[NOAA] Relay JSON parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray alerts = doc["alerts"].as<JsonArray>();
+    if (alerts.isNull())
         return false;
 
-    if (rawArrayKeyIsEmpty(payload, "features", featuresPos))
+    if (alerts.size() == 0)
     {
-        lockNoaaState();
-        clearAlertFields();
-        clearAlertCache();
-        s_hasAlert = false;
-        s_screenDirty = true;
-        unlockNoaaState();
-        return true;
-    }
-
-    const int featuresColonPos = payload.indexOf(':', featuresPos);
-    if (featuresColonPos < 0)
-        return false;
-    const int featuresArrayPos = skipJsonWhitespace(payload, featuresColonPos + 1);
-    if (featuresArrayPos < 0 || payload.charAt(featuresArrayPos) != '[')
-        return false;
-    const int featuresArrayEnd = findMatchingBracket(payload, featuresArrayPos);
-    String featuresPayload;
-    if (featuresArrayEnd < 0)
-    {
-        Serial.println("[NOAA] Incomplete features array; parsing partial payload");
-        featuresPayload = payload.substring(featuresArrayPos + 1);
-    }
-    else
-    {
-        featuresPayload = payload.substring(featuresArrayPos + 1, featuresArrayEnd);
-    }
-
-    DateTime nowUtc;
-    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
-    int searchPos = 0;
-    NwsAlert primaryAlert;
-    bool primaryHasFullText = false;
-    bool foundAlert = false;
-    while (!foundAlert)
-    {
-        searchPos = skipJsonWhitespace(featuresPayload, searchPos);
-        if (searchPos < 0 || searchPos >= featuresPayload.length())
-            break;
-        if (featuresPayload.charAt(searchPos) == ',')
-        {
-            ++searchPos;
-            continue;
-        }
-        if (featuresPayload.charAt(searchPos) != '{')
-            break;
-
-        const int featureEnd = findMatchingBrace(featuresPayload, searchPos);
-        if (featureEnd < 0)
-            break;
-
-        String featurePayload = featuresPayload.substring(searchPos, featureEnd + 1);
-        String propsPayload;
-        const int nextSearchPos = featureEnd + 1;
-        featurePayload.reserve(static_cast<unsigned>(featureEnd - searchPos + 2));
-        propsPayload.reserve(static_cast<unsigned>(featureEnd - searchPos + 2));
-        if (!extractPropertiesPayloadFromFeature(featurePayload, propsPayload))
-        {
-            searchPos = nextSearchPos;
-            continue;
-        }
-
-        NwsAlert alert;
-        String alertUrl;
-        if (!parseNoaaAlertFromPropertiesSlice(propsPayload, alert, alertUrl))
-        {
-            searchPos = nextSearchPos;
-            continue;
-        }
-
-        if (haveNowUtc && !noaaAlertIsActiveNow(alert, nowUtc))
-        {
-            searchPos = nextSearchPos;
-            continue;
-        }
-
-        primaryAlert = alert;
-        primaryHasFullText = summaryPayloadHasFullAlertText(alert.description, alert.instruction);
-
-        Serial.printf("[NOAA] Alert event=%u headline=%u desc=%u instr=%u url=%u\n",
-                      static_cast<unsigned>(alert.event.length()),
-                      static_cast<unsigned>(alert.headline.length()),
-                      static_cast<unsigned>(alert.description.length()),
-                      static_cast<unsigned>(alert.instruction.length()),
-                      static_cast<unsigned>(alertUrl.length()));
-
-        foundAlert = true;
-    }
-
-    if (!foundAlert)
-    {
-        const int propsPos = payload.indexOf("\"properties\"");
-        if (propsPos >= 0)
-        {
-            NwsAlert fallbackAlert;
-            String fallbackUrl;
-            String fallbackProps = payload.substring(propsPos);
-            if (parseNoaaAlertFromPropertiesSlice(fallbackProps, fallbackAlert, fallbackUrl))
-            {
-                if (haveNowUtc && !noaaAlertIsActiveNow(fallbackAlert, nowUtc))
-                {
-                    lockNoaaState();
-                    clearAlertFields();
-                    clearAlertCache();
-                    s_hasAlert = false;
-                    s_unreadAlert = false;
-                    s_lastDetailedAlertUrl = "";
-                    s_screenDirty = true;
-                    unlockNoaaState();
-                    Serial.println("[NOAA] Parsed 0 alert(s)");
-                    return true;
-                }
-                lockNoaaState();
-                clearAlertFields();
-                clearAlertCache();
-                s_activeAlertUrl = fallbackAlert.url;
-                s_alert = fallbackAlert;
-                s_alertCount = 1;
-                s_hasAlert = true;
-                s_lastDetailedAlertUrl = summaryPayloadHasFullAlertText(fallbackAlert.description, fallbackAlert.instruction) ? fallbackAlert.url : "";
-                s_screenDirty = true;
-                unlockNoaaState();
-                Serial.printf("[NOAA] Fallback parsed first alert event=%u headline=%u desc=%u instr=%u\n",
-                              static_cast<unsigned>(fallbackAlert.event.length()),
-                              static_cast<unsigned>(fallbackAlert.headline.length()),
-                              static_cast<unsigned>(fallbackAlert.description.length()),
-                              static_cast<unsigned>(fallbackAlert.instruction.length()));
-                return true;
-            }
-        }
-
-        lockNoaaState();
-        clearAlertFields();
-        clearAlertCache();
-        s_hasAlert = false;
+        const bool hadAlert = s_hasAlert;
+        clearAlertState();
         s_unreadAlert = false;
-        s_lastDetailedAlertUrl = "";
         s_screenDirty = true;
-        unlockNoaaState();
+        if (hadAlert && !s_suppressClearHeading)
+            queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
         Serial.println("[NOAA] Parsed 0 alert(s)");
         return true;
     }
 
-    lockNoaaState();
-    clearAlertFields();
-    clearAlertCache();
-    s_alert = primaryAlert;
-    s_alertCount = 1;
+    DateTime nowUtc;
+    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
+    std::vector<NwsAlert> parsedAlerts;
+    parsedAlerts.reserve(alerts.size());
+    for (JsonObject alertObj : alerts)
+    {
+        NwsAlert candidate;
+        candidate.id = relayField(alertObj, "id", "i");
+        candidate.url = candidate.id;
+        candidate.event = relayField(alertObj, "event", "e");
+        candidate.severity = relayField(alertObj, "severity", "s");
+        candidate.certainty = relayField(alertObj, "certainty", "y");
+        candidate.headline = relayField(alertObj, "headline", "h");
+        candidate.description = relayField(alertObj, "description", "d");
+        candidate.instruction = relayField(alertObj, "instruction", "n");
+        candidate.urgency = relayField(alertObj, "urgency", "g");
+        candidate.response = relayField(alertObj, "response", "r");
+        candidate.areaDesc = relayField(alertObj, "area", "a");
+        candidate.onset = relayField(alertObj, "onset", "o");
+        candidate.expires = relayField(alertObj, "expires", "x");
+        candidate.ends = relayField(alertObj, "ends", "z");
+        if (candidate.description.length() == 0)
+            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
+        if (candidate.headline.length() == 0 && candidate.description.length() > 0)
+            candidate.headline = candidate.description;
+
+        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
+            continue;
+        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
+            continue;
+
+        parsedAlerts.push_back(candidate);
+    }
+
+    if (parsedAlerts.empty())
+    {
+        clearAlertState();
+        s_unreadAlert = false;
+        s_screenDirty = true;
+        Serial.println("[NOAA] Parsed 0 alert(s)");
+        return true;
+    }
+
+    const String previousAlertId = s_activeAlertId;
+    const size_t previousCount = s_alertCount;
+    std::sort(parsedAlerts.begin(), parsedAlerts.end(), noaaAlertPriorityLess);
+    s_alerts = parsedAlerts;
+    s_alertCount = s_alerts.size();
     s_hasAlert = true;
-    s_activeAlertUrl = s_alert.url;
-    s_lastDetailedAlertUrl = primaryHasFullText ? s_activeAlertUrl : "";
+    s_activeAlertId = s_alerts.front().id;
     s_screenDirty = true;
-    unlockNoaaState();
-    Serial.printf("[NOAA] Summary fields desc=%u instr=%u certainty=%u response=%u effective=%u ends=%u\n",
-                  static_cast<unsigned>(primaryAlert.description.length()),
-                  static_cast<unsigned>(primaryAlert.instruction.length()),
-                  static_cast<unsigned>(primaryAlert.certainty.length()),
-                  static_cast<unsigned>(primaryAlert.response.length()),
-                  static_cast<unsigned>(primaryAlert.effective.length()),
-                  static_cast<unsigned>(primaryAlert.ends.length()));
-    Serial.println("[NOAA] Parsed 1 alert");
-    return true;
-}
 
-static bool parseNoaaDetailPayload(const String &payload)
-{
-    const int propsPos = payload.indexOf("\"properties\"");
-    if (propsPos < 0)
-        return false;
-
-    String description;
-    String instruction;
-    String note;
-    String effective;
-    String ends;
-    String certainty;
-    String response;
-    assignRawField(description, payload, "description", propsPos);
-    assignRawField(instruction, payload, "instruction", propsPos);
-    assignRawField(note, payload, "note", propsPos);
-    assignRawField(effective, payload, "effective", propsPos);
-    assignRawField(ends, payload, "ends", propsPos);
-    assignRawField(certainty, payload, "certainty", propsPos);
-    assignRawField(response, payload, "response", propsPos);
-    if (description.length() == 0)
-        description = "No description provided.";
-
-    lockNoaaState();
-    if (s_alertCount > 0)
+    if (noaaAlertScreen.isActive())
     {
-        s_alert.description = description;
-        s_alert.instruction = instruction;
-        s_alert.note = note;
-        s_alert.effective = effective;
-        s_alert.ends = ends;
-        s_alert.certainty = certainty;
-        s_alert.response = response;
+        s_unreadAlert = false;
+        s_lastReadAlertId = s_activeAlertId;
     }
-    s_screenDirty = true;
-    unlockNoaaState();
-    return true;
-}
-
-static bool readNoaaBody(WiFiClientSecure &client, int contentLength, String &bodyOut)
-{
-    bodyOut = "";
-    if (contentLength > 0 && contentLength > static_cast<int>(NOAA_MAX_BODY_BYTES))
+    else if (s_activeAlertId.length() > 0 && s_activeAlertId != previousAlertId && s_activeAlertId != s_lastReadAlertId)
     {
-        Serial.printf("[NOAA] Payload too large: %d bytes\n", contentLength);
-        return false;
-    }
-
-    if (contentLength > 0)
-        bodyOut.reserve(static_cast<unsigned>(contentLength + 1));
-    else
-        bodyOut.reserve(4096);
-
-    char buffer[257];
-    unsigned long lastDataMs = millis();
-    while (client.connected() || client.available() > 0)
-    {
-        int available = client.available();
-        if (available <= 0)
-        {
-            if ((millis() - lastDataMs) >= NOAA_READ_TIMEOUT_MS)
-                break;
-            delay(1);
-            continue;
-        }
-
-        int toRead = available;
-        if (toRead > static_cast<int>(sizeof(buffer)))
-            toRead = static_cast<int>(sizeof(buffer));
-
-        int n = client.readBytes(buffer, static_cast<size_t>(toRead));
-        if (n <= 0)
-            continue;
-
-        lastDataMs = millis();
-
-        int compactLen = 0;
-        for (int i = 0; i < n; ++i)
-        {
-            if (buffer[i] != '\0')
-                buffer[compactLen++] = buffer[i];
-        }
-        if (compactLen <= 0)
-            continue;
-
-        if ((bodyOut.length() + static_cast<unsigned>(compactLen)) > NOAA_MAX_BODY_BYTES)
-        {
-            Serial.printf("[NOAA] Body exceeded %u bytes\n", static_cast<unsigned>(NOAA_MAX_BODY_BYTES));
-            return false;
-        }
-
-        buffer[compactLen] = '\0';
-        bodyOut += buffer;
-
-        if (contentLength > 0 && bodyOut.length() >= contentLength)
-            break;
-    }
-
-    return bodyOut.length() > 0;
-}
-
-static bool fetchAndParseNoaaPath(const String &path, bool detailRequest, float lat, float lon, bool &connectFailed)
-{
-    connectFailed = false;
-    if (WiFi.status() != WL_CONNECTED)
-    {
-        Serial.println("[NOAA] WiFi not connected");
-        connectFailed = true;
-        return false;
-    }
-
-    logNoaaFetchDiagnostics("before connect");
-
-    WiFiClientSecure client;
-    client.setInsecure();
-    client.setHandshakeTimeout(NOAA_CONNECT_TIMEOUT_MS / 1000UL);
-
-    bool connected = false;
-    for (uint8_t attempt = 1; attempt <= NOAA_CONNECT_RETRIES; ++attempt)
-    {
-        Serial.printf("[NOAA] Connect attempt %u/%u\n", static_cast<unsigned>(attempt), static_cast<unsigned>(NOAA_CONNECT_RETRIES));
-        if (client.connect(NOAA_HOST, NOAA_PORT, NOAA_CONNECT_TIMEOUT_MS))
-        {
-            connected = true;
-            break;
-        }
-        client.stop();
-        delay(150);
-    }
-
-    if (!connected)
-    {
-        logNoaaFetchDiagnostics("connect failed");
-        Serial.println("[NOAA] Failed to connect to api.weather.gov");
-        connectFailed = true;
-        return false;
-    }
-
-    client.setTimeout(NOAA_READ_TIMEOUT_MS / 1000UL);
-
-    Serial.printf("[NOAA] Request URL: https://%s%s\n", NOAA_HOST, path.c_str());
-    client.print(
-        String("GET ") + path + " HTTP/1.1\r\n" +
-        "Host: " + NOAA_HOST + "\r\n" +
-        "User-Agent: VisionWX/1.0 (weather display firmware)\r\n" +
-        "Accept: application/geo+json\r\n" +
-        "Accept-Encoding: identity\r\n" +
-        "Connection: close\r\n\r\n");
-
-    if (!waitForClientData(client, NOAA_READ_TIMEOUT_MS))
-    {
-        if (WiFi.status() != WL_CONNECTED)
-        {
-            logNoaaFetchDiagnostics("wifi dropped");
-            Serial.println("[NOAA] WiFi dropped while waiting for HTTP response");
-        }
+        s_unreadAlert = true;
+        if (s_alertCount > 1)
+            queueTemporaryAlertHeading("WEATHER ALERTS",
+                                       NOAA_ALERT_HEADING_MS,
+                                       noaaAlertSignature(s_activeAlertId),
+                                       (String(s_alertCount) + " ACTIVE").c_str());
         else
-            Serial.println("[NOAA] Timed out waiting for HTTP response");
-        client.stop();
+            queueTemporaryAlertHeading("WEATHER ALERT", NOAA_ALERT_HEADING_MS, noaaAlertSignature(s_activeAlertId), noaaAlertEventText(s_alerts.front()));
+    }
+    else if (!noaaAlertScreen.isActive() && s_alertCount > previousCount && !s_suppressClearHeading)
+    {
+        s_unreadAlert = true;
+        queueTemporaryAlertHeading("WEATHER ALERTS",
+                                   NOAA_ALERT_HEADING_MS,
+                                   noaaAlertSignature(s_activeAlertId),
+                                   (String(s_alertCount) + " ACTIVE").c_str());
+    }
+
+    Serial.printf("[NOAA] Parsed relay alert event=%s severity=%s expires=%s count=%u stale=%d\n",
+                  s_alerts.front().event.c_str(),
+                  s_alerts.front().severity.c_str(),
+                  s_alerts.front().expires.c_str(),
+                  static_cast<unsigned>(s_alertCount),
+                  static_cast<int>(relayTopLevelBool(doc, "stale", "s", false)));
+    return true;
+}
+
+static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectFailedOut = nullptr)
+{
+    if (connectFailedOut)
+        *connectFailedOut = false;
+
+    HTTPClient http;
+    http.setConnectTimeout(NOAA_HTTP_TIMEOUT_MS);
+    http.setTimeout(NOAA_HTTP_TIMEOUT_MS);
+    http.setReuse(false);
+
+    String url = String(NOAA_BASE_URL) + NOAA_ALERTS_ACTIVE_PATH +
+                 "?lat=" + String(lat, 4) +
+                 "&lon=" + String(lon, 4) +
+                 "&compact=true";
+
+    Serial.printf("[NOAA] Request URL: %s\n", url.c_str());
+    if (!http.begin(url))
+    {
+        Serial.println("[NOAA] HTTP begin failed");
+        if (connectFailedOut)
+            *connectFailedOut = true;
         return false;
     }
 
-    String statusLine = client.readStringUntil('\n');
-    statusLine.trim();
-    if (statusLine.length() == 0)
+    http.addHeader("Accept", "application/json");
+    http.addHeader("User-Agent", "VisionWX/1.0 (weather display firmware)");
+
+    const int status = http.GET();
+    Serial.printf("[NOAA] HTTP status: %d\n", status);
+    if (status <= 0)
     {
-        Serial.println("[NOAA] Empty HTTP status line");
-        client.stop();
+        if (connectFailedOut)
+            *connectFailedOut = true;
+        http.end();
+        return false;
+    }
+    if (status != HTTP_CODE_OK)
+    {
+        http.end();
         return false;
     }
 
-    int firstSpace = statusLine.indexOf(' ');
-    int secondSpace = (firstSpace >= 0) ? statusLine.indexOf(' ', firstSpace + 1) : -1;
-    int httpStatus = (firstSpace >= 0)
-                         ? statusLine.substring(firstSpace + 1, secondSpace > 0 ? secondSpace : statusLine.length()).toInt()
-                         : -1;
-    Serial.printf("[NOAA] HTTP status: %d\n", httpStatus);
-    if (httpStatus != 200)
-    {
-        if (WiFi.status() != WL_CONNECTED)
-            connectFailed = true;
-        client.stop();
-        return false;
-    }
+    String payload = http.getString();
+    http.end();
 
-    int contentLength = -1;
-    while (client.connected())
-    {
-        if (!waitForClientData(client, NOAA_READ_TIMEOUT_MS))
-            break;
-        String line = client.readStringUntil('\n');
-        if (line == "\r" || line.length() == 0)
-            break;
-        line.trim();
-        if (line.startsWith("Content-Length:"))
-            contentLength = line.substring(strlen("Content-Length:")).toInt();
-    }
-
-    String payload;
-    if (!readNoaaBody(client, contentLength, payload))
-    {
-        client.stop();
-        Serial.println("[NOAA] Failed to read payload body");
-        return false;
-    }
-
-    client.stop();
     Serial.printf("[NOAA] Fetched %u bytes for %.4f,%.4f\n",
                   static_cast<unsigned>(payload.length()),
                   static_cast<double>(lat),
                   static_cast<double>(lon));
-    bool ok = detailRequest ? parseNoaaDetailPayload(payload) : parseNoaaSummaryPayload(payload);
-    if (!ok && WiFi.status() != WL_CONNECTED)
-        Serial.println("[NOAA] WiFi dropped during payload read");
-    Serial.printf("[NOAA] %s parse %s for %.4f,%.4f\n",
-                  detailRequest ? "detail" : "summary",
-                  ok ? "ok" : "failed",
-                  static_cast<double>(lat),
-                  static_cast<double>(lon));
-    return ok;
-}
-
-static bool fetchAndParseNoaaSummaryPayload(const float lat, const float lon, bool *connectFailedOut = nullptr)
-{
-    String path = "/alerts/active?point=" + String(lat, 4) + "," + String(lon, 4);
-    Serial.printf("[NOAA] Summary request for %.4f,%.4f\n",
-                  static_cast<double>(lat),
-                  static_cast<double>(lon));
-    bool connectFailed = false;
-    bool ok = fetchAndParseNoaaPath(path, false, lat, lon, connectFailed);
-    if (connectFailedOut)
-        *connectFailedOut = connectFailed;
-    if (!ok && connectFailed)
-        deferNoaaUntil(millis() + NOAA_CONNECT_FAIL_BACKOFF_MS);
-    return ok;
-}
-
-static bool pathFromNoaaUrl(const String &url, String &pathOut)
-{
-    const String prefix = String("https://") + NOAA_HOST;
-    if (!url.startsWith(prefix))
-        return false;
-    int slash = url.indexOf('/', prefix.length());
-    if (slash < 0)
-        return false;
-    pathOut = url.substring(slash);
-    return pathOut.length() > 0;
-}
-
-static bool fetchAndParseNoaaDetailPayload(const float lat, const float lon, bool *connectFailedOut = nullptr)
-{
-    if (s_alertCount == 0 || s_alert.url.length() == 0)
-        return false;
-
-    String path;
-    if (!pathFromNoaaUrl(s_alert.url, path))
-    {
-        Serial.printf("[NOAA] Unsupported detail URL: %s\n", s_alert.url.c_str());
-        return false;
-    }
-
-    Serial.printf("[NOAA] Detail request source URL: %s\n", s_alert.url.c_str());
-    bool connectFailed = false;
-    bool ok = fetchAndParseNoaaPath(path, true, lat, lon, connectFailed);
-    if (connectFailedOut)
-        *connectFailedOut = connectFailed;
-    if (!ok && connectFailed)
-        deferNoaaUntil(millis() + NOAA_CONNECT_FAIL_BACKOFF_MS);
-    return ok;
-}
-
-static bool noaaNeedsDetailFetch()
-{
-    return s_hasAlert &&
-           s_alertCount > 0 &&
-           s_alert.url.length() > 0 &&
-           s_alert.url != s_lastDetailedAlertUrl;
+    return parseRelayAlertsPayload(payload);
 }
 
 static void fetchNoaaAlertSummarySync(bool preserveSchedule)
 {
     bool forced = s_forceImmediateFetch;
     s_forceImmediateFetch = false;
-    bool pausedUdp = false;
+
     const unsigned long savedLastFetchAttempt = s_lastFetchAttempt;
     const unsigned long savedNextScheduledFetchMs = s_nextScheduledFetchMs;
     const unsigned long savedNextFetchAllowedMs = s_nextFetchAllowedMs;
@@ -1220,66 +678,47 @@ static void fetchNoaaAlertSummarySync(bool preserveSchedule)
     if (!preserveSchedule)
         s_lastFetchAttempt = fetchStartMs;
     stampLastCheckNow();
-
-    pausedUdp = pauseUdpTrafficForNoaa();
-    if (!noaaHandshakeHeapOkay())
-    {
-        if (preserveSchedule)
-        {
-            s_lastFetchAttempt = savedLastFetchAttempt;
-            s_nextScheduledFetchMs = savedNextScheduledFetchMs;
-            s_nextFetchAllowedMs = savedNextFetchAllowedMs;
-        }
-        else
-        {
-            s_nextFetchAllowedMs = millis() + NOAA_RETRY_BACKOFF_MS;
-        }
-        resumeUdpTrafficAfterNoaa(pausedUdp);
-        s_fetchInProgress = false;
-        s_screenDirty = true;
-        return;
-    }
+    s_suppressClearHeading = preserveSchedule;
 
     bool connectFailed = false;
-    bool fetchOk = fetchAndParseNoaaSummaryPayload(lat, lon, &connectFailed);
+    const bool fetchOk = fetchAndParseNoaaSummaryPayload(lat, lon, &connectFailed);
+    s_suppressClearHeading = false;
     if (fetchOk)
-      {
-        if (s_hasAlert && s_activeAlertUrl.length() > 0)
-        {
-            if (noaaAlertScreen.isActive())
-                markNoaaAlertRead();
-            else if (s_activeAlertUrl != s_lastReadAlertUrl)
-                s_unreadAlert = true;
-        }
-        else
-        {
-            s_unreadAlert = false;
-        }
-        s_detailFetchPending = noaaNeedsDetailFetch();
-        if (!s_hasAlert)
-            s_lastDetailedAlertUrl = "";
+    {
         s_nextFetchAllowedMs = 0;
         if (!preserveSchedule)
             s_nextScheduledFetchMs = fetchStartMs + NOAA_FETCH_INTERVAL_MS;
-        if (preserveSchedule)
-            showSectionHeading("ALERT DONE", nullptr, 1200);
+        else if (!s_hasAlert)
+            queueTemporaryAlertHeading("NO ACTIVE ALERT", NOAA_MANUAL_RESULT_HEADING_MS);
+        else
+        {
+            if (s_alertCount > 1)
+                queueTemporaryAlertHeading("ACTIVE ALERTS",
+                                           NOAA_MANUAL_RESULT_HEADING_MS,
+                                           noaaAlertSignature(s_activeAlertId),
+                                           (String(s_alertCount) + " TOTAL").c_str());
+            else
+                queueTemporaryAlertHeading("WEATHER ALERT",
+                                           NOAA_MANUAL_RESULT_HEADING_MS,
+                                           noaaAlertSignature(s_activeAlertId),
+                                           noaaAlertEventText(s_alerts.front()));
+        }
     }
     else
     {
         Serial.println("[NOAA] Failed to fetch payload");
-        s_nextFetchAllowedMs = millis() + NOAA_RETRY_BACKOFF_MS;
-          if (forced)
-          {
-              s_screenDirty = true;
-          }
-      }
+        s_nextFetchAllowedMs = millis() + (connectFailed ? NOAA_CONNECT_FAIL_BACKOFF_MS : NOAA_RETRY_BACKOFF_MS);
+        if (forced)
+            s_screenDirty = true;
+    }
+
     if (preserveSchedule)
     {
         s_lastFetchAttempt = savedLastFetchAttempt;
         s_nextScheduledFetchMs = savedNextScheduledFetchMs;
         s_nextFetchAllowedMs = savedNextFetchAllowedMs;
     }
-    resumeUdpTrafficAfterNoaa(pausedUdp);
+
     s_fetchInProgress = false;
     s_screenDirty = true;
 }
@@ -1289,73 +728,18 @@ static void fetchNoaaAlertSummarySync()
     fetchNoaaAlertSummarySync(false);
 }
 
-static void fetchNoaaAlertDetailSync()
-{
-    if (!noaaNeedsDetailFetch())
-    {
-        s_detailFetchPending = false;
-        s_fetchInProgress = false;
-        s_screenDirty = true;
-        return;
-    }
-
-      float lat = NAN;
-      float lon = NAN;
-      bool pausedUdp = false;
-      if (!resolveNoaaCoordinates(lat, lon))
-      {
-          Serial.println("[NOAA] Missing coordinates for detail fetch");
-          s_fetchInProgress = false;
-          s_screenDirty = true;
-        return;
-    }
-
-    pausedUdp = pauseUdpTrafficForNoaa();
-    if (!noaaHandshakeHeapOkay())
-    {
-        s_nextFetchAllowedMs = millis() + NOAA_RETRY_BACKOFF_MS;
-        resumeUdpTrafficAfterNoaa(pausedUdp);
-        s_fetchInProgress = false;
-        s_screenDirty = true;
-        return;
-    }
-
-    bool connectFailed = false;
-    bool fetchOk = fetchAndParseNoaaDetailPayload(lat, lon, &connectFailed);
-    if (fetchOk)
-      {
-        s_lastDetailedAlertUrl = s_activeAlertUrl;
-        if (s_alertCount > 0)
-            s_lastDetailedAlertUrl = s_alert.url;
-        s_detailFetchPending = false;
-        s_nextFetchAllowedMs = 0;
-    }
-      else
-      {
-          Serial.println("[NOAA] Failed to fetch detail payload");
-          s_nextFetchAllowedMs = millis() + NOAA_RETRY_BACKOFF_MS;
-      }
-
-    resumeUdpTrafficAfterNoaa(pausedUdp);
-    s_fetchInProgress = false;
-    s_screenDirty = true;
-}
-
 void initNoaaAlerts()
 {
-    initNoaaStringStorage();
     s_prevEnabled = noaaAlertsEnabled;
     s_screenDirty = true;
-    s_hasAlert = false;
-    clearAlertCache();
-    clearAlertFields();
+    clearAlertState();
+    s_lastCheckHHMM = "--:--";
     s_lastFetchAttempt = 0;
     s_nextScheduledFetchMs = 0;
     s_nextFetchAllowedMs = 0;
-    s_detailFetchPending = false;
     s_unreadAlert = false;
-    s_lastReadAlertUrl = "";
-    s_forceImmediateFetch = noaaAlertsEnabled;
+    s_lastReadAlertId = "";
+    s_forceImmediateFetch = false;
     applyNoaaLines(true);
 }
 
@@ -1375,7 +759,6 @@ void tickNoaaAlerts(unsigned long nowMs)
             }
             else
             {
-                Serial.println("[NOAA] WiFi connected, short NOAA settle");
                 deferNoaaUntil(nowMs + NOAA_WIFI_RECONNECT_QUIET_MS);
             }
         }
@@ -1419,20 +802,10 @@ void tickNoaaAlerts(unsigned long nowMs)
 
     if (!wifiConnected)
         return;
-
     if (s_wifiConnectedSinceMs == 0 || (nowMs - s_wifiConnectedSinceMs) < NOAA_WIFI_STABLE_MS)
         return;
-
     if (s_nextFetchAllowedMs != 0 && nowMs < s_nextFetchAllowedMs)
         return;
-
-    if (noaaAlertScreen.isActive() && s_detailFetchPending)
-    {
-        s_fetchInProgress = true;
-        s_screenDirty = true;
-        fetchNoaaAlertDetailSync();
-        return;
-    }
 
     if (!s_forceImmediateFetch)
     {
@@ -1467,20 +840,22 @@ void refreshNoaaAlertsForScreenEntry()
 
 void notifyNoaaSettingsChanged()
 {
+    const bool keepNoaaScreen = (currentScreen == SCREEN_NOAA_ALERT) && noaaAlertsEnabled;
     s_forceImmediateFetch = noaaAlertsEnabled;
     s_screenDirty = true;
-    s_hasAlert = false;
-    clearAlertCache();
-    clearAlertFields();
+    clearAlertState();
     s_lastFetchAttempt = 0;
     s_nextScheduledFetchMs = 0;
     s_nextFetchAllowedMs = 0;
-    s_detailFetchPending = false;
     s_unreadAlert = false;
     s_manualFetchPending = false;
-    s_lastReadAlertUrl = "";
+    s_lastReadAlertId = "";
     if (noaaAlertsEnabled)
         s_nextFetchAllowedMs = 0;
+
+    ensureCurrentScreenAllowed();
+    if (keepNoaaScreen && currentScreen == SCREEN_NOAA_ALERT)
+        refreshNoaaAlertsForScreenEntry();
 }
 
 NoaaManualFetchResult requestNoaaManualFetch()
@@ -1491,6 +866,8 @@ NoaaManualFetchResult requestNoaaManualFetch()
         return NOAA_MANUAL_FETCH_BUSY;
     if (WiFi.status() != WL_CONNECTED)
         return NOAA_MANUAL_FETCH_BLOCKED;
+    s_fetchInProgress = true;
+    s_screenDirty = true;
     s_manualFetchPending = true;
     return NOAA_MANUAL_FETCH_STARTED;
 }
@@ -1523,7 +900,7 @@ uint16_t noaaActiveColor()
 {
     lockNoaaState();
     bool hasAlert = s_hasAlert;
-    String severity = (s_alertCount > 0) ? s_alert.severity : "";
+    String severity = (!s_alerts.empty()) ? s_alerts.front().severity : "";
     unlockNoaaState();
 
     if (!hasAlert || !dma_display)
@@ -1547,7 +924,7 @@ bool noaaGetAlert(size_t index, NwsAlert &out)
         unlockNoaaState();
         return false;
     }
-    out = s_alert;
+    out = s_alerts[index];
     unlockNoaaState();
     return true;
 }

@@ -115,8 +115,6 @@ void readIRSensor()
     }
     handleIRKey(key);
     irrecv.resume(); // Receive the next value
-    IRCodes::printCode(results.decode_type, results.value, results.bits, results.repeat);
-    Serial.printf("IR Key: %s (Profile: %s)\n", IRCodes::keyName(key), IRCodes::activeProfileName());
   }
 }
 
@@ -135,15 +133,6 @@ float readBrightnessSensor()
   float lux = 500 * pow(ldr_kOhm, -1.4);
   s_lastRawLux = lux;
 
-  Serial.print(F("ADC: "));
-  Serial.print(adcValue);
-  Serial.print(F("  V: "));
-  Serial.print(voltage, 2);
-  Serial.print(F("  R_LDR: "));
-  Serial.print(ldrResistance, 0);
-  Serial.print(F(" Ω"));
-  Serial.print(F("  Lux: "));
-  Serial.println(lux, 1);
 
   return lux;
 }
@@ -176,8 +165,6 @@ void setDisplayBrightnessFromLux(float lux)
 
   setPanelBrightness(brightness);
 
-  Serial.printf("LogAutoBrightness: Raw Lux=%.1f Calibrated=%.1f (Gain=%d%%, Sens=%.2f) -> Brightness=%d\n",
-                lux, calibratedLux, lightGain, sensitivity, brightness);
 }
 
 float getCalibratedLux(float rawLux)
@@ -315,8 +302,6 @@ IRCodes::WxKey getIRCodeNonBlocking()
 
       s_lastPhysicalDeliveredKey = key;
       s_lastPhysicalDeliveredAt = now;
-      IRCodes::printCode(results.decode_type, results.value, results.bits, results.repeat);
-      Serial.printf("IR Key: %s (Profile: %s)\n", IRCodes::keyName(key), IRCodes::activeProfileName());
       if (!menuActive && isNavKey(key))
       {
           playBuzzerTone(1200, 80);
@@ -473,4 +458,5 @@ void readBMP280()
 
 bool newAirQualityData = false;
 bool newAHT20_BMP280Data = false;
+
 
