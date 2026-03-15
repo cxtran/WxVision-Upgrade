@@ -716,7 +716,7 @@ void appendSummaryPhrase(char *dest, size_t destSize, const char *phrase)
 
     const size_t currentLen = strlen(dest);
     if (currentLen > 0)
-        snprintf(dest + currentLen, destSize - currentLen, " * ");
+        snprintf(dest + currentLen, destSize - currentLen, " ¦ ");
 
     const size_t updatedLen = strlen(dest);
     if (updatedLen < destSize - 1)
@@ -956,15 +956,15 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         char setText[12];
         formatClockMinutesCompact(s_data.sunriseMinutes, riseText, sizeof(riseText));
         formatClockMinutesCompact(s_data.sunsetMinutes, setText, sizeof(setText));
-        snprintf(phrase, sizeof(phrase), "Sun %s-%s", riseText, setText);
+        snprintf(phrase, sizeof(phrase), "Sun Times %s-%s", riseText, setText);
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 
     if (s_data.hasSunAzimuth && s_data.hasSunAltitude)
     {
-        snprintf(phrase, sizeof(phrase), "Sun %s %+d\xC2\xB0",
-                 compassLabelForDegrees(s_data.sunAzimuthDeg),
-                 static_cast<int>(roundf(s_data.sunAltitudeDeg)));
+        snprintf(phrase, sizeof(phrase), "Sun Position %+d\xC2\xB0 %s",
+                 static_cast<int>(roundf(s_data.sunAltitudeDeg)),
+                 compassLabelForDegrees(s_data.sunAzimuthDeg));
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 
@@ -983,9 +983,9 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
 
     if (s_data.hasMoonAltitude && s_data.hasMoonAzimuth)
     {
-        snprintf(phrase, sizeof(phrase), "Moon %s %+d\xC2\xB0",
-                 compassLabelForDegrees(s_data.moonAzimuthDeg),
-                 static_cast<int>(roundf(s_data.moonAltitudeDeg)));
+        snprintf(phrase, sizeof(phrase), "Moon Position %+d\xC2\xB0 %s",
+                 static_cast<int>(roundf(s_data.moonAltitudeDeg)),
+                 compassLabelForDegrees(s_data.moonAzimuthDeg));
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
 
         snprintf(phrase, sizeof(phrase), "Moon %s",

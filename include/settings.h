@@ -88,6 +88,10 @@ extern String wfStationId;
 extern float tempOffset;   // degrees C
 extern int humOffset;    // %
 extern int lightGain;    // %
+extern int envAlertCo2Threshold;
+extern float envAlertTempThresholdC;
+extern int envAlertHumidityLowThreshold;
+extern int envAlertHumidityHighThreshold;
 extern int buzzerVolume;   // 0-100
 extern int buzzerToneSet;  // 0 = Bright, 1 = Soft, 2 = Click, 3 = Chime, 4 = Pulse, 5 = Warm, 6 = Melody (ADSR)
 extern int alarmSoundMode; // 0 = Tone, 1 = Fur Elise, 2 = Swan Lake, 3 = Turkish March, 4 = Moonlight Sonata

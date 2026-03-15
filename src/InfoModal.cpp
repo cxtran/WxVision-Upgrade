@@ -478,7 +478,7 @@ void InfoModal::draw()
                 }
                 else
                 {
-                    if (lines[idx].startsWith("Temp Offset"))
+                    if (lines[idx].startsWith("Temp Offset") || lines[idx].startsWith("Temp Alert"))
                     {
                         s += ": " + String(static_cast<float>(val) / 10.0f, 1);
                     }
@@ -1371,6 +1371,40 @@ void InfoModal::handleIR(uint32_t code)
                     }
                     else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
                     else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
+                    else if (lines[selIndex].startsWith("CO2 Alert")) *ptr = constrain(*ptr, 400, 5000);
+                    else if (lines[selIndex].startsWith("Temp Alert"))
+                    {
+                        int minTenths = (units.temp == TempUnit::F) ? 500 : 100;
+                        int maxTenths = (units.temp == TempUnit::F) ? 1220 : 500;
+                        *ptr = constrain(*ptr, minTenths, maxTenths);
+                        float displayVal = static_cast<float>(*ptr) / 10.0f;
+                        envAlertTempThresholdC = (units.temp == TempUnit::F)
+                                                     ? static_cast<float>((displayVal - 32.0f) * 5.0f / 9.0f)
+                                                     : displayVal;
+                        envAlertTempThresholdC = constrain(envAlertTempThresholdC, 10.0f, 50.0f);
+                        float normalizedDisplay = static_cast<float>(dispTemp(envAlertTempThresholdC));
+                        *ptr = static_cast<int>(lroundf(normalizedDisplay * 10.0f));
+                    }
+                    else if (lines[selIndex].startsWith("Hum Low Alert")) *ptr = constrain(*ptr, 0, 100);
+                    else if (lines[selIndex].startsWith("Hum High Alert")) *ptr = constrain(*ptr, 0, 100);
+
+                    if (lines[selIndex].startsWith("CO2 Alert"))
+                        envAlertCo2Threshold = *ptr;
+                    else if (lines[selIndex].startsWith("Hum Low Alert"))
+                        envAlertHumidityLowThreshold = *ptr;
+                    else if (lines[selIndex].startsWith("Hum High Alert"))
+                        envAlertHumidityHighThreshold = *ptr;
+
+                    envAlertCo2Threshold = constrain(envAlertCo2Threshold, 400, 5000);
+                    envAlertHumidityLowThreshold = constrain(envAlertHumidityLowThreshold, 0, 100);
+                    envAlertHumidityHighThreshold = constrain(envAlertHumidityHighThreshold, 0, 100);
+                    if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
+                    {
+                        if (lines[selIndex].startsWith("Hum Low Alert"))
+                            envAlertHumidityHighThreshold = envAlertHumidityLowThreshold;
+                        else if (lines[selIndex].startsWith("Hum High Alert"))
+                            envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
+                    }
 
                     // Save to NVS right away
                     saveCalibrationSettings();
@@ -1382,8 +1416,10 @@ void InfoModal::handleIR(uint32_t code)
                     // Hint the climate screen to refresh next tick
                     newAHT20_BMP280Data = true;
 
-                    Serial.printf("[Calibration autosave] temp=%.1f hum=%d gain=%d\n",
-                                tempOffset, humOffset, lightGain);
+                    Serial.printf("[Calibration autosave] temp=%.1f hum=%d gain=%d co2=%d tempAlert=%.1f humLow=%d humHigh=%d\n",
+                                tempOffset, humOffset, lightGain,
+                                envAlertCo2Threshold, envAlertTempThresholdC,
+                                envAlertHumidityLowThreshold, envAlertHumidityHighThreshold);
                 }
 
                 beep(code == IR_LEFT ? 900 : 1800);

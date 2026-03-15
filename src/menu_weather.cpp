@@ -64,6 +64,7 @@ void showNoaaSettingsModal()
     noaaModal.setCallback([alertsLineIdx, getAlertLineIdx](bool accepted, int btnIdx) {
         const bool prevEnabled = noaaAlertsEnabled;
         noaaAlertsEnabled = (noaaEnabledTemp > 0);
+        const int selectedLine = noaaModal.getSelIndex();
 
         if (noaaAlertsEnabled != prevEnabled)
         {
@@ -72,7 +73,7 @@ void showNoaaSettingsModal()
             Serial.printf("[NOAA] enabled=%d\n", noaaAlertsEnabled);
         }
 
-        if (accepted && btnIdx == getAlertLineIdx)
+        if (accepted && (btnIdx == getAlertLineIdx || selectedLine == getAlertLineIdx))
         {
             NoaaManualFetchResult result = requestNoaaManualFetch();
             if (result == NOAA_MANUAL_FETCH_STARTED)
@@ -91,7 +92,7 @@ void showNoaaSettingsModal()
             return;
         }
 
-        if (accepted && btnIdx == alertsLineIdx)
+        if (accepted && (btnIdx == alertsLineIdx || selectedLine == alertsLineIdx))
             return;
     });
 

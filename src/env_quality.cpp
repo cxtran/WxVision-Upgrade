@@ -1256,10 +1256,12 @@ void serviceEnvironmentalAlerts()
 
     // Drive the alert directly from the measured ppm threshold so it does not
     // depend on a secondary band classification near the cutoff.
-    const bool co2High = !isnan(co2Raw) && co2Raw >= 1200.0f;
-    const bool tempHighRaw = !isnan(tempC) && tempC > 26.5f && (tempBand == EnvBand::Poor || tempBand == EnvBand::Critical);
+    const bool co2High = !isnan(co2Raw) && co2Raw >= static_cast<float>(envAlertCo2Threshold);
+    const bool tempHighRaw = !isnan(tempC) && tempC > envAlertTempThresholdC &&
+                             (tempBand == EnvBand::Poor || tempBand == EnvBand::Critical);
     const bool humidityWarnRaw = !isnan(humidity) &&
-                              ((humidity < 30.0f) || (humidity > 60.0f)) &&
+                              ((humidity < static_cast<float>(envAlertHumidityLowThreshold)) ||
+                               (humidity > static_cast<float>(envAlertHumidityHighThreshold))) &&
                               (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
     const bool sensorFailure = !scd40Ready || !aht20Ready || !bmp280Ready;
     const bool tempHigh = !co2High && tempHighRaw;

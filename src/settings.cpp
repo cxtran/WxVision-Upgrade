@@ -111,6 +111,10 @@ String owmCountryCustom = "";
 float tempOffset = wxv::defaults::kTempOffsetDefaultC;   // degrees C
 int humOffset = wxv::defaults::kHumOffsetDefault;    // %
 int lightGain = wxv::defaults::kLightGainDefaultPercent;  // %
+int envAlertCo2Threshold = 1200;
+float envAlertTempThresholdC = 26.5f;
+int envAlertHumidityLowThreshold = 30;
+int envAlertHumidityHighThreshold = 60;
 
 // --- Date/Time/Timezone ---
 int dstAuto = 0;
@@ -201,6 +205,13 @@ void loadSettings() {
     tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
     humOffset    = prefs.getInt("humOffset", wxv::defaults::kHumOffsetDefault);
     lightGain    = constrain(prefs.getInt("lightGain", wxv::defaults::kLightGainDefaultPercent), wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
+    envAlertCo2Threshold = constrain(prefs.getInt("envCo2Thr", 1200), 400, 5000);
+    envAlertTempThresholdC = static_cast<float>(prefs.getInt("envTempThr", 265)) / 10.0f;
+    envAlertTempThresholdC = constrain(envAlertTempThresholdC, 10.0f, 50.0f);
+    envAlertHumidityLowThreshold = constrain(prefs.getInt("envHumLow", 30), 0, 100);
+    envAlertHumidityHighThreshold = constrain(prefs.getInt("envHumHigh", 60), 0, 100);
+    if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
+        envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
 
     loadDateTimeSettings();
 
@@ -277,6 +288,16 @@ void saveCalibrationSettings() {
     prefs.putInt("humOffset", humOffset);
     lightGain = constrain(lightGain, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
     prefs.putInt("lightGain", lightGain);
+    envAlertCo2Threshold = constrain(envAlertCo2Threshold, 400, 5000);
+    envAlertTempThresholdC = constrain(envAlertTempThresholdC, 10.0f, 50.0f);
+    envAlertHumidityLowThreshold = constrain(envAlertHumidityLowThreshold, 0, 100);
+    envAlertHumidityHighThreshold = constrain(envAlertHumidityHighThreshold, 0, 100);
+    if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
+        envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
+    prefs.putInt("envCo2Thr", envAlertCo2Threshold);
+    prefs.putInt("envTempThr", static_cast<int>(lroundf(envAlertTempThresholdC * 10.0f)));
+    prefs.putInt("envHumLow", envAlertHumidityLowThreshold);
+    prefs.putInt("envHumHigh", envAlertHumidityHighThreshold);
     prefs.end();
 }
 

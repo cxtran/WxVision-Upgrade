@@ -1044,6 +1044,10 @@ void setupWebServer() {
     doc["tempOffset"]       = dispTempOffset(tempOffset);
     doc["humOffset"]        = humOffset;
     doc["lightGain"]        = lightGain;
+    doc["envAlertCo2Threshold"] = envAlertCo2Threshold;
+    doc["envAlertTempThreshold"] = dispTemp(envAlertTempThresholdC);
+    doc["envAlertHumidityLowThreshold"] = envAlertHumidityLowThreshold;
+    doc["envAlertHumidityHighThreshold"] = envAlertHumidityHighThreshold;
     doc["ntpServer"]        = ntpServerHost;
     doc["ntpPreset"]        = ntpServerPreset;
     JsonArray alarms = doc.createNestedArray("alarms");
@@ -1378,9 +1382,46 @@ void setupWebServer() {
           lightGain = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
           dirtyCalibration = true;
         }
+        if (!doc["envAlertCo2Threshold"].isNull()) {
+          JsonVariant v = doc["envAlertCo2Threshold"];
+          envAlertCo2Threshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
+        }
+        if (!doc["envAlertTempThreshold"].isNull()) {
+          JsonVariant v = doc["envAlertTempThreshold"];
+          double incoming = 0.0;
+          if (v.is<double>() || v.is<float>()) {
+            incoming = v.as<double>();
+          } else if (v.is<int>() || v.is<long>() || v.is<long long>()) {
+            incoming = static_cast<double>(v.as<long long>());
+          } else if (v.is<const char*>()) {
+            incoming = atof(v.as<const char*>());
+          }
+          envAlertTempThresholdC = (units.temp == TempUnit::F)
+                                     ? static_cast<float>((incoming - 32.0) * 5.0 / 9.0)
+                                     : static_cast<float>(incoming);
+          dirtyCalibration = true;
+        }
+        if (!doc["envAlertHumidityLowThreshold"].isNull()) {
+          JsonVariant v = doc["envAlertHumidityLowThreshold"];
+          envAlertHumidityLowThreshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
+        }
+        if (!doc["envAlertHumidityHighThreshold"].isNull()) {
+          JsonVariant v = doc["envAlertHumidityHighThreshold"];
+          envAlertHumidityHighThreshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
+        }
         tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);
         humOffset  = constrain(humOffset, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
         lightGain  = constrain(lightGain, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
+        envAlertCo2Threshold = constrain(envAlertCo2Threshold, 400, 5000);
+        envAlertTempThresholdC = constrain(envAlertTempThresholdC, 10.0f, 50.0f);
+        envAlertHumidityLowThreshold = constrain(envAlertHumidityLowThreshold, 0, 100);
+        envAlertHumidityHighThreshold = constrain(envAlertHumidityHighThreshold, 0, 100);
+        if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold) {
+          envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
+        }
 
         // Alarms
         if (!doc["alarms"].isNull() && doc["alarms"].is<JsonArray>())

@@ -2,6 +2,7 @@
 
 #include <math.h>
 #include <string.h>
+#include <vector>
 
 #include "astronomy.h"
 #include "display.h"
@@ -13,7 +14,6 @@ namespace
 {
 constexpr unsigned long kSkyFactsPageAutoMs = 4200UL;
 constexpr int kSummaryRepeatGapPx = 4;
-constexpr int kSummaryEntryInsetPx = 6;
 constexpr unsigned long kSummaryStartDelayMs = 2000UL;
 
 uint8_t s_skyFactsPageIndex = 0;
@@ -29,6 +29,55 @@ unsigned long s_summaryMarqueeLastStepMs = 0;
 unsigned long s_summaryMarqueeStartAfterMs = 0;
 unsigned long s_summaryStepMs = 0;
 char s_summaryLastText[192] = "";
+
+std::vector<String> splitSummaryPhrases(const char *raw)
+{
+    std::vector<String> phrases;
+    if (!raw || raw[0] == '\0')
+        return phrases;
+
+    String text(raw);
+    int startPos = 0;
+    while (startPos < text.length())
+    {
+        int sep = text.indexOf(" ¦ ", startPos);
+        String part = (sep >= 0) ? text.substring(startPos, sep) : text.substring(startPos);
+        part.trim();
+        if (part.length() > 0 && !part.equalsIgnoreCase("NOW"))
+            phrases.push_back(part);
+        if (sep < 0)
+            break;
+        startPos = sep + 3;
+    }
+    return phrases;
+}
+
+void buildSummaryLayout(const wxv::astronomy::SkyFactPage &page, String &line1, String &line2, String &ticker)
+{
+    if (page.line1[0] != '\0')
+        line1 = page.line1;
+    if (page.line2[0] != '\0')
+        line2 = page.line2;
+    if (page.marquee[0] != '\0')
+        ticker = page.marquee;
+
+    if (line1.length() > 0 || line2.length() > 0)
+        return;
+
+    std::vector<String> phrases = splitSummaryPhrases(page.marquee);
+    if (!phrases.empty())
+        line1 = phrases[0];
+    if (phrases.size() > 1)
+        line2 = phrases[1];
+
+    ticker = "";
+    for (size_t i = 2; i < phrases.size(); ++i)
+    {
+        if (ticker.length() > 0)
+            ticker += " ¦ ";
+        ticker += phrases[i];
+    }
+}
 
 uint16_t titleBg()
 {
@@ -112,19 +161,24 @@ void drawCenteredLine(int y, const char *text, uint16_t color)
 
 void syncSummaryMarqueeState(const wxv::astronomy::SkyFactPage &page, bool forceReset)
 {
-    const bool textChanged = strncmp(s_summaryLastText, page.marquee, sizeof(s_summaryLastText)) != 0;
+    String line1;
+    String line2;
+    String ticker;
+    buildSummaryLayout(page, line1, line2, ticker);
+    const char *marqueeText = ticker.c_str();
+    const bool textChanged = strncmp(s_summaryLastText, marqueeText, sizeof(s_summaryLastText)) != 0;
     if (forceReset || textChanged)
     {
         const bool hadExistingText = s_summaryLastText[0] != '\0';
-        const int previousCycle = PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx + kSummaryEntryInsetPx;
-        snprintf(s_summaryLastText, sizeof(s_summaryLastText), "%s", page.marquee);
+        const int previousCycle = PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx;
+        snprintf(s_summaryLastText, sizeof(s_summaryLastText), "%s", marqueeText);
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
         int16_t x1, y1;
         uint16_t w, h;
-        dma_display->getTextBounds(page.marquee, 0, 0, &x1, &y1, &w, &h);
+        dma_display->getTextBounds(marqueeText, 0, 0, &x1, &y1, &w, &h);
         s_summaryMarqueeWidth = static_cast<int>(w);
-        const int nextCycle = PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx + kSummaryEntryInsetPx;
+        const int nextCycle = PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx;
         if (forceReset || previousCycle <= 0 || nextCycle <= 0)
             s_summaryMarqueeOffset = 0;
         else
@@ -149,18 +203,36 @@ void syncSummaryMarqueeState(const wxv::astronomy::SkyFactPage &page, bool force
 void drawSummaryPage(const wxv::astronomy::SkyFactPage &page)
 {
     drawHeader(page.title[0] ? page.title : "SKY BRIEF");
-    dma_display->fillRect(0, 12, PANEL_RES_X, 20, myBLACK);
+    dma_display->fillRect(0, 8, PANEL_RES_X, 24, myBLACK);
 
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
-    dma_display->setTextColor(bodyColor());
-    if (page.marquee[0] != '\0')
+    const uint16_t accent = pageAccentColor(page.type);
+    const uint16_t normal = bodyColor();
+
+    String line1;
+    String line2;
+    String ticker;
+    buildSummaryLayout(page, line1, line2, ticker);
+
+    if (line1.length() > 0 && line2.length() > 0)
     {
-        const int textX = PANEL_RES_X - kSummaryEntryInsetPx - s_summaryMarqueeOffset;
-        dma_display->setCursor(textX, 20);
-        dma_display->print(page.marquee);
-        dma_display->setCursor(textX + s_summaryMarqueeWidth + kSummaryRepeatGapPx + kSummaryEntryInsetPx, 20);
-        dma_display->print(page.marquee);
+        drawCenteredLine(8, line1.c_str(), accent);
+        drawCenteredLine(16, line2.c_str(), normal);
+    }
+    else if (line1.length() > 0)
+    {
+        drawCenteredLine(16, line1.c_str(), accent);
+    }
+
+    dma_display->setTextColor(normal);
+    if (ticker.length() > 0)
+    {
+        const int textX = PANEL_RES_X - s_summaryMarqueeOffset;
+        dma_display->setCursor(textX, 24);
+        dma_display->print(ticker);
+        dma_display->setCursor(textX + s_summaryMarqueeWidth + kSummaryRepeatGapPx, 24);
+        dma_display->print(ticker);
     }
 }
 
@@ -185,7 +257,7 @@ unsigned long effectiveSummaryStepMs()
 
 int summaryCycleWidth()
 {
-    return PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx + kSummaryEntryInsetPx;
+    return PANEL_RES_X + s_summaryMarqueeWidth + kSummaryRepeatGapPx;
 }
 
 bool speedUpSummaryStep()
@@ -376,7 +448,11 @@ void tickSkyBriefScreen()
         return;
     }
 
-    if (page.marquee[0] == '\0')
+    String line1;
+    String line2;
+    String ticker;
+    buildSummaryLayout(page, line1, line2, ticker);
+    if (ticker.length() == 0)
         return;
 
     const unsigned long summaryStepMs = effectiveSummaryStepMs();

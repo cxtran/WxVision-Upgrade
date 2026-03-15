@@ -1282,6 +1282,22 @@ void loop()
         stepNoaaAlertsScreen((key == IRCodes::WxKey::Down) ? 1 : -1);
         return;
     }
+    if (currentScreen == SCREEN_NOAA_ALERT && key == IRCodes::WxKey::Ok)
+    {
+        NoaaManualFetchResult result = requestNoaaManualFetch();
+        if (result == NOAA_MANUAL_FETCH_STARTED)
+        {
+            drawNoaaAlertsScreen();
+            queueTemporaryAlertHeading("GETTING ALERT...", 1200);
+        }
+        else if (result == NOAA_MANUAL_FETCH_BUSY)
+            showSectionHeading("FETCHING...", nullptr, 1200);
+        else if (result == NOAA_MANUAL_FETCH_BLOCKED)
+            showSectionHeading("WIFI BUSY", nullptr, 1200);
+        else
+            showSectionHeading("NOAA OFF", nullptr, 1200);
+        return;
+    }
     // --- BEGIN WORLD TIME FEATURE ---
     if (currentScreen == SCREEN_WORLD_CLOCK &&
         worldTimeHasSelections() &&

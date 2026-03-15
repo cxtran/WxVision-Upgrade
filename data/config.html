@@ -301,6 +301,22 @@
         <label for="lightGain">Light Gain (%)</label>
         <input id="lightGain" type="number" step="1" min="1" max="300">
       </div>
+      <div class="row tight">
+        <label for="envAlertCo2Threshold">CO2 Alert (ppm)</label>
+        <input id="envAlertCo2Threshold" type="number" step="50" min="400" max="5000">
+      </div>
+      <div class="row tight">
+        <label for="envAlertTempThreshold">Temp Alert (&deg;C)</label>
+        <input id="envAlertTempThreshold" type="number" step="0.1" min="10" max="50">
+      </div>
+      <div class="row tight">
+        <label for="envAlertHumidityLowThreshold">Humidity Low Alert (%)</label>
+        <input id="envAlertHumidityLowThreshold" type="number" step="1" min="0" max="100">
+      </div>
+      <div class="row tight">
+        <label for="envAlertHumidityHighThreshold">Humidity High Alert (%)</label>
+        <input id="envAlertHumidityHighThreshold" type="number" step="1" min="0" max="100">
+      </div>
     </div>
     <div class="actions">
       <button class="btn" id="btnSaveCalibration">Save Calibration</button>
@@ -628,17 +644,7 @@
       <button class="btn warn" id="btnActionReboot">Reboot</button>
     </div>
     <div class="actions">
-      <a class="btn-link" href="/status.html">Show System Info</a>
       <span class="msg" id="systemActionMsg"></span>
-    </div>
-  </section>
-
-  <!-- Save All -->
-  <section class="card">
-    <h2>Save</h2>
-    <div class="actions">
-      <button id="btnSaveAll" class="btn primary">Save All Settings</button>
-      <span id="saveAllMsg" class="msg"></span>
     </div>
   </section>
 

@@ -5281,7 +5281,7 @@ void displayClock()
         const int ampmGap = units.clock24h ? 0 : 1;
         const int totalW = hmW + secondGap + secondW + ampmGap + ampmW;
         int x = 64 - totalW;
-        x -= 1;
+        x -= 6;
         if (x < 0)
             x = 0;
 
@@ -5289,7 +5289,7 @@ void displayClock()
         dma_display->setCursor(x, 9);
         dma_display->print(hmBuf);
 
-        const int secondX = x + hmW + secondGap;
+        const int secondX = x + hmW + secondGap + 1;
         const int secondY = 11;
         wxv::seg7::Metrics secondMetrics;
         secondMetrics.digitWidth = 3;
@@ -5301,7 +5301,7 @@ void displayClock()
 
         if (!units.clock24h)
         {
-            wxv::seg7::drawDigit(secondX + secondW + ampmGap, secondY, isPM ? 'P' : 'A',
+            wxv::seg7::drawDigit(secondX + secondW + ampmGap + 2, secondY, isPM ? 'P' : 'A',
                                  clockLineColor, 1, secondMetrics);
         }
     }
@@ -5350,27 +5350,13 @@ void displayDate()
     const int wifiIconW = 7;
     const int wifiIconGap = 2;
     const bool showWifiIcon = rightJustify && (WiFi.status() == WL_CONNECTED);
-    const int reservedWifiW = showWifiIcon ? (wifiIconW + wifiIconGap) : 0;
-    int dateX = rightJustify ? (64 - static_cast<int>(w))
-                             : ((64 - static_cast<int>(w)) / 2);
+    int dateX = rightJustify ? 1 : ((64 - static_cast<int>(w)) / 2);
     if (dateX < 0)
         dateX = 0;
-    if (showWifiIcon)
-    {
-        dateX -= reservedWifiW;
-        if (dateX < 0)
-            dateX = 0;
-    }
-    if (rightJustify)
-    {
-        dateX -= 1;
-        if (dateX < 0)
-            dateX = 0;
-    }
 
     if (showWifiIcon)
     {
-        const int wifiX = dateX;
+        const int wifiX = 56;
         const int wifiY = 17;
         uint16_t wifiDim = (theme == 1)
                                ? dma_display->color565(35, 35, 60)
@@ -5379,7 +5365,6 @@ void displayDate()
                                   ? dma_display->color565(90, 140, 200)
                                   : dma_display->color565(100, 255, 120);
         drawWiFiIcon(wifiX, wifiY, wifiDim, wifiActive, WiFi.RSSI());
-        dateX += reservedWifiW;
     }
 
     dma_display->setCursor(dateX, 17);

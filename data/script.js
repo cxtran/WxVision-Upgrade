@@ -9,6 +9,17 @@ function setMsg(id, text, ok) {
   setTimeout(function(){ el.textContent=''; el.classList.remove('ok','err'); }, 2500);
 }
 function pad2(n){ return (n<10?'0':'')+n; }
+var elementCache = Object.create(null);
+
+function byId(id){
+  if (!id) return null;
+  if (Object.prototype.hasOwnProperty.call(elementCache, id)) {
+    return elementCache[id];
+  }
+  var el = document.getElementById(id);
+  elementCache[id] = el || null;
+  return elementCache[id];
+}
 
 var pendingDeviceFetches = 0;
 
@@ -50,7 +61,7 @@ function endDeviceFetch(){
   }
 }
 
-function shouldTrackDeviceFetch(input){
+function shouldTrackDeviceFetch(input, init){
   var url = '';
   if (typeof input === 'string') {
     url = input;
@@ -58,6 +69,7 @@ function shouldTrackDeviceFetch(input){
     url = input.url;
   }
   if (!url) return false;
+  if (init && init.wxvSkipWait) return false;
   // Track same-origin/device endpoints.
   return url[0] === '/' || url.indexOf(window.location.origin) === 0;
 }
@@ -65,7 +77,7 @@ function shouldTrackDeviceFetch(input){
 if (typeof window.fetch === 'function' && !window.__wxvFetchWrapped) {
   var _nativeFetch = window.fetch.bind(window);
   window.fetch = function(input, init){
-    var track = shouldTrackDeviceFetch(input);
+    var track = shouldTrackDeviceFetch(input, init);
     if (track) beginDeviceFetch();
     return _nativeFetch(input, init)
       .finally(function(){
@@ -85,6 +97,7 @@ function minutesToTimeString(mins){
 }
 
 var alarmClockIs24 = true;
+var settingsLoadToken = 0;
 
 function clamp(value, min, max){
   var v = Number(value);
@@ -186,7 +199,7 @@ function sendRemoteCommand(action, attempt){
     toggleScreenRemote();
     return;
   }
-  fetch('/ir?btn=' + encodeURIComponent(action), { cache: 'no-store' })
+  fetch('/ir?btn=' + encodeURIComponent(action), { cache: 'no-store', wxvSkipWait: true })
     .then(function(r){
       if (!r.ok) {
         if (r.status === 503) {
@@ -208,7 +221,7 @@ function sendRemoteCommand(action, attempt){
 }
 
 function toggleScreenRemote(){
-  fetch('/screen?toggle=1')
+  fetch('/screen?toggle=1', { cache: 'no-store', wxvSkipWait: true })
     .then(function(r){
       if (!r.ok) throw new Error('Failed');
       return r.json().catch(function(){ return null; });
@@ -218,10 +231,10 @@ function toggleScreenRemote(){
       var msg = (payload.state === 'off') ? 'Screen turned off.' : 'Screen turned on.';
       setMsg('remoteMsg', msg, true);
       if (typeof loadIndexStatus === 'function') {
-        loadIndexStatus();
+        loadIndexStatus(true);
       }
       if (typeof loadFullStatus === 'function') {
-        loadFullStatus();
+        loadFullStatus(true);
       }
     })
     .catch(function(){
@@ -233,10 +246,23 @@ function setupRemoteControls(){
   var buttons = document.querySelectorAll('[data-remote]');
   if (!buttons || buttons.length === 0) return;
   Array.prototype.forEach.call(buttons, function(btn){
-    btn.addEventListener('click', function(ev){
+    function triggerRemote(ev){
       ev.preventDefault();
+      btn.__wxvLastRemoteTriggerAt = Date.now();
       var action = btn.getAttribute('data-remote');
       sendRemoteCommand(action);
+    }
+    btn.addEventListener('pointerdown', function(ev){
+      if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+      triggerRemote(ev);
+    });
+    btn.addEventListener('click', function(ev){
+      var lastTriggerAt = btn.__wxvLastRemoteTriggerAt || 0;
+      if (lastTriggerAt && (Date.now() - lastTriggerAt) < 450) {
+        ev.preventDefault();
+        return;
+      }
+      triggerRemote(ev);
     });
   });
 }
@@ -561,10 +587,11 @@ function renderFullStatus(st){
 }
 
 
-function loadFullStatus(){
+function loadFullStatus(background){
   if (fullStatusPending) return;
   fullStatusPending = true;
-  fetch('/status.json')
+  var fetchOpts = background ? { wxvSkipWait: true, cache: 'no-store' } : { cache: 'no-store' };
+  fetch('/status.json', fetchOpts)
     .then(function(r){
       if (!r.ok) throw new Error('Request failed');
       return r.json();
@@ -591,6 +618,9 @@ var startMs = Date.now();
 var settingsTabPanels = [];
 var settingsTabButtons = [];
 var activeSettingsTabId = '';
+var secondarySettingsLoaded = false;
+var secondarySettingsLoading = false;
+var lastSettingsTimeSnapshot = null;
 
 const COUNTRY_OPTIONS = [
   { label: 'Vietnam (VN)', code: 'VN' },
@@ -646,6 +676,9 @@ function activateSettingsTab(targetId){
     btn.setAttribute('aria-selected', active ? 'true' : 'false');
   });
   try { localStorage.setItem('wxv.activeSettingsTab', targetId); } catch (e) {}
+  if (targetId === 'card-time' || targetId === 'card-worldtime') {
+    ensureSecondarySettingsData();
+  }
 }
 
 function syncSettingsTabsVisibility(){
@@ -754,6 +787,68 @@ function fmtUtc(offsetMin){
   var mi = m % 60;
   return 'UTC' + sign + pad2(h) + ':' + pad2(mi);
 }
+
+function applyTimezoneSelection(timeData){
+  var t = timeData || lastSettingsTimeSnapshot || {};
+  var tzSel = document.getElementById('tzSelect');
+  if (!tzSel || !tzList.length) return;
+  tzSel.innerHTML = '';
+  tzList.forEach(function(z){
+    var opt = document.createElement('option');
+    opt.value = z.id || '';
+    opt.textContent = z.label || (z.city + ' (' + fmtUtc(z.offset) + ')');
+    opt.dataset.supportsDst = z.supportsDst ? '1' : '0';
+    tzSel.appendChild(opt);
+  });
+  var tzName = t.tzName || '';
+  var idx = -1;
+  if (tzName) {
+    var lower = tzName.toLowerCase();
+    for (var i=0;i<tzList.length;i++){ if ((tzList[i].id || '').toLowerCase() === lower) { idx=i; break; } }
+  }
+  if (idx < 0) {
+    for (var j=0;j<tzList.length;j++){ if (tzList[j].offset === tzOffset) { idx=j; break; } }
+  }
+  if (idx >= 0) tzSel.selectedIndex = idx;
+}
+
+function ensureSecondarySettingsData(forceReload){
+  if (forceReload === void 0) forceReload = false;
+  if (secondarySettingsLoading) return Promise.resolve();
+  if (secondarySettingsLoaded && !forceReload) {
+    applyTimezoneSelection(lastSettingsTimeSnapshot);
+    applyAutoDstAvailability();
+    return Promise.resolve();
+  }
+  secondarySettingsLoading = true;
+  return fetch('/timezones.json', { wxvSkipWait: true, cache: 'no-store' })
+    .then(function(r){ return r.ok ? r.json() : []; })
+    .catch(function(){ return []; })
+    .then(function(timezones){
+      tzList = (timezones || []).map(function(item){
+        if (!item) return item;
+        item.supportsDst = !!item.supportsDst;
+        return item;
+      });
+      populateWorldCustomTzSelect();
+      applyTimezoneSelection(lastSettingsTimeSnapshot);
+      return fetch('/worldtime.json', { wxvSkipWait: true, cache: 'no-store' })
+        .then(function(r){ return r.ok ? r.json() : { ids: [] }; })
+        .catch(function(){ return { ids: [] }; });
+    })
+    .then(function(worldtime){
+      renderWorldTimeSettings(worldtime || { ids: [] });
+      secondarySettingsLoaded = true;
+      applyAutoDstAvailability();
+    })
+    .catch(function(err){
+      console.warn('Secondary settings load failed:', err);
+    })
+    .finally(function(){
+      secondarySettingsLoading = false;
+    });
+}
+
 function formatDate(d, fmt){
   var y=d.getFullYear(), mo=pad2(d.getMonth()+1), da=pad2(d.getDate());
   if (fmt==1) return mo+'/'+da+'/'+y;
@@ -777,6 +872,52 @@ function applyAutoBrightnessUI(){
   var ab = +abEl.value;
   b.disabled = (ab === 1);
   b.title = (ab === 1) ? 'Disabled when Auto Brightness is ON' : '';
+}
+
+function applyTemperatureUnitUI(convertExisting){
+  var tempUnitEl = byId('uTemp');
+  var tempOffsetEl = byId('tempOffset');
+  var tempAlertEl = byId('envAlertTempThreshold');
+  var tempOffsetLabel = document.querySelector('label[for="tempOffset"]');
+  var tempAlertLabel = document.querySelector('label[for="envAlertTempThreshold"]');
+  if (!tempUnitEl) return;
+
+  var nextUnit = +(tempUnitEl.value ?? 0);
+  var currentOffsetUnit = tempOffsetEl ? +(tempOffsetEl.dataset.unit ?? nextUnit) : nextUnit;
+  var currentAlertUnit = tempAlertEl ? +(tempAlertEl.dataset.unit ?? nextUnit) : nextUnit;
+
+  if (tempOffsetLabel) tempOffsetLabel.innerHTML = nextUnit === 1 ? 'Temp Offset (&deg;F)' : 'Temp Offset (&deg;C)';
+  if (tempAlertLabel) tempAlertLabel.innerHTML = nextUnit === 1 ? 'Temp Alert (&deg;F)' : 'Temp Alert (&deg;C)';
+
+  if (tempOffsetEl) {
+    var offsetVal = parseFloat(tempOffsetEl.value);
+    if (!isFinite(offsetVal)) offsetVal = 0;
+    if (convertExisting && currentOffsetUnit !== nextUnit) {
+      offsetVal = (nextUnit === 1) ? (offsetVal * 9 / 5) : (offsetVal * 5 / 9);
+    }
+    var minOffset = nextUnit === 1 ? (-10 * 9 / 5) : -10;
+    var maxOffset = nextUnit === 1 ? (10 * 9 / 5) : 10;
+    tempOffsetEl.step = '0.1';
+    tempOffsetEl.min = minOffset.toFixed(1);
+    tempOffsetEl.max = maxOffset.toFixed(1);
+    tempOffsetEl.value = clamp(offsetVal, minOffset, maxOffset).toFixed(1);
+    tempOffsetEl.dataset.unit = String(nextUnit);
+  }
+
+  if (tempAlertEl) {
+    var alertVal = parseFloat(tempAlertEl.value);
+    if (!isFinite(alertVal)) alertVal = (nextUnit === 1 ? 79.7 : 26.5);
+    if (convertExisting && currentAlertUnit !== nextUnit) {
+      alertVal = (nextUnit === 1) ? ((alertVal * 9 / 5) + 32) : ((alertVal - 32) * 5 / 9);
+    }
+    var minAlert = nextUnit === 1 ? 50 : 10;
+    var maxAlert = nextUnit === 1 ? 122 : 50;
+    tempAlertEl.step = '0.1';
+    tempAlertEl.min = minAlert.toFixed(1);
+    tempAlertEl.max = maxAlert.toFixed(1);
+    tempAlertEl.value = clamp(alertVal, minAlert, maxAlert).toFixed(1);
+    tempAlertEl.dataset.unit = String(nextUnit);
+  }
 }
 
 function applyAutoThemeUI(){
@@ -850,10 +991,11 @@ function applyAutoDstAvailability(){
 
 var indexStatusPending = false;
 
-function loadIndexStatus(){
+function loadIndexStatus(background){
   if (indexStatusPending) return;
   indexStatusPending = true;
-  fetch('/status-brief.json', { cache: 'no-store' })
+  var fetchOpts = background ? { cache: 'no-store', wxvSkipWait: true } : { cache: 'no-store' };
+  fetch('/status-brief.json', fetchOpts)
     .then(function(r){
       if (!r.ok) throw new Error("Status fetch failed");
       return r.json();
@@ -894,22 +1036,22 @@ function loadIndexStatus(){
       indexStatusPending = false;
     });
 }
-function loadAll(){
-  Promise.all([
-    fetch('/settings.json').then(function(r){return r.json();}),
-    fetch('/time.json').then(function(r){return r.json();}).catch(function(){return {epoch:0,tzOffset:0,tzName:'Custom',dateFmt:0,ntpServer:'pool.ntp.org'};}),
-    fetch('/timezones.json').then(function(r){return r.json();}).catch(function(){return [];}),
-    fetch('/worldtime.json').then(function(r){return r.json();}).catch(function(){return {ids:[]};})
-  ])
+function loadAll(background){
+  var fetchOpts = background ? { wxvSkipWait: true } : undefined;
+  var loadToken = ++settingsLoadToken;
+  secondarySettingsLoaded = false;
+  fetch('/settings.json', fetchOpts)
+  .then(function(r){ return r.json(); })
+  .then(function(s){
+    return fetch('/time.json', fetchOpts)
+      .then(function(r){ return r.json(); })
+      .catch(function(){ return {epoch:0,tzOffset:0,tzName:'Custom',dateFmt:0,ntpServer:'pool.ntp.org'}; })
+      .then(function(t){ return { s: s, t: t }; });
+  })
   .then(function(results){
-    var s = results[0], t = results[1], wt = results[3] || {ids:[]};
-    tzList = (results[2] || []).map(function(item){
-      if (!item) return item;
-      item.supportsDst = !!item.supportsDst;
-      return item;
-    });
-    populateWorldCustomTzSelect();
-    renderWorldTimeSettings(wt);
+    if (loadToken !== settingsLoadToken) return;
+    var s = results.s, t = results.t;
+    lastSettingsTimeSnapshot = t;
 
     var wifiSSIDEl = document.getElementById('wifiSSID');
     if (wifiSSIDEl) wifiSSIDEl.value = s.wifiSSID || '';
@@ -1022,22 +1164,29 @@ function loadAll(){
     }
 
     var tempOffsetEl = document.getElementById('tempOffset');
-    var tempOffsetLabel = document.querySelector('label[for="tempOffset"]');
     var tempUnit = (s.units && typeof s.units.temp !== 'undefined') ? s.units.temp : 0;
-    if (tempOffsetLabel) tempOffsetLabel.innerHTML = tempUnit === 1 ? 'Temp Offset (&deg;F)' : 'Temp Offset (&deg;C)';
     if (tempOffsetEl) {
       var displayOffset = (typeof s.tempOffset !== 'undefined') ? Number(s.tempOffset) : 0;
-      var minRange = tempUnit === 1 ? (-10 * 9 / 5) : -10;
-      var maxRange = tempUnit === 1 ? (10 * 9 / 5) : 10;
-      tempOffsetEl.step = '0.1';
-      tempOffsetEl.min = minRange.toFixed(1);
-      tempOffsetEl.max = maxRange.toFixed(1);
       tempOffsetEl.value = isFinite(displayOffset) ? displayOffset.toFixed(1) : '0.0';
+      tempOffsetEl.dataset.unit = String(tempUnit);
     }
+    var tempAlertEl = document.getElementById('envAlertTempThreshold');
+    if (tempAlertEl) {
+      var displayAlert = (typeof s.envAlertTempThreshold !== 'undefined') ? Number(s.envAlertTempThreshold) : (tempUnit === 1 ? 79.7 : 26.5);
+      tempAlertEl.value = isFinite(displayAlert) ? displayAlert.toFixed(1) : (tempUnit === 1 ? '79.7' : '26.5');
+      tempAlertEl.dataset.unit = String(tempUnit);
+    }
+    applyTemperatureUnitUI(false);
     var humOffsetEl = document.getElementById('humOffset');
     if (humOffsetEl) humOffsetEl.value = (typeof s.humOffset !== 'undefined' ? s.humOffset : 0);
     var lightGainEl = document.getElementById('lightGain');
     if (lightGainEl) lightGainEl.value = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
+    var co2AlertEl = document.getElementById('envAlertCo2Threshold');
+    if (co2AlertEl) co2AlertEl.value = (typeof s.envAlertCo2Threshold !== 'undefined' ? s.envAlertCo2Threshold : 1200);
+    var humLowAlertEl = document.getElementById('envAlertHumidityLowThreshold');
+    if (humLowAlertEl) humLowAlertEl.value = (typeof s.envAlertHumidityLowThreshold !== 'undefined' ? s.envAlertHumidityLowThreshold : 30);
+    var humHighAlertEl = document.getElementById('envAlertHumidityHighThreshold');
+    if (humHighAlertEl) humHighAlertEl.value = (typeof s.envAlertHumidityHighThreshold !== 'undefined' ? s.envAlertHumidityHighThreshold : 60);
     var buzzVolEl = document.getElementById('buzzerVolume');
     if (buzzVolEl) buzzVolEl.value = (typeof s.buzzerVolume !== 'undefined' ? s.buzzerVolume : 100);
     var buzzToneEl = document.getElementById('buzzerToneSet');
@@ -1078,30 +1227,14 @@ function loadAll(){
     tzOffset = (typeof t.tzOffset !== 'undefined' ? t.tzOffset : 0);
     var dfEl = document.getElementById('dateFmt');
     if (dfEl) dfEl.value = (typeof t.dateFmt !== 'undefined' ? t.dateFmt : 0);
+    applyNtpFields(s);
+    setManualDateTimeFields(currentEpoch, tzOffset);
 
-    var tzSel = document.getElementById('tzSelect');
-    if (tzSel) {
-      tzSel.innerHTML = '';
-      tzList.forEach(function(z){
-        var opt = document.createElement('option');
-        opt.value = z.id || '';
-        opt.textContent = z.label || (z.city + ' (' + fmtUtc(z.offset) + ')');
-        opt.dataset.supportsDst = z.supportsDst ? '1' : '0';
-        tzSel.appendChild(opt);
-      });
-      var tzName = t.tzName || '';
-      var idx = -1;
-      if (tzName) {
-        var lower = tzName.toLowerCase();
-        for (var i=0;i<tzList.length;i++){ if ((tzList[i].id || '').toLowerCase() === lower) { idx=i; break; } }
-      }
-      if (idx < 0) { for (var j=0;j<tzList.length;j++){ if (tzList[j].offset === tzOffset) { idx=j; break; } } }
-      if (idx >= 0) tzSel.selectedIndex = idx;
-      var tzNameTag = document.getElementById('tzNameTag');
-      if (tzNameTag) { tzNameTag.textContent = 'TZ: ' + (t.tzLabel || tzName || 'Custom'); }
-      var tzOffsetTag = document.getElementById('tzOffsetTag');
-      if (tzOffsetTag) tzOffsetTag.textContent = fmtUtc(tzOffset);
-    }
+    applyTimezoneSelection(t);
+    var tzNameTag = document.getElementById('tzNameTag');
+    if (tzNameTag) { tzNameTag.textContent = 'TZ: ' + (t.tzLabel || t.tzName || 'Custom'); }
+    var tzOffsetTag = document.getElementById('tzOffsetTag');
+    if (tzOffsetTag) tzOffsetTag.textContent = fmtUtc(tzOffset);
     var autoDstEl = document.getElementById('autoDst');
     if (autoDstEl) {
       autoDstEl.value = (t.tzAutoDst ? '1' : '0');
@@ -1117,6 +1250,9 @@ function loadAll(){
     var otaBtn = document.getElementById('btnUploadOta');
     if (otaBtn) {
       otaBtn.addEventListener('click', uploadOtaFirmware);
+    }
+    if (activeSettingsTabId === 'card-time' || activeSettingsTabId === 'card-worldtime') {
+      ensureSecondarySettingsData();
     }
   });
 }
@@ -1195,9 +1331,6 @@ async function uploadOtaFirmware(event){
 
 
 function readSettingsForm() {
-  function byId(id) {
-    return document.getElementById(id);
-  }
   function getTimeMinutes(id, fallback){
     var el = byId(id);
     var value = el ? el.value : '';
@@ -1273,6 +1406,38 @@ function readSettingsForm() {
       if (el) el.value = lg;
       return lg;
     })(),
+    envAlertCo2Threshold: (function(){
+      var v = +(byId('envAlertCo2Threshold')?.value ?? 1200);
+      if (!isFinite(v)) v = 1200;
+      v = clamp(Math.round(v / 50) * 50, 400, 5000);
+      var el = byId('envAlertCo2Threshold');
+      if (el) el.value = v;
+      return v;
+    })(),
+    envAlertTempThreshold: (function(){
+      var v = +(byId('envAlertTempThreshold')?.value ?? 26.5);
+      if (!isFinite(v)) v = 26.5;
+      var tempUnit = +(byId('uTemp')?.value ?? 0);
+      var minV = tempUnit === 1 ? 50 : 10;
+      var maxV = tempUnit === 1 ? 122 : 50;
+      v = clamp(v, minV, maxV);
+      v = Math.round(v * 10) / 10;
+      var el = byId('envAlertTempThreshold');
+      if (el) el.value = v.toFixed(1);
+      return v;
+    })(),
+    envAlertHumidityLowThreshold: (function(){
+      var v = +(byId('envAlertHumidityLowThreshold')?.value ?? 30);
+      if (!isFinite(v)) v = 30;
+      v = clamp(Math.round(v), 0, 100);
+      return v;
+    })(),
+    envAlertHumidityHighThreshold: (function(){
+      var v = +(byId('envAlertHumidityHighThreshold')?.value ?? 60);
+      if (!isFinite(v)) v = 60;
+      v = clamp(Math.round(v), 0, 100);
+      return v;
+    })(),
     buzzerVolume: +(byId('buzzerVolume')?.value ?? 100),
     buzzerTone:  +(byId('buzzerToneSet')?.value ?? 0),
     alarmSound:  +(byId('alarmSoundMode')?.value ?? 0),
@@ -1347,21 +1512,13 @@ async function submitSettings(payload, msgId) {
       return false;
     }
     setMsg(msgId, 'Saved.', true);
-    loadAll();
+    loadAll(true);
     return true;
   } catch (err) {
     console.error('Save failed', err);
     setMsg(msgId, 'Network error', false);
     return false;
   }
-}
-
-async function saveAllSettings(event){
-  if (event && typeof event.preventDefault === 'function') {
-    event.preventDefault();
-  }
-  const payload = readSettingsForm();
-  await submitSettings(payload, 'saveAllMsg');
 }
 
 async function saveDeviceSettings(event){
@@ -1414,7 +1571,20 @@ async function saveCalibrationSettings(event){
   if (event && typeof event.preventDefault === 'function') {
     event.preventDefault();
   }
-  const payload = pickSettings(readSettingsForm(), ['tempOffset','humOffset','lightGain']);
+  const payload = pickSettings(readSettingsForm(), [
+    'tempOffset',
+    'humOffset',
+    'lightGain',
+    'envAlertCo2Threshold',
+    'envAlertTempThreshold',
+    'envAlertHumidityLowThreshold',
+    'envAlertHumidityHighThreshold'
+  ]);
+  if (payload.envAlertHumidityLowThreshold > payload.envAlertHumidityHighThreshold) {
+    payload.envAlertHumidityLowThreshold = payload.envAlertHumidityHighThreshold;
+    var lowEl = byId('envAlertHumidityLowThreshold');
+    if (lowEl) lowEl.value = String(payload.envAlertHumidityLowThreshold);
+  }
   await submitSettings(payload, 'saveCalibrationMsg');
 }
 
@@ -1724,6 +1894,36 @@ function formatLocalTime(epochSec, offsetMinutes){
   return d.getFullYear() + '-' + pad2(d.getMonth()+1) + '-' + pad2(d.getDate()) +
          ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
+function setManualDateTimeFields(epochSec, offsetMinutes){
+  var ms = (epochSec + (offsetMinutes || 0) * 60) * 1000;
+  var d = new Date(ms);
+  if (isNaN(d.getTime())) return;
+  var dateEl = byId('manualDate');
+  var timeEl = byId('manualTime');
+  if (dateEl) dateEl.value = d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+  if (timeEl) timeEl.value = pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+}
+function applyNtpFields(settings){
+  var presetEl = byId('ntpPreset');
+  var customEl = byId('ntpCustom');
+  if (!presetEl && !customEl) return;
+  var server = (settings && settings.ntpServer) ? String(settings.ntpServer).trim() : 'pool.ntp.org';
+  var matchedPreset = false;
+  if (presetEl) {
+    Array.prototype.forEach.call(presetEl.options || [], function(opt){
+      if (String(opt.value || '').toLowerCase() === server.toLowerCase()) {
+        presetEl.value = opt.value;
+        matchedPreset = true;
+      }
+    });
+    if (!matchedPreset && presetEl.options && presetEl.options.length) {
+      presetEl.selectedIndex = 0;
+    }
+  }
+  if (customEl) {
+    customEl.value = matchedPreset ? '' : server;
+  }
+}
 function parseManualToEpoch() {
 
   var d = document.getElementById('manualDate').value;
@@ -1783,11 +1983,10 @@ function syncNTP(){
 }
 
 window.addEventListener('load', function(){
-  if (document.getElementById('btnSaveAll')) {
+  if (document.getElementById('settingsTabs')) {
     initSettingsTabs();
     loadAll();
-    var btn = document.getElementById('btnSaveAll');
-    if (btn) btn.addEventListener('click', saveAllSettings);
+    var btn;
     btn = document.getElementById('btnSaveDevice');
     if (btn) btn.addEventListener('click', saveDeviceSettings);
     btn = document.getElementById('btnSaveUnits');
@@ -1828,6 +2027,10 @@ window.addEventListener('load', function(){
     if (btn) btn.addEventListener('click', function(){ runSystemAction('factory-reset', 'systemActionMsg'); });
     btn = document.getElementById('btnActionReboot');
     if (btn) btn.addEventListener('click', function(){ runSystemAction('reboot', 'systemActionMsg'); });
+    var tempUnitEl = document.getElementById('uTemp');
+    if (tempUnitEl) tempUnitEl.addEventListener('change', function(){
+      applyTemperatureUnitUI(true);
+    });
     var clockFormatEl = document.getElementById('uClock');
     if (clockFormatEl) clockFormatEl.addEventListener('change', function(){
       applyAlarmHourFormat(isClock24Selected());

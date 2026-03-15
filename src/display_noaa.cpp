@@ -775,6 +775,240 @@ namespace
         return p;
     }
 
+    static String eventPhrase(const String &eventRaw)
+    {
+        String event = normalizeAlertText(eventRaw);
+        event.trim();
+        if (event.length() == 0)
+            return "Weather alert";
+        event.toLowerCase();
+        return event;
+    }
+
+    static String sentenceCase(const String &raw)
+    {
+        String out = normalizeAlertText(raw);
+        out.trim();
+        if (out.length() == 0)
+            return out;
+        out.toLowerCase();
+        out.setCharAt(0, static_cast<char>(toupper(static_cast<unsigned char>(out.charAt(0)))));
+        return out;
+    }
+
+    static String urgencyPhrase(const String &urgencyRaw)
+    {
+        String urgency = fullUrgency(urgencyRaw);
+        urgency.toLowerCase();
+        if (urgency == "immediate")
+            return "is in effect now";
+        if (urgency == "expected")
+            return "is expected";
+        if (urgency == "future")
+            return "is possible later";
+        if (urgency == "past")
+            return "was reported earlier";
+        return "is in effect";
+    }
+
+    static String conciseTimeRange(const NwsAlert &a, const String &whenSection)
+    {
+        String when = normalizeAlertText(whenSection);
+        if (when.length() > 0)
+        {
+            String lower = when;
+            lower.toLowerCase();
+            if (lower.startsWith("from "))
+                when = when.substring(5);
+            else if (lower.startsWith("until "))
+                when = when.substring(6);
+            else if (lower.startsWith("starting "))
+                when = when.substring(9);
+            else if (lower.startsWith("begins "))
+                when = when.substring(7);
+            else if (lower.startsWith("expires "))
+                when = when.substring(8);
+            if (when.length() > 56)
+                when = when.substring(0, 56);
+            return when;
+        }
+        if (a.onset.length() > 0 && a.ends.length() > 0)
+            return formatLocalDateTime(a.onset) + " to " + formatLocalDateTime(a.ends);
+        if (a.onset.length() > 0)
+            return "starting " + formatLocalDateTime(a.onset);
+        if (a.ends.length() > 0)
+            return "until " + formatLocalDateTime(a.ends);
+        if (a.expires.length() > 0)
+            return "until " + formatLocalDateTime(a.expires);
+        return "";
+    }
+
+    static String conciseImpactText(const String &impactsRaw, const String &descriptionRaw)
+    {
+        String text = impactsRaw.length() > 0 ? impactsRaw : extractHazardImpact(descriptionRaw);
+        String up = normalizeAlertText(text);
+        up.toUpperCase();
+        if (up.indexOf("TORNADO") >= 0)
+            return "A tornado may be on the ground.";
+        if (up.indexOf("HEAT ILLNES") >= 0)
+            return "Hot weather can cause heat illness.";
+        if (up.indexOf("LARGE HAIL") >= 0)
+            return "Large hail may cause injury or damage.";
+        if (up.indexOf("DAMAGING WIND") >= 0 || up.indexOf("DESTRUCTIVE WIND") >= 0)
+            return "Damaging winds are possible.";
+        if (up.indexOf("FLASH FLOOD") >= 0 || up.indexOf("FLOODING") >= 0)
+            return "Flooding is possible.";
+        if (up.indexOf("GUSTY WIND") >= 0)
+            return "Strong winds may cause damage.";
+        if (up.indexOf("HEAVY SNOW") >= 0 || up.indexOf("BLOWING SNOW") >= 0)
+            return "Snow may make travel difficult.";
+        if (up.indexOf("ICE ACCUMULATION") >= 0 || up.indexOf("FREEZING RAIN") >= 0)
+            return "Ice may create dangerous travel.";
+        if (up.indexOf("REDUCED VISIBILITY") >= 0)
+            return "Visibility may be reduced.";
+        if (up.indexOf("DENSE FOG") >= 0)
+            return "Dense fog may make driving dangerous.";
+        if (up.indexOf("DANGEROUS SURF") >= 0)
+            return "Surf conditions may be dangerous.";
+        if (up.indexOf("CRITICAL FIRE WEATHER") >= 0 || up.indexOf("RAPID FIRE GROWTH") >= 0)
+            return "Fire can spread quickly.";
+        return "";
+    }
+
+    static String friendlyActionText(const NwsAlert &a)
+    {
+        String action = extractAction(a.instruction, a.description);
+        if (action == "SEE DETAILS" || action.length() == 0)
+        {
+            String instruction = normalizeAlertText(a.instruction);
+            String up = instruction;
+            up.toUpperCase();
+            if (up.indexOf("TAKE COVER NOW") >= 0)
+                return "Take cover now.";
+            if (up.indexOf("MOVE TO A BASEMENT") >= 0 || up.indexOf("INTERIOR ROOM") >= 0)
+                return "Move to an interior room on the lowest floor.";
+            if (up.indexOf("AVOID WINDOWS") >= 0)
+                return "Stay away from windows.";
+            if (up.indexOf("MOVE TO HIGHER GROUND") >= 0)
+                return "Move to higher ground now.";
+            if (up.indexOf("TURN AROUND") >= 0 && up.indexOf("DON'T DROWN") >= 0)
+                return "Turn around, don't drive through flood water.";
+            if (up.indexOf("DO NOT TRAVEL") >= 0)
+                return "Avoid travel.";
+            if (up.indexOf("POSTPONE TRAVEL") >= 0)
+                return "Delay travel if possible.";
+            if (up.indexOf("USE EXTREME CAUTION") >= 0)
+                return "Use extreme caution.";
+            if (up.indexOf("SECURE LOOSE OBJECTS") >= 0)
+                return "Secure loose outdoor items.";
+            if (up.indexOf("DO NOT BURN") >= 0)
+                return "Avoid outdoor burning.";
+            if (up.indexOf("REPORT SMOKE") >= 0 || up.indexOf("REPORT ANY FIRE") >= 0)
+                return "Report smoke or fire immediately.";
+            if (up.indexOf("DRINK PLENTY OF FLUIDS") >= 0 || up.indexOf("STAY HYDRATED") >= 0)
+                return "Drink water and stay cool.";
+            if (up.indexOf("AIR-CONDITIONED ROOM") >= 0 || up.indexOf("AIR CONDITIONED ROOM") >= 0)
+                return "Stay in a cool indoor place.";
+            if (up.indexOf("STAY OUT OF THE SUN") >= 0)
+                return "Stay out of direct sun.";
+            if (up.indexOf("CHECK UP ON RELATIVES") >= 0 || up.indexOf("CHECK UP ON NEIGHBORS") >= 0)
+                return "Check on family and neighbors.";
+            if (up.indexOf("REDUCE OUTDOOR RECREATION") >= 0 || up.indexOf("LIMIT OUTDOOR") >= 0)
+                return "Limit time outdoors.";
+            if (up.indexOf("TAKE FREQUENT REST BREAKS") >= 0)
+                return "Take frequent breaks.";
+            if (up.indexOf("CALL 9 1 1") >= 0 || up.indexOf("HEAT STROKE IS AN EMERGENCY") >= 0)
+                return "Call 911 for heat stroke.";
+
+            String response = fullResponse(a.response);
+            response.toLowerCase();
+            if (response == "execute")
+                return "Take precautions.";
+            if (response == "avoid")
+                return "Avoid risky activity.";
+            if (response == "monitor")
+                return "Monitor conditions closely.";
+            if (response == "prepare")
+                return "Prepare now.";
+            if (response == "shelter")
+                return "Seek shelter.";
+            if (response == "evacuate")
+                return "Follow evacuation guidance.";
+
+            String eventUp = normalizeAlertText(a.event);
+            eventUp.toUpperCase();
+            if (eventUp.indexOf("TORNADO WARNING") >= 0)
+                return "Take cover now.";
+            if (eventUp.indexOf("FLASH FLOOD WARNING") >= 0)
+                return "Move to higher ground.";
+            if (eventUp.indexOf("SEVERE THUNDERSTORM WARNING") >= 0)
+                return "Move indoors and stay away from windows.";
+            if (eventUp.indexOf("WINTER STORM WARNING") >= 0 || eventUp.indexOf("BLIZZARD WARNING") >= 0)
+                return "Avoid travel if possible.";
+            if (eventUp.indexOf("ICE STORM WARNING") >= 0)
+                return "Avoid travel and watch for ice.";
+            if (eventUp.indexOf("RED FLAG WARNING") >= 0)
+                return "Avoid outdoor burning.";
+            if (eventUp.indexOf("DENSE FOG ADVISORY") >= 0)
+                return "Slow down and use low-beam headlights.";
+            if (eventUp.indexOf("HIGH WIND WARNING") >= 0 || eventUp.indexOf("WIND ADVISORY") >= 0)
+                return "Secure loose objects and use caution.";
+            return "";
+        }
+
+        action.toLowerCase();
+        if (action == "take cover")
+            return "Take cover.";
+        if (action == "move indoors")
+            return "Move indoors.";
+        if (action == "avoid travel")
+            return "Avoid travel.";
+        if (action == "seek shelter")
+            return "Seek shelter.";
+        if (action == "stay indoors")
+            return "Stay indoors.";
+        if (action == "turn around")
+            return "Turn around, don't drive through it.";
+
+        if (!action.endsWith("."))
+            action += ".";
+        if (action.length() > 0)
+            action.setCharAt(0, static_cast<char>(toupper(static_cast<unsigned char>(action.charAt(0)))));
+        return action;
+    }
+
+    static String buildReadableSummaryParagraph(const NwsAlert &a, const String &whenSection, const String &impactsSection)
+    {
+        String summary;
+        String severity = fullSeverity(a.severity);
+        severity.toLowerCase();
+        if (severity != "unknown")
+            summary += "A " + severity + " ";
+        else
+            summary += "A ";
+        summary += eventPhrase(a.event) + " " + urgencyPhrase(a.urgency);
+
+        String when = conciseTimeRange(a, whenSection);
+        if (when.length() > 0)
+        {
+            String lowerWhen = when;
+            lowerWhen.toLowerCase();
+            if (lowerWhen.indexOf(" to ") >= 0)
+                summary += " from " + when;
+            else
+                summary += " until " + when;
+        }
+
+        summary += ".";
+        String impactText = conciseImpactText(impactsSection, a.description);
+        if (impactText.length() > 0)
+            summary += " " + sentenceCase(impactText);
+        String actionText = friendlyActionText(a);
+        if (actionText.length() > 0)
+            summary += " " + actionText;
+        return summary;
+    }
+
     static void buildAlertPages(const NwsAlert &a, size_t alertIndex, size_t totalAlerts, std::vector<AlertPage> &outPages)
     {
         outPages.clear();
@@ -835,26 +1069,10 @@ namespace
         uint16_t sevColor = noaaSeverityColorUi(a.severity);
 
         const String pageSuffix = String(alertIndex + 1) + "/" + String(totalAlerts);
-        AlertPage summaryPage;
-        summaryPage.title = "SUMMARY " + pageSuffix;
-        summaryPage.staged = true;
-        summaryPage.stages.push_back("Event: " + normalizeAlertText(a.event));
-        summaryPage.stages.push_back("Severity: " + fullSeverity(a.severity));
-        summaryPage.stages.push_back("Urgency: " + fullUrgency(a.urgency));
-        if (a.response.length() > 0)
-            summaryPage.stages.push_back("Response: " + fullResponse(a.response));
-        if (a.onset.length() > 0)
-            summaryPage.stages.push_back("Starts: " + formatLocalDateTime(a.onset));
-        if (a.ends.length() > 0)
-            summaryPage.stages.push_back("Ends: " + formatLocalDateTime(a.ends));
-        else
-            summaryPage.stages.push_back("Expires: " + formatLocalDateTime(a.expires));
-        summaryPage.lines = wrapTextToLines(summaryPage.stages[0], ALERT_WRAP_CHARS);
-        summaryPage.lineColors.push_back(ui_theme::noaaLinePrimary());
-        summaryPage.lineColors.push_back(sevColor);
-        summaryPage.lineColors.push_back(ui_theme::noaaLineSecondary());
-        summaryPage.scrollable = false;
+        AlertPage summaryPage = makePage("SUMMARY " + pageSuffix, buildReadableSummaryParagraph(a, whenSection, impactsSection));
         summaryPage.titleColor = sevColor;
+        for (size_t i = 0; i < summaryPage.lineColors.size(); ++i)
+            summaryPage.lineColors[i] = ui_theme::noaaLineSecondary();
         outPages.push_back(summaryPage);
 
         if (action.length() > 0 && action != "SEE DETAILS")
