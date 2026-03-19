@@ -14,6 +14,7 @@
 #include "system.h"
 #include "default_values.h"
 #include "ui_theme.h"
+#include "noaa.h"
 #include <limits.h>
 
 extern InfoModal alarmModal;
@@ -1356,7 +1357,7 @@ void InfoModal::handleIR(uint32_t code)
                     saveDisplaySettings();
                 }
 
-                if (this == &calibrationModal )
+                if (this == &calibrationModal || this == &noaaModal)
                 {
                     // Clamp according to which field label this is
                     if (lines[selIndex].startsWith("Temp Offset"))
@@ -1371,8 +1372,8 @@ void InfoModal::handleIR(uint32_t code)
                     }
                     else if (lines[selIndex].startsWith("Hum Offset")) *ptr = constrain(*ptr, wxv::defaults::kHumOffsetMin, wxv::defaults::kHumOffsetMax);
                     else if (lines[selIndex].startsWith("Light Gain")) *ptr = constrain(*ptr, wxv::defaults::kLightGainMinPercent, wxv::defaults::kLightGainMaxPercent);
-                    else if (lines[selIndex].startsWith("CO2 Alert")) *ptr = constrain(*ptr, 400, 5000);
-                    else if (lines[selIndex].startsWith("Temp Alert"))
+                    else if (lines[selIndex].startsWith("CO2 Alert") || lines[selIndex].startsWith("CO2 Threshold")) *ptr = constrain(*ptr, 400, 5000);
+                    else if (lines[selIndex].startsWith("Temp Alert") || lines[selIndex].startsWith("Temp Threshold"))
                     {
                         int minTenths = (units.temp == TempUnit::F) ? 500 : 100;
                         int maxTenths = (units.temp == TempUnit::F) ? 1220 : 500;
@@ -1385,14 +1386,14 @@ void InfoModal::handleIR(uint32_t code)
                         float normalizedDisplay = static_cast<float>(dispTemp(envAlertTempThresholdC));
                         *ptr = static_cast<int>(lroundf(normalizedDisplay * 10.0f));
                     }
-                    else if (lines[selIndex].startsWith("Hum Low Alert")) *ptr = constrain(*ptr, 0, 100);
-                    else if (lines[selIndex].startsWith("Hum High Alert")) *ptr = constrain(*ptr, 0, 100);
+                    else if (lines[selIndex].startsWith("Hum Low Alert") || lines[selIndex].startsWith("Hum Low Threshold")) *ptr = constrain(*ptr, 0, 100);
+                    else if (lines[selIndex].startsWith("Hum High Alert") || lines[selIndex].startsWith("Hum High Threshold")) *ptr = constrain(*ptr, 0, 100);
 
-                    if (lines[selIndex].startsWith("CO2 Alert"))
+                    if (lines[selIndex].startsWith("CO2 Alert") || lines[selIndex].startsWith("CO2 Threshold"))
                         envAlertCo2Threshold = *ptr;
-                    else if (lines[selIndex].startsWith("Hum Low Alert"))
+                    else if (lines[selIndex].startsWith("Hum Low Alert") || lines[selIndex].startsWith("Hum Low Threshold"))
                         envAlertHumidityLowThreshold = *ptr;
-                    else if (lines[selIndex].startsWith("Hum High Alert"))
+                    else if (lines[selIndex].startsWith("Hum High Alert") || lines[selIndex].startsWith("Hum High Threshold"))
                         envAlertHumidityHighThreshold = *ptr;
 
                     envAlertCo2Threshold = constrain(envAlertCo2Threshold, 400, 5000);
@@ -1400,9 +1401,9 @@ void InfoModal::handleIR(uint32_t code)
                     envAlertHumidityHighThreshold = constrain(envAlertHumidityHighThreshold, 0, 100);
                     if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
                     {
-                        if (lines[selIndex].startsWith("Hum Low Alert"))
+                        if (lines[selIndex].startsWith("Hum Low Alert") || lines[selIndex].startsWith("Hum Low Threshold"))
                             envAlertHumidityHighThreshold = envAlertHumidityLowThreshold;
-                        else if (lines[selIndex].startsWith("Hum High Alert"))
+                        else if (lines[selIndex].startsWith("Hum High Alert") || lines[selIndex].startsWith("Hum High Threshold"))
                             envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
                     }
 
@@ -1416,7 +1417,7 @@ void InfoModal::handleIR(uint32_t code)
                     // Hint the climate screen to refresh next tick
                     newAHT20_BMP280Data = true;
 
-                    Serial.printf("[Calibration autosave] temp=%.1f hum=%d gain=%d co2=%d tempAlert=%.1f humLow=%d humHigh=%d\n",
+                    Serial.printf("[Alert/Calibration autosave] temp=%.1f hum=%d gain=%d co2=%d tempAlert=%.1f humLow=%d humHigh=%d\n",
                                 tempOffset, humOffset, lightGain,
                                 envAlertCo2Threshold, envAlertTempThresholdC,
                                 envAlertHumidityLowThreshold, envAlertHumidityHighThreshold);
@@ -1592,8 +1593,20 @@ void InfoModal::handleIR(uint32_t code)
                         pendingModalTime = millis() + 10;
                         return;
                     }
-                    if (this == &noaaModal && lines[selIndex] == "Alerts")
+                    if (this == &noaaModal &&
+                        (lines[selIndex] == "NOAA Alerts" ||
+                         lines[selIndex] == "CO2 Alert" ||
+                         lines[selIndex] == "Temp Alert" ||
+                         lines[selIndex] == "Humidity Alert"))
                     {
+                        noaaAlertsEnabled = (lines[selIndex] == "NOAA Alerts") ? (val > 0) : noaaAlertsEnabled;
+                        envAlertCo2Enabled = (lines[selIndex] == "CO2 Alert") ? (val > 0) : envAlertCo2Enabled;
+                        envAlertTempEnabled = (lines[selIndex] == "Temp Alert") ? (val > 0) : envAlertTempEnabled;
+                        envAlertHumidityEnabled = (lines[selIndex] == "Humidity Alert") ? (val > 0) : envAlertHumidityEnabled;
+                        saveNoaaSettings();
+                        saveCalibrationSettings();
+                        if (lines[selIndex] == "NOAA Alerts")
+                            notifyNoaaSettingsChanged();
                         requestNoaaSettingsModalRefresh();
                         beep(code == IR_LEFT ? 900 : 1800);
                         return;

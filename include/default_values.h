@@ -155,6 +155,9 @@ struct DefaultConfig {
   float tempOffsetC;
   int humOffset;
   int lightGainPercent;       // [1..300]
+  bool envAlertCo2Enabled;
+  bool envAlertTempEnabled;
+  bool envAlertHumidityEnabled;
   int defaultNtpPreset;       // existing storage mapping
   int dateFormatStorage;      // existing storage mapping
 };
@@ -271,6 +274,9 @@ static const DefaultConfig kDefaults = {
     kTempOffsetDefaultC,       // tempOffsetC
     kHumOffsetDefault,         // humOffset
     kLightGainDefaultPercent,  // lightGainPercent
+    true,       // envAlertCo2Enabled
+    true,       // envAlertTempEnabled
+    true,       // envAlertHumidityEnabled
     1,          // defaultNtpPreset
     0           // dateFormatStorage
 };

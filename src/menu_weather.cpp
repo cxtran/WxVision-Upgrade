@@ -14,11 +14,13 @@
 namespace
 {
 bool s_preserveNoaaEnabledTemp = false;
+bool s_preserveIndoorAlertTemps = false;
 }
 
 void requestNoaaSettingsModalRefresh()
 {
     s_preserveNoaaEnabledTemp = true;
+    s_preserveIndoorAlertTemps = true;
     noaaModal.hide();
     pendingModalFn = showNoaaSettingsModal;
     pendingModalTime = millis() + 10;
@@ -34,16 +36,34 @@ void showNoaaSettingsModal()
     menuActive = true;
 
     static int noaaEnabledTemp = 0;
+    static int co2EnabledTemp = 0;
+    static int tempEnabledTemp = 0;
+    static int humidityEnabledTemp = 0;
+    static int envTempThresholdTenths = 0;
 
     if (!s_preserveNoaaEnabledTemp)
         noaaEnabledTemp = noaaAlertsEnabled ? 1 : 0;
+    if (!s_preserveIndoorAlertTemps)
+    {
+        co2EnabledTemp = envAlertCo2Enabled ? 1 : 0;
+        tempEnabledTemp = envAlertTempEnabled ? 1 : 0;
+        humidityEnabledTemp = envAlertHumidityEnabled ? 1 : 0;
+        envTempThresholdTenths = static_cast<int>(lroundf(static_cast<float>(dispTemp(envAlertTempThresholdC)) * 10.0f));
+    }
     s_preserveNoaaEnabledTemp = false;
+    s_preserveIndoorAlertTemps = false;
 
-    String labels[2];
-    InfoFieldType types[2];
+    String labels[InfoModal::MAX_LINES];
+    InfoFieldType types[InfoModal::MAX_LINES];
+    int *numberRefs[InfoModal::MAX_LINES];
+    int numberCount = 0;
+    int *chooserRefs[InfoModal::MAX_LINES];
+    const char *const *chooserOpts[InfoModal::MAX_LINES];
+    int chooserCounts[InfoModal::MAX_LINES];
+    int chooserCount = 0;
     int lineCount = 0;
-    const int alertsLineIdx = lineCount;
-    labels[lineCount] = "Alerts";
+    const int noaaLineIdx = lineCount;
+    labels[lineCount] = "NOAA Alerts";
     types[lineCount++] = InfoChooser;
     int getAlertLineIdx = -1;
     if (noaaEnabledTemp > 0)
@@ -52,18 +72,103 @@ void showNoaaSettingsModal()
         labels[lineCount] = "Get Alert";
         types[lineCount++] = InfoButton;
     }
-    int *chooserRefs[] = {&noaaEnabledTemp};
+
+    const int co2LineIdx = lineCount;
+    labels[lineCount] = "CO2 Alert";
+    types[lineCount++] = InfoChooser;
+    if (co2EnabledTemp > 0)
+    {
+        labels[lineCount] = "CO2 Threshold (ppm)";
+        types[lineCount] = InfoNumber;
+        numberRefs[numberCount++] = &envAlertCo2Threshold;
+        ++lineCount;
+    }
+
+    const int tempLineIdx = lineCount;
+    labels[lineCount] = "Temp Alert";
+    types[lineCount++] = InfoChooser;
+    if (tempEnabledTemp > 0)
+    {
+        labels[lineCount] = (units.temp == TempUnit::F) ? "Temp Threshold (F)" : "Temp Threshold (C)";
+        types[lineCount] = InfoNumber;
+        numberRefs[numberCount++] = &envTempThresholdTenths;
+        ++lineCount;
+    }
+
+    const int humidityLineIdx = lineCount;
+    labels[lineCount] = "Humidity Alert";
+    types[lineCount++] = InfoChooser;
+    if (humidityEnabledTemp > 0)
+    {
+        labels[lineCount] = "Hum Low Threshold (%)";
+        types[lineCount] = InfoNumber;
+        numberRefs[numberCount++] = &envAlertHumidityLowThreshold;
+        ++lineCount;
+        labels[lineCount] = "Hum High Threshold (%)";
+        types[lineCount] = InfoNumber;
+        numberRefs[numberCount++] = &envAlertHumidityHighThreshold;
+        ++lineCount;
+    }
+
     static const char *alertsOpts[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {alertsOpts};
-    int chooserCounts[] = {2};
+    chooserRefs[chooserCount] = &noaaEnabledTemp;
+    chooserOpts[chooserCount] = alertsOpts;
+    chooserCounts[chooserCount] = 2;
+    ++chooserCount;
+    chooserRefs[chooserCount] = &co2EnabledTemp;
+    chooserOpts[chooserCount] = alertsOpts;
+    chooserCounts[chooserCount] = 2;
+    ++chooserCount;
+    chooserRefs[chooserCount] = &tempEnabledTemp;
+    chooserOpts[chooserCount] = alertsOpts;
+    chooserCounts[chooserCount] = 2;
+    ++chooserCount;
+    chooserRefs[chooserCount] = &humidityEnabledTemp;
+    chooserOpts[chooserCount] = alertsOpts;
+    chooserCounts[chooserCount] = 2;
+    ++chooserCount;
 
     noaaModal.setLines(labels, types, lineCount);
-    noaaModal.setValueRefs(nullptr, 0, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    noaaModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, nullptr, 0, nullptr);
     noaaModal.setKeepOpenOnSelect(true);
 
-    noaaModal.setCallback([alertsLineIdx, getAlertLineIdx](bool accepted, int btnIdx) {
+    NumberFieldConfig co2Cfg;
+    co2Cfg.step = 50;
+    co2Cfg.minValue = 400;
+    co2Cfg.maxValue = 5000;
+    co2Cfg.hasBounds = true;
+    co2Cfg.accelerateOnHold = true;
+
+    NumberFieldConfig tempAlertCfg;
+    tempAlertCfg.step = 5;
+    tempAlertCfg.minValue = (units.temp == TempUnit::F) ? 500 : 100;
+    tempAlertCfg.maxValue = (units.temp == TempUnit::F) ? 1220 : 500;
+    tempAlertCfg.hasBounds = true;
+    tempAlertCfg.accelerateOnHold = true;
+
+    NumberFieldConfig humidityCfg;
+    humidityCfg.step = 1;
+    humidityCfg.minValue = 0;
+    humidityCfg.maxValue = 100;
+    humidityCfg.hasBounds = true;
+    humidityCfg.accelerateOnHold = true;
+
+    for (int i = 0; i < lineCount; ++i)
+    {
+        if (labels[i].startsWith("CO2 Threshold"))
+            noaaModal.setNumberFieldConfig(i, co2Cfg);
+        else if (labels[i].startsWith("Temp Threshold"))
+            noaaModal.setNumberFieldConfig(i, tempAlertCfg);
+        else if (labels[i].startsWith("Hum Low Threshold") || labels[i].startsWith("Hum High Threshold"))
+            noaaModal.setNumberFieldConfig(i, humidityCfg);
+    }
+
+    noaaModal.setCallback([noaaLineIdx, co2LineIdx, tempLineIdx, humidityLineIdx, getAlertLineIdx](bool accepted, int btnIdx) {
         const bool prevEnabled = noaaAlertsEnabled;
         noaaAlertsEnabled = (noaaEnabledTemp > 0);
+        envAlertCo2Enabled = (co2EnabledTemp > 0);
+        envAlertTempEnabled = (tempEnabledTemp > 0);
+        envAlertHumidityEnabled = (humidityEnabledTemp > 0);
         const int selectedLine = noaaModal.getSelIndex();
 
         if (noaaAlertsEnabled != prevEnabled)
@@ -72,6 +177,7 @@ void showNoaaSettingsModal()
             notifyNoaaSettingsChanged();
             Serial.printf("[NOAA] enabled=%d\n", noaaAlertsEnabled);
         }
+        saveCalibrationSettings();
 
         if (accepted && (btnIdx == getAlertLineIdx || selectedLine == getAlertLineIdx))
         {
@@ -92,7 +198,11 @@ void showNoaaSettingsModal()
             return;
         }
 
-        if (accepted && (btnIdx == alertsLineIdx || selectedLine == alertsLineIdx))
+        if (accepted &&
+            (btnIdx == noaaLineIdx || selectedLine == noaaLineIdx ||
+             btnIdx == co2LineIdx || selectedLine == co2LineIdx ||
+             btnIdx == tempLineIdx || selectedLine == tempLineIdx ||
+             btnIdx == humidityLineIdx || selectedLine == humidityLineIdx))
             return;
     });
 

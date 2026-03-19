@@ -90,7 +90,7 @@ InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
 InfoModal alarmModal("Alarm");
-InfoModal noaaModal("NOAA Alerts");
+InfoModal noaaModal("Alerts");
 InfoModal locationModal("Location");
 InfoModal worldTimeModal("World Time");
 InfoModal manageTzModal("Manage TZ");
@@ -544,7 +544,7 @@ void showMainMenuModal()
 
     String items[] = {
         "Device", "WiFi", "Display", "World Time", "Alarm",
-        "NOAA Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
+        "Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};

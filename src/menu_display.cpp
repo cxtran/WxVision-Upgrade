@@ -222,52 +222,20 @@ void showCalibrationModal()
     String labels[] = {
         tempLabel,
         "Hum Offset (%)",
-        "Light Gain (%)",
-        "CO2 Alert (ppm)",
-        displayInF ? "Temp Alert (F)" : "Temp Alert (C)",
-        "Hum Low Alert (%)",
-        "Hum High Alert (%)"
+        "Light Gain (%)"
     };
     InfoFieldType types[] = {
-        InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber, InfoNumber
+        InfoNumber, InfoNumber, InfoNumber
     };
     int *numberRefs[] = {
         &tempOffsetDisplayTenths,
         &humOffset,
-        &lightGain,
-        &envAlertCo2Threshold,
-        &envTempThresholdTenths,
-        &envAlertHumidityLowThreshold,
-        &envAlertHumidityHighThreshold
+        &lightGain
     };
 
-    calibrationModal.setLines(labels, types, 7);
-    calibrationModal.setValueRefs(numberRefs, 7, nullptr, 0, nullptr, nullptr);
+    calibrationModal.setLines(labels, types, 3);
+    calibrationModal.setValueRefs(numberRefs, 3, nullptr, 0, nullptr, nullptr);
     calibrationModal.setShowNumberArrows(true);
-    NumberFieldConfig co2Cfg;
-    co2Cfg.step = 50;
-    co2Cfg.minValue = 400;
-    co2Cfg.maxValue = 5000;
-    co2Cfg.hasBounds = true;
-    co2Cfg.accelerateOnHold = true;
-    calibrationModal.setNumberFieldConfig(3, co2Cfg);
-
-    NumberFieldConfig tempAlertCfg;
-    tempAlertCfg.step = 5;
-    tempAlertCfg.minValue = (units.temp == TempUnit::F) ? 500 : 100;
-    tempAlertCfg.maxValue = (units.temp == TempUnit::F) ? 1220 : 500;
-    tempAlertCfg.hasBounds = true;
-    tempAlertCfg.accelerateOnHold = true;
-    calibrationModal.setNumberFieldConfig(4, tempAlertCfg);
-
-    NumberFieldConfig humidityCfg;
-    humidityCfg.step = 1;
-    humidityCfg.minValue = 0;
-    humidityCfg.maxValue = 100;
-    humidityCfg.hasBounds = true;
-    humidityCfg.accelerateOnHold = true;
-    calibrationModal.setNumberFieldConfig(5, humidityCfg);
-    calibrationModal.setNumberFieldConfig(6, humidityCfg);
 
     // No final "OK" save. We autosave on each change in handleIR().
     calibrationModal.setCallback([](bool, int) {

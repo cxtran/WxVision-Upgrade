@@ -115,6 +115,9 @@ int envAlertCo2Threshold = 1200;
 float envAlertTempThresholdC = 26.5f;
 int envAlertHumidityLowThreshold = 30;
 int envAlertHumidityHighThreshold = 60;
+bool envAlertCo2Enabled = wxv::defaults::kDefaults.envAlertCo2Enabled;
+bool envAlertTempEnabled = wxv::defaults::kDefaults.envAlertTempEnabled;
+bool envAlertHumidityEnabled = wxv::defaults::kDefaults.envAlertHumidityEnabled;
 
 // --- Date/Time/Timezone ---
 int dstAuto = 0;
@@ -210,6 +213,9 @@ void loadSettings() {
     envAlertTempThresholdC = constrain(envAlertTempThresholdC, 10.0f, 50.0f);
     envAlertHumidityLowThreshold = constrain(prefs.getInt("envHumLow", 30), 0, 100);
     envAlertHumidityHighThreshold = constrain(prefs.getInt("envHumHigh", 60), 0, 100);
+    envAlertCo2Enabled = prefs.getBool("envCo2En", wxv::defaults::kDefaults.envAlertCo2Enabled);
+    envAlertTempEnabled = prefs.getBool("envTempEn", wxv::defaults::kDefaults.envAlertTempEnabled);
+    envAlertHumidityEnabled = prefs.getBool("envHumEn", wxv::defaults::kDefaults.envAlertHumidityEnabled);
     if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
         envAlertHumidityLowThreshold = envAlertHumidityHighThreshold;
 
@@ -298,6 +304,9 @@ void saveCalibrationSettings() {
     prefs.putInt("envTempThr", static_cast<int>(lroundf(envAlertTempThresholdC * 10.0f)));
     prefs.putInt("envHumLow", envAlertHumidityLowThreshold);
     prefs.putInt("envHumHigh", envAlertHumidityHighThreshold);
+    prefs.putBool("envCo2En", envAlertCo2Enabled);
+    prefs.putBool("envTempEn", envAlertTempEnabled);
+    prefs.putBool("envHumEn", envAlertHumidityEnabled);
     prefs.end();
 }
 

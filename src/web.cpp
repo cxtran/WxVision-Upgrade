@@ -29,6 +29,7 @@
 #include "app_state.h"
 #include "weather_provider.h"
 #include "screen_manager.h"
+#include <new>
 
 static AppState &app = appState();
 bool otaInProgress = false;
@@ -100,6 +101,7 @@ static constexpr uint32_t kAppIndoorBroadcastMinMs = 5000u;
 static constexpr uint32_t kAppDeviceBroadcastMinMs = 10000u;
 static constexpr uint32_t kAppAlertBroadcastMinMs = 1000u;
 static constexpr uint32_t kAppLightningBroadcastMinMs = 5000u;
+static constexpr uint16_t kMaxAppWsClients = 2;
 
 namespace
 {
@@ -158,6 +160,7 @@ struct AppRuntimeState
   {
     char source[24] = "";
     float tempF = NAN;
+    float pressureInHg = NAN;
     int humidity = -1;
     char condition[40] = "";
     char updatedIso[32] = "";
@@ -172,6 +175,7 @@ struct AppRuntimeState
     int ahtHumidity = -1;
     int co2ppm = 0;
     float pressureInHg = NAN;
+    float lightLux = NAN;
   } indoor;
 
   struct AlertItem
@@ -187,6 +191,7 @@ struct AppRuntimeState
   {
     size_t activeCount = 0;
     char highestSeverity[16] = "none";
+    char primaryMessage[512] = "";
     AlertItem items[3];
     size_t itemCount = 0;
   } alerts;
@@ -429,6 +434,7 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     JsonObject weather = doc["weather"].to<JsonObject>();
     weather["source"] = state.weather.source;
     serializeCompactFloat(weather["tempF"], state.weather.tempF);
+    serializeCompactFloat(weather["pressureInHg"], state.weather.pressureInHg, 2);
     if (state.weather.humidity >= 0)
       weather["humidity"] = state.weather.humidity;
     else
@@ -452,10 +458,24 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     else
       indoor["co2ppm"] = nullptr;
     serializeCompactFloat(indoor["pressureInHg"], state.indoor.pressureInHg, 2);
+    serializeCompactFloat(indoor["lightLux"], state.indoor.lightLux, 1);
 
     JsonObject alerts = doc["alerts"].to<JsonObject>();
     alerts["activeCount"] = state.alerts.activeCount;
     alerts["highestSeverity"] = state.alerts.highestSeverity;
+    if (state.alerts.itemCount > 0)
+    {
+      alerts["headline"] = state.alerts.items[0].headline;
+      if (state.alerts.primaryMessage[0] != '\0')
+        alerts["message"] = state.alerts.primaryMessage;
+      else
+        alerts["message"] = nullptr;
+    }
+    else
+    {
+      alerts["headline"] = nullptr;
+      alerts["message"] = nullptr;
+    }
 
     JsonObject lightning = doc["lightning"].to<JsonObject>();
     lightning["enabled"] = state.lightning.enabled;
@@ -496,6 +516,19 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     JsonDocument doc;
     doc["activeCount"] = state.alerts.activeCount;
     doc["highestSeverity"] = state.alerts.highestSeverity;
+    if (state.alerts.itemCount > 0)
+    {
+      doc["headline"] = state.alerts.items[0].headline;
+      if (state.alerts.primaryMessage[0] != '\0')
+        doc["message"] = state.alerts.primaryMessage;
+      else
+        doc["message"] = nullptr;
+    }
+    else
+    {
+      doc["headline"] = nullptr;
+      doc["message"] = nullptr;
+    }
     JsonArray items = doc["items"].to<JsonArray>();
     for (size_t i = 0; i < state.alerts.itemCount; ++i)
     {
@@ -563,6 +596,7 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     doc["ts"] = state.time.localIso;
     JsonObject data = doc["data"].to<JsonObject>();
     serializeCompactFloat(data["tempF"], state.weather.tempF);
+    serializeCompactFloat(data["pressureInHg"], state.weather.pressureInHg, 2);
     if (state.weather.humidity >= 0)
       data["humidity"] = state.weather.humidity;
     else
@@ -580,15 +614,21 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     doc["ts"] = state.time.localIso;
     JsonObject data = doc["data"].to<JsonObject>();
     serializeCompactFloat(data["tempF"], state.indoor.tempF);
+    serializeCompactFloat(data["ahtTempF"], state.indoor.ahtTempF);
     if (state.indoor.humidity >= 0)
       data["humidity"] = state.indoor.humidity;
     else
       data["humidity"] = nullptr;
+    if (state.indoor.ahtHumidity >= 0)
+      data["ahtHumidity"] = state.indoor.ahtHumidity;
+    else
+      data["ahtHumidity"] = nullptr;
     if (state.indoor.co2ppm > 0)
       data["co2ppm"] = state.indoor.co2ppm;
     else
       data["co2ppm"] = nullptr;
     serializeCompactFloat(data["pressureInHg"], state.indoor.pressureInHg, 2);
+    serializeCompactFloat(data["lightLux"], state.indoor.lightLux, 1);
 
     state.indoorWsJson = "";
     serializeJson(doc, state.indoorWsJson);
@@ -618,14 +658,24 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     data["activeCount"] = state.alerts.activeCount;
     data["highestSeverity"] = state.alerts.highestSeverity;
     if (state.alerts.itemCount > 0)
+    {
       data["headline"] = state.alerts.items[0].headline;
+      if (state.alerts.primaryMessage[0] != '\0')
+        data["message"] = state.alerts.primaryMessage;
+      else
+        data["message"] = nullptr;
+    }
     else
+    {
       data["headline"] = nullptr;
+      data["message"] = nullptr;
+    }
 
     state.alertWsJson = "";
     serializeJson(doc, state.alertWsJson);
     state.alertWsSig = String(state.alerts.activeCount) + "|" + state.alerts.highestSeverity + "|" +
-                       ((state.alerts.itemCount > 0) ? String(state.alerts.items[0].headline) : String(""));
+                       ((state.alerts.itemCount > 0) ? String(state.alerts.items[0].headline) : String("")) + "|" +
+                       String(state.alerts.primaryMessage);
   }
 
   {
@@ -652,7 +702,15 @@ static void refreshAppRuntimeState(bool force = false)
     return;
   }
 
-  AppRuntimeState next;
+  const uint32_t lastWeatherBroadcastMs = g_appRuntime.lastWeatherBroadcastMs;
+  const uint32_t lastIndoorBroadcastMs = g_appRuntime.lastIndoorBroadcastMs;
+  const uint32_t lastDeviceBroadcastMs = g_appRuntime.lastDeviceBroadcastMs;
+  const uint32_t lastAlertBroadcastMs = g_appRuntime.lastAlertBroadcastMs;
+  const uint32_t lastLightningBroadcastMs = g_appRuntime.lastLightningBroadcastMs;
+
+  g_appRuntime.~AppRuntimeState();
+  new (&g_appRuntime) AppRuntimeState();
+  AppRuntimeState &next = g_appRuntime;
   copyToBuffer(next.device.name, sizeof(next.device.name), deviceHostname.length() ? deviceHostname : String("WxVision"));
   copyToBuffer(next.device.ip, sizeof(next.device.ip), WiFi.localIP().toString());
   copyToBuffer(next.device.mac, sizeof(next.device.mac), WiFi.macAddress());
@@ -678,23 +736,28 @@ static void refreshAppRuntimeState(bool force = false)
   next.location.lat = noaaLatitude;
   next.location.lon = noaaLongitude;
 
-  wxv::provider::WeatherSnapshot snapshot;
-  wxv::provider::readActiveProviderSnapshot(snapshot);
   copyToBuffer(next.weather.source, sizeof(next.weather.source), dataSourceLabel(dataSource));
-  if (snapshot.hasCurrent)
+  if (isDataSourceForecastModel())
   {
-    if (!isnan(snapshot.current.tempC))
-      next.weather.tempF = celsiusToFahrenheitValue(snapshot.current.tempC);
-    if (snapshot.current.humidityPct >= 0)
-      next.weather.humidity = snapshot.current.humidityPct;
-    if (snapshot.current.condition.length() > 0)
-      copyToBuffer(next.weather.condition, sizeof(next.weather.condition), snapshot.current.condition);
+    if (!isnan(currentCond.temp))
+      next.weather.tempF = celsiusToFahrenheitValue(static_cast<float>(currentCond.temp));
+    if (!isnan(currentCond.pressure))
+      next.weather.pressureInHg = hpaToInHgValue(static_cast<float>(currentCond.pressure));
+    if (currentCond.humidity >= 0)
+      next.weather.humidity = currentCond.humidity;
+    if (currentCond.cond.length() > 0)
+      copyToBuffer(next.weather.condition, sizeof(next.weather.condition), currentCond.cond);
     next.weather.updatedEpoch = currentCond.time;
   }
-  if (isnan(next.weather.tempF) && str_Temp.length() > 0)
-    next.weather.tempF = celsiusToFahrenheitValue(static_cast<float>(atof(str_Temp.c_str())));
-  if (next.weather.humidity < 0 && str_Humd.length() > 0)
-    next.weather.humidity = str_Humd.toInt();
+  else
+  {
+    if (str_Temp.length() > 0 && str_Temp != "--")
+      next.weather.tempF = celsiusToFahrenheitValue(static_cast<float>(atof(str_Temp.c_str())));
+    if (str_Humd.length() > 0 && str_Humd != "--")
+      next.weather.humidity = str_Humd.toInt();
+    if (!isnan(currentCond.pressure))
+      next.weather.pressureInHg = hpaToInHgValue(static_cast<float>(currentCond.pressure));
+  }
   if (next.weather.condition[0] == '\0' && str_Weather_Conditions.length() > 0)
     copyToBuffer(next.weather.condition, sizeof(next.weather.condition), str_Weather_Conditions);
   copyToBuffer(next.weather.updatedIso, sizeof(next.weather.updatedIso),
@@ -713,9 +776,19 @@ static void refreshAppRuntimeState(bool force = false)
   next.indoor.co2ppm = (SCD40_co2 > 0) ? static_cast<int>(SCD40_co2) : 0;
   if (!isnan(bmp280_pressure))
     next.indoor.pressureInHg = hpaToInHgValue(bmp280_pressure);
+  float luxNow = getLastCalibratedLux();
+  if (!isfinite(luxNow))
+  {
+    float rawLux = readBrightnessSensor();
+    if (isfinite(rawLux))
+      luxNow = getCalibratedLux(rawLux);
+  }
+  if (isfinite(luxNow))
+    next.indoor.lightLux = luxNow;
 
   next.alerts.activeCount = noaaAlertCount();
   copyToBuffer(next.alerts.highestSeverity, sizeof(next.alerts.highestSeverity), highestAlertSeverity());
+  next.alerts.primaryMessage[0] = '\0';
   next.alerts.itemCount = min(next.alerts.activeCount, static_cast<size_t>(3));
   for (size_t i = 0; i < next.alerts.itemCount; ++i)
   {
@@ -728,6 +801,15 @@ static void refreshAppRuntimeState(bool force = false)
     severity.toLowerCase();
     copyToBuffer(next.alerts.items[i].severity, sizeof(next.alerts.items[i].severity), severity);
     copyToBuffer(next.alerts.items[i].headline, sizeof(next.alerts.items[i].headline), alert.headline);
+    String message = alert.description.length() ? alert.description : alert.headline;
+    if (alert.instruction.length() && alert.instruction != message)
+    {
+      if (message.length())
+        message += "\n\n";
+      message += alert.instruction;
+    }
+    if (i == 0)
+      copyToBuffer(next.alerts.primaryMessage, sizeof(next.alerts.primaryMessage), message);
     copyToBuffer(next.alerts.items[i].expires, sizeof(next.alerts.items[i].expires), alert.expires);
   }
 
@@ -764,14 +846,13 @@ static void refreshAppRuntimeState(bool force = false)
   next.settings.lightningEnabled = g_appLightningEnabled;
   next.settings.soundEnabled = (buzzerVolume > 0);
   next.lastRefreshMs = nowMs;
-  next.lastWeatherBroadcastMs = g_appRuntime.lastWeatherBroadcastMs;
-  next.lastIndoorBroadcastMs = g_appRuntime.lastIndoorBroadcastMs;
-  next.lastDeviceBroadcastMs = g_appRuntime.lastDeviceBroadcastMs;
-  next.lastAlertBroadcastMs = g_appRuntime.lastAlertBroadcastMs;
-  next.lastLightningBroadcastMs = g_appRuntime.lastLightningBroadcastMs;
+  next.lastWeatherBroadcastMs = lastWeatherBroadcastMs;
+  next.lastIndoorBroadcastMs = lastIndoorBroadcastMs;
+  next.lastDeviceBroadcastMs = lastDeviceBroadcastMs;
+  next.lastAlertBroadcastMs = lastAlertBroadcastMs;
+  next.lastLightningBroadcastMs = lastLightningBroadcastMs;
 
   rebuildAppRuntimeJson(next);
-  g_appRuntime = std::move(next);
 }
 
 static void sendAppJson(AsyncWebServerRequest *req, const String &payload)
@@ -799,6 +880,10 @@ static void appRuntimeBroadcastTick()
 {
   refreshAppRuntimeState();
   if (g_appWs.count() == 0)
+  {
+    return;
+  }
+  if (!g_appWs.availableForWriteAll())
   {
     return;
   }
@@ -1160,8 +1245,11 @@ static void serializeAppCalibrationSettings(JsonObject obj)
   obj["tempOffset"] = serialized(String(dispTempOffset(tempOffset), 1));
   obj["humidityOffset"] = humOffset;
   obj["lightGain"] = lightGain;
+  obj["co2Enabled"] = envAlertCo2Enabled;
   obj["co2Threshold"] = envAlertCo2Threshold;
+  obj["tempEnabled"] = envAlertTempEnabled;
   obj["tempThreshold"] = serialized(String(dispTemp(envAlertTempThresholdC), 1));
+  obj["humidityEnabled"] = envAlertHumidityEnabled;
   obj["humidityLowThreshold"] = envAlertHumidityLowThreshold;
   obj["humidityHighThreshold"] = envAlertHumidityHighThreshold;
 }
@@ -1182,8 +1270,11 @@ static void serializeAppAlarmsSettings(JsonObject obj)
     item["oneShotPending"] = alarmOneShotPending[i];
   }
   obj["alarmSound"] = alarmSoundMode;
+  obj["co2Enabled"] = envAlertCo2Enabled;
   obj["co2Threshold"] = envAlertCo2Threshold;
+  obj["tempEnabled"] = envAlertTempEnabled;
   obj["tempThreshold"] = serialized(String(dispTemp(envAlertTempThresholdC), 1));
+  obj["humidityEnabled"] = envAlertHumidityEnabled;
   obj["humidityLowThreshold"] = envAlertHumidityLowThreshold;
   obj["humidityHighThreshold"] = envAlertHumidityHighThreshold;
 }
@@ -1766,6 +1857,11 @@ static bool applyAppCalibrationSettings(JsonObjectConst obj, JsonObject fieldErr
       dirty.calibration = true;
     }
   }
+  if (!obj["co2Enabled"].isNull())
+  {
+    envAlertCo2Enabled = obj["co2Enabled"].as<bool>();
+    dirty.calibration = true;
+  }
   if (!obj["tempThreshold"].isNull())
   {
     float value = obj["tempThreshold"].as<float>();
@@ -1779,6 +1875,11 @@ static bool applyAppCalibrationSettings(JsonObjectConst obj, JsonObject fieldErr
       envAlertTempThresholdC = tempC;
       dirty.calibration = true;
     }
+  }
+  if (!obj["tempEnabled"].isNull())
+  {
+    envAlertTempEnabled = obj["tempEnabled"].as<bool>();
+    dirty.calibration = true;
   }
   if (!obj["humidityLowThreshold"].isNull())
   {
@@ -1801,6 +1902,11 @@ static bool applyAppCalibrationSettings(JsonObjectConst obj, JsonObject fieldErr
       envAlertHumidityHighThreshold = value;
       dirty.calibration = true;
     }
+  }
+  if (!obj["humidityEnabled"].isNull())
+  {
+    envAlertHumidityEnabled = obj["humidityEnabled"].as<bool>();
+    dirty.calibration = true;
   }
   if (envAlertHumidityLowThreshold > envAlertHumidityHighThreshold)
     setFieldError(fieldErrors, "humidityLowThreshold", "must be less than or equal to humidityHighThreshold");
@@ -2399,7 +2505,7 @@ static bool queueNtpSyncTask()
 
 void webTick()
 {
-  g_appWs.cleanupClients();
+  g_appWs.cleanupClients(kMaxAppWsClients);
   appRuntimeBroadcastTick();
 
   if (g_webPendingReboot && static_cast<int32_t>(millis() - g_webRebootAtMs) >= 0)
@@ -4238,6 +4344,10 @@ void setupWebServer() {
                      void *arg, uint8_t *data, size_t len) {
     (void)server;
     if (type == WS_EVT_CONNECT) {
+      if (g_appWs.count() > kMaxAppWsClients) {
+        client->close(1008, "too many clients");
+        return;
+      }
       client->text(appHelloMessage());
       return;
     }

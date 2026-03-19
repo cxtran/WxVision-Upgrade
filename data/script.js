@@ -973,6 +973,7 @@ function applyAutoThemeUI(){
 function applyAutoDstAvailability(){
   var tzSel = document.getElementById('tzSelect');
   var autoDstEl = document.getElementById('autoDst');
+  var autoDstHelpEl = document.getElementById('autoDstHelp');
   if (!tzSel || !autoDstEl) return;
   var idx = tzSel.selectedIndex;
   var supports = false;
@@ -983,9 +984,11 @@ function applyAutoDstAvailability(){
     autoDstEl.value = '0';
     autoDstEl.disabled = true;
     autoDstEl.title = 'DST not observed in this timezone';
+    if (autoDstHelpEl) autoDstHelpEl.textContent = 'DST is not observed in this timezone.';
   } else {
     autoDstEl.disabled = false;
     autoDstEl.title = '';
+    if (autoDstHelpEl) autoDstHelpEl.textContent = 'Automatically adjusts when the selected timezone observes DST.';
   }
 }
 
