@@ -835,6 +835,7 @@ void refreshNoaaAlertsForScreenEntry()
 {
     markNoaaAlertRead();
     s_screenDirty = true;
+    resetNoaaAlertsScreenPager();
     drawNoaaAlertsScreen();
 }
 

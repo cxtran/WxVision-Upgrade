@@ -103,6 +103,18 @@ static constexpr uint32_t kAppAlertBroadcastMinMs = 1000u;
 static constexpr uint32_t kAppLightningBroadcastMinMs = 5000u;
 static constexpr uint16_t kMaxAppWsClients = 2;
 
+#define WEB_UI_DISABLED 0
+#define WEB_UI_MINIMAL 1
+#define WEB_UI_FULL 2
+
+#ifndef WEB_UI_MODE
+#define WEB_UI_MODE WEB_UI_MINIMAL
+#endif
+
+#if WEB_UI_MODE != WEB_UI_DISABLED && WEB_UI_MODE != WEB_UI_MINIMAL && WEB_UI_MODE != WEB_UI_FULL
+#error "WEB_UI_MODE must be WEB_UI_DISABLED (0), WEB_UI_MINIMAL (1), or WEB_UI_FULL (2)."
+#endif
+
 namespace
 {
 volatile bool g_webPendingQuickRestore = false;
@@ -191,7 +203,7 @@ struct AppRuntimeState
   {
     size_t activeCount = 0;
     char highestSeverity[16] = "none";
-    char primaryMessage[512] = "";
+    char primaryMessage[2048] = "";
     AlertItem items[3];
     size_t itemCount = 0;
   } alerts;
@@ -939,6 +951,87 @@ static bool enqueueAppButton(const String &button)
     return false;
   return enqueueVirtualIRKey(key);
 }
+
+#if WEB_UI_MODE == WEB_UI_MINIMAL
+static const char kMinimalBaseCss[] PROGMEM = R"rawliteral(
+<style>
+:root{color-scheme:dark;--bg:#0f1218;--card:#171c25;--line:#273246;--fg:#eef3fb;--muted:#9aabc3;--accent:#67d3ff;--warn:#ffcb6b;--danger:#ff7d7d;--ok:#79e28c}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.45 Arial,sans-serif}main{max-width:860px;margin:0 auto;padding:20px 14px 40px;display:grid;gap:14px}a{color:var(--accent)}header{padding:18px 14px 0;max-width:860px;margin:0 auto}header h1{margin:0;font-size:24px}header p{margin:6px 0 0;color:var(--muted)}nav{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 14px}.kv{display:grid;gap:3px}.kv b{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:14px}.btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:8px 14px;border-radius:10px;border:1px solid #3a4c68;background:#182232;color:var(--fg);text-decoration:none;cursor:pointer}.btn.primary{background:var(--accent);border-color:var(--accent);color:#071019}.btn.warn{background:var(--warn);border-color:var(--warn);color:#211500}.btn.danger{background:#3a1b1d;border-color:#7d3538;color:#ffd9d9}.btn:disabled{opacity:.55;cursor:default}.row{display:grid;gap:8px;margin-top:12px}label{font-size:13px;color:var(--muted)}input{width:100%;min-height:40px;padding:9px 11px;border-radius:10px;border:1px solid #33425b;background:#0f151e;color:var(--fg)}.msg{min-height:1.2em;color:var(--muted)}.msg.ok{color:var(--ok)}.msg.err{color:var(--danger)}ul{list-style:none;padding:0;margin:0;display:grid;gap:8px}.net{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:10px;border:1px solid var(--line);border-radius:12px;background:#121824}.meta{font-size:12px;color:var(--muted)}pre{margin:0;padding:12px;border-radius:12px;background:#0d1219;border:1px solid var(--line);overflow:auto;white-space:pre-wrap;word-break:break-word}.tiny{font-size:12px;color:var(--muted)}
+</style>
+)rawliteral";
+
+static void sendMinimalPage(AsyncWebServerRequest *req, const char *head, const char *body)
+{
+  String html;
+  html.reserve(strlen_P(head) + strlen_P(kMinimalBaseCss) + strlen_P(body) + 16);
+  html += FPSTR(head);
+  html += FPSTR(kMinimalBaseCss);
+  html += FPSTR(body);
+
+  AsyncWebServerResponse *res = req->beginResponse(200, "text/html; charset=utf-8", html);
+  res->addHeader("Cache-Control", "no-store, max-age=0");
+  req->send(res);
+}
+
+static const char kMinimalHomePage[] PROGMEM = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WxVision Recovery</title>
+)rawliteral"
+R"rawliteral()rawliteral";
+
+static const char kMinimalHomePage2[] PROGMEM = R"rawliteral(
+</head><body><header><h1>WxVision Recovery</h1><p>Minimal admin interface. The app runtime API remains the primary interface.</p><nav><a class="btn primary" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Device</b><span id="deviceName">--</span></div><div class="kv"><b>IP</b><span id="ip">--</span></div><div class="kv"><b>Wi-Fi SSID</b><span id="ssid">--</span></div><div class="kv"><b>RSSI</b><span id="rssi">--</span></div><div class="kv"><b>Uptime</b><span id="uptime">--</span></div><div class="kv"><b>Screen</b><span id="screen">--</span></div></div><div class="actions"><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a><button class="btn warn" id="rebootBtn" type="button">Reboot</button><button class="btn" id="restoreBtn" type="button">Restore Defaults</button><button class="btn danger" id="factoryBtn" type="button">Factory Reset</button></div><p class="msg" id="msg"></p></section><section class="card"><div class="grid"><div class="kv"><b>App API</b><span id="appApi">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceApi">Checking...</span></div><div class="kv"><b>WebSocket</b><span>/ws/app</span></div><div class="kv"><b>Diagnostics</b><span><a href="/status.json">status.json</a> | <a href="/trend.json?limit=60">trend.json</a></span></div></div></section></main><script>
+function setText(id,v){var el=document.getElementById(id);if(el)el.textContent=(v===undefined||v===null||v==='')?'--':String(v);}
+function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
+async function postAction(path,confirmText){if(confirmText&&!window.confirm(confirmText))return;setMsg('Working...',true);try{const res=await fetch(path,{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||data.message||'Request failed');setMsg(data.message||'Queued.',true);}catch(err){setMsg(err.message||'Request failed',false);}}
+async function loadStatus(){try{const res=await fetch('/status.json',{cache:'no-store'});if(!res.ok)throw new Error('status unavailable');const data=await res.json();setText('deviceName',data.hostname||'WxVision');setText('ip',data.ip);setText('ssid',data.wifiSSID||data.wifiStatus);setText('rssi',(data.rssi===undefined||data.rssi===null)?'--':data.rssi+' dBm');setText('uptime',data.uptime);setText('screen',data.screenLabel||data.screen);}catch(err){setMsg(err.message||'Unable to load status',false);}}
+async function checkApi(path,id){try{const res=await fetch(path,{cache:'no-store'});document.getElementById(id).textContent=res.ok?'OK':'HTTP '+res.status;}catch(err){document.getElementById(id).textContent='Unavailable';}}
+document.getElementById('rebootBtn').addEventListener('click',function(){postAction('/action/reboot','Reboot the device now?');});
+document.getElementById('restoreBtn').addEventListener('click',function(){postAction('/action/quick-restore','Restore defaults but keep Wi-Fi credentials and logs?');});
+document.getElementById('factoryBtn').addEventListener('click',function(){postAction('/action/factory-reset','Factory reset will erase Wi-Fi credentials and logs. Continue?');});
+loadStatus();checkApi('/api/app/state','appApi');checkApi('/api/app/device','deviceApi');setInterval(loadStatus,10000);
+</script></body></html>
+)rawliteral";
+
+static const char kMinimalNetworkPage[] PROGMEM = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WxVision Network</title>
+)rawliteral";
+
+static const char kMinimalNetworkPage2[] PROGMEM = R"rawliteral(
+</head><body><header><h1>Network Recovery</h1><p>Reconnect the device without the full legacy web UI.</p><nav><a class="btn" href="/">Home</a><a class="btn primary" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Current SSID</b><span id="currentSsid">--</span></div><div class="kv"><b>Current IP</b><span id="currentIp">--</span></div><div class="kv"><b>AP Recovery</b><span id="apInfo">--</span></div></div><div class="row"><label for="ssid">Wi-Fi SSID</label><input id="ssid" autocomplete="username" spellcheck="false"></div><div class="row"><label for="password">Wi-Fi Password</label><input id="password" type="password" autocomplete="current-password"></div><div class="actions"><button class="btn primary" id="saveBtn" type="button">Save and Reconnect</button><button class="btn" id="scanBtn" type="button">Scan Networks</button><button class="btn" id="reconnectBtn" type="button">Reconnect Only</button></div><p class="msg" id="msg"></p></section><section class="card"><h2>Nearby Networks</h2><ul id="scanList"><li class="net"><span>No scan yet.</span></li></ul></section></main><script>
+function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
+function text(v,fallback){return(v===undefined||v===null||v==='')?(fallback||'--'):String(v);}
+function pickNetwork(ssid){document.getElementById('ssid').value=ssid||'';document.getElementById('password').focus();}
+async function loadCurrent(){try{const [statusRes,deviceRes]=await Promise.all([fetch('/status.json',{cache:'no-store'}),fetch('/api/app/settings/device',{cache:'no-store'})]);const status=await statusRes.json();const device=await deviceRes.json().catch(()=>({}));document.getElementById('currentSsid').textContent=text(status.wifiSSID,status.wifiStatus);document.getElementById('currentIp').textContent=text(status.ip);document.getElementById('ssid').value=device.wifiSsid||status.wifiSSID||'';}catch(err){setMsg('Unable to load current network settings.',false);}}
+async function reconnectOnly(){setMsg('Requesting Wi-Fi reconnect...',true);try{const res=await fetch('/api/app/action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'reconnect_wifi'})});const data=await res.json().catch(()=>({}));if(!res.ok||data.ok===false)throw new Error(data.error||'Reconnect failed');setMsg(data.queued?'Reconnect queued.':'Reconnect request sent.',true);}catch(err){setMsg(err.message||'Reconnect failed',false);}}
+async function saveAndReconnect(){var ssid=document.getElementById('ssid').value.trim();var password=document.getElementById('password').value;if(!ssid){setMsg('SSID is required.',false);return;}setMsg('Saving Wi-Fi settings...',true);var payload={wifiSsid:ssid};if(password)payload.wifiPassword=password;try{const saveRes=await fetch('/api/app/settings/device',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});const saveData=await saveRes.json().catch(()=>({}));if(!saveRes.ok||saveData.ok===false)throw new Error('Save failed');await reconnectOnly();}catch(err){setMsg(err.message||'Save failed',false);}}
+async function scanNetworks(){setMsg('Scanning for Wi-Fi networks...',true);var list=document.getElementById('scanList');list.innerHTML='<li class=\"net\"><span>Scanning...</span></li>';try{const res=await fetch('/wifi/scan',{cache:'no-store'});const data=await res.json();document.getElementById('apInfo').textContent=data.apActive?(text(data.apSSID)+' @ '+text(data.apIP)):'Inactive';if(!data.networks||!data.networks.length){list.innerHTML='<li class=\"net\"><span>No networks found.</span></li>';setMsg('Scan complete.',true);return;}list.innerHTML='';data.networks.forEach(function(net){var li=document.createElement('li');li.className='net';var secure=net.secure?'Secure':'Open';li.innerHTML='<div><div>'+text(net.ssid)+'</div><div class=\"meta\">'+secure+' | '+text(net.rssi)+' dBm | Ch '+text(net.channel)+'</div></div><button class=\"btn\" type=\"button\">Use</button>';li.querySelector('button').addEventListener('click',function(){pickNetwork(net.ssid);});list.appendChild(li);});setMsg('Scan complete.',true);}catch(err){list.innerHTML='<li class=\"net\"><span>Scan failed.</span></li>';setMsg(err.message||'Scan failed',false);}}
+document.getElementById('saveBtn').addEventListener('click',saveAndReconnect);document.getElementById('scanBtn').addEventListener('click',scanNetworks);document.getElementById('reconnectBtn').addEventListener('click',reconnectOnly);loadCurrent();fetch('/wifi/scan',{cache:'no-store'}).then(function(r){return r.json();}).then(function(data){document.getElementById('apInfo').textContent=data.apActive?(text(data.apSSID)+' @ '+text(data.apIP)):'Inactive';}).catch(function(){});
+</script></body></html>
+)rawliteral";
+
+static const char kMinimalDiagnosticsPage[] PROGMEM = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WxVision Diagnostics</title>
+)rawliteral";
+
+static const char kMinimalDiagnosticsPage2[] PROGMEM = R"rawliteral(
+</head><body><header><h1>Diagnostics</h1><p>Lightweight device info and app API health.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn primary" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Status JSON</b><span id="statusCheck">Checking...</span></div><div class="kv"><b>App State API</b><span id="stateCheck">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceCheck">Checking...</span></div><div class="kv"><b>Trend Log</b><span><a href="/trend.json?limit=60">Open trend.json</a></span></div></div></section><section class="card"><h2>Device Snapshot</h2><pre id="statusDump">Loading...</pre></section><section class="card"><h2>App Snapshot</h2><pre id="appDump">Loading...</pre></section></main><script>
+async function loadJson(path,target,statusId){try{const res=await fetch(path,{cache:'no-store'});document.getElementById(statusId).textContent=res.ok?'OK':'HTTP '+res.status;const data=await res.json().catch(()=>({error:'invalid json'}));document.getElementById(target).textContent=JSON.stringify(data,null,2);}catch(err){document.getElementById(statusId).textContent='Unavailable';document.getElementById(target).textContent=String(err&&err.message||err);}}
+loadJson('/status.json','statusDump','statusCheck');loadJson('/api/app/state','appDump','stateCheck');fetch('/api/app/device',{cache:'no-store'}).then(function(res){document.getElementById('deviceCheck').textContent=res.ok?'OK':'HTTP '+res.status;}).catch(function(){document.getElementById('deviceCheck').textContent='Unavailable';});
+</script></body></html>
+)rawliteral";
+
+static const char kMinimalOtaPage[] PROGMEM = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WxVision OTA Update</title>
+)rawliteral";
+
+static const char kMinimalOtaPage2[] PROGMEM = R"rawliteral(
+</head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
+function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
+function pollForReturn(attempt){if(attempt>25){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
+document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setMsg('Upload complete. Rebooting device...',true);fetch('/reboot').catch(function(){});pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
+</script></body></html>
+)rawliteral";
+#endif
 } // namespace
 
 // --- UnitPrefs helpers ---
@@ -2726,7 +2819,8 @@ void setupWebServer() {
     req->send(res);
   });
 
-  // Serve index.html at root
+  // Browser UI registration
+#if WEB_UI_MODE == WEB_UI_FULL
   // Static files with dev-friendly caching
   server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html").setCacheControl("max-age=86400, public");
   server.serveStatic("/config.html", SPIFFS, "/config.html").setCacheControl("no-cache");
@@ -2734,11 +2828,32 @@ void setupWebServer() {
   server.serveStatic("/script.js",   SPIFFS, "/script.js").setCacheControl("max-age=86400, public");
   server.serveStatic("/sensor-log.json", SPIFFS, "/sensor_log.bin"); // fallback if needed
 
-
   // Explicit route for config.html
   server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest* req){
     req->send(SPIFFS, "/config.html", "text/html");
   });
+#elif WEB_UI_MODE == WEB_UI_MINIMAL
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalHomePage, kMinimalHomePage2);
+  });
+
+  server.on("/network", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalNetworkPage, kMinimalNetworkPage2);
+  });
+
+  server.on("/diagnostics", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalDiagnosticsPage, kMinimalDiagnosticsPage2);
+  });
+
+  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalDiagnosticsPage, kMinimalDiagnosticsPage2);
+  });
+
+  server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalOtaPage, kMinimalOtaPage2);
+  });
+#endif
+
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     static String cachedPayload;
     static uint32_t cacheBuiltAt = 0;
@@ -2971,7 +3086,7 @@ void setupWebServer() {
       found = 0;
 
     JsonDocument doc;
-    JsonArray arr = doc.createNestedArray("networks");
+    JsonArray arr = doc["networks"].to<JsonArray>();
     const int MAX_NETWORKS = 25;
     int emitted = 0;
     for (int i = 0; i < found && emitted < MAX_NETWORKS; ++i)
@@ -3022,6 +3137,7 @@ void setupWebServer() {
     req->send(res);
   });
 
+#if WEB_UI_MODE == WEB_UI_FULL
   server.on("/ir", HTTP_GET, [](AsyncWebServerRequest *req) {
     if (!req->hasParam("btn"))
     {
@@ -3096,6 +3212,7 @@ void setupWebServer() {
     serializeJson(doc, json);
     req->send(200, "application/json", json);
   });
+#endif
 
   server.on("/action/quick-restore", HTTP_POST, [](AsyncWebServerRequest *req) {
     g_webPendingQuickRestore = true;
@@ -3113,6 +3230,7 @@ void setupWebServer() {
     req->send(202, "application/json", "{\"ok\":true,\"message\":\"Reboot queued.\"}");
   });
 
+#if WEB_UI_MODE == WEB_UI_FULL
   server.on("/action/learn-remote", HTTP_POST, [](AsyncWebServerRequest *req) {
     bool ok = startUniversalRemoteLearning();
     if (!ok) {
@@ -3140,7 +3258,9 @@ void setupWebServer() {
     showScenePreviewModal();
     req->send(200, "application/json", "{\"ok\":true,\"message\":\"Preview screens opened on device.\"}");
   });
+#endif
 
+#if WEB_UI_MODE == WEB_UI_FULL
   server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest *req) {
     JsonDocument doc;
     doc["wifiSSID"]         = wifiSSID;
@@ -3961,6 +4081,7 @@ void setupWebServer() {
                                               ? "{\"ok\":true,\"queued\":false,\"lastResult\":true}"
                                        : "{\"ok\":false,\"queued\":false,\"lastResult\":false}"));
   });
+#endif
 
   server.on("/api/app/state", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
@@ -4282,6 +4403,7 @@ void setupWebServer() {
   );
 
   // ---------- Status / OTA / Reboot ----------
+#if WEB_UI_MODE == WEB_UI_FULL
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
     String tempDisp = fmtTemp(atof(str_Temp.c_str()), 0);
     String status = "<html><body><h2>Status</h2>";
@@ -4293,14 +4415,15 @@ void setupWebServer() {
     req->send(200, "text/html", status);
   });
 
+  server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
+    req->send(SPIFFS, "/ota.html", "text/html");
+  });
+#endif
+
   server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *req) {
     g_webPendingReboot = true;
     g_webRebootAtMs = millis() + 150;
     req->send(202, "text/plain", "Reboot queued.");
-  });
-
-  server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
-    req->send(SPIFFS, "/ota.html", "text/html");
   });
 
   server.on("/update", HTTP_POST,

@@ -12,45 +12,32 @@ namespace
     struct AlertPage
     {
         String title;
-        std::vector<String> lines;
+        std::vector<String> wrappedLines;
         std::vector<uint16_t> lineColors;
-        bool scrollable = false;
         uint16_t titleColor = 0;
-        bool staged = false;
-        std::vector<String> stages;
+        bool loop = true;
     };
 
-    static constexpr unsigned long PAGE_DWELL_MS = 2200UL;
-    static constexpr unsigned long SCROLL_STEP_MS = 55UL;
-    static constexpr unsigned long SCROLL_PAUSE_END_MS = 4000UL;
-    static constexpr unsigned long ALERT_STAGE_DWELL_MS = 3000UL;
-    static constexpr unsigned long PAGE_SCROLL_START_DELAY_MS = 3000UL;
-    static constexpr unsigned long ALERT_ROTATE_EXTRA_MS = 0UL;
+    static constexpr unsigned long PAGE_DWELL_MS = 2400UL;
+    static constexpr unsigned long PAGE_CONTINUE_DWELL_MS = 1200UL;
+    static constexpr unsigned long ALERT_CHAR_REVEAL_MS = 80UL;
+    static constexpr unsigned long ALERT_CURSOR_BLINK_MS = 320UL;
     static constexpr int ALERT_TITLE_H = ui_theme::Layout::kTitleBarH;
-    static constexpr int ALERT_BODY_Y = ui_theme::Layout::kBodyY;
     static constexpr int ALERT_BODY_TOP_Y = ui_theme::Layout::kBodyY - 1;
     static constexpr int ALERT_LINE_H = ui_theme::Layout::kBodyLineH;
     static constexpr int ALERT_VISIBLE_LINES = ui_theme::Layout::kBodyVisibleLines;
-    static constexpr int ALERT_VISIBLE_H = ui_theme::Layout::kBodyVisibleH + 1;
-    static constexpr int ALERT_WRAP_CHARS = ui_theme::Layout::kWrapCharsTiny;
-    static constexpr int ALERT_STAGE_TARGET_Y = ALERT_BODY_TOP_Y;
-    static constexpr int ALERT_STAGE_GAP_PX = ALERT_LINE_H;
+    static constexpr int ALERT_BODY_LEFT_X = 1;
+    static constexpr int ALERT_BODY_WIDTH_PX = PANEL_RES_X - 2;
 
     static uint32_t s_alertSig = 0;
     static size_t s_alertCountCached = 0;
     static uint8_t s_alertPageIndex = 0;
-    static int s_alertScrollOffsetPx = 0;
-    static bool s_alertEndPause = false;
-    static unsigned long s_alertPageStartMs = 0;
-    static unsigned long s_alertLastScrollMs = 0;
-    static unsigned long s_alertPauseStartMs = 0;
+    static size_t s_alertWrappedLineIndex = 0;
+    static size_t s_alertPageStartLine = 0;
+    static unsigned long s_alertLastPageAdvanceMs = 0;
+    static unsigned long s_alertPageRevealStartMs = 0;
+    static bool s_alertCompleted = false;
     static std::vector<AlertPage> s_alertPages;
-    static size_t s_alertStageIndex = 0;
-    static bool s_alertStageAnimating = false;
-    static int s_alertStageScrollOffsetPx = 0;
-    static int s_alertStageContentOffsetPx = 0;
-    static bool s_alertStageEndPause = false;
-    static unsigned long s_alertStagePauseStartMs = 0;
 
     static uint32_t hashAppend(uint32_t h, const String &s)
     {
@@ -63,28 +50,15 @@ namespace
         return h;
     }
 
-    static String loadingDots(unsigned long nowMs)
-    {
-        const unsigned long phase = (nowMs / 350UL) % 4UL;
-        if (phase == 1UL)
-            return ".";
-        if (phase == 2UL)
-            return "..";
-        if (phase == 3UL)
-            return "...";
-        return "";
-    }
-
     static AlertPage makeLoadingPage(const String &title, const String &line1, const String &line2, uint16_t titleColor, uint16_t lineColor)
     {
         AlertPage p;
         p.title = title;
         p.titleColor = titleColor;
-        p.lines.push_back(line1);
-        p.lines.push_back(line2);
+        p.wrappedLines.push_back(line1);
+        p.wrappedLines.push_back(line2);
         p.lineColors.push_back(lineColor);
         p.lineColors.push_back(lineColor);
-        p.scrollable = false;
         return p;
     }
 
@@ -95,6 +69,8 @@ namespace
         h ^= static_cast<uint32_t>(count & 0xFFu);
         h *= 16777619u;
         h = hashAppend(h, noaaLastCheckHHMM());
+        h ^= noaaFetchInProgress() ? 0xA5A5u : 0x5A5Au;
+        h *= 16777619u;
         for (size_t i = 0; i < count; ++i)
         {
             NwsAlert a;
@@ -161,6 +137,26 @@ namespace
         return out;
     }
 
+    static String capitalizeSentenceStarts(String in)
+    {
+        bool capitalizeNext = true;
+        for (int i = 0; i < in.length(); ++i)
+        {
+            char c = in.charAt(i);
+            if (isalpha(static_cast<unsigned char>(c)))
+            {
+                if (capitalizeNext)
+                    in.setCharAt(i, static_cast<char>(toupper(static_cast<unsigned char>(c))));
+                capitalizeNext = false;
+            }
+            else if (c == '.' || c == '!' || c == '?')
+            {
+                capitalizeNext = true;
+            }
+        }
+        return in;
+    }
+
     static void replaceAll(String &s, const char *needle, const char *value)
     {
         s.replace(needle, value);
@@ -176,27 +172,8 @@ namespace
         replaceAll(t, " in effect", "");
         t = collapseWhitespace(t);
         t = compactPunctuation(t);
+        t = capitalizeSentenceStarts(t);
         return t;
-    }
-
-    static String shortEventName(const String &eventRaw)
-    {
-        String e = normalizeAlertText(eventRaw);
-        if (e.equalsIgnoreCase("Severe Thunderstorm Warning"))
-            return "SVR TSTORM";
-        if (e.equalsIgnoreCase("Tornado Warning"))
-            return "TORNADO";
-        if (e.equalsIgnoreCase("Flash Flood Warning"))
-            return "FLASH FLD";
-        if (e.equalsIgnoreCase("Flood Warning"))
-            return "FLOOD WARN";
-        if (e.equalsIgnoreCase("Winter Storm Warning"))
-            return "WTR STORM";
-
-        if (e.length() > 16)
-            e = e.substring(0, 16);
-        e.trim();
-        return e.length() ? e : "NOAA ALERT";
     }
 
     static String titleCaseWord(String word)
@@ -221,48 +198,11 @@ namespace
         return s.length() ? titleCaseWord(s) : "Unknown";
     }
 
-    static String fullCertainty(const String &certaintyRaw)
-    {
-        String s = normalizeAlertText(certaintyRaw);
-        s.trim();
-        return s.length() ? titleCaseWord(s) : "Unknown";
-    }
-
     static String fullResponse(const String &responseRaw)
     {
         String s = normalizeAlertText(responseRaw);
         s.trim();
         return s.length() ? titleCaseWord(s) : "Unknown";
-    }
-
-    static String compactSeverity(const String &severityRaw)
-    {
-        String s = severityRaw;
-        s.toLowerCase();
-        if (s == "extreme")
-            return "EXT";
-        if (s == "severe")
-            return "SEV";
-        if (s == "moderate")
-            return "MOD";
-        if (s == "minor")
-            return "MIN";
-        return "UNK";
-    }
-
-    static String compactUrgency(const String &urgencyRaw)
-    {
-        String s = urgencyRaw;
-        s.toLowerCase();
-        if (s == "immediate")
-            return "IMM";
-        if (s == "expected")
-            return "EXP";
-        if (s == "future")
-            return "FUT";
-        if (s == "past")
-            return "PST";
-        return "UNK";
     }
 
     static uint16_t noaaSeverityColorUi(const String &severityRaw)
@@ -660,11 +600,10 @@ namespace
         return 1;
     }
 
-    static std::vector<String> wrapTextToLines(const String &textRaw, int maxCharsPerLine)
+    static std::vector<String> wrapTextToPixelWidth(const String &textRaw, int maxWidthPx)
     {
         std::vector<String> lines;
-        String text = normalizeAlertText(textRaw);
-        const int maxWidthPx = PANEL_RES_X - 2;
+        String text = collapseWhitespace(textRaw);
         if (text.length() == 0)
         {
             lines.push_back("--");
@@ -672,7 +611,6 @@ namespace
         }
 
         String line;
-        line.reserve(maxCharsPerLine + 2);
         int pos = 0;
         while (pos < text.length())
         {
@@ -723,55 +661,62 @@ namespace
         return lines;
     }
 
-    static AlertPage makePage(const String &title, const String &body)
+    struct AlertTextPage
+    {
+        size_t startLine = 0;
+        size_t lineCount = 0;
+    };
+
+    static std::vector<AlertTextPage> paginateWrappedLines(const std::vector<String> &wrappedLines, size_t linesPerPage)
+    {
+        std::vector<AlertTextPage> pages;
+        if (linesPerPage == 0)
+            return pages;
+
+        if (wrappedLines.empty())
+        {
+            AlertTextPage page;
+            page.startLine = 0;
+            page.lineCount = 0;
+            pages.push_back(page);
+            return pages;
+        }
+
+        for (size_t start = 0; start < wrappedLines.size(); start += linesPerPage)
+        {
+            const size_t remaining = wrappedLines.size() - start;
+            const size_t count = (remaining < linesPerPage) ? remaining : linesPerPage;
+            AlertTextPage page;
+            page.startLine = start;
+            page.lineCount = count;
+            pages.push_back(page);
+        }
+        return pages;
+    }
+
+    static size_t pageCountForWrappedLines(const std::vector<String> &wrappedLines)
+    {
+        const std::vector<AlertTextPage> pages = paginateWrappedLines(wrappedLines, ALERT_VISIBLE_LINES);
+        return pages.empty() ? 1u : pages.size();
+    }
+
+    static size_t lastPageStartLine(const AlertPage &page)
+    {
+        const size_t pageCount = pageCountForWrappedLines(page.wrappedLines);
+        if (pageCount == 0)
+            return 0;
+        return (pageCount - 1u) * static_cast<size_t>(ALERT_VISIBLE_LINES);
+    }
+
+    static AlertPage makePage(const String &title, const String &body, uint16_t titleColor = 0, uint16_t lineColor = 0)
     {
         AlertPage p;
         p.title = title;
-        p.lines = wrapTextToLines(body, ALERT_WRAP_CHARS);
-        p.lineColors.assign(p.lines.size(), 0);
-        p.scrollable = static_cast<int>(p.lines.size()) > ALERT_VISIBLE_LINES;
-        return p;
-    }
-
-    static AlertPage makeLinesPage(const String &title, const std::vector<String> &rawLines)
-    {
-        AlertPage p;
-        p.title = title;
-        for (const String &rawLine : rawLines)
-        {
-            const String normalized = normalizeAlertText(rawLine);
-            if (normalized.length() == 0)
-                continue;
-            std::vector<String> wrapped = wrapTextToLines(normalized, ALERT_WRAP_CHARS);
-            p.lines.insert(p.lines.end(), wrapped.begin(), wrapped.end());
-        }
-        if (p.lines.empty())
-            p.lines.push_back("--");
-        p.lineColors.assign(p.lines.size(), 0);
-        p.scrollable = static_cast<int>(p.lines.size()) > ALERT_VISIBLE_LINES;
-        return p;
-    }
-
-    static AlertPage makeSummaryPage()
-    {
-        const size_t count = noaaAlertCount();
-        AlertPage p;
-        p.title = "NOAA ALERTS";
-        p.titleColor = ui_theme::noaaTitleInfo();
-
-        p.lines.push_back(String(count) + " ACTIVE ALERTS");
-        p.lineColors.push_back(ui_theme::noaaLinePrimary());
-
-        for (size_t i = 0; i < count; ++i)
-        {
-            NwsAlert a;
-            if (!noaaGetAlert(i, a))
-                continue;
-            p.lines.push_back(String(i + 1) + " " + shortEventName(a.event));
-            p.lineColors.push_back(noaaSeverityColorUi(a.severity));
-        }
-
-        p.scrollable = static_cast<int>(p.lines.size()) > ALERT_VISIBLE_LINES;
+        p.titleColor = titleColor;
+        p.wrappedLines = wrapTextToPixelWidth(normalizeAlertText(body), ALERT_BODY_WIDTH_PX);
+        if (p.wrappedLines.empty())
+            p.wrappedLines.push_back("--");
+        p.lineColors.assign(p.wrappedLines.size(), lineColor);
         return p;
     }
 
@@ -1057,6 +1002,7 @@ namespace
         }
         if (detailsFallback.length() == 0)
             detailsFallback = "No details provided.";
+
         String action = extractAction(a.instruction, a.description);
         if (preparedness.length() > 0)
         {
@@ -1066,40 +1012,29 @@ namespace
         }
         if (action == "SEE DETAILS" && a.note.length() > 0)
             action = normalizeAlertText(a.note);
-        uint16_t sevColor = noaaSeverityColorUi(a.severity);
 
+        const uint16_t sevColor = noaaSeverityColorUi(a.severity);
         const String pageSuffix = String(alertIndex + 1) + "/" + String(totalAlerts);
-        AlertPage summaryPage = makePage("SUMMARY " + pageSuffix, buildReadableSummaryParagraph(a, whenSection, impactsSection));
-        summaryPage.titleColor = sevColor;
-        for (size_t i = 0; i < summaryPage.lineColors.size(); ++i)
-            summaryPage.lineColors[i] = ui_theme::noaaLineSecondary();
+
+        AlertPage summaryPage = makePage("SUMMARY " + pageSuffix, buildReadableSummaryParagraph(a, whenSection, impactsSection), sevColor, ui_theme::noaaLineSecondary());
         outPages.push_back(summaryPage);
 
         if (action.length() > 0 && action != "SEE DETAILS")
         {
-            AlertPage actionPage = makePage("DO THIS " + pageSuffix, action);
-            actionPage.titleColor = ui_theme::noaaTitleDoThis();
-            for (size_t i = 0; i < actionPage.lineColors.size(); ++i)
-                actionPage.lineColors[i] = ui_theme::noaaTitleDoThis();
+            AlertPage actionPage = makePage("DO THIS " + pageSuffix, action, ui_theme::noaaTitleDoThis(), ui_theme::noaaTitleDoThis());
             outPages.push_back(actionPage);
         }
 
         if (what.length() > 0)
         {
-            AlertPage whatPage = makePage("WHAT " + pageSuffix, what);
-            whatPage.titleColor = ui_theme::noaaTitleWhat();
-            for (size_t i = 0; i < whatPage.lineColors.size(); ++i)
-                whatPage.lineColors[i] = ui_theme::noaaLineWhat();
+            AlertPage whatPage = makePage("WHAT " + pageSuffix, what, ui_theme::noaaTitleWhat(), ui_theme::noaaLineWhat());
             outPages.push_back(whatPage);
         }
 
-        String area = whereSection.length() > 0 ? whereSection : (a.areaDesc.length() ? a.areaDesc : "");
+        String area = whereSection.length() > 0 ? whereSection : a.areaDesc;
         if (area.length() > 0)
         {
-            AlertPage areaPage = makePage("WHERE " + pageSuffix, area);
-            areaPage.titleColor = ui_theme::noaaTitleArea();
-            for (size_t i = 0; i < areaPage.lineColors.size(); ++i)
-                areaPage.lineColors[i] = ui_theme::noaaTitleArea();
+            AlertPage areaPage = makePage("WHERE " + pageSuffix, area, ui_theme::noaaTitleArea(), ui_theme::noaaTitleArea());
             outPages.push_back(areaPage);
         }
 
@@ -1114,29 +1049,20 @@ namespace
             appendSectionText(whenBody, "Expires", formatLocalDateTime(a.expires));
         if (whenBody.length() > 0)
         {
-            AlertPage whenPage = makePage("WHEN " + pageSuffix, whenBody);
-            whenPage.titleColor = ui_theme::noaaLineSecondary();
-            for (size_t i = 0; i < whenPage.lineColors.size(); ++i)
-                whenPage.lineColors[i] = ui_theme::noaaLineSecondary();
+            AlertPage whenPage = makePage("WHEN " + pageSuffix, whenBody, ui_theme::noaaLineSecondary(), ui_theme::noaaLineSecondary());
             outPages.push_back(whenPage);
         }
 
         String impactsBody = impacts.length() > 0 ? impacts : detailsFallback;
         if (impactsBody.length() > 0)
         {
-            AlertPage impactsPage = makePage("IMPACTS " + pageSuffix, impactsBody);
-            impactsPage.titleColor = sevColor;
-            for (size_t i = 0; i < impactsPage.lineColors.size(); ++i)
-                impactsPage.lineColors[i] = sevColor;
+            AlertPage impactsPage = makePage("IMPACTS " + pageSuffix, impactsBody, sevColor, sevColor);
             outPages.push_back(impactsPage);
         }
 
         if (additionalDetails.length() > 0)
         {
-            AlertPage morePage = makePage("ADDITIONAL " + pageSuffix, additionalDetails);
-            morePage.titleColor = ui_theme::noaaTitleWhat();
-            for (size_t i = 0; i < morePage.lineColors.size(); ++i)
-                morePage.lineColors[i] = ui_theme::noaaLineWhat();
+            AlertPage morePage = makePage("ADDITIONAL " + pageSuffix, additionalDetails, ui_theme::noaaTitleWhat(), ui_theme::noaaLineWhat());
             outPages.push_back(morePage);
         }
     }
@@ -1158,19 +1084,10 @@ namespace
         size_t count = noaaAlertCount();
         if (count == 0)
         {
-            AlertPage p0 = makePage("NOAA ALERT", "NONE ACTIVE LAST CHECK " + noaaLastCheckHHMM());
-            p0.titleColor = ui_theme::noaaTitleInfo();
-            for (size_t i = 0; i < p0.lineColors.size(); ++i)
-                p0.lineColors[i] = (i == 0)
-                                       ? ui_theme::noaaTitleDoThis()
-                                       : ui_theme::noaaTitleInfo();
-            s_alertPages.push_back(p0);
-
-            AlertPage p1 = makePage("NOAA ALERT", "MONITORING... WXVISION OK");
-            p1.titleColor = ui_theme::noaaTitleInfo();
-            for (size_t i = 0; i < p1.lineColors.size(); ++i)
-                p1.lineColors[i] = ui_theme::noaaLineInfo();
-            s_alertPages.push_back(p1);
+            s_alertPages.push_back(makePage("NOAA ALERT",
+                                            "No active alerts. Last check " + noaaLastCheckHHMM() + ". Monitoring NOAA feed.",
+                                            ui_theme::noaaTitleInfo(),
+                                            ui_theme::noaaLineInfo()));
             return;
         }
 
@@ -1189,234 +1106,259 @@ namespace
 
     static void resetAlertPager(unsigned long nowMs)
     {
-        s_alertPageIndex = 0;
-        s_alertScrollOffsetPx = 0;
-        s_alertEndPause = false;
-        s_alertLastScrollMs = nowMs;
-        s_alertPauseStartMs = 0;
-        s_alertPageStartMs = nowMs;
-        s_alertStageIndex = 0;
-        s_alertStageAnimating = false;
-        s_alertStageScrollOffsetPx = 0;
-        s_alertStageContentOffsetPx = 0;
-        s_alertStageEndPause = false;
-        s_alertStagePauseStartMs = 0;
         rebuildAlertPagesForCurrentAlert();
+        s_alertPageIndex = 0;
+        s_alertWrappedLineIndex = 0;
+        s_alertPageStartLine = 0;
+        s_alertLastPageAdvanceMs = nowMs;
+        s_alertPageRevealStartMs = nowMs;
+        s_alertCompleted = false;
     }
 
     static void resetAlertPageState(unsigned long nowMs)
     {
-        s_alertScrollOffsetPx = 0;
-        s_alertEndPause = false;
-        s_alertLastScrollMs = nowMs;
-        s_alertPauseStartMs = 0;
-        s_alertPageStartMs = nowMs;
-        s_alertStageIndex = 0;
-        s_alertStageAnimating = false;
-        s_alertStageScrollOffsetPx = 0;
-        s_alertStageContentOffsetPx = 0;
-        s_alertStageEndPause = false;
-        s_alertStagePauseStartMs = 0;
+        s_alertWrappedLineIndex = 0;
+        s_alertPageStartLine = 0;
+        s_alertLastPageAdvanceMs = nowMs;
+        s_alertPageRevealStartMs = nowMs;
+        s_alertCompleted = false;
+    }
+
+    static void setCurrentAlertPageStart(size_t startLine, unsigned long nowMs)
+    {
+        s_alertPageStartLine = startLine;
+        s_alertWrappedLineIndex = startLine;
+        s_alertLastPageAdvanceMs = nowMs;
+        s_alertPageRevealStartMs = nowMs;
+        s_alertCompleted = false;
+    }
+
+    static AlertTextPage currentAlertTextPage(const AlertPage &page, size_t pageStartLine)
+    {
+        const std::vector<AlertTextPage> pages = paginateWrappedLines(page.wrappedLines, ALERT_VISIBLE_LINES);
+        AlertTextPage currentPage;
+        currentPage.startLine = 0;
+        currentPage.lineCount = 0;
+        if (pages.empty())
+            return currentPage;
+
+        currentPage = pages[0];
+        for (const AlertTextPage &candidate : pages)
+        {
+            if (candidate.startLine == pageStartLine)
+            {
+                currentPage = candidate;
+                break;
+            }
+        }
+        return currentPage;
+    }
+
+    static unsigned long alertPageRevealDurationMs(const AlertPage &page, size_t pageStartLine)
+    {
+        const AlertTextPage currentPage = currentAlertTextPage(page, pageStartLine);
+        unsigned long durationMs = 0;
+        for (size_t lineOffset = 0; lineOffset < currentPage.lineCount; ++lineOffset)
+        {
+            const size_t lineIndex = currentPage.startLine + lineOffset;
+            if (lineIndex >= page.wrappedLines.size())
+                break;
+
+            const String &line = page.wrappedLines[lineIndex];
+            for (int i = 0; i < line.length(); ++i)
+                durationMs += (line.charAt(i) == '.') ? (ALERT_CHAR_REVEAL_MS + 320UL) : ALERT_CHAR_REVEAL_MS;
+        }
+        return durationMs;
+    }
+
+    static unsigned long alertCharRevealDelayMs(char c)
+    {
+        if (c == '.')
+            return ALERT_CHAR_REVEAL_MS + 320UL;
+        if (c == '!' || c == '?')
+            return ALERT_CHAR_REVEAL_MS + 260UL;
+        if (c == ',' || c == ';' || c == ':')
+            return ALERT_CHAR_REVEAL_MS + 140UL;
+        return ALERT_CHAR_REVEAL_MS;
+    }
+
+    static size_t revealedCharsForElapsedMs(const String &line, unsigned long elapsedMs, unsigned long &consumedMs)
+    {
+        consumedMs = 0;
+        size_t visibleChars = 0;
+        for (int i = 0; i < line.length(); ++i)
+        {
+            const unsigned long charDelayMs = alertCharRevealDelayMs(line.charAt(i));
+            if ((consumedMs + charDelayMs) > elapsedMs)
+                break;
+            consumedMs += charDelayMs;
+            ++visibleChars;
+        }
+        return visibleChars;
+    }
+
+    static bool alertPageEndsWithPeriod(const AlertPage &page, size_t pageStartLine)
+    {
+        const AlertTextPage currentPage = currentAlertTextPage(page, pageStartLine);
+        if (currentPage.lineCount == 0)
+            return false;
+
+        for (size_t reverseOffset = currentPage.lineCount; reverseOffset > 0; --reverseOffset)
+        {
+            const size_t lineIndex = currentPage.startLine + (reverseOffset - 1u);
+            if (lineIndex >= page.wrappedLines.size())
+                continue;
+
+            String line = page.wrappedLines[lineIndex];
+            line.trim();
+            if (line.length() == 0)
+                continue;
+
+            return line.charAt(line.length() - 1) == '.';
+        }
+
+        return false;
     }
 
     static void advanceAlertPage(unsigned long nowMs)
     {
-        resetAlertPageState(nowMs);
+        if (s_alertPages.empty())
+            return;
 
-        const size_t count = noaaAlertCount();
-        if (count == 0)
+        const AlertPage &page = s_alertPages[s_alertPageIndex];
+        const size_t nextStart = s_alertPageStartLine + static_cast<size_t>(ALERT_VISIBLE_LINES);
+        if (nextStart < page.wrappedLines.size())
         {
-            s_alertPageIndex = static_cast<uint8_t>((s_alertPageIndex + 1) % 2);
-            rebuildAlertPagesForCurrentAlert();
+            setCurrentAlertPageStart(nextStart, nowMs);
             return;
         }
 
-        const size_t totalPages = s_alertPages.size();
-        s_alertPageIndex = static_cast<uint8_t>((s_alertPageIndex + 1u) % totalPages);
-        rebuildAlertPagesForCurrentAlert();
+        s_alertCompleted = true;
+        if ((s_alertPageIndex + 1u) < s_alertPages.size())
+        {
+            s_alertPageIndex = static_cast<uint8_t>(s_alertPageIndex + 1u);
+            setCurrentAlertPageStart(0, nowMs);
+            return;
+        }
+
+        if (page.loop)
+        {
+            s_alertPageIndex = 0;
+            setCurrentAlertPageStart(0, nowMs);
+        }
     }
 
     static void stepAlertPageManual(int direction, unsigned long nowMs)
     {
-        size_t count = noaaAlertCount();
-        const size_t pageCount = s_alertPages.empty() ? ((count == 0) ? 2u : 1u) : s_alertPages.size();
-        if (pageCount == 0)
+        if (s_alertPages.empty())
             return;
 
-        int next = static_cast<int>(s_alertPageIndex) + ((direction >= 0) ? 1 : -1);
-        while (next < 0)
-            next += static_cast<int>(pageCount);
-        next %= static_cast<int>(pageCount);
-        s_alertPageIndex = static_cast<uint8_t>(next);
-
-        resetAlertPageState(nowMs);
-
-        if (count == 0)
+        if (direction >= 0)
         {
-            rebuildAlertPagesForCurrentAlert();
+            advanceAlertPage(nowMs);
             return;
         }
 
-        rebuildAlertPagesForCurrentAlert();
+        if (s_alertPageStartLine >= static_cast<size_t>(ALERT_VISIBLE_LINES))
+        {
+            setCurrentAlertPageStart(s_alertPageStartLine - static_cast<size_t>(ALERT_VISIBLE_LINES), nowMs);
+            return;
+        }
+
+        if (s_alertPageIndex == 0)
+            s_alertPageIndex = static_cast<uint8_t>(s_alertPages.size() - 1u);
+        else
+            s_alertPageIndex = static_cast<uint8_t>(s_alertPageIndex - 1u);
+
+        setCurrentAlertPageStart(lastPageStartLine(s_alertPages[s_alertPageIndex]), nowMs);
     }
 
-    static void drawWrappedLinesAt(const std::vector<String> &lines, const std::vector<uint16_t> &colors, int baseY, uint16_t defaultColor)
+    static void drawNoaaAlertPage(const AlertPage &page, size_t pageStartLine, uint16_t defaultColor, unsigned long nowMs)
     {
-        for (size_t i = 0; i < lines.size(); ++i)
+        const AlertTextPage currentPage = currentAlertTextPage(page, pageStartLine);
+        unsigned long revealElapsedMs = nowMs - s_alertPageRevealStartMs;
+        const bool showCursor = ((nowMs / ALERT_CURSOR_BLINK_MS) % 2UL) == 0UL;
+        bool cursorDrawn = false;
+
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+
+        for (size_t lineOffset = 0; lineOffset < currentPage.lineCount; ++lineOffset)
         {
-            int y = baseY + static_cast<int>(i) * ALERT_LINE_H;
-            if (y < (ALERT_BODY_TOP_Y - 7) || y > PANEL_RES_Y - 1)
-                continue;
+            const size_t lineIndex = currentPage.startLine + lineOffset;
+            if (lineIndex >= page.wrappedLines.size())
+                break;
+
             uint16_t lineColor = defaultColor;
-            if (i < colors.size() && colors[i] != 0)
-                lineColor = colors[i];
+            if (lineIndex < page.lineColors.size() && page.lineColors[lineIndex] != 0)
+                lineColor = page.lineColors[lineIndex];
+
+            const String &fullLine = page.wrappedLines[lineIndex];
+            String visibleLine;
+            unsigned long consumedLineMs = 0;
+            const size_t visibleChars = revealedCharsForElapsedMs(fullLine, revealElapsedMs, consumedLineMs);
+            if (visibleChars >= fullLine.length())
+            {
+                visibleLine = fullLine;
+                revealElapsedMs = (revealElapsedMs > consumedLineMs) ? (revealElapsedMs - consumedLineMs) : 0;
+            }
+            else
+            {
+                visibleLine = fullLine.substring(0, visibleChars);
+                revealElapsedMs = 0;
+            }
+
+            const int y = ALERT_BODY_TOP_Y + 1 + static_cast<int>(lineOffset * ALERT_LINE_H);
             dma_display->setTextColor(lineColor);
-            dma_display->setCursor(1, y);
-            dma_display->print(lines[i]);
+            dma_display->setCursor(ALERT_BODY_LEFT_X, y);
+            dma_display->print(visibleLine);
+
+            if (!cursorDrawn && showCursor && visibleChars < fullLine.length())
+            {
+                const String cursorPrefix = fullLine.substring(0, visibleChars);
+                const int cursorX = ALERT_BODY_LEFT_X + noaaTextWidthPx(cursorPrefix);
+                dma_display->drawFastVLine(cursorX, y, 7, lineColor);
+                cursorDrawn = true;
+                break;
+            }
         }
-    }
 
-    static uint16_t stageColorForIndex(size_t stageIndex, uint16_t bodyFg, uint16_t headerFg)
-    {
-        if (stageIndex == 0)
-            return ui_theme::noaaLinePrimary();
-        if (stageIndex == 1)
-            return headerFg;
-        if (stageIndex == 3)
-            return ui_theme::noaaLineSecondary();
-        return bodyFg;
-    }
-
-    static uint16_t stageLabelColorForIndex(size_t stageIndex, uint16_t headerFg)
-    {
-        if (stageIndex <= 3)
-            return ui_theme::noaaLineSecondary();
-        return headerFg;
-    }
-
-    static void splitStageText(const String &stageText, String &labelOut, String &valueOut)
-    {
-        int sep = stageText.indexOf(':');
-        if (sep < 0)
+        if (!cursorDrawn && showCursor && currentPage.lineCount > 0)
         {
-            labelOut = "";
-            valueOut = stageText;
-            return;
-        }
-        labelOut = stageText.substring(0, sep + 1);
-        valueOut = stageText.substring(sep + 1);
-        valueOut.trim();
-    }
+            const size_t lastLineOffset = currentPage.lineCount - 1u;
+            const size_t lastLineIndex = currentPage.startLine + lastLineOffset;
+            if (lastLineIndex < page.wrappedLines.size())
+            {
+                const String &lastLine = page.wrappedLines[lastLineIndex];
+                uint16_t lineColor = defaultColor;
+                if (lastLineIndex < page.lineColors.size() && page.lineColors[lastLineIndex] != 0)
+                    lineColor = page.lineColors[lastLineIndex];
 
-    static std::vector<String> buildStageLines(const String &stageText)
-    {
-        String label;
-        String value;
-        splitStageText(stageText, label, value);
-
-        std::vector<String> lines;
-        lines.push_back(label.length() ? label : stageText);
-
-        std::vector<String> valueLines = wrapTextToLines(value, ALERT_WRAP_CHARS);
-        if (valueLines.empty())
-            valueLines.push_back("--");
-        for (const String &line : valueLines)
-            lines.push_back(line);
-
-        return lines;
-    }
-
-    static int stageBlockHeightPx(const String &stageText)
-    {
-        std::vector<String> lines = buildStageLines(stageText);
-        return static_cast<int>(lines.size()) * ALERT_LINE_H;
-    }
-
-    static int stageTransitionDistancePx(const String &stageText)
-    {
-        return stageBlockHeightPx(stageText) + ALERT_STAGE_GAP_PX;
-    }
-
-    static void drawStageAt(const String &stageText, size_t stageIndex, int baseY, int scrollOffsetPx, uint16_t bodyFg, uint16_t headerFg)
-    {
-        std::vector<String> stageLines = buildStageLines(stageText);
-        const uint16_t labelColor = stageLabelColorForIndex(stageIndex, headerFg);
-        const uint16_t valueColor = stageColorForIndex(stageIndex, bodyFg, headerFg);
-        const int minVisibleY = ui_theme::Layout::kTitleBarY;
-
-        for (size_t i = 0; i < stageLines.size(); ++i)
-        {
-            int y = baseY + static_cast<int>(i) * ALERT_LINE_H - scrollOffsetPx;
-            if (y < minVisibleY || y > PANEL_RES_Y - 1)
-                continue;
-            dma_display->setTextColor((i == 0) ? labelColor : valueColor);
-            dma_display->setCursor(1, y);
-            dma_display->print(stageLines[i]);
+                const int y = ALERT_BODY_TOP_Y + 1 + static_cast<int>(lastLineOffset * ALERT_LINE_H);
+                const int cursorX = ALERT_BODY_LEFT_X + noaaTextWidthPx(lastLine);
+                dma_display->drawFastVLine(cursorX, y, 7, lineColor);
+            }
         }
     }
 
-    static void renderNoaaPage()
+    static void renderNoaaPage(unsigned long nowMs = millis())
     {
         if (!dma_display || s_alertPages.empty())
             return;
 
-        const unsigned long nowMs = millis();
         if (s_alertPageIndex >= s_alertPages.size())
             s_alertPageIndex = 0;
         const AlertPage &page = s_alertPages[s_alertPageIndex];
 
         uint16_t headerBg = ui_theme::noaaHeaderBg(theme);
         uint16_t headerFg = page.titleColor ? page.titleColor : ui_theme::noaaHeaderFgFallback(theme);
-        uint16_t bodyFg = (theme == 1) ? ui_theme::monoBodyText() : ui_theme::noaaTitleArea();
+        uint16_t bodyFg = (theme == 1) ? ui_theme::monoBodyText() : ui_theme::noaaLinePrimary();
 
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
 
         dma_display->fillRect(0, ALERT_BODY_TOP_Y, PANEL_RES_X, PANEL_RES_Y - ALERT_BODY_TOP_Y, myBLACK);
-        dma_display->setTextColor(bodyFg);
-
-        if (page.staged && !page.stages.empty())
-        {
-            size_t stageIndex = s_alertStageIndex;
-            if (stageIndex >= page.stages.size())
-                stageIndex = page.stages.size() - 1;
-
-            int currentBaseY = ALERT_STAGE_TARGET_Y;
-            if (s_alertStageAnimating && (stageIndex + 1) < page.stages.size())
-            {
-                int nextBaseY = currentBaseY + stageTransitionDistancePx(page.stages[stageIndex]);
-                drawStageAt(page.stages[stageIndex], stageIndex, currentBaseY, s_alertStageScrollOffsetPx, bodyFg, headerFg);
-                drawStageAt(page.stages[stageIndex + 1], stageIndex + 1, nextBaseY, s_alertStageScrollOffsetPx, bodyFg, headerFg);
-            }
-            else
-            {
-                drawStageAt(page.stages[stageIndex], stageIndex, currentBaseY, s_alertStageContentOffsetPx, bodyFg, headerFg);
-            }
-        }
-        else
-        {
-            for (size_t i = 0; i < page.lines.size(); ++i)
-            {
-                int y = ALERT_BODY_TOP_Y + static_cast<int>(i) * ALERT_LINE_H - s_alertScrollOffsetPx;
-                if (y < (ALERT_BODY_TOP_Y - 7) || y > PANEL_RES_Y - 1)
-                    continue;
-                uint16_t lineColor = bodyFg;
-                if (i < page.lineColors.size() && page.lineColors[i] != 0)
-                    lineColor = page.lineColors[i];
-                String lineText = page.lines[i];
-                if (noaaFetchInProgress())
-                {
-                    const String dots = loadingDots(nowMs);
-                    if (page.title == "NOAA ALERT" && i == 1)
-                        lineText = "INFO" + dots;
-                    else if (page.title == "STATUS" && i == 1)
-                        lineText = "NOAA FEED" + dots;
-                }
-                dma_display->setTextColor(lineColor);
-                dma_display->setCursor(1, y);
-                dma_display->print(lineText);
-            }
-        }
+        drawNoaaAlertPage(page, s_alertWrappedLineIndex, bodyFg, nowMs);
 
         // Draw title last so the top scrolling line slides behind it instead of disappearing early.
         dma_display->fillRect(0, ui_theme::Layout::kTitleBarY, PANEL_RES_X, ALERT_TITLE_H, headerBg);
@@ -1440,7 +1382,17 @@ void drawNoaaAlertsScreen()
         resetAlertPager(nowMs);
     }
 
-    renderNoaaPage();
+    renderNoaaPage(nowMs);
+}
+
+void resetNoaaAlertsScreenPager()
+{
+    s_alertPageIndex = 0;
+    s_alertWrappedLineIndex = 0;
+    s_alertPageStartLine = 0;
+    s_alertLastPageAdvanceMs = millis();
+    s_alertPageRevealStartMs = s_alertLastPageAdvanceMs;
+    s_alertCompleted = false;
 }
 
 void tickNoaaAlertsScreen()
@@ -1458,147 +1410,19 @@ void tickNoaaAlertsScreen()
     if (s_alertPageIndex >= s_alertPages.size())
         s_alertPageIndex = 0;
     const AlertPage &page = s_alertPages[s_alertPageIndex];
+    const unsigned long revealDurationMs = alertPageRevealDurationMs(page, s_alertWrappedLineIndex);
+    const unsigned long pageDwellMs = alertPageEndsWithPeriod(page, s_alertWrappedLineIndex)
+                                          ? PAGE_DWELL_MS
+                                          : PAGE_CONTINUE_DWELL_MS;
+    const unsigned long elapsedSinceRevealStart = nowMs - s_alertPageRevealStartMs;
 
-    if (page.staged)
+    renderNoaaPage(nowMs);
+
+    if (elapsedSinceRevealStart >= (revealDurationMs + pageDwellMs))
     {
-        bool changed = false;
-        if (!s_alertStageAnimating)
-        {
-            const int stageHeightPx = stageBlockHeightPx(page.stages[s_alertStageIndex]);
-            int maxStageOffset = stageHeightPx - ALERT_VISIBLE_H;
-            if (maxStageOffset < 0)
-                maxStageOffset = 0;
-
-            if (maxStageOffset <= 0)
-            {
-                if ((nowMs - s_alertPageStartMs) >= ALERT_STAGE_DWELL_MS)
-                {
-                    if ((s_alertStageIndex + 1) < page.stages.size())
-                    {
-                        s_alertStageAnimating = true;
-                        s_alertStageScrollOffsetPx = 0;
-                        s_alertLastScrollMs = nowMs;
-                    }
-                    else
-                    {
-                        advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
-                    }
-                    changed = true;
-                }
-            }
-            else if (s_alertStageContentOffsetPx < maxStageOffset)
-            {
-                if (s_alertStageContentOffsetPx == 0 && (nowMs - s_alertPageStartMs) < PAGE_SCROLL_START_DELAY_MS)
-                {
-                    // Hold the initial stage view long enough to read before scrolling begins.
-                }
-                else if ((nowMs - s_alertLastScrollMs) >= SCROLL_STEP_MS)
-                {
-                    s_alertLastScrollMs = nowMs;
-                    s_alertStageContentOffsetPx++;
-                    changed = true;
-                }
-            }
-            else
-            {
-                if (!s_alertStageEndPause)
-                {
-                    s_alertStageEndPause = true;
-                    s_alertStagePauseStartMs = nowMs;
-                }
-                else if ((nowMs - s_alertStagePauseStartMs) >= SCROLL_PAUSE_END_MS)
-                {
-                    s_alertStageEndPause = false;
-                    if ((s_alertStageIndex + 1) < page.stages.size())
-                    {
-                        s_alertStageAnimating = true;
-                        s_alertStageScrollOffsetPx = 0;
-                        s_alertLastScrollMs = nowMs;
-                    }
-                    else
-                    {
-                        advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
-                    }
-                    changed = true;
-                }
-            }
-        }
-        else if ((nowMs - s_alertLastScrollMs) >= SCROLL_STEP_MS)
-        {
-            s_alertLastScrollMs = nowMs;
-            s_alertStageScrollOffsetPx++;
-            changed = true;
-            int blockHeightPx = stageTransitionDistancePx(page.stages[s_alertStageIndex]);
-            if (s_alertStageScrollOffsetPx >= blockHeightPx)
-            {
-                s_alertStageAnimating = false;
-                s_alertStageScrollOffsetPx = 0;
-                if ((s_alertStageIndex + 1) < page.stages.size())
-                {
-                    ++s_alertStageIndex;
-                    s_alertPageStartMs = nowMs;
-                    s_alertStageContentOffsetPx = 0;
-                    s_alertStageEndPause = false;
-                    s_alertStagePauseStartMs = 0;
-                }
-                else
-                {
-                    advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
-                }
-            }
-        }
-
-        if (changed)
-            renderNoaaPage();
-        return;
+        advanceAlertPage(nowMs);
+        renderNoaaPage(nowMs);
     }
-
-    int contentHeight = static_cast<int>(page.lines.size()) * ALERT_LINE_H;
-    int maxOffset = contentHeight - ALERT_VISIBLE_H;
-    if (maxOffset < 0)
-        maxOffset = 0;
-
-    bool changed = false;
-    if (maxOffset <= 0 || !page.scrollable)
-    {
-        if ((nowMs - s_alertPageStartMs) >= PAGE_DWELL_MS)
-        {
-            advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
-            changed = true;
-        }
-    }
-    else
-    {
-        if (s_alertScrollOffsetPx < maxOffset)
-        {
-            if (s_alertScrollOffsetPx == 0 && (nowMs - s_alertPageStartMs) < PAGE_SCROLL_START_DELAY_MS)
-            {
-                // Hold the initial visible content long enough to read before scrolling begins.
-            }
-            else if ((nowMs - s_alertLastScrollMs) >= SCROLL_STEP_MS)
-            {
-                s_alertLastScrollMs = nowMs;
-                s_alertScrollOffsetPx++;
-                changed = true;
-            }
-        }
-        else
-        {
-            if (!s_alertEndPause)
-            {
-                s_alertEndPause = true;
-                s_alertPauseStartMs = nowMs;
-            }
-            else if ((nowMs - s_alertPauseStartMs) >= SCROLL_PAUSE_END_MS)
-            {
-                advanceAlertPage(nowMs + ALERT_ROTATE_EXTRA_MS);
-                changed = true;
-            }
-        }
-    }
-
-    if (changed)
-        renderNoaaPage();
 }
 
 void stepNoaaAlertsScreen(int direction)

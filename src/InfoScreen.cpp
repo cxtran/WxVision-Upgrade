@@ -531,49 +531,7 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         s_currentRoll.setBlockSizePx(InfoScreen::CHARH * 2);
     }
     else if (_screenMode == SCREEN_NOAA_ALERT) {
-        // NOAA alert: show all fields with vertical roll-up
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        vec.reserve(_lineCount * 2);
-        const bool monoTheme = (theme == 1);
-        const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
-        const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
-        const int valueIndentPx = 4;
-        auto pushValueWrapped = [&](const String &text) {
-            auto wrapped = wrapToWidth(text, InfoScreen::SCREEN_WIDTH - valueIndentPx);
-            for (const auto &w : wrapped) {
-                vec.push_back(w);
-                colors.push_back(valueColor);
-                offsets.push_back(valueIndentPx);
-            }
-        };
-        for (int i = 0; i < _lineCount; ++i) {
-            String raw = _lines[i];
-            int colon = raw.indexOf(':');
-            String label = (colon >= 0) ? raw.substring(0, colon + 1) : raw;
-            String value = (colon >= 0) ? raw.substring(colon + 1) : "";
-            label.trim();
-            value.trim();
-            if (label.length()) {
-                vec.push_back(label);
-                colors.push_back(labelColor);
-                offsets.push_back(0);
-            }
-            if (value.length()) {
-                pushValueWrapped(value);
-            }
-        }
-        if (vec.empty()) {
-            vec.push_back("No alert data");
-            colors.push_back(valueColor);
-            offsets.push_back(0);
-        }
-        s_noaaRoll.setLines(vec, resetPosition);
-        s_noaaRoll.setLineColors(colors);
-        s_noaaRoll.setLineOffsets(offsets);
-        s_noaaRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
-        s_noaaRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH);
+        // NOAA uses the dedicated paged renderer in display_noaa.cpp.
     }
 }
 
@@ -734,11 +692,7 @@ void InfoScreen::draw() {
         return;
     }
     if (_screenMode == SCREEN_NOAA_ALERT) {
-        int bodyH = InfoScreen::SCREEN_HEIGHT - headerHeight;
-        dma_display->fillRect(0, headerHeight, InfoScreen::SCREEN_WIDTH, bodyH, 0);
-        dma_display->fillRect(0, headerHeight - 1, InfoScreen::SCREEN_WIDTH, 1, 0);
-        s_noaaRoll.draw(*dma_display, 0, headerHeight, bodyH, defaultLineColor);
-        drawHeader();
+        drawNoaaAlertsScreen();
         return;
     }
     // Forecast path: same vertical roll-up animation style as hourly forecast
@@ -917,9 +871,7 @@ void InfoScreen::tick() {
         return;
     }
     if (_screenMode == SCREEN_NOAA_ALERT) {
-        s_noaaRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
-        s_noaaRoll.update();
-        draw();
+        tickNoaaAlertsScreen();
         return;
     }
     if (_screenMode == SCREEN_UDP_FORECAST) {
@@ -990,7 +942,6 @@ void InfoScreen::handleIR(uint32_t code) {
         if (_screenMode == SCREEN_UDP_DATA) return &s_liveRoll;
         if (_screenMode == SCREEN_LIGHTNING) return &s_lightningRoll;
         if (_screenMode == SCREEN_CURRENT) return &s_currentRoll;
-        if (_screenMode == SCREEN_NOAA_ALERT) return &s_noaaRoll;
         return nullptr;
     };
 

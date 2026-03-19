@@ -132,6 +132,7 @@ void tickSkyBriefScreen();
 void drawNoaaAlertsScreen();
 void tickNoaaAlertsScreen();
 void stepNoaaAlertsScreen(int direction);
+void resetNoaaAlertsScreenPager();
 bool stepNoaaAlertSelection(int direction);
 void showSectionHeading(const char* title, const char* subtitle = nullptr, uint16_t ms = 2000);
 void drawWeatherConditionScene(WeatherSceneKind kind);

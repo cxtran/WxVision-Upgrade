@@ -326,6 +326,9 @@ void enterScreen(ScreenMode mode)
 
 void beginScreenTransition(ScreenMode next, unsigned long now)
 {
+    if (currentScreen == SCREEN_NOAA_ALERT && next != SCREEN_NOAA_ALERT)
+        resetNoaaAlertsScreenPager();
+
     hideAllInfoScreens();
 
     const char *title = nullptr;
