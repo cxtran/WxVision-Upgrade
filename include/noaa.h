@@ -2,6 +2,10 @@
 
 #include <Arduino.h>
 
+#ifndef WXV_ENABLE_NOAA_ALERTS
+#define WXV_ENABLE_NOAA_ALERTS 1
+#endif
+
 struct NwsAlert
 {
     String url;
@@ -39,6 +43,7 @@ enum NoaaManualFetchResult
     NOAA_MANUAL_FETCH_BLOCKED
 };
 
+#if WXV_ENABLE_NOAA_ALERTS
 void initNoaaAlerts();
 void tickNoaaAlerts(unsigned long nowMs);
 void showNoaaAlertScreen();
@@ -52,3 +57,18 @@ uint16_t noaaActiveColor();
 size_t noaaAlertCount();
 bool noaaGetAlert(size_t index, NwsAlert &out);
 String noaaLastCheckHHMM();
+#else
+inline void initNoaaAlerts() {}
+inline void tickNoaaAlerts(unsigned long) {}
+inline void showNoaaAlertScreen() {}
+inline void refreshNoaaAlertsForScreenEntry() {}
+inline void notifyNoaaSettingsChanged() {}
+inline NoaaManualFetchResult requestNoaaManualFetch() { return NOAA_MANUAL_FETCH_OFF; }
+inline bool noaaHasActiveAlert() { return false; }
+inline bool noaaHasUnreadAlert() { return false; }
+inline bool noaaFetchInProgress() { return false; }
+inline uint16_t noaaActiveColor() { return 0; }
+inline size_t noaaAlertCount() { return 0; }
+inline bool noaaGetAlert(size_t, NwsAlert &) { return false; }
+inline String noaaLastCheckHHMM() { return "--:--"; }
+#endif

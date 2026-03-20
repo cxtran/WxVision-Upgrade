@@ -1320,10 +1320,15 @@ static void serializeAppDisplaySettings(JsonObject obj)
 
 static void serializeAppWfTempestSettings(JsonObject obj)
 {
+  obj["dataSource"] = dataSource;
   obj["selected"] = (dataSource == DATA_SOURCE_WEATHERFLOW);
-  obj["token"] = "";
+  obj["token"] = wfToken;
   obj["tokenSet"] = !wfToken.isEmpty();
   obj["stationId"] = wfStationId;
+  obj["owmCity"] = owmCity;
+  obj["owmCountryIndex"] = owmCountryIndex;
+  obj["owmCountryCustom"] = owmCountryCustom;
+  obj["owmApiKey"] = owmApiKey;
 }
 
 static void serializeAppForecastUiSettings(JsonObject obj)
@@ -1375,6 +1380,7 @@ static void serializeAppAlarmsSettings(JsonObject obj)
 static void serializeAppNoaaSettings(JsonObject obj)
 {
   obj["enabled"] = noaaAlertsEnabled;
+  obj["lightningEnabled"] = g_appLightningEnabled;
   obj["latitude"] = serialized(String(noaaLatitude, 4));
   obj["longitude"] = serialized(String(noaaLongitude, 4));
 }
@@ -1571,6 +1577,12 @@ static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
   if (dirty.noaa)
   {
     saveNoaaSettings();
+    Preferences appPrefs;
+    if (appPrefs.begin("visionwx", false))
+    {
+      appPrefs.putBool("appLtngEn", g_appLightningEnabled);
+      appPrefs.end();
+    }
     notifyNoaaSettingsChanged();
   }
   if (dirty.dateTime)
@@ -1832,6 +1844,18 @@ static bool applyAppWfTempestSettings(JsonObjectConst obj, JsonObject fieldError
   if (obj.isNull())
     return true;
 
+  if (!obj["dataSource"].isNull())
+  {
+    int value = obj["dataSource"].as<int>();
+    if (value < DATA_SOURCE_OWM || value > DATA_SOURCE_OPEN_METEO)
+      setFieldError(fieldErrors, "dataSource", "must be between 0 and 3");
+    else
+    {
+      setDataSource(value);
+      dirty.device = true;
+      dirty.weather = true;
+    }
+  }
   if (!obj["selected"].isNull())
   {
     if (obj["selected"].as<bool>())
@@ -1853,6 +1877,32 @@ static bool applyAppWfTempestSettings(JsonObjectConst obj, JsonObject fieldError
   if (!obj["stationId"].isNull())
   {
     wfStationId = obj["stationId"].as<String>();
+    dirty.weather = true;
+  }
+  if (!obj["owmCity"].isNull())
+  {
+    owmCity = obj["owmCity"].as<String>();
+    dirty.weather = true;
+  }
+  if (!obj["owmCountryIndex"].isNull())
+  {
+    int value = obj["owmCountryIndex"].as<int>();
+    if (value < 0 || value > 10)
+      setFieldError(fieldErrors, "owmCountryIndex", "must be between 0 and 10");
+    else
+    {
+      owmCountryIndex = value;
+      dirty.weather = true;
+    }
+  }
+  if (!obj["owmCountryCustom"].isNull())
+  {
+    owmCountryCustom = obj["owmCountryCustom"].as<String>();
+    dirty.weather = true;
+  }
+  if (!obj["owmApiKey"].isNull())
+  {
+    owmApiKey = obj["owmApiKey"].as<String>();
     dirty.weather = true;
   }
 
@@ -2085,6 +2135,11 @@ static bool applyAppNoaaSettings(JsonObjectConst obj, JsonObject fieldErrors, Ap
   if (!obj["enabled"].isNull())
   {
     noaaAlertsEnabled = obj["enabled"].as<bool>();
+    dirty.noaa = true;
+  }
+  if (!obj["lightningEnabled"].isNull())
+  {
+    g_appLightningEnabled = obj["lightningEnabled"].as<bool>();
     dirty.noaa = true;
   }
   if (!obj["latitude"].isNull())

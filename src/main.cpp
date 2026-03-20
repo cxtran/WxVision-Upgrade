@@ -67,7 +67,9 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_TEMP_HISTORY,
     SCREEN_PREDICT,
     SCREEN_NOAA_ALERT,
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     SCREEN_LUNAR_LUCK,
+#endif
     };
 const int NUM_INFOSCREENS = sizeof(InfoScreenModes) / sizeof(ScreenMode);
 
@@ -700,7 +702,7 @@ void loop()
     {
         needsClear = true;
         lastScreen = currentScreen;
-        if (currentScreen == SCREEN_LUNAR_LUCK)
+        if (WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK && currentScreen == SCREEN_LUNAR_LUCK)
             resetLunarLuckSectionRotation();
         if (currentScreen == SCREEN_WORLD_CLOCK)
             resetWorldClockScreenState();
@@ -943,7 +945,7 @@ void loop()
 
     // Keep small-text rendering consistent on non-lunar screens.
     // Large text paths explicitly set their own font and remain unchanged.
-    if (dma_display && currentScreen != SCREEN_LUNAR_LUCK)
+    if (dma_display && (!WXV_ENABLE_LUNAR_CALENDAR || !WXV_ENABLE_LUNAR_LUCK || currentScreen != SCREEN_LUNAR_LUCK))
     {
         dma_display->setFont(&Font5x7Uts);
         dma_display->setTextSize(1);
@@ -1238,11 +1240,11 @@ void loop()
         return;
     }
     // --- 6. No modal/menu/keyboard/InfoScreen active: handle IR for menu or screen rotation ---
-    IRCodes::WxKey key = (currentScreen == SCREEN_LUNAR_LUCK)
+    IRCodes::WxKey key = (WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK && currentScreen == SCREEN_LUNAR_LUCK)
                              ? getIRCodeNonBlocking()
                              : getIRCodeDebounced();
     uint32_t code = IRCodes::legacyCodeForKey(key);
-    if (currentScreen == SCREEN_LUNAR_LUCK)
+    if (WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK && currentScreen == SCREEN_LUNAR_LUCK)
     {
         if (handleLunarLuckInput(code))
         {
@@ -1525,7 +1527,7 @@ void loop()
         }
     }
 
-    if (currentScreen == SCREEN_LUNAR_LUCK)
+    if (WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK && currentScreen == SCREEN_LUNAR_LUCK)
     {
         static int lastLunarLuckDay = -1;
         static int lastLunarLuckMonth = -1;

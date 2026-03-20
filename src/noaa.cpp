@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include <time.h>
 #include "settings.h"
 #include "datetimesettings.h"
@@ -11,6 +13,8 @@
 #include "InfoScreen.h"
 #include "screen_manager.h"
 #include "tempest.h"
+
+#if WXV_ENABLE_NOAA_ALERTS
 
 extern InfoScreen noaaAlertScreen;
 
@@ -32,6 +36,8 @@ static unsigned long s_lastFetchAttempt = 0;
 static unsigned long s_nextScheduledFetchMs = 0;
 static unsigned long s_nextFetchAllowedMs = 0;
 static unsigned long s_wifiConnectedSinceMs = 0;
+static StaticSemaphore_t s_noaaStateMutexBuffer;
+static SemaphoreHandle_t s_noaaStateMutex = nullptr;
 
 static constexpr unsigned long NOAA_FETCH_INTERVAL_MS = 15UL * 60UL * 1000UL;
 static constexpr unsigned long NOAA_RETRY_BACKOFF_MS = 30000UL;
@@ -47,12 +53,25 @@ static constexpr uint16_t NOAA_MANUAL_RESULT_HEADING_MS = 1800U;
 static bool parseNoaaIsoUtc(const String &isoRaw, DateTime &utcOut);
 static bool noaaCurrentUtc(DateTime &utcOut);
 
+static SemaphoreHandle_t ensureNoaaStateMutex()
+{
+    if (s_noaaStateMutex == nullptr)
+        s_noaaStateMutex = xSemaphoreCreateMutexStatic(&s_noaaStateMutexBuffer);
+    return s_noaaStateMutex;
+}
+
 static void lockNoaaState()
 {
+    SemaphoreHandle_t mutex = ensureNoaaStateMutex();
+    if (mutex != nullptr)
+        xSemaphoreTake(mutex, portMAX_DELAY);
 }
 
 static void unlockNoaaState()
 {
+    SemaphoreHandle_t mutex = ensureNoaaStateMutex();
+    if (mutex != nullptr)
+        xSemaphoreGive(mutex);
 }
 
 static bool noaaCoordsValid(float lat, float lon)
@@ -89,6 +108,7 @@ static bool resolveNoaaCoordinates(float &lat, float &lon)
 
 static void stampLastCheckNow()
 {
+    String nextValue = "--:--";
     if (rtcReady)
     {
         DateTime utcNow = rtc.now();
@@ -96,32 +116,35 @@ static void stampLastCheckNow()
         DateTime localNow = utcToLocal(utcNow, offsetMinutes);
         char buf[6];
         snprintf(buf, sizeof(buf), "%02d:%02d", localNow.hour(), localNow.minute());
-        s_lastCheckHHMM = String(buf);
-        return;
+        nextValue = String(buf);
     }
-
-    time_t raw = time(nullptr);
-    if (raw > 0)
+    else
     {
-        struct tm *ti = localtime(&raw);
-        if (ti != nullptr)
+        time_t raw = time(nullptr);
+        if (raw > 0)
         {
-            char buf[6];
-            snprintf(buf, sizeof(buf), "%02d:%02d", ti->tm_hour, ti->tm_min);
-            s_lastCheckHHMM = String(buf);
-            return;
+            struct tm *ti = localtime(&raw);
+            if (ti != nullptr)
+            {
+                char buf[6];
+                snprintf(buf, sizeof(buf), "%02d:%02d", ti->tm_hour, ti->tm_min);
+                nextValue = String(buf);
+            }
         }
     }
-
-    s_lastCheckHHMM = "--:--";
+    lockNoaaState();
+    s_lastCheckHHMM = nextValue;
+    unlockNoaaState();
 }
 
 static void clearAlertState()
 {
+    lockNoaaState();
     s_hasAlert = false;
     s_alertCount = 0;
     s_alerts.clear();
     s_activeAlertId = "";
+    unlockNoaaState();
 }
 
 static const char *noaaAlertEventText(const NwsAlert &alert)
@@ -152,12 +175,23 @@ static bool noaaAlertIsActiveNow(const NwsAlert &alert, const DateTime &nowUtc)
 
 static void pruneExpiredCachedAlerts()
 {
+    bool shouldShowCleared = false;
+    bool shouldShowRemaining = false;
+    size_t remainingCount = 0;
+
+    lockNoaaState();
     if (!s_hasAlert || s_alertCount == 0)
+    {
+        unlockNoaaState();
         return;
+    }
 
     DateTime nowUtc;
     if (!noaaCurrentUtc(nowUtc))
+    {
+        unlockNoaaState();
         return;
+    }
 
     std::vector<NwsAlert> activeAlerts;
     activeAlerts.reserve(s_alerts.size());
@@ -168,7 +202,10 @@ static void pruneExpiredCachedAlerts()
     }
 
     if (activeAlerts.size() == s_alerts.size())
+    {
+        unlockNoaaState();
         return;
+    }
 
     const bool hadUnread = s_unreadAlert;
     const size_t previousCount = s_alertCount;
@@ -183,13 +220,22 @@ static void pruneExpiredCachedAlerts()
     if (!s_suppressClearHeading)
     {
         if (!s_hasAlert && !hadUnread)
-            queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
+            shouldShowCleared = true;
         else if (previousCount > s_alertCount && s_hasAlert)
-            queueTemporaryAlertHeading("ALERT CLEARED",
-                                       NOAA_MANUAL_RESULT_HEADING_MS,
-                                       0,
-                                       (String(s_alertCount) + " REMAIN").c_str());
+        {
+            shouldShowRemaining = true;
+            remainingCount = s_alertCount;
+        }
     }
+    unlockNoaaState();
+
+    if (shouldShowCleared)
+        queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
+    else if (shouldShowRemaining)
+        queueTemporaryAlertHeading("ALERT CLEARED",
+                                   NOAA_MANUAL_RESULT_HEADING_MS,
+                                   0,
+                                   (String(remainingCount) + " REMAIN").c_str());
 }
 
 static void markNoaaAlertRead()
@@ -221,9 +267,14 @@ static uint16_t severityColor(const String &severity)
 
 static bool snapshotPrimaryAlert(NwsAlert &out)
 {
+    lockNoaaState();
     if (!s_hasAlert || s_alertCount == 0)
+    {
+        unlockNoaaState();
         return false;
+    }
     out = s_alerts.front();
+    unlockNoaaState();
     return true;
 }
 
@@ -235,6 +286,9 @@ static void applyNoaaLines(bool forceReset)
     bool useColors = false;
     NwsAlert primary;
     bool havePrimary = false;
+    bool fetchInProgress = false;
+    bool hasAlert = false;
+    String lastCheck;
 
     auto push = [&](const String &label, const String &value, uint16_t color) {
         if (count >= INFOSCREEN_MAX_LINES)
@@ -246,8 +300,11 @@ static void applyNoaaLines(bool forceReset)
         ++count;
     };
 
-    lockNoaaState();
     havePrimary = snapshotPrimaryAlert(primary);
+    lockNoaaState();
+    fetchInProgress = s_fetchInProgress;
+    hasAlert = s_hasAlert;
+    lastCheck = s_lastCheckHHMM;
     unlockNoaaState();
 
     if (!noaaAlertsEnabled)
@@ -256,13 +313,13 @@ static void applyNoaaLines(bool forceReset)
         push("Severity", "--", 0);
         push("", "Enable NOAA alerts in menu.", 0);
     }
-    else if (s_fetchInProgress)
+    else if (fetchInProgress)
     {
         push("", "Get Alert info ...", 0);
         push("Status", "Checking relay", 0);
-        push("Last", s_lastCheckHHMM, 0);
+        push("Last", lastCheck, 0);
     }
-    else if (!s_hasAlert || !havePrimary)
+    else if (!hasAlert || !havePrimary)
     {
         push("", "No Active Alert", 0);
         push("Severity", "None", 0);
@@ -500,11 +557,18 @@ static bool parseRelayAlertsPayload(const String &payload)
 
     if (alerts.size() == 0)
     {
-        const bool hadAlert = s_hasAlert;
+        bool hadAlert = false;
+        bool suppressClearHeading = false;
+        lockNoaaState();
+        hadAlert = s_hasAlert;
+        suppressClearHeading = s_suppressClearHeading;
+        unlockNoaaState();
         clearAlertState();
+        lockNoaaState();
         s_unreadAlert = false;
         s_screenDirty = true;
-        if (hadAlert && !s_suppressClearHeading)
+        unlockNoaaState();
+        if (hadAlert && !suppressClearHeading)
             queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
         Serial.println("[NOAA] Parsed 0 alert(s)");
         return true;
@@ -547,51 +611,78 @@ static bool parseRelayAlertsPayload(const String &payload)
     if (parsedAlerts.empty())
     {
         clearAlertState();
+        lockNoaaState();
         s_unreadAlert = false;
         s_screenDirty = true;
+        unlockNoaaState();
         Serial.println("[NOAA] Parsed 0 alert(s)");
         return true;
     }
 
-    const String previousAlertId = s_activeAlertId;
-    const size_t previousCount = s_alertCount;
     std::sort(parsedAlerts.begin(), parsedAlerts.end(), noaaAlertPriorityLess);
+    String previousAlertId;
+    String activeAlertId;
+    String activeEvent;
+    String activeSeverity;
+    String activeExpires;
+    String lastReadAlertId;
+    size_t alertCount = 0;
+    size_t previousCount = 0;
+    bool screenActive = noaaAlertScreen.isActive();
+    bool suppressClearHeading = false;
+    bool showSingleAlert = false;
+    bool showAlertCount = false;
+
+    lockNoaaState();
+    previousAlertId = s_activeAlertId;
+    previousCount = s_alertCount;
+    lastReadAlertId = s_lastReadAlertId;
+    suppressClearHeading = s_suppressClearHeading;
     s_alerts = parsedAlerts;
     s_alertCount = s_alerts.size();
     s_hasAlert = true;
     s_activeAlertId = s_alerts.front().id;
     s_screenDirty = true;
+    activeAlertId = s_activeAlertId;
+    activeEvent = s_alerts.front().event;
+    activeSeverity = s_alerts.front().severity;
+    activeExpires = s_alerts.front().expires;
+    alertCount = s_alertCount;
 
-    if (noaaAlertScreen.isActive())
+    if (screenActive)
     {
         s_unreadAlert = false;
         s_lastReadAlertId = s_activeAlertId;
     }
-    else if (s_activeAlertId.length() > 0 && s_activeAlertId != previousAlertId && s_activeAlertId != s_lastReadAlertId)
+    else if (s_activeAlertId.length() > 0 && s_activeAlertId != previousAlertId && s_activeAlertId != lastReadAlertId)
     {
         s_unreadAlert = true;
-        if (s_alertCount > 1)
-            queueTemporaryAlertHeading("WEATHER ALERTS",
-                                       NOAA_ALERT_HEADING_MS,
-                                       noaaAlertSignature(s_activeAlertId),
-                                       (String(s_alertCount) + " ACTIVE").c_str());
-        else
-            queueTemporaryAlertHeading("WEATHER ALERT", NOAA_ALERT_HEADING_MS, noaaAlertSignature(s_activeAlertId), noaaAlertEventText(s_alerts.front()));
+        showAlertCount = (s_alertCount > 1);
+        showSingleAlert = !showAlertCount;
     }
-    else if (!noaaAlertScreen.isActive() && s_alertCount > previousCount && !s_suppressClearHeading)
+    else if (!screenActive && s_alertCount > previousCount && !suppressClearHeading)
     {
         s_unreadAlert = true;
+        showAlertCount = true;
+    }
+    unlockNoaaState();
+
+    if (showAlertCount)
         queueTemporaryAlertHeading("WEATHER ALERTS",
                                    NOAA_ALERT_HEADING_MS,
-                                   noaaAlertSignature(s_activeAlertId),
-                                   (String(s_alertCount) + " ACTIVE").c_str());
-    }
+                                   noaaAlertSignature(activeAlertId),
+                                   (String(alertCount) + " ACTIVE").c_str());
+    else if (showSingleAlert)
+        queueTemporaryAlertHeading("WEATHER ALERT",
+                                   NOAA_ALERT_HEADING_MS,
+                                   noaaAlertSignature(activeAlertId),
+                                   activeEvent.length() ? activeEvent.c_str() : "NOAA ALERT");
 
     Serial.printf("[NOAA] Parsed relay alert event=%s severity=%s expires=%s count=%u stale=%d\n",
-                  s_alerts.front().event.c_str(),
-                  s_alerts.front().severity.c_str(),
-                  s_alerts.front().expires.c_str(),
-                  static_cast<unsigned>(s_alertCount),
+                  activeEvent.c_str(),
+                  activeSeverity.c_str(),
+                  activeExpires.c_str(),
+                  static_cast<unsigned>(alertCount),
                   static_cast<int>(relayTopLevelBool(doc, "stale", "s", false)));
     return true;
 }
@@ -650,12 +741,17 @@ static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectF
 
 static void fetchNoaaAlertSummarySync(bool preserveSchedule)
 {
-    bool forced = s_forceImmediateFetch;
+    bool forced = false;
+    unsigned long savedLastFetchAttempt = 0;
+    unsigned long savedNextScheduledFetchMs = 0;
+    unsigned long savedNextFetchAllowedMs = 0;
+    lockNoaaState();
+    forced = s_forceImmediateFetch;
     s_forceImmediateFetch = false;
-
-    const unsigned long savedLastFetchAttempt = s_lastFetchAttempt;
-    const unsigned long savedNextScheduledFetchMs = s_nextScheduledFetchMs;
-    const unsigned long savedNextFetchAllowedMs = s_nextFetchAllowedMs;
+    savedLastFetchAttempt = s_lastFetchAttempt;
+    savedNextScheduledFetchMs = s_nextScheduledFetchMs;
+    savedNextFetchAllowedMs = s_nextFetchAllowedMs;
+    unlockNoaaState();
     const unsigned long fetchStartMs = millis();
 
     float lat = NAN;
@@ -665,62 +761,93 @@ static void fetchNoaaAlertSummarySync(bool preserveSchedule)
         Serial.println("[NOAA] Missing coordinates (set device location or timezone)");
         if (preserveSchedule)
         {
+            lockNoaaState();
             s_lastFetchAttempt = savedLastFetchAttempt;
             s_nextScheduledFetchMs = savedNextScheduledFetchMs;
             s_nextFetchAllowedMs = savedNextFetchAllowedMs;
+            unlockNoaaState();
         }
+        lockNoaaState();
         s_fetchInProgress = false;
         if (forced)
             s_screenDirty = true;
+        unlockNoaaState();
         return;
     }
 
     if (!preserveSchedule)
+    {
+        lockNoaaState();
         s_lastFetchAttempt = fetchStartMs;
+        unlockNoaaState();
+    }
     stampLastCheckNow();
+    lockNoaaState();
     s_suppressClearHeading = preserveSchedule;
+    unlockNoaaState();
 
     bool connectFailed = false;
     const bool fetchOk = fetchAndParseNoaaSummaryPayload(lat, lon, &connectFailed);
+    bool hasAlert = false;
+    size_t alertCount = 0;
+    String activeAlertId;
+    String activeEvent;
+    lockNoaaState();
     s_suppressClearHeading = false;
+    hasAlert = s_hasAlert;
+    alertCount = s_alertCount;
+    if (hasAlert && !s_alerts.empty())
+    {
+        activeAlertId = s_activeAlertId;
+        activeEvent = s_alerts.front().event;
+    }
+    unlockNoaaState();
     if (fetchOk)
     {
+        lockNoaaState();
         s_nextFetchAllowedMs = 0;
         if (!preserveSchedule)
             s_nextScheduledFetchMs = fetchStartMs + NOAA_FETCH_INTERVAL_MS;
-        else if (!s_hasAlert)
+        unlockNoaaState();
+        if (preserveSchedule && !hasAlert)
             queueTemporaryAlertHeading("NO ACTIVE ALERT", NOAA_MANUAL_RESULT_HEADING_MS);
-        else
+        else if (preserveSchedule)
         {
-            if (s_alertCount > 1)
+            if (alertCount > 1)
                 queueTemporaryAlertHeading("ACTIVE ALERTS",
                                            NOAA_MANUAL_RESULT_HEADING_MS,
-                                           noaaAlertSignature(s_activeAlertId),
-                                           (String(s_alertCount) + " TOTAL").c_str());
+                                           noaaAlertSignature(activeAlertId),
+                                           (String(alertCount) + " TOTAL").c_str());
             else
                 queueTemporaryAlertHeading("WEATHER ALERT",
                                            NOAA_MANUAL_RESULT_HEADING_MS,
-                                           noaaAlertSignature(s_activeAlertId),
-                                           noaaAlertEventText(s_alerts.front()));
+                                           noaaAlertSignature(activeAlertId),
+                                           activeEvent.length() ? activeEvent.c_str() : "NOAA ALERT");
         }
     }
     else
     {
         Serial.println("[NOAA] Failed to fetch payload");
+        lockNoaaState();
         s_nextFetchAllowedMs = millis() + (connectFailed ? NOAA_CONNECT_FAIL_BACKOFF_MS : NOAA_RETRY_BACKOFF_MS);
         if (forced)
             s_screenDirty = true;
+        unlockNoaaState();
     }
 
     if (preserveSchedule)
     {
+        lockNoaaState();
         s_lastFetchAttempt = savedLastFetchAttempt;
         s_nextScheduledFetchMs = savedNextScheduledFetchMs;
         s_nextFetchAllowedMs = savedNextFetchAllowedMs;
+        unlockNoaaState();
     }
 
+    lockNoaaState();
     s_fetchInProgress = false;
     s_screenDirty = true;
+    unlockNoaaState();
 }
 
 static void fetchNoaaAlertSummarySync()
@@ -730,9 +857,10 @@ static void fetchNoaaAlertSummarySync()
 
 void initNoaaAlerts()
 {
+    ensureNoaaStateMutex();
+    lockNoaaState();
     s_prevEnabled = noaaAlertsEnabled;
     s_screenDirty = true;
-    clearAlertState();
     s_lastCheckHHMM = "--:--";
     s_lastFetchAttempt = 0;
     s_nextScheduledFetchMs = 0;
@@ -740,19 +868,28 @@ void initNoaaAlerts()
     s_unreadAlert = false;
     s_lastReadAlertId = "";
     s_forceImmediateFetch = false;
+    unlockNoaaState();
+    clearAlertState();
     applyNoaaLines(true);
 }
 
 void tickNoaaAlerts(unsigned long nowMs)
 {
     const bool wifiConnected = (WiFi.status() == WL_CONNECTED);
-    if (wifiConnected != s_prevWifiConnected)
+    bool prevWifiConnected = false;
+    bool forceImmediateFetch = false;
+    lockNoaaState();
+    prevWifiConnected = s_prevWifiConnected;
+    forceImmediateFetch = s_forceImmediateFetch;
+    unlockNoaaState();
+    if (wifiConnected != prevWifiConnected)
     {
+        lockNoaaState();
         s_prevWifiConnected = wifiConnected;
         if (wifiConnected)
         {
             s_wifiConnectedSinceMs = nowMs;
-            if (s_forceImmediateFetch)
+            if (forceImmediateFetch)
             {
                 Serial.println("[NOAA] WiFi connected, arming immediate NOAA fetch");
                 s_nextFetchAllowedMs = 0;
@@ -767,56 +904,96 @@ void tickNoaaAlerts(unsigned long nowMs)
             s_wifiConnectedSinceMs = 0;
             Serial.println("[NOAA] WiFi disconnected, delaying NOAA fetch");
         }
+        unlockNoaaState();
     }
 
-    if (s_prevEnabled != noaaAlertsEnabled)
+    bool prevEnabled = false;
+    lockNoaaState();
+    prevEnabled = s_prevEnabled;
+    unlockNoaaState();
+    if (prevEnabled != noaaAlertsEnabled)
     {
+        lockNoaaState();
         s_prevEnabled = noaaAlertsEnabled;
         s_screenDirty = true;
         if (noaaAlertsEnabled)
             s_forceImmediateFetch = true;
+        unlockNoaaState();
     }
 
     pruneExpiredCachedAlerts();
 
-    if (s_screenDirty)
+    bool screenDirty = false;
+    lockNoaaState();
+    screenDirty = s_screenDirty;
+    unlockNoaaState();
+    if (screenDirty)
     {
         applyNoaaLines(false);
+        lockNoaaState();
         s_screenDirty = false;
+        unlockNoaaState();
     }
 
     if (!noaaAlertsEnabled)
     {
+        lockNoaaState();
         s_manualFetchPending = false;
+        unlockNoaaState();
         return;
     }
 
-    if (s_manualFetchPending)
+    bool manualFetchPending = false;
+    lockNoaaState();
+    manualFetchPending = s_manualFetchPending;
+    unlockNoaaState();
+    if (manualFetchPending)
     {
+        lockNoaaState();
         s_manualFetchPending = false;
         s_fetchInProgress = true;
         s_screenDirty = true;
+        unlockNoaaState();
         fetchNoaaAlertSummarySync(true);
         return;
     }
 
     if (!wifiConnected)
         return;
-    if (s_wifiConnectedSinceMs == 0 || (nowMs - s_wifiConnectedSinceMs) < NOAA_WIFI_STABLE_MS)
+
+    forceImmediateFetch = false;
+    unsigned long nextScheduledFetchMs = 0;
+    unsigned long nextFetchAllowedMs = 0;
+    unsigned long wifiConnectedSinceMs = 0;
+    lockNoaaState();
+    forceImmediateFetch = s_forceImmediateFetch;
+    nextScheduledFetchMs = s_nextScheduledFetchMs;
+    nextFetchAllowedMs = s_nextFetchAllowedMs;
+    wifiConnectedSinceMs = s_wifiConnectedSinceMs;
+    unlockNoaaState();
+    if (wifiConnectedSinceMs == 0 || (nowMs - wifiConnectedSinceMs) < NOAA_WIFI_STABLE_MS)
         return;
-    if (s_nextFetchAllowedMs != 0 && nowMs < s_nextFetchAllowedMs)
+    if (nextFetchAllowedMs != 0 && nowMs < nextFetchAllowedMs)
         return;
 
-    if (!s_forceImmediateFetch)
+    if (!forceImmediateFetch)
     {
-        if (s_nextScheduledFetchMs == 0)
-            s_nextScheduledFetchMs = nowMs + NOAA_FETCH_INTERVAL_MS;
-        if (static_cast<long>(nowMs - s_nextScheduledFetchMs) < 0)
+        if (nextScheduledFetchMs == 0)
+        {
+            lockNoaaState();
+            if (s_nextScheduledFetchMs == 0)
+                s_nextScheduledFetchMs = nowMs + NOAA_FETCH_INTERVAL_MS;
+            nextScheduledFetchMs = s_nextScheduledFetchMs;
+            unlockNoaaState();
+        }
+        if (static_cast<long>(nowMs - nextScheduledFetchMs) < 0)
             return;
     }
 
+    lockNoaaState();
     s_fetchInProgress = true;
     s_screenDirty = true;
+    unlockNoaaState();
     fetchNoaaAlertSummarySync();
 }
 
@@ -834,7 +1011,9 @@ void showNoaaAlertScreen()
 void refreshNoaaAlertsForScreenEntry()
 {
     markNoaaAlertRead();
+    lockNoaaState();
     s_screenDirty = true;
+    unlockNoaaState();
     resetNoaaAlertsScreenPager();
     drawNoaaAlertsScreen();
 }
@@ -842,9 +1021,9 @@ void refreshNoaaAlertsForScreenEntry()
 void notifyNoaaSettingsChanged()
 {
     const bool keepNoaaScreen = (currentScreen == SCREEN_NOAA_ALERT) && noaaAlertsEnabled;
+    lockNoaaState();
     s_forceImmediateFetch = noaaAlertsEnabled;
     s_screenDirty = true;
-    clearAlertState();
     s_lastFetchAttempt = 0;
     s_nextScheduledFetchMs = 0;
     s_nextFetchAllowedMs = 0;
@@ -853,6 +1032,8 @@ void notifyNoaaSettingsChanged()
     s_lastReadAlertId = "";
     if (noaaAlertsEnabled)
         s_nextFetchAllowedMs = 0;
+    unlockNoaaState();
+    clearAlertState();
 
     ensureCurrentScreenAllowed();
     if (keepNoaaScreen && currentScreen == SCREEN_NOAA_ALERT)
@@ -863,13 +1044,21 @@ NoaaManualFetchResult requestNoaaManualFetch()
 {
     if (!noaaAlertsEnabled)
         return NOAA_MANUAL_FETCH_OFF;
+    lockNoaaState();
     if (s_fetchInProgress || s_manualFetchPending)
+    {
+        unlockNoaaState();
         return NOAA_MANUAL_FETCH_BUSY;
+    }
     if (WiFi.status() != WL_CONNECTED)
+    {
+        unlockNoaaState();
         return NOAA_MANUAL_FETCH_BLOCKED;
+    }
     s_fetchInProgress = true;
     s_screenDirty = true;
     s_manualFetchPending = true;
+    unlockNoaaState();
     return NOAA_MANUAL_FETCH_STARTED;
 }
 
@@ -937,3 +1126,5 @@ String noaaLastCheckHHMM()
     unlockNoaaState();
     return out;
 }
+
+#endif

@@ -28,6 +28,8 @@ bool screenIsAllowed(ScreenMode mode)
         return false;
     case SCREEN_NOAA_ALERT:
         return noaaAlertsEnabled;
+    case SCREEN_LUNAR_LUCK:
+        return WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK;
     default:
         return true;
     }

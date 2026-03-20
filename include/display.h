@@ -13,6 +13,18 @@
 #include "time.h"
 #include <RTClib.h>
 
+#ifndef WXV_ENABLE_LUNAR_CALENDAR
+#define WXV_ENABLE_LUNAR_CALENDAR 1
+#endif
+
+#ifndef WXV_ENABLE_LUNAR_LUCK
+#define WXV_ENABLE_LUNAR_LUCK WXV_ENABLE_LUNAR_CALENDAR
+#endif
+
+#if WXV_ENABLE_LUNAR_LUCK && !WXV_ENABLE_LUNAR_CALENDAR
+#error "WXV_ENABLE_LUNAR_LUCK requires WXV_ENABLE_LUNAR_CALENDAR"
+#endif
+
 // === Panel Config ===
 #define PANEL_RES_X 64
 #define PANEL_RES_Y 32

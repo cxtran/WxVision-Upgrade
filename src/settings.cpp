@@ -4,6 +4,7 @@
 #include "units.h"   // <-- add this
 #include "display.h"
 #include "default_values.h"
+#include "noaa.h"
 
 // Preferences storage object
 Preferences prefs;
@@ -125,6 +126,13 @@ int timeZoneOffsetMinutes = 0;
 int dateFormat = wxv::defaults::kDefaults.dateFormatStorage;
 int timeFormat24h = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
 
+static void applyNoaaBuildDefaults()
+{
+#if !WXV_ENABLE_NOAA_ALERTS
+    noaaAlertsEnabled = false;
+#endif
+}
+
 void loadSettings() {
     prefs.begin("visionwx", true);
 
@@ -141,6 +149,7 @@ void loadSettings() {
     noaaAlertsEnabled = prefs.getBool("noaaEnabled", wxv::defaults::kDefaults.noaaAlertsEnabled);
     noaaLatitude = prefs.getFloat("noaaLat", wxv::defaults::kDefaults.noaaLatitude);
     noaaLongitude = prefs.getFloat("noaaLon", wxv::defaults::kDefaults.noaaLongitude);
+    applyNoaaBuildDefaults();
     for (int i = 0; i < 3; ++i)
     {
         String idx = String(i);
@@ -327,6 +336,7 @@ void saveAlarmSettings() {
 
 void saveNoaaSettings() {
     prefs.begin("visionwx", false);
+    applyNoaaBuildDefaults();
     prefs.putBool("noaaEnabled", noaaAlertsEnabled);
     prefs.putFloat("noaaLat", noaaLatitude);
     prefs.putFloat("noaaLon", noaaLongitude);

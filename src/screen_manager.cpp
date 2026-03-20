@@ -245,10 +245,12 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         title = "Sky Brief";
         subtitle = "Summary";
         return true;
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:
         title = "Lunar Calendar";
         subtitle = "Luck";
         return true;
+#endif
     default:
         return false;
     }
@@ -300,9 +302,11 @@ void enterScreen(ScreenMode mode)
         resetPredictionRenderState();
         drawPredictionScreen();
         break;
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:
         drawLunarLuckScreen();
         break;
+#endif
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
         break;
@@ -412,9 +416,11 @@ void renderScreenContents(ScreenMode mode)
     case SCREEN_SKY_BRIEF:
         drawSkyBriefScreen();
         break;
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:
         drawLunarLuckScreen();
         break;
+#endif
     default:
         break;
     }
