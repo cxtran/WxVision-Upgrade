@@ -29,6 +29,7 @@
 #include "app_state.h"
 #include "weather_provider.h"
 #include "screen_manager.h"
+#include "generated_web_assets.h"
 #include <new>
 
 static AppState &app = appState();
@@ -127,6 +128,34 @@ volatile bool g_ntpSyncLastOk = false;
 
 bool g_wifiScanPrimed = false;
 bool g_wifiScanIncludeHidden = false;
+
+const web_assets::EmbeddedAsset *findEmbeddedAsset(const char *path)
+{
+  for (size_t i = 0; i < web_assets::kAssetCount; ++i)
+  {
+    if (strcmp(web_assets::kAssets[i].path, path) == 0)
+      return &web_assets::kAssets[i];
+  }
+  return nullptr;
+}
+
+void sendEmbeddedAsset(AsyncWebServerRequest *req, const web_assets::EmbeddedAsset &asset)
+{
+  AsyncWebServerResponse *res = req->beginResponse(200, asset.contentType, asset.data, asset.size);
+  res->addHeader("Cache-Control", asset.cacheControl);
+  req->send(res);
+}
+
+void sendEmbeddedAssetByPath(AsyncWebServerRequest *req, const char *path)
+{
+  const web_assets::EmbeddedAsset *asset = findEmbeddedAsset(path);
+  if (!asset)
+  {
+    req->send(404, "text/plain", "Not found");
+    return;
+  }
+  sendEmbeddedAsset(req, *asset);
+}
 } // namespace
 
 static bool queueNtpSyncTask();
@@ -2683,8 +2712,7 @@ void setupWebServer() {
     return;
   }
   if (!SPIFFS.begin(true)) {
-    Serial.println("SPIFFS Mount Failed!");
-    return;
+    Serial.println("SPIFFS Mount Failed! Continuing without filesystem-backed web assets.");
   }
 
   Preferences appPrefs;
@@ -2876,16 +2904,29 @@ void setupWebServer() {
 
   // Browser UI registration
 #if WEB_UI_MODE == WEB_UI_FULL
-  // Static files with dev-friendly caching
-  server.serveStatic("/", SPIFFS, "/").setDefaultFile("index.html").setCacheControl("max-age=86400, public");
-  server.serveStatic("/config.html", SPIFFS, "/config.html").setCacheControl("no-cache");
-  server.serveStatic("/style.css",   SPIFFS, "/style.css").setCacheControl("max-age=86400, public");
-  server.serveStatic("/script.js",   SPIFFS, "/script.js").setCacheControl("max-age=86400, public");
-  server.serveStatic("/sensor-log.json", SPIFFS, "/sensor_log.bin"); // fallback if needed
-
-  // Explicit route for config.html
-  server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest* req){
-    req->send(SPIFFS, "/config.html", "text/html");
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/index.html");
+  });
+  server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/index.html");
+  });
+  server.on("/config.html", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/config.html");
+  });
+  server.on("/status.html", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/status.html");
+  });
+  server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/ota.html");
+  });
+  server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/style.css");
+  });
+  server.on("/script.js", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/script.js");
+  });
+  server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/ota.html");
   });
 #elif WEB_UI_MODE == WEB_UI_MINIMAL
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -4468,10 +4509,6 @@ void setupWebServer() {
     status += "<p>Time: " + String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second) + "</p>";
     status += "<p><a href='/ota'>Start OTA</a> | <a href='/reboot'>Reboot</a> | <a href='/'>Settings</a></p></body></html>";
     req->send(200, "text/html", status);
-  });
-
-  server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
-    req->send(SPIFFS, "/ota.html", "text/html");
   });
 #endif
 

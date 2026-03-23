@@ -6,6 +6,7 @@
 #include "settings.h"
 #include "units.h"
 #include "alarm.h"
+#include "ui_theme.h"
 
 namespace
 {
@@ -85,14 +86,14 @@ uint16_t inactiveDimColor()
 
 uint16_t cityNameColor()
 {
-    return (theme == 1) ? dma_display->color565(120, 120, 180)
-                        : dma_display->color565(180, 220, 255);
+    return (theme == 1) ? dma_display->color565(170, 170, 255)
+                        : dma_display->color565(235, 248, 255);
 }
 
 uint16_t weatherTextColor()
 {
-    return (theme == 1) ? dma_display->color565(225, 225, 210)
-                        : dma_display->color565(245, 240, 225);
+    return (theme == 1) ? dma_display->color565(150, 150, 140)
+                        : dma_display->color565(205, 198, 182);
 }
 
 int textWidth(const char *text)
@@ -351,6 +352,8 @@ void drawBannerTopLine(unsigned long nowMs)
     dma_display->fillRect(0, 0, PANEL_RES_X, 8, myBLACK);
     dma_display->setFont(&Font5x7Uts);
     dma_display->setTextSize(1);
+    const uint16_t dividerColor = ui_theme::isNightTheme() ? ui_theme::monoUnderline()
+                                                           : ui_theme::infoUnderlineDay();
 
     if (s_phase == BannerPhase::ScrollWeather)
     {
@@ -375,6 +378,7 @@ void drawBannerTopLine(unsigned long nowMs)
             dma_display->setCursor(s_scrollX, 0);
             dma_display->print(s_weatherText);
         }
+        dma_display->drawFastHLine(0, 7, PANEL_RES_X, dividerColor);
         return;
     }
 
@@ -404,6 +408,7 @@ void drawBannerTopLine(unsigned long nowMs)
     }
     dma_display->setCursor(cityX, 0);
     dma_display->print(s_cityText);
+    dma_display->drawFastHLine(0, 7, PANEL_RES_X, dividerColor);
 }
 
 void drawSegmentedPageBar()
