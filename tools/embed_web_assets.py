@@ -17,6 +17,10 @@ ASSETS = [
 ]
 
 
+def asset_paths():
+    return [DATA_DIR / filename for filename, _, _ in ASSETS]
+
+
 def symbol_name(filename: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in filename)
 
@@ -74,7 +78,18 @@ def generate_header() -> None:
     lines.append("static constexpr size_t kAssetCount = sizeof(kAssets) / sizeof(kAssets[0]);\n")
     lines.append("} // namespace web_assets\n")
 
-    OUTPUT.write_text("".join(lines), encoding="utf-8", newline="\n")
+    content = "".join(lines)
+    if OUTPUT.exists():
+        existing = OUTPUT.read_text(encoding="utf-8")
+        if existing == content:
+            return
+    OUTPUT.write_text(content, encoding="utf-8", newline="\n")
 
 
 generate_header()
+
+# Force recompilation of the web server translation unit whenever embedded
+# assets change. Without this direct dependency, SCons can miss the header
+# rewrite until the following build invocation.
+web_object = Path(env.subst("$BUILD_DIR")) / "src" / "web.cpp.o"
+env.Depends(str(web_object), [str(path) for path in asset_paths()] + [str(OUTPUT)])

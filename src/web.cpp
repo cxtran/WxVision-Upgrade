@@ -23,6 +23,7 @@
 #include "wifisettings.h"
 #include "default_values.h"
 #include "notifications.h"
+#include "alarm.h"
 #include "menu.h"
 #include "noaa.h"
 #include "worldtime.h"
@@ -1124,6 +1125,17 @@ struct AppSettingsDirtyFlags
   bool worldTime = false;
 };
 
+static constexpr size_t kAppSettingsSectionCount = 12;
+static const char *const kAppSettingsSections[kAppSettingsSectionCount] = {
+    "device", "units", "display", "wf-tempest", "forecast-ui", "calibration",
+    "alarms", "noaa", "location", "datetime", "world-time", "sound"};
+
+struct AppSettingsSnapshot
+{
+  const char *section = nullptr;
+  String payload;
+};
+
 static const char *tempUnitName(TempUnit value)
 {
   return (value == TempUnit::F) ? "F" : "C";
@@ -1504,10 +1516,7 @@ static void serializeAppSettingsSection(JsonObject root, const char *section)
 
 static bool isKnownAppSettingsSection(const char *section)
 {
-  static const char *const kSections[] = {
-      "device", "units", "display", "wf-tempest", "forecast-ui", "calibration",
-      "alarms", "noaa", "location", "datetime", "world-time", "sound"};
-  for (const char *name : kSections)
+  for (const char *name : kAppSettingsSections)
   {
     if (strcmp(name, section) == 0)
       return true;
@@ -1547,10 +1556,7 @@ static String buildAppSettingsJson(const char *section = nullptr)
   }
   else
   {
-    static const char *const kSections[] = {
-        "device", "units", "display", "wf-tempest", "forecast-ui", "calibration",
-        "alarms", "noaa", "location", "datetime", "world-time", "sound"};
-    for (const char *name : kSections)
+    for (const char *name : kAppSettingsSections)
       serializeAppSettingsSection(doc.to<JsonObject>(), name);
   }
 
@@ -1573,7 +1579,7 @@ static void sendAppValidationError(AsyncWebServerRequest *req, JsonObject fieldE
   req->send(400, "application/json", payload);
 }
 
-static void broadcastAppSettingsUpdate(const char *section)
+void broadcastAppSettingsUpdate(const char *section)
 {
   if (g_appWs.count() == 0)
     return;
@@ -1586,6 +1592,52 @@ static void broadcastAppSettingsUpdate(const char *section)
   String payload;
   serializeJson(doc, payload);
   g_appWs.textAll(payload);
+}
+
+static AppSettingsSnapshot captureAppSettingsSnapshot(const char *section)
+{
+  AppSettingsSnapshot snapshot;
+  snapshot.section = section;
+  snapshot.payload = buildAppSettingsJson(section);
+  return snapshot;
+}
+
+static size_t collectChangedAppSettingsSections(const AppSettingsSnapshot *snapshots,
+                                                size_t snapshotCount,
+                                                const char **changedSections,
+                                                size_t changedCapacity)
+{
+  size_t changedCount = 0;
+  for (size_t i = 0; i < snapshotCount; ++i)
+  {
+    if (!snapshots[i].section || changedCount >= changedCapacity)
+      break;
+
+    if (buildAppSettingsJson(snapshots[i].section) != snapshots[i].payload)
+      changedSections[changedCount++] = snapshots[i].section;
+  }
+  return changedCount;
+}
+
+static bool broadcastChangedAppSettingsSections(const AppSettingsSnapshot *snapshots,
+                                                size_t snapshotCount,
+                                                bool collapseMultipleToAll = true)
+{
+  const char *changed[kAppSettingsSectionCount] = {};
+  size_t changedCount = collectChangedAppSettingsSections(
+      snapshots, snapshotCount, changed, kAppSettingsSectionCount);
+  if (changedCount == 0)
+    return false;
+
+  if (collapseMultipleToAll && changedCount > 1)
+  {
+    broadcastAppSettingsUpdate("all");
+    return true;
+  }
+
+  for (size_t i = 0; i < changedCount; ++i)
+    broadcastAppSettingsUpdate(changed[i]);
+  return true;
 }
 
 static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
@@ -1602,7 +1654,10 @@ static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
   if (dirty.calibration)
     saveCalibrationSettings();
   if (dirty.alarms)
+  {
     saveAlarmSettings();
+    notifyAlarmSettingsChanged();
+  }
   if (dirty.noaa)
   {
     saveNoaaSettings();
@@ -3312,11 +3367,13 @@ void setupWebServer() {
 
   server.on("/action/quick-restore", HTTP_POST, [](AsyncWebServerRequest *req) {
     g_webPendingQuickRestore = true;
+    broadcastAppSettingsUpdate("all");
     req->send(202, "application/json", "{\"ok\":true,\"message\":\"Settings reset queued (Wi-Fi + logs kept).\"}");
   });
 
   server.on("/action/factory-reset", HTTP_POST, [](AsyncWebServerRequest *req) {
     g_webPendingFactoryReset = true;
+    broadcastAppSettingsUpdate("all");
     req->send(202, "application/json", "{\"ok\":true,\"message\":\"Factory reset queued (erasing Wi-Fi + logs).\"}");
   });
 
@@ -3468,6 +3525,19 @@ void setupWebServer() {
         bool dirtyNoaa = false;
         bool dirtyDateTime = false;
         bool dirtyUnits = false;
+        AppSettingsSnapshot snapshots[] = {
+          captureAppSettingsSnapshot("device"),
+          captureAppSettingsSnapshot("units"),
+          captureAppSettingsSnapshot("display"),
+          captureAppSettingsSnapshot("wf-tempest"),
+          captureAppSettingsSnapshot("forecast-ui"),
+          captureAppSettingsSnapshot("calibration"),
+          captureAppSettingsSnapshot("alarms"),
+          captureAppSettingsSnapshot("noaa"),
+          captureAppSettingsSnapshot("location"),
+          captureAppSettingsSnapshot("datetime"),
+          captureAppSettingsSnapshot("sound")
+        };
 
         // Device
         if (!doc["wifiSSID"].isNull()) {
@@ -3823,7 +3893,11 @@ void setupWebServer() {
         if (dirtyDisplay) saveDisplaySettings();
         if (dirtyWeather) saveWeatherSettings();
         if (dirtyCalibration) saveCalibrationSettings();
-        if (dirtyAlarm) saveAlarmSettings();
+        if (dirtyAlarm)
+        {
+          saveAlarmSettings();
+          notifyAlarmSettingsChanged();
+        }
         if (dirtyNoaa)
         {
           saveNoaaSettings();
@@ -3836,8 +3910,11 @@ void setupWebServer() {
           float lux = readBrightnessSensor();
           tickAutoThemeAmbient(lux);
         }
+        refreshAppRuntimeState(true);
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
+        broadcastChangedAppSettingsSections(
+          snapshots, sizeof(snapshots) / sizeof(snapshots[0]));
 
         if (owmCountryIndex >= 0 && owmCountryIndex < (countryCount - 1)) {
           owmCountryCode = countryCodes[owmCountryIndex];
@@ -3928,6 +4005,7 @@ void setupWebServer() {
       body->concat((const char*)data, len);
 
       if (index + len == total) {
+        AppSettingsSnapshot snapshot = captureAppSettingsSnapshot("datetime");
         JsonDocument doc;
         if (deserializeJson(doc, *body)) {
           delete body; req->_tempObject = nullptr;
@@ -4019,7 +4097,9 @@ void setupWebServer() {
         }
 
         saveDateTimeSettings();
+        refreshAppRuntimeState(true);
         req->send(200, "application/json", "{\"ok\":true}");
+        broadcastChangedAppSettingsSections(&snapshot, 1, false);
       }
     }
   );
@@ -4082,6 +4162,7 @@ void setupWebServer() {
       body->concat((const char*)data, len);
 
       if (index + len == total) {
+        AppSettingsSnapshot snapshot = captureAppSettingsSnapshot("world-time");
         JsonDocument doc;
         if (deserializeJson(doc, *body)) {
           delete body; req->_tempObject = nullptr;
@@ -4148,7 +4229,9 @@ void setupWebServer() {
 
         worldTimeResetView();
         saveWorldTimeSettings();
+        refreshAppRuntimeState(true);
         req->send(200, "application/json", "{\"ok\":true}");
+        broadcastChangedAppSettingsSections(&snapshot, 1, false);
       }
     }
   );
@@ -4244,6 +4327,7 @@ void setupWebServer() {
         JsonDocument errorDoc;
         JsonObject fieldErrors = errorDoc.to<JsonObject>();
         AppSettingsDirtyFlags dirty;
+        AppSettingsSnapshot snapshot = captureAppSettingsSnapshot(section);
         applyAppSettingsSection(section, doc.as<JsonObjectConst>(), fieldErrors, dirty);
         if (fieldErrors.size() != 0) {
           sendAppValidationError(req, fieldErrors);
@@ -4252,7 +4336,7 @@ void setupWebServer() {
 
         persistAppSettingsChanges(dirty);
         refreshAppRuntimeState(true);
-        broadcastAppSettingsUpdate(section);
+        broadcastChangedAppSettingsSections(&snapshot, 1, false);
 
         JsonDocument resp;
         resp["ok"] = true;
@@ -4381,10 +4465,22 @@ void setupWebServer() {
       JsonObject allErrors = errorsDoc.to<JsonObject>();
       AppSettingsDirtyFlags dirty;
       JsonObjectConst root = doc.as<JsonObjectConst>();
+      AppSettingsSnapshot snapshots[kAppSettingsSectionCount];
+      size_t snapshotCount = 0;
       for (JsonPairConst pair : root) {
         const char *section = pair.key().c_str();
         if (!isKnownAppSettingsSection(section))
           continue;
+
+        bool alreadyCaptured = false;
+        for (size_t i = 0; i < snapshotCount; ++i) {
+          if (strcmp(snapshots[i].section, section) == 0) {
+            alreadyCaptured = true;
+            break;
+          }
+        }
+        if (!alreadyCaptured && snapshotCount < kAppSettingsSectionCount)
+          snapshots[snapshotCount++] = captureAppSettingsSnapshot(section);
 
         JsonDocument sectionErrorsDoc;
         JsonObject sectionErrors = sectionErrorsDoc.to<JsonObject>();
@@ -4414,11 +4510,7 @@ void setupWebServer() {
 
       persistAppSettingsChanges(dirty);
       refreshAppRuntimeState(true);
-      for (JsonPairConst pair : root) {
-        const char *section = pair.key().c_str();
-        if (isKnownAppSettingsSection(section))
-          broadcastAppSettingsUpdate(section);
-      }
+      broadcastChangedAppSettingsSections(snapshots, snapshotCount);
       req->send(200, "application/json", "{\"ok\":true,\"saved\":true,\"applied\":true}");
     }
   );
@@ -4459,6 +4551,7 @@ void setupWebServer() {
 
       bool ok = false;
       bool queued = false;
+      String allSettingsSnapshot = buildAppSettingsJson();
       if (action == "sync_ntp") {
         ok = true;
         queued = queueNtpSyncTask();
@@ -4478,9 +4571,11 @@ void setupWebServer() {
       } else if (action == "save_settings") {
         saveAllSettings();
         saveWorldTimeSettings();
+        refreshAppRuntimeState(true);
         ok = true;
       } else if (action == "restore_defaults") {
         g_webPendingQuickRestore = true;
+        broadcastAppSettingsUpdate("all");
         ok = true;
         queued = true;
       }
@@ -4495,6 +4590,8 @@ void setupWebServer() {
       String payload;
       serializeJson(resp, payload);
       req->send(ok ? 200 : 400, "application/json", payload);
+      if (ok && action == "save_settings" && buildAppSettingsJson() != allSettingsSnapshot)
+        broadcastAppSettingsUpdate("all");
     }
   );
 

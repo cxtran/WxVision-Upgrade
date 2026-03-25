@@ -1,6 +1,7 @@
 #include "alarm.h"
 #include "settings.h"
 #include "buzzer.h"
+#include "web.h"
 
 static bool s_alarmActive = false;
 static bool s_alarmFlashVisible = true;
@@ -207,6 +208,7 @@ void tickAlarmState(const DateTime &now)
             alarmOneShotPending[triggeredSlot] = false;
             alarmEnabled[triggeredSlot] = false;
             saveAlarmSettings();
+            broadcastAppSettingsUpdate("alarms");
         }
     }
     else if (!shouldBeActive && s_lastTriggerMinuteKey == currentMinuteKey)
