@@ -350,11 +350,12 @@ function describeHumidityPct(value){
 function describeCo2(ppm){
   var value = Number(ppm);
   if (!isFinite(value) || value <= 0) return null;
-  if (value <= 600) return 'Excellent';
-  if (value <= 1000) return 'Good';
-  if (value <= 1400) return 'Fair';
-  if (value <= 2000) return 'Poor';
-  return 'Very poor';
+  if (value <= 600) return 'Fresh air';
+  if (value <= 800) return 'Comfortable';
+  if (value <= 1000) return 'Slightly elevated';
+  if (value <= 1200) return 'Ventilate soon';
+  if (value <= 2000) return 'Stale air';
+  return 'Vent now';
 }
 
 function describePressure(value){
@@ -529,6 +530,11 @@ function formatUptimeLocal(sec){
   return days > 0 ? (days + ' d ' + base) : base;
 }
 
+function titleCaseText(value){
+  if (value === undefined || value === null || value === '') return '--';
+  return String(value).replace(/\b\w/g, function(ch){ return ch.toUpperCase(); });
+}
+
 function renderFullStatus(st){
   setText("fs-wifi-status", st.wifiStatus || st.wifiSSID || "--");
   setText("fs-ssid", st.wifiSSID || "--");
@@ -577,6 +583,14 @@ function renderFullStatus(st){
   setText("fs-aht-temp", st.ahtTemp || "--");
   setText("fs-aht-hum", formatHumidityValue(st.ahtHumidity));
   setText("fs-pressure", st.pressure || "--");
+  setText("fs-indoor-eqi", (typeof st.indoorEqi === 'number') ? st.indoorEqi : '--');
+  setText("fs-indoor-band", titleCaseText(st.indoorBand));
+  setText("fs-indoor-sensor", titleCaseText(st.indoorSensorStatus));
+  setText("fs-indoor-sensor-age", (typeof st.indoorSensorAgeSec === 'number') ? (st.indoorSensorAgeSec + ' sec old') : '--');
+  setText("fs-indoor-freshness", titleCaseText(st.indoorFreshness));
+  setText("fs-indoor-trend", titleCaseText(st.indoorTrend));
+  setText("fs-indoor-summary", st.indoorSummary || "--");
+  setText("fs-indoor-action", st.indoorAction || "--");
 
   setText("fs-indoor-temp-desc", describeTempC(st.indoorTempRaw));
   setText("fs-indoor-hum-desc", describeHumidityPct(st.indoorHumidityRaw));
@@ -1186,6 +1200,12 @@ function loadAll(background){
     if (lightGainEl) lightGainEl.value = (typeof s.lightGain !== 'undefined' ? s.lightGain : 100);
     var co2AlertEl = document.getElementById('envAlertCo2Threshold');
     if (co2AlertEl) co2AlertEl.value = (typeof s.envAlertCo2Threshold !== 'undefined' ? s.envAlertCo2Threshold : 1200);
+    var co2EnabledEl = document.getElementById('envAlertCo2Enabled');
+    if (co2EnabledEl) co2EnabledEl.value = (s.envAlertCo2Enabled === false || s.envAlertCo2Enabled === 0) ? '0' : '1';
+    var tempEnabledEl = document.getElementById('envAlertTempEnabled');
+    if (tempEnabledEl) tempEnabledEl.value = (s.envAlertTempEnabled === false || s.envAlertTempEnabled === 0) ? '0' : '1';
+    var humEnabledEl = document.getElementById('envAlertHumidityEnabled');
+    if (humEnabledEl) humEnabledEl.value = (s.envAlertHumidityEnabled === false || s.envAlertHumidityEnabled === 0) ? '0' : '1';
     var humLowAlertEl = document.getElementById('envAlertHumidityLowThreshold');
     if (humLowAlertEl) humLowAlertEl.value = (typeof s.envAlertHumidityLowThreshold !== 'undefined' ? s.envAlertHumidityLowThreshold : 30);
     var humHighAlertEl = document.getElementById('envAlertHumidityHighThreshold');
@@ -1417,6 +1437,7 @@ function readSettingsForm() {
       if (el) el.value = v;
       return v;
     })(),
+    envAlertCo2Enabled: +(byId('envAlertCo2Enabled')?.value ?? 1) === 1,
     envAlertTempThreshold: (function(){
       var v = +(byId('envAlertTempThreshold')?.value ?? 26.5);
       if (!isFinite(v)) v = 26.5;
@@ -1429,12 +1450,14 @@ function readSettingsForm() {
       if (el) el.value = v.toFixed(1);
       return v;
     })(),
+    envAlertTempEnabled: +(byId('envAlertTempEnabled')?.value ?? 1) === 1,
     envAlertHumidityLowThreshold: (function(){
       var v = +(byId('envAlertHumidityLowThreshold')?.value ?? 30);
       if (!isFinite(v)) v = 30;
       v = clamp(Math.round(v), 0, 100);
       return v;
     })(),
+    envAlertHumidityEnabled: +(byId('envAlertHumidityEnabled')?.value ?? 1) === 1,
     envAlertHumidityHighThreshold: (function(){
       var v = +(byId('envAlertHumidityHighThreshold')?.value ?? 60);
       if (!isFinite(v)) v = 60;
@@ -1578,8 +1601,11 @@ async function saveCalibrationSettings(event){
     'tempOffset',
     'humOffset',
     'lightGain',
+    'envAlertCo2Enabled',
     'envAlertCo2Threshold',
+    'envAlertTempEnabled',
     'envAlertTempThreshold',
+    'envAlertHumidityEnabled',
     'envAlertHumidityLowThreshold',
     'envAlertHumidityHighThreshold'
   ]);

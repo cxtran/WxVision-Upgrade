@@ -17,6 +17,10 @@ extern float bmp280_pressure;
 extern bool scd40Ready;
 extern bool aht20Ready;
 extern bool bmp280Ready;
+extern unsigned long scd40InitMs;
+extern unsigned long scd40LastSuccessMs;
+extern int16_t scd40LastError;
+extern uint32_t scd40ReadFailures;
 
 extern bool newAirQualityData;
 extern bool newAHT20_BMP280Data;
@@ -60,5 +64,8 @@ void readSCD40();
 //void setupBMP280();
 void readAHT20();
 void readBMP280();
+
+bool scd40DataIsFresh(unsigned long staleAfterMs = 90000UL);
+bool scd40IsWarmingUp(unsigned long warmupMs = 90000UL);
 
   

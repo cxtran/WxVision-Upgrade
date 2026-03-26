@@ -721,12 +721,21 @@ static String buildDetailsValue(int eqIndexInt,
     {
         if (co2Band == EnvBand::Moderate)
         {
-            appendAdvice(adviceSegment, "Turn on fan to lower CO2");
+            appendAdvice(adviceSegment, "Add light ventilation before air turns stale");
         }
         else if (co2Band == EnvBand::Poor || co2Band == EnvBand::Critical)
         {
-            appendAdvice(adviceSegment, "Turn on fan or open windows");
+            appendAdvice(adviceSegment, "Open windows or run ventilation now");
         }
+    }
+
+    if (scd40Ready && scd40IsWarmingUp())
+    {
+        appendAdvice(adviceSegment, "CO2 sensor is warming up");
+    }
+    else if (scd40Ready && !scd40DataIsFresh())
+    {
+        appendAdvice(adviceSegment, "CO2 sensor data is stale; verify before acting");
     }
 
     if (!isnan(humidity))
@@ -1103,24 +1112,34 @@ void showEnvironmentalQualityScreen()
     s_co2Value = co2Raw;
     s_co2Band = co2Band;
 
-    EnvBand bands[4] = {co2Band, tempBand, humBand, pressBand};
-    int totalScore = 0;
-    int validCount = 0;
+    struct WeightedBand
+    {
+        EnvBand band;
+        float weight;
+    };
+    const WeightedBand bands[4] = {
+        {co2Band, 0.45f},
+        {tempBand, 0.20f},
+        {humBand, 0.20f},
+        {pressBand, 0.15f},
+    };
+    float totalScore = 0.0f;
+    float totalWeight = 0.0f;
     for (int i = 0; i < 4; ++i)
     {
-        int s = scoreForBand(bands[i]);
+        int s = scoreForBand(bands[i].band);
         if (s >= 0)
         {
-            totalScore += s;
-            ++validCount;
+            totalScore += (static_cast<float>(s) / 3.0f) * bands[i].weight;
+            totalWeight += bands[i].weight;
         }
     }
 
-    float eqIndex = (validCount > 0)
-                        ? (static_cast<float>(totalScore) / (validCount * 3.0f)) * 100.0f
+    float eqIndex = (totalWeight > 0.0f)
+                        ? (totalScore / totalWeight) * 100.0f
                         : -1.0f;
     int eqIndexInt = (eqIndex >= 0.0f) ? static_cast<int>(eqIndex + 0.5f) : -1;
-    EnvBand overallBand = (validCount > 0) ? bandFromIndex(eqIndex) : EnvBand::Unknown;
+    EnvBand overallBand = (totalWeight > 0.0f) ? bandFromIndex(eqIndex) : EnvBand::Unknown;
     s_eqIndexValue = eqIndex;
 
     String lines[3];
@@ -1266,7 +1285,8 @@ void serviceEnvironmentalAlerts()
                                ((humidity < static_cast<float>(envAlertHumidityLowThreshold)) ||
                                 (humidity > static_cast<float>(envAlertHumidityHighThreshold))) &&
                                (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
-    const bool sensorFailure = !scd40Ready || !aht20Ready || !bmp280Ready;
+    const bool scd40Fault = !scd40Ready || (!scd40IsWarmingUp() && !scd40DataIsFresh(180000UL));
+    const bool sensorFailure = scd40Fault || !aht20Ready || !bmp280Ready;
     const bool tempHigh = !co2High && tempHighRaw;
     const bool humidityWarn = !co2High && !tempHigh && humidityWarnRaw;
 

@@ -24,6 +24,10 @@
 uint16_t SCD40_co2 = 0;
 float SCD40_temp = NAN, SCD40_hum = NAN;
 bool scd40Ready = false;
+unsigned long scd40InitMs = 0;
+unsigned long scd40LastSuccessMs = 0;
+int16_t scd40LastError = 0;
+uint32_t scd40ReadFailures = 0;
 
 // aht20 and bmp280
 float aht20_temp = NAN, aht20_hum = NAN;
@@ -56,6 +60,45 @@ static float computeCalibratedLux(float rawLux)
     calibratedLux = maxLux;
 
   return calibratedLux;
+}
+
+namespace
+{
+  constexpr uint32_t kScd40RestartThreshold = 3;
+
+  bool startScd40PeriodicMeasurement()
+  {
+    scd40InitMs = millis();
+    scd40LastError = scd4x.startPeriodicMeasurement();
+    if (scd40LastError == 0)
+    {
+      scd40Ready = true;
+      scd40ReadFailures = 0;
+      Serial.println(F("SCD40 initialized"));
+      return true;
+    }
+
+    scd40Ready = false;
+    Serial.printf("SCD40 startPeriodicMeasurement failed: %d\n", scd40LastError);
+    return false;
+  }
+
+  void handleScd40ReadError(const char *step, int16_t error)
+  {
+    scd40LastError = error;
+    ++scd40ReadFailures;
+    Serial.printf("SCD40 %s failed: %d\n", step, error);
+
+    if (scd40ReadFailures < kScd40RestartThreshold)
+      return;
+
+    Serial.println(F("SCD40 restarting periodic measurement"));
+    scd4x.stopPeriodicMeasurement();
+    delay(20);
+    scd4x.reinit();
+    delay(20);
+    startScd40PeriodicMeasurement();
+  }
 }
 
 namespace
@@ -394,9 +437,7 @@ void setupSensors()
 
   // --- SCD40 ---
   scd4x.begin(Wire, 0x62);
-  scd4x.startPeriodicMeasurement();
-  scd40Ready = true;
-  Serial.println(F("SCD40 initialized"));
+  startScd40PeriodicMeasurement();
 
   // --- AHT20 ---
   if (aht20.begin())
@@ -431,14 +472,37 @@ void setupSensors()
 void readSCD40()
 {
   bool isDataReady = false;
-  scd4x.getDataReadyStatus(isDataReady);
+  int16_t error = scd4x.getDataReadyStatus(isDataReady);
+  if (error != 0)
+  {
+    handleScd40ReadError("getDataReadyStatus", error);
+    return;
+  }
   if (isDataReady)
   {
-    scd4x.readMeasurement(SCD40_co2, SCD40_temp, SCD40_hum);
+    error = scd4x.readMeasurement(SCD40_co2, SCD40_temp, SCD40_hum);
+    if (error != 0)
+    {
+      handleScd40ReadError("readMeasurement", error);
+      return;
+    }
+
+    scd40Ready = true;
+    scd40LastError = 0;
+    scd40ReadFailures = 0;
+    scd40LastSuccessMs = millis();
   }
   else
   {
-    Serial.println(F("SCD40 data not ready"));
+    if (scd40LastSuccessMs != 0 && (millis() - scd40LastSuccessMs) > 180000UL)
+    {
+      Serial.println(F("SCD40 stale, restarting measurement"));
+      scd4x.stopPeriodicMeasurement();
+      delay(20);
+      scd4x.reinit();
+      delay(20);
+      startScd40PeriodicMeasurement();
+    }
   }
 }
 
@@ -458,5 +522,17 @@ void readBMP280()
 
 bool newAirQualityData = false;
 bool newAHT20_BMP280Data = false;
+
+bool scd40DataIsFresh(unsigned long staleAfterMs)
+{
+  return scd40LastSuccessMs != 0 && (millis() - scd40LastSuccessMs) <= staleAfterMs;
+}
+
+bool scd40IsWarmingUp(unsigned long warmupMs)
+{
+  if (scd40InitMs == 0)
+    return true;
+  return (millis() - scd40InitMs) < warmupMs;
+}
 
 

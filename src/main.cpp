@@ -104,18 +104,13 @@ static bool otaInitialized = false;
 static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
-static bool autoWifiReconnectSuppressed = false;
-
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
 
 // === Display Timers ===
-
-unsigned long prevMillis_ShowTimeDate = 0;
 unsigned long lastBrightnessRead = 0;
 unsigned long lastButtonCheck = 0;
 
-const long interval_ShowTimeDate = 1000;
 const unsigned long brightnessInterval = 10000;
 const unsigned long buttonInterval = 100;
 
@@ -124,9 +119,6 @@ unsigned long lastReadSCD40 = 0;
 const unsigned long SCD40ReadInterval = 10000;
 unsigned long lastReadAHT20_BMP280 = 0;
 const unsigned long AHT20_BMP280ReadInterval = 10000;
-
-// CLock Screen
-unsigned long lastClockUpdate = 0;
 
 // unsigned long lastReadDHT = 0;
 // const unsigned long DHTreadInterval = 2000;
@@ -574,7 +566,6 @@ void setup()
     if (WiFi.status() != WL_CONNECTED)
     {
         Serial.println("[WiFi] Connection failed; starting offline without WiFi prompt.");
-        autoWifiReconnectSuppressed = true;
         initialSetupAwaitingWifi = false;
         splashUpdate("Offline", 6, 6);
         completeStartupAfterWiFi(true);
@@ -1519,7 +1510,7 @@ void loop()
             noteFrameDraw(now);
             needsClear = false;
         }
-        if (!needsClear && renderDue(RenderSlot::SkyBriefTick, now, kRenderSkySummaryMs))
+        if (!needsClear && renderDue(RenderSlot::SkyBriefTick, now, kRenderMarqueeMs))
         {
             tickSkyBriefScreen();
             markRendered(RenderSlot::SkyBriefTick, now);

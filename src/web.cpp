@@ -175,8 +175,8 @@ struct AppRuntimeState
     char mac[18] = "";
     bool online = false;
     uint32_t uptimeSec = 0;
-    char currentScreen[24] = "";
-    char dataSourceName[24] = "";
+    char currentScreen[20] = "";
+    char dataSourceName[20] = "";
   } device;
 
   struct WifiInfo
@@ -188,7 +188,7 @@ struct AppRuntimeState
   struct TimeInfo
   {
     char localIso[32] = "";
-    char timezone[48] = "";
+    char timezone[24] = "";
     char display[16] = "";
   } time;
 
@@ -200,7 +200,7 @@ struct AppRuntimeState
 
   struct WeatherInfo
   {
-    char source[24] = "";
+    char source[20] = "";
     float tempF = NAN;
     float pressureInHg = NAN;
     int humidity = -1;
@@ -218,13 +218,21 @@ struct AppRuntimeState
     int co2ppm = 0;
     float pressureInHg = NAN;
     float lightLux = NAN;
+    int eqi = -1;
+    char band[16] = "";
+    char freshness[24] = "";
+    char summary[64] = "";
+    char action[64] = "";
+    char trend[24] = "";
+    char sensorStatus[16] = "";
+    uint32_t sensorAgeSec = 0;
   } indoor;
 
   struct AlertItem
   {
     char id[28] = "";
-    char source[12] = "";
-    char severity[16] = "";
+    char source[8] = "";
+    char severity[12] = "";
     char headline[72] = "";
     char expires[32] = "";
   };
@@ -233,7 +241,7 @@ struct AppRuntimeState
   {
     size_t activeCount = 0;
     char highestSeverity[16] = "none";
-    char primaryMessage[2048] = "";
+    char primaryMessage[768] = "";
     AlertItem items[3];
     size_t itemCount = 0;
   } alerts;
@@ -268,11 +276,11 @@ struct AppRuntimeState
   String deviceWsJson;
   String alertWsJson;
   String lightningWsJson;
-  String weatherWsSig;
-  String indoorWsSig;
-  String deviceWsSig;
-  String alertWsSig;
-  String lightningWsSig;
+  uint32_t weatherWsSig = 0;
+  uint32_t indoorWsSig = 0;
+  uint32_t deviceWsSig = 0;
+  uint32_t alertWsSig = 0;
+  uint32_t lightningWsSig = 0;
   uint32_t lastRefreshMs = 0;
   uint32_t lastWeatherBroadcastMs = 0;
   uint32_t lastIndoorBroadcastMs = 0;
@@ -282,11 +290,11 @@ struct AppRuntimeState
 };
 
 AppRuntimeState g_appRuntime;
-String g_lastWeatherWsSig;
-String g_lastIndoorWsSig;
-String g_lastDeviceWsSig;
-String g_lastAlertWsSig;
-String g_lastLightningWsSig;
+uint32_t g_lastWeatherWsSig = 0;
+uint32_t g_lastIndoorWsSig = 0;
+uint32_t g_lastDeviceWsSig = 0;
+uint32_t g_lastAlertWsSig = 0;
+uint32_t g_lastLightningWsSig = 0;
 bool g_appLightningEnabled = true;
 
 static const char *manualScreenLabel(int value)
@@ -367,6 +375,398 @@ static void copyToBuffer(char *dest, size_t destSize, const char *value)
   if (destSize == 0)
     return;
   strlcpy(dest, value ? value : "", destSize);
+}
+
+static void appendToBuffer(char *dest, size_t destSize, const String &value)
+{
+  if (destSize == 0 || value.isEmpty())
+    return;
+
+  size_t used = strnlen(dest, destSize);
+  if (used >= destSize - 1)
+    return;
+  strlcpy(dest + used, value.c_str(), destSize - used);
+}
+
+static void appendToBuffer(char *dest, size_t destSize, const char *value)
+{
+  if (destSize == 0 || !value || !value[0])
+    return;
+
+  size_t used = strnlen(dest, destSize);
+  if (used >= destSize - 1)
+    return;
+  strlcpy(dest + used, value, destSize - used);
+}
+
+static void buildAlertPrimaryMessage(char *dest,
+                                     size_t destSize,
+                                     const String &headline,
+                                     const String &description,
+                                     const String &instruction)
+{
+  if (destSize == 0)
+    return;
+
+  dest[0] = '\0';
+  const String &base = description.length() ? description : headline;
+  appendToBuffer(dest, destSize, base);
+  if (instruction.length() == 0 || instruction == base)
+    return;
+
+  appendToBuffer(dest, destSize, "\n\n");
+  appendToBuffer(dest, destSize, instruction);
+}
+
+static constexpr uint32_t kSigSeed = 2166136261u;
+static constexpr uint32_t kSigPrime = 16777619u;
+
+static uint32_t hashAppend(uint32_t hash, const char *text)
+{
+  if (!text)
+    return hash;
+  while (*text)
+  {
+    hash ^= static_cast<uint8_t>(*text++);
+    hash *= kSigPrime;
+  }
+  return hash;
+}
+
+static uint32_t hashAppend(uint32_t hash, const String &text)
+{
+  return hashAppend(hash, text.c_str());
+}
+
+static uint32_t hashAppend(uint32_t hash, int value)
+{
+  hash ^= static_cast<uint32_t>(value);
+  hash *= kSigPrime;
+  return hash;
+}
+
+static uint32_t hashAppend(uint32_t hash, uint32_t value)
+{
+  hash ^= value;
+  hash *= kSigPrime;
+  return hash;
+}
+
+static uint32_t hashAppend(uint32_t hash, float value, uint8_t decimals = 2)
+{
+  if (!isfinite(value))
+    return hashAppend(hash, "nan");
+  char buf[24];
+  dtostrf(value, 0, decimals, buf);
+  return hashAppend(hash, buf);
+}
+
+enum class IndoorBand : int8_t
+{
+  Unknown = -1,
+  Critical = 0,
+  Poor = 1,
+  Moderate = 2,
+  Good = 3,
+};
+
+static IndoorBand indoorBandFromCo2(float co2)
+{
+  if (!isfinite(co2) || co2 <= 0.0f)
+    return IndoorBand::Unknown;
+  if (co2 <= 800.0f)
+    return IndoorBand::Good;
+  if (co2 <= 1200.0f)
+    return IndoorBand::Moderate;
+  if (co2 <= 2000.0f)
+    return IndoorBand::Poor;
+  return IndoorBand::Critical;
+}
+
+static IndoorBand indoorBandFromTemp(float tempC)
+{
+  if (!isfinite(tempC))
+    return IndoorBand::Unknown;
+  if (tempC >= 20.0f && tempC <= 24.0f)
+    return IndoorBand::Good;
+  if ((tempC >= 18.0f && tempC < 20.0f) || (tempC > 24.0f && tempC <= 26.0f))
+    return IndoorBand::Moderate;
+  if ((tempC >= 16.0f && tempC < 18.0f) || (tempC > 26.0f && tempC <= 28.0f))
+    return IndoorBand::Poor;
+  return IndoorBand::Critical;
+}
+
+static IndoorBand indoorBandFromHumidity(float humidity)
+{
+  if (!isfinite(humidity))
+    return IndoorBand::Unknown;
+  if (humidity >= 35.0f && humidity <= 55.0f)
+    return IndoorBand::Good;
+  if ((humidity >= 30.0f && humidity < 35.0f) || (humidity > 55.0f && humidity <= 60.0f))
+    return IndoorBand::Moderate;
+  if ((humidity >= 25.0f && humidity < 30.0f) || (humidity > 60.0f && humidity <= 70.0f))
+    return IndoorBand::Poor;
+  return IndoorBand::Critical;
+}
+
+static IndoorBand indoorBandFromPressure(float pressureHpa)
+{
+  if (!isfinite(pressureHpa) || pressureHpa < 200.0f)
+    return IndoorBand::Unknown;
+  if (pressureHpa >= 995.0f && pressureHpa <= 1025.0f)
+    return IndoorBand::Good;
+  if ((pressureHpa >= 985.0f && pressureHpa < 995.0f) || (pressureHpa > 1025.0f && pressureHpa <= 1035.0f))
+    return IndoorBand::Moderate;
+  if ((pressureHpa >= 970.0f && pressureHpa < 985.0f) || (pressureHpa > 1035.0f && pressureHpa <= 1045.0f))
+    return IndoorBand::Poor;
+  return IndoorBand::Critical;
+}
+
+static int indoorBandScore(IndoorBand band)
+{
+  switch (band)
+  {
+  case IndoorBand::Good:
+    return 3;
+  case IndoorBand::Moderate:
+    return 2;
+  case IndoorBand::Poor:
+    return 1;
+  case IndoorBand::Critical:
+    return 0;
+  default:
+    return -1;
+  }
+}
+
+static const char *indoorBandLabel(IndoorBand band)
+{
+  switch (band)
+  {
+  case IndoorBand::Good:
+    return "good";
+  case IndoorBand::Moderate:
+    return "moderate";
+  case IndoorBand::Poor:
+    return "poor";
+  case IndoorBand::Critical:
+    return "critical";
+  default:
+    return "unknown";
+  }
+}
+
+struct IndoorDerivedState
+{
+  float tempC = NAN;
+  float humidity = NAN;
+  float pressureHpa = NAN;
+  float co2ppm = NAN;
+  int eqi = -1;
+  IndoorBand overallBand = IndoorBand::Unknown;
+  IndoorBand co2Band = IndoorBand::Unknown;
+  IndoorBand tempBand = IndoorBand::Unknown;
+  IndoorBand humidityBand = IndoorBand::Unknown;
+  IndoorBand pressureBand = IndoorBand::Unknown;
+  float co2Delta30m = NAN;
+  float co2SlopePpmPerHour = NAN;
+  const char *freshness = "unknown";
+  const char *sensorStatus = "unknown";
+  uint32_t sensorAgeSec = 0;
+  String summary;
+  String action;
+  String trend;
+};
+
+static IndoorDerivedState buildIndoorDerivedState()
+{
+  IndoorDerivedState state;
+
+  if (!isnan(SCD40_temp))
+    state.tempC = SCD40_temp + tempOffset;
+  else if (!isnan(aht20_temp))
+    state.tempC = aht20_temp + tempOffset;
+
+  if (!isnan(SCD40_hum))
+    state.humidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
+  else if (!isnan(aht20_hum))
+    state.humidity = constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
+
+  if (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f)
+    state.pressureHpa = bmp280_pressure;
+  if (SCD40_co2 > 0)
+    state.co2ppm = static_cast<float>(SCD40_co2);
+
+  state.co2Band = indoorBandFromCo2(state.co2ppm);
+  state.tempBand = indoorBandFromTemp(state.tempC);
+  state.humidityBand = indoorBandFromHumidity(state.humidity);
+  state.pressureBand = indoorBandFromPressure(state.pressureHpa);
+
+  struct WeightedBand
+  {
+    IndoorBand band;
+    float weight;
+  };
+  const WeightedBand weightedBands[] = {
+      {state.co2Band, 0.45f},
+      {state.tempBand, 0.20f},
+      {state.humidityBand, 0.20f},
+      {state.pressureBand, 0.15f},
+  };
+
+  float weightedScore = 0.0f;
+  float totalWeight = 0.0f;
+  for (const auto &entry : weightedBands)
+  {
+    int score = indoorBandScore(entry.band);
+    if (score < 0)
+      continue;
+    weightedScore += (static_cast<float>(score) / 3.0f) * entry.weight;
+    totalWeight += entry.weight;
+  }
+  if (totalWeight > 0.0f)
+  {
+    state.eqi = static_cast<int>(roundf((weightedScore / totalWeight) * 100.0f));
+    if (state.eqi >= 75)
+      state.overallBand = IndoorBand::Good;
+    else if (state.eqi >= 50)
+      state.overallBand = IndoorBand::Moderate;
+    else if (state.eqi >= 25)
+      state.overallBand = IndoorBand::Poor;
+    else
+      state.overallBand = IndoorBand::Critical;
+  }
+
+  if (!isnan(state.co2ppm))
+  {
+    if (state.co2ppm <= 600.0f)
+      state.freshness = "fresh";
+    else if (state.co2ppm <= 900.0f)
+      state.freshness = "comfortable";
+    else if (state.co2ppm <= 1200.0f)
+      state.freshness = "elevated";
+    else if (state.co2ppm <= 2000.0f)
+      state.freshness = "stale";
+    else
+      state.freshness = "poor";
+  }
+
+  if (!scd40Ready)
+  {
+    state.sensorStatus = "fault";
+  }
+  else if (scd40IsWarmingUp())
+  {
+    state.sensorStatus = "warming";
+  }
+  else if (!scd40DataIsFresh())
+  {
+    state.sensorStatus = "stale";
+  }
+  else
+  {
+    state.sensorStatus = "fresh";
+  }
+  if (scd40LastSuccessMs != 0)
+    state.sensorAgeSec = static_cast<uint32_t>((millis() - scd40LastSuccessMs) / 1000UL);
+
+  const auto &log = getSensorLog();
+  if (!isnan(state.co2ppm) && !log.empty())
+  {
+    const uint32_t latestTs = log.back().ts;
+    float co2At30m = NAN;
+    float earliestRecentCo2 = NAN;
+    uint32_t earliestRecentTs = 0;
+    for (size_t i = log.size(); i-- > 0;)
+    {
+      const SensorSample &sample = log[i];
+      if (!isnan(sample.co2) && sample.co2 > 0.0f)
+      {
+        if (isnan(earliestRecentCo2))
+        {
+          earliestRecentCo2 = sample.co2;
+          earliestRecentTs = sample.ts;
+        }
+        if (latestTs > sample.ts && (latestTs - sample.ts) >= 1800UL)
+        {
+          co2At30m = sample.co2;
+          break;
+        }
+      }
+    }
+    if (!isnan(co2At30m))
+      state.co2Delta30m = state.co2ppm - co2At30m;
+
+    if (!isnan(earliestRecentCo2) && earliestRecentTs < latestTs)
+    {
+      const float hours = static_cast<float>(latestTs - earliestRecentTs) / 3600.0f;
+      if (hours > 0.05f)
+        state.co2SlopePpmPerHour = (state.co2ppm - earliestRecentCo2) / hours;
+    }
+  }
+
+  if (!isnan(state.co2SlopePpmPerHour))
+  {
+    if (state.co2SlopePpmPerHour >= 180.0f)
+      state.trend = "rising fast";
+    else if (state.co2SlopePpmPerHour >= 60.0f)
+      state.trend = "rising";
+    else if (state.co2SlopePpmPerHour <= -180.0f)
+      state.trend = "dropping fast";
+    else if (state.co2SlopePpmPerHour <= -60.0f)
+      state.trend = "dropping";
+    else
+      state.trend = "steady";
+  }
+  else
+  {
+    state.trend = "steady";
+  }
+
+  if (strcmp(state.sensorStatus, "warming") == 0)
+  {
+    state.summary = "CO2 sensor warming up";
+    state.action = "Wait for a fresh baseline before trusting ventilation advice";
+  }
+  else if (strcmp(state.sensorStatus, "stale") == 0)
+  {
+    state.summary = "Indoor data is stale";
+    state.action = "Check sensor connection before acting on CO2 readings";
+  }
+  else if (strcmp(state.sensorStatus, "fault") == 0)
+  {
+    state.summary = "CO2 sensor fault detected";
+    state.action = "Inspect the SCD40 wiring or power cycle the device";
+  }
+  else if (!isnan(state.co2ppm) && state.co2ppm > 1200.0f)
+  {
+    state.summary = "Indoor air is stale";
+    state.action = (!isnan(state.co2SlopePpmPerHour) && state.co2SlopePpmPerHour > 100.0f)
+                       ? "Ventilate now, CO2 is climbing quickly"
+                       : "Open windows or run ventilation";
+  }
+  else if (!isnan(state.co2ppm) && state.co2ppm > 900.0f)
+  {
+    state.summary = "CO2 is elevated";
+    state.action = "Add light ventilation before the room gets stuffy";
+  }
+  else if (state.humidityBand == IndoorBand::Poor || state.humidityBand == IndoorBand::Critical)
+  {
+    state.summary = (isfinite(state.humidity) && state.humidity < 35.0f) ? "Indoor air is dry" : "Indoor air is humid";
+    state.action = (isfinite(state.humidity) && state.humidity < 35.0f) ? "Run a humidifier or reduce HVAC drying" : "Run dehumidification or increase airflow";
+  }
+  else if (state.tempBand == IndoorBand::Poor || state.tempBand == IndoorBand::Critical)
+  {
+    state.summary = "Indoor temperature is outside the comfort range";
+    state.action = "Adjust HVAC toward the comfort band";
+  }
+  else
+  {
+    state.summary = "Indoor air looks healthy";
+    state.action = "No immediate action needed";
+  }
+
+  return state;
 }
 
 static String formatIsoLocalTime(time_t epoch)
@@ -501,6 +901,17 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
       indoor["co2ppm"] = nullptr;
     serializeCompactFloat(indoor["pressureInHg"], state.indoor.pressureInHg, 2);
     serializeCompactFloat(indoor["lightLux"], state.indoor.lightLux, 1);
+    if (state.indoor.eqi >= 0)
+      indoor["eqi"] = state.indoor.eqi;
+    else
+      indoor["eqi"] = nullptr;
+    indoor["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+    indoor["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
+    indoor["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+    indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
+    indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
+    indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+    indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
 
     JsonObject alerts = doc["alerts"].to<JsonObject>();
     alerts["activeCount"] = state.alerts.activeCount;
@@ -546,6 +957,12 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
       doc["co2ppm"] = state.indoor.co2ppm;
     else
       doc["co2ppm"] = nullptr;
+    if (state.indoor.eqi >= 0)
+      doc["indoorEqi"] = state.indoor.eqi;
+    else
+      doc["indoorEqi"] = nullptr;
+    doc["indoorBand"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+    doc["indoorSummary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
     doc["alertCount"] = state.alerts.activeCount;
     doc["currentScreen"] = state.device.currentScreen;
     doc["rssi"] = state.wifi.rssi;
@@ -647,7 +1064,11 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
 
     state.weatherWsJson = "";
     serializeJson(doc, state.weatherWsJson);
-    state.weatherWsSig = String(state.weather.tempF, 1) + "|" + state.weather.humidity + "|" + state.weather.condition;
+    uint32_t sig = kSigSeed;
+    sig = hashAppend(sig, state.weather.tempF, 1);
+    sig = hashAppend(sig, state.weather.humidity);
+    sig = hashAppend(sig, state.weather.condition);
+    state.weatherWsSig = sig;
   }
 
   {
@@ -671,11 +1092,28 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
       data["co2ppm"] = nullptr;
     serializeCompactFloat(data["pressureInHg"], state.indoor.pressureInHg, 2);
     serializeCompactFloat(data["lightLux"], state.indoor.lightLux, 1);
+    if (state.indoor.eqi >= 0)
+      data["eqi"] = state.indoor.eqi;
+    else
+      data["eqi"] = nullptr;
+    data["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+    data["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
+    data["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+    data["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
+    data["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
+    data["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+    data["sensorAgeSec"] = state.indoor.sensorAgeSec;
 
     state.indoorWsJson = "";
     serializeJson(doc, state.indoorWsJson);
-    state.indoorWsSig = String(state.indoor.tempF, 1) + "|" + state.indoor.humidity + "|" +
-                        state.indoor.co2ppm + "|" + String(state.indoor.pressureInHg, 2);
+    uint32_t sig = kSigSeed;
+    sig = hashAppend(sig, state.indoor.tempF, 1);
+    sig = hashAppend(sig, state.indoor.humidity);
+    sig = hashAppend(sig, state.indoor.co2ppm);
+    sig = hashAppend(sig, state.indoor.pressureInHg, 2);
+    sig = hashAppend(sig, state.indoor.eqi);
+    sig = hashAppend(sig, state.indoor.sensorStatus);
+    state.indoorWsSig = sig;
   }
 
   {
@@ -689,7 +1127,11 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
 
     state.deviceWsJson = "";
     serializeJson(doc, state.deviceWsJson);
-    state.deviceWsSig = String(state.device.currentScreen) + "|" + state.device.uptimeSec + "|" + state.wifi.rssi;
+    uint32_t sig = kSigSeed;
+    sig = hashAppend(sig, state.device.currentScreen);
+    sig = hashAppend(sig, state.device.uptimeSec);
+    sig = hashAppend(sig, state.wifi.rssi);
+    state.deviceWsSig = sig;
   }
 
   {
@@ -715,9 +1157,13 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
 
     state.alertWsJson = "";
     serializeJson(doc, state.alertWsJson);
-    state.alertWsSig = String(state.alerts.activeCount) + "|" + state.alerts.highestSeverity + "|" +
-                       ((state.alerts.itemCount > 0) ? String(state.alerts.items[0].headline) : String("")) + "|" +
-                       String(state.alerts.primaryMessage);
+    uint32_t sig = kSigSeed;
+    sig = hashAppend(sig, static_cast<uint32_t>(state.alerts.activeCount));
+    sig = hashAppend(sig, state.alerts.highestSeverity);
+    if (state.alerts.itemCount > 0)
+      sig = hashAppend(sig, state.alerts.items[0].headline);
+    sig = hashAppend(sig, state.alerts.primaryMessage);
+    state.alertWsSig = sig;
   }
 
   {
@@ -730,8 +1176,11 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
 
     state.lightningWsJson = "";
     serializeJson(doc, state.lightningWsJson);
-    state.lightningWsSig = String(state.lightning.lastDistanceMi, 1) + "|" + state.lightning.strikeCount + "|" +
-                           state.lightning.level;
+    uint32_t sig = kSigSeed;
+    sig = hashAppend(sig, state.lightning.lastDistanceMi, 1);
+    sig = hashAppend(sig, state.lightning.strikeCount);
+    sig = hashAppend(sig, state.lightning.level);
+    state.lightningWsSig = sig;
   }
 }
 
@@ -828,6 +1277,16 @@ static void refreshAppRuntimeState(bool force = false)
   if (isfinite(luxNow))
     next.indoor.lightLux = luxNow;
 
+  const IndoorDerivedState indoorDerived = buildIndoorDerivedState();
+  next.indoor.eqi = indoorDerived.eqi;
+  copyToBuffer(next.indoor.band, sizeof(next.indoor.band), indoorBandLabel(indoorDerived.overallBand));
+  copyToBuffer(next.indoor.freshness, sizeof(next.indoor.freshness), indoorDerived.freshness);
+  copyToBuffer(next.indoor.summary, sizeof(next.indoor.summary), indoorDerived.summary);
+  copyToBuffer(next.indoor.action, sizeof(next.indoor.action), indoorDerived.action);
+  copyToBuffer(next.indoor.trend, sizeof(next.indoor.trend), indoorDerived.trend);
+  copyToBuffer(next.indoor.sensorStatus, sizeof(next.indoor.sensorStatus), indoorDerived.sensorStatus);
+  next.indoor.sensorAgeSec = indoorDerived.sensorAgeSec;
+
   next.alerts.activeCount = noaaAlertCount();
   copyToBuffer(next.alerts.highestSeverity, sizeof(next.alerts.highestSeverity), highestAlertSeverity());
   next.alerts.primaryMessage[0] = '\0';
@@ -843,15 +1302,12 @@ static void refreshAppRuntimeState(bool force = false)
     severity.toLowerCase();
     copyToBuffer(next.alerts.items[i].severity, sizeof(next.alerts.items[i].severity), severity);
     copyToBuffer(next.alerts.items[i].headline, sizeof(next.alerts.items[i].headline), alert.headline);
-    String message = alert.description.length() ? alert.description : alert.headline;
-    if (alert.instruction.length() && alert.instruction != message)
-    {
-      if (message.length())
-        message += "\n\n";
-      message += alert.instruction;
-    }
     if (i == 0)
-      copyToBuffer(next.alerts.primaryMessage, sizeof(next.alerts.primaryMessage), message);
+      buildAlertPrimaryMessage(next.alerts.primaryMessage,
+                               sizeof(next.alerts.primaryMessage),
+                               alert.headline,
+                               alert.description,
+                               alert.instruction);
     copyToBuffer(next.alerts.items[i].expires, sizeof(next.alerts.items[i].expires), alert.expires);
   }
 
@@ -3130,6 +3586,25 @@ void setupWebServer() {
         doc["pressureRaw"] = bmp280_pressure;
       }
 
+      const IndoorDerivedState indoorDerived = buildIndoorDerivedState();
+      if (indoorDerived.eqi >= 0)
+        doc["indoorEqi"] = indoorDerived.eqi;
+      doc["indoorBand"] = indoorBandLabel(indoorDerived.overallBand);
+      doc["indoorFreshness"] = indoorDerived.freshness;
+      doc["indoorSummary"] = indoorDerived.summary;
+      doc["indoorAction"] = indoorDerived.action;
+      doc["indoorTrend"] = indoorDerived.trend;
+      doc["indoorSensorStatus"] = indoorDerived.sensorStatus;
+      doc["indoorSensorAgeSec"] = indoorDerived.sensorAgeSec;
+      if (isfinite(indoorDerived.co2SlopePpmPerHour))
+        doc["co2SlopePpmPerHour"] = serialized(String(indoorDerived.co2SlopePpmPerHour, 1));
+      else
+        doc["co2SlopePpmPerHour"] = nullptr;
+      if (isfinite(indoorDerived.co2Delta30m))
+        doc["co2Delta30m"] = serialized(String(indoorDerived.co2Delta30m, 0));
+      else
+        doc["co2Delta30m"] = nullptr;
+
       cachedPayload = "";
       serializeJson(doc, cachedPayload);
       cacheBuiltAt = now;
@@ -3462,8 +3937,11 @@ void setupWebServer() {
     doc["tempOffset"]       = dispTempOffset(tempOffset);
     doc["humOffset"]        = humOffset;
     doc["lightGain"]        = lightGain;
+    doc["envAlertCo2Enabled"] = envAlertCo2Enabled;
     doc["envAlertCo2Threshold"] = envAlertCo2Threshold;
+    doc["envAlertTempEnabled"] = envAlertTempEnabled;
     doc["envAlertTempThreshold"] = dispTemp(envAlertTempThresholdC);
+    doc["envAlertHumidityEnabled"] = envAlertHumidityEnabled;
     doc["envAlertHumidityLowThreshold"] = envAlertHumidityLowThreshold;
     doc["envAlertHumidityHighThreshold"] = envAlertHumidityHighThreshold;
     doc["ntpServer"]        = ntpServerHost;
@@ -3818,6 +4296,10 @@ void setupWebServer() {
           envAlertCo2Threshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
           dirtyCalibration = true;
         }
+        if (!doc["envAlertCo2Enabled"].isNull()) {
+          envAlertCo2Enabled = doc["envAlertCo2Enabled"].as<bool>();
+          dirtyCalibration = true;
+        }
         if (!doc["envAlertTempThreshold"].isNull()) {
           JsonVariant v = doc["envAlertTempThreshold"];
           double incoming = 0.0;
@@ -3833,6 +4315,10 @@ void setupWebServer() {
                                      : static_cast<float>(incoming);
           dirtyCalibration = true;
         }
+        if (!doc["envAlertTempEnabled"].isNull()) {
+          envAlertTempEnabled = doc["envAlertTempEnabled"].as<bool>();
+          dirtyCalibration = true;
+        }
         if (!doc["envAlertHumidityLowThreshold"].isNull()) {
           JsonVariant v = doc["envAlertHumidityLowThreshold"];
           envAlertHumidityLowThreshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
@@ -3841,6 +4327,10 @@ void setupWebServer() {
         if (!doc["envAlertHumidityHighThreshold"].isNull()) {
           JsonVariant v = doc["envAlertHumidityHighThreshold"];
           envAlertHumidityHighThreshold = v.is<int>() ? v.as<int>() : atoi(v.as<const char*>());
+          dirtyCalibration = true;
+        }
+        if (!doc["envAlertHumidityEnabled"].isNull()) {
+          envAlertHumidityEnabled = doc["envAlertHumidityEnabled"].as<bool>();
           dirtyCalibration = true;
         }
         tempOffset = constrain(tempOffset, wxv::defaults::kTempOffsetMinC, wxv::defaults::kTempOffsetMaxC);

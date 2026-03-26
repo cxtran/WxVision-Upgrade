@@ -302,12 +302,33 @@
         <input id="lightGain" type="number" step="1" min="1" max="300">
       </div>
       <div class="row tight">
+        <label for="envAlertCo2Enabled">CO2 Alert Enabled</label>
+        <select id="envAlertCo2Enabled">
+          <option value="1">On</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+      <div class="row tight">
         <label for="envAlertCo2Threshold">CO2 Alert (ppm)</label>
         <input id="envAlertCo2Threshold" type="number" step="50" min="400" max="5000">
       </div>
       <div class="row tight">
+        <label for="envAlertTempEnabled">Temp Alert Enabled</label>
+        <select id="envAlertTempEnabled">
+          <option value="1">On</option>
+          <option value="0">Off</option>
+        </select>
+      </div>
+      <div class="row tight">
         <label for="envAlertTempThreshold">Temp Alert (&deg;C)</label>
         <input id="envAlertTempThreshold" type="number" step="0.1" min="10" max="50">
+      </div>
+      <div class="row tight">
+        <label for="envAlertHumidityEnabled">Humidity Alert Enabled</label>
+        <select id="envAlertHumidityEnabled">
+          <option value="1">On</option>
+          <option value="0">Off</option>
+        </select>
       </div>
       <div class="row tight">
         <label for="envAlertHumidityLowThreshold">Humidity Low Alert (%)</label>

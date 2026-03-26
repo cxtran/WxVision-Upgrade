@@ -5,7 +5,7 @@
 #include <math.h>
 
 namespace {
-constexpr size_t kRamMaxSamples = 500;     // keep ~1.5-2 days in RAM, full history on flash
+constexpr size_t kRamMaxSamples = 288;     // 24h @ 5-minute sampling; full history stays on flash
 constexpr const char *kLogPath = "/sensor_log.bin";
 std::vector<SensorSample> s_log;
 bool s_spiffsReady = false;
@@ -105,23 +105,6 @@ void appendSensorSample(const SensorSample &s) {
         s_log[s_log.size() - 1] = s;
     }
     saveLog();
-}
-
-void sensorLogToJson(JsonDocument &doc) {
-    JsonArray arr = doc.to<JsonArray>();
-    for (const auto &s : s_log) {
-        JsonObject o = arr.add<JsonObject>();
-        o["ts"] = s.ts;
-        o["temp"] = s.temp;
-        o["hum"] = s.hum;
-        o["press"] = s.press;
-        o["lux"] = s.lux;
-        if (!isnan(s.co2) && s.co2 > 0.0f) {
-            o["co2"] = s.co2;
-        } else {
-            o["co2"] = nullptr;
-        }
-    }
 }
 
 void sensorLogToJsonDownsample(JsonDocument &doc, size_t maxSamples) {

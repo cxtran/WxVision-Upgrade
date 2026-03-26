@@ -13,8 +13,9 @@ namespace
     {
         String title;
         std::vector<String> wrappedLines;
-        std::vector<uint16_t> lineColors;
         uint16_t titleColor = 0;
+        uint16_t lineColor = 0;
+        uint16_t firstLineColor = 0;
         bool loop = true;
     };
 
@@ -55,11 +56,19 @@ namespace
         AlertPage p;
         p.title = title;
         p.titleColor = titleColor;
+        p.lineColor = lineColor;
         p.wrappedLines.push_back(line1);
         p.wrappedLines.push_back(line2);
-        p.lineColors.push_back(lineColor);
-        p.lineColors.push_back(lineColor);
         return p;
+    }
+
+    static uint16_t alertLineColorAt(const AlertPage &page, size_t lineIndex, uint16_t defaultColor)
+    {
+        if (lineIndex == 0 && page.firstLineColor != 0)
+            return page.firstLineColor;
+        if (page.lineColor != 0)
+            return page.lineColor;
+        return defaultColor;
     }
 
     static uint32_t noaaUiSignature()
@@ -667,37 +676,14 @@ namespace
         size_t lineCount = 0;
     };
 
-    static std::vector<AlertTextPage> paginateWrappedLines(const std::vector<String> &wrappedLines, size_t linesPerPage)
-    {
-        std::vector<AlertTextPage> pages;
-        if (linesPerPage == 0)
-            return pages;
-
-        if (wrappedLines.empty())
-        {
-            AlertTextPage page;
-            page.startLine = 0;
-            page.lineCount = 0;
-            pages.push_back(page);
-            return pages;
-        }
-
-        for (size_t start = 0; start < wrappedLines.size(); start += linesPerPage)
-        {
-            const size_t remaining = wrappedLines.size() - start;
-            const size_t count = (remaining < linesPerPage) ? remaining : linesPerPage;
-            AlertTextPage page;
-            page.startLine = start;
-            page.lineCount = count;
-            pages.push_back(page);
-        }
-        return pages;
-    }
-
     static size_t pageCountForWrappedLines(const std::vector<String> &wrappedLines)
     {
-        const std::vector<AlertTextPage> pages = paginateWrappedLines(wrappedLines, ALERT_VISIBLE_LINES);
-        return pages.empty() ? 1u : pages.size();
+        if (ALERT_VISIBLE_LINES <= 0)
+            return 1u;
+        if (wrappedLines.empty())
+            return 1u;
+        return (wrappedLines.size() + static_cast<size_t>(ALERT_VISIBLE_LINES) - 1u) /
+               static_cast<size_t>(ALERT_VISIBLE_LINES);
     }
 
     static size_t lastPageStartLine(const AlertPage &page)
@@ -716,7 +702,7 @@ namespace
         p.wrappedLines = wrapTextToPixelWidth(normalizeAlertText(body), ALERT_BODY_WIDTH_PX);
         if (p.wrappedLines.empty())
             p.wrappedLines.push_back("--");
-        p.lineColors.assign(p.wrappedLines.size(), lineColor);
+        p.lineColor = lineColor;
         return p;
     }
 
@@ -1073,7 +1059,7 @@ namespace
         if (noaaFetchInProgress())
         {
             AlertPage p0 = makeLoadingPage("NOAA ALERT", "GET ALERT", "INFO", ui_theme::noaaTitleInfo(), ui_theme::noaaLineInfo());
-            p0.lineColors[0] = ui_theme::noaaLinePrimary();
+            p0.firstLineColor = ui_theme::noaaLinePrimary();
             s_alertPages.push_back(p0);
 
             AlertPage p1 = makeLoadingPage("STATUS", "CHECKING", "NOAA FEED", ui_theme::noaaTitleWhat(), ui_theme::noaaLineInfo());
@@ -1135,22 +1121,16 @@ namespace
 
     static AlertTextPage currentAlertTextPage(const AlertPage &page, size_t pageStartLine)
     {
-        const std::vector<AlertTextPage> pages = paginateWrappedLines(page.wrappedLines, ALERT_VISIBLE_LINES);
         AlertTextPage currentPage;
         currentPage.startLine = 0;
         currentPage.lineCount = 0;
-        if (pages.empty())
+        if (page.wrappedLines.empty() || ALERT_VISIBLE_LINES <= 0)
             return currentPage;
 
-        currentPage = pages[0];
-        for (const AlertTextPage &candidate : pages)
-        {
-            if (candidate.startLine == pageStartLine)
-            {
-                currentPage = candidate;
-                break;
-            }
-        }
+        const size_t maxStartLine = lastPageStartLine(page);
+        currentPage.startLine = min(pageStartLine, maxStartLine);
+        const size_t remaining = page.wrappedLines.size() - currentPage.startLine;
+        currentPage.lineCount = min(remaining, static_cast<size_t>(ALERT_VISIBLE_LINES));
         return currentPage;
     }
 
@@ -1289,9 +1269,7 @@ namespace
             if (lineIndex >= page.wrappedLines.size())
                 break;
 
-            uint16_t lineColor = defaultColor;
-            if (lineIndex < page.lineColors.size() && page.lineColors[lineIndex] != 0)
-                lineColor = page.lineColors[lineIndex];
+            const uint16_t lineColor = alertLineColorAt(page, lineIndex, defaultColor);
 
             const String &fullLine = page.wrappedLines[lineIndex];
             String visibleLine;
@@ -1330,9 +1308,7 @@ namespace
             if (lastLineIndex < page.wrappedLines.size())
             {
                 const String &lastLine = page.wrappedLines[lastLineIndex];
-                uint16_t lineColor = defaultColor;
-                if (lastLineIndex < page.lineColors.size() && page.lineColors[lastLineIndex] != 0)
-                    lineColor = page.lineColors[lastLineIndex];
+                const uint16_t lineColor = alertLineColorAt(page, lastLineIndex, defaultColor);
 
                 const int y = ALERT_BODY_TOP_Y + 1 + static_cast<int>(lastLineOffset * ALERT_LINE_H);
                 const int cursorX = ALERT_BODY_LEFT_X + noaaTextWidthPx(lastLine);

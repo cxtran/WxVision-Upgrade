@@ -9,5 +9,4 @@ void broadcastAppSettingsUpdate(const char *section);
 extern bool otaInProgress;
 
 // Trend logging (declared in datalogger.cpp)
-void sensorLogToJson(class JsonDocument &doc);
 

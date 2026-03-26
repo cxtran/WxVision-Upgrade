@@ -5,6 +5,8 @@
 
 namespace wxv::astronomy
 {
+constexpr size_t kSkyFactMarqueeLen = 512;
+
 enum class SkyFactType : uint8_t
 {
     Season = 0,
@@ -68,7 +70,7 @@ struct SkyFactPage
     char line1[24] = "";
     char line2[24] = "";
     char line3[24] = "";
-    char marquee[192] = "";
+    char marquee[kSkyFactMarqueeLen] = "";
 };
 
 void updateAstronomyData(bool force = false);

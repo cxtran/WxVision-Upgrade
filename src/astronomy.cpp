@@ -108,6 +108,152 @@ int dayOfYear(int year, int month, int day)
     return doy;
 }
 
+int weekOfYear(int year, int month, int day)
+{
+    const int doy = dayOfYear(year, month, day);
+    return ((doy - 1) / 7) + 1;
+}
+
+const char *monthNameShort(int month)
+{
+    static const char *kMonths[] = {
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"};
+    month = constrain(month, 1, 12);
+    return kMonths[month - 1];
+}
+
+int quarterOfYear(int month)
+{
+    month = constrain(month, 1, 12);
+    return ((month - 1) / 3) + 1;
+}
+
+int daysUntilWeekend(const DateTime &localNow)
+{
+    const int dow = localNow.dayOfTheWeek(); // 0=Sunday
+    if (dow == 0 || dow == 6)
+        return 0;
+    return 6 - dow;
+}
+
+double earthSunDistanceAu(int year, int month, int day)
+{
+    const double gamma = (2.0 * kPi / 365.0) * (static_cast<double>(dayOfYear(year, month, day)) - 1.0);
+    return 1.00014 - 0.01671 * cos(gamma) - 0.00014 * cos(2.0 * gamma);
+}
+
+struct MeteorShowerPeak
+{
+    uint8_t month;
+    uint8_t day;
+    const char *name;
+};
+
+const MeteorShowerPeak kMeteorPeaks[] = {
+    {1, 3, "Quadrantids"},
+    {4, 22, "Lyrids"},
+    {5, 6, "Eta Aquariids"},
+    {7, 30, "Southern Delta Aquariids"},
+    {8, 12, "Perseids"},
+    {10, 21, "Orionids"},
+    {11, 17, "Leonids"},
+    {12, 14, "Geminids"},
+    {12, 22, "Ursids"}};
+
+int daysUntilDate(const DateTime &fromLocal, int targetMonth, int targetDay)
+{
+    DateTime fromDay(fromLocal.year(), fromLocal.month(), fromLocal.day(), 0, 0, 0);
+    DateTime target(fromLocal.year(), targetMonth, targetDay, 0, 0, 0);
+    if (target < fromDay)
+        target = DateTime(fromLocal.year() + 1, targetMonth, targetDay, 0, 0, 0);
+    return static_cast<int32_t>(target.unixtime() - fromDay.unixtime()) / 86400;
+}
+
+bool nextMeteorPeak(const DateTime &localNow, const MeteorShowerPeak *&peakOut, int &daysOut)
+{
+    peakOut = nullptr;
+    daysOut = 0;
+    int bestDays = 10000;
+    for (size_t i = 0; i < sizeof(kMeteorPeaks) / sizeof(kMeteorPeaks[0]); ++i)
+    {
+        const int days = daysUntilDate(localNow, kMeteorPeaks[i].month, kMeteorPeaks[i].day);
+        if (days < bestDays)
+        {
+            bestDays = days;
+            peakOut = &kMeteorPeaks[i];
+            daysOut = days;
+        }
+    }
+    return peakOut != nullptr;
+}
+
+bool dstTransitionLocal(const TimezoneInfo &tz, int year, DateTime &startLocal, DateTime &endLocal)
+{
+    if (tz.dstRule == DstRule::None)
+    {
+        startLocal = endLocal = DateTime(2000, 1, 1, 0, 0, 0);
+        return false;
+    }
+
+    auto nthWeekdayOfMonth = [](int y, int m, int weekday, int nth) -> int
+    {
+        DateTime firstDay(y, m, 1, 0, 0, 0);
+        const int firstDow = firstDay.dayOfTheWeek();
+        int delta = (weekday - firstDow + 7) % 7;
+        return 1 + delta + (nth - 1) * 7;
+    };
+
+    auto daysInMonthLocal = [](int y, int m) -> int
+    {
+        static const int kDays[] = {31,28,31,30,31,30,31,31,30,31,30,31};
+        int days = kDays[(m - 1) % 12];
+        if (m == 2 && (((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0)))
+            ++days;
+        return days;
+    };
+
+    auto lastWeekdayOfMonth = [&](int y, int m, int weekday) -> int
+    {
+        const int dim = daysInMonthLocal(y, m);
+        DateTime lastDate(y, m, dim, 0, 0, 0);
+        const int lastDow = lastDate.dayOfTheWeek();
+        const int delta = (lastDow - weekday + 7) % 7;
+        return dim - delta;
+    };
+
+    switch (tz.dstRule)
+    {
+    case DstRule::NorthAmerica:
+    case DstRule::Newfoundland:
+        startLocal = DateTime(year, 3, nthWeekdayOfMonth(year, 3, 0, 2), 2, 0, 0);
+        endLocal = DateTime(year, 11, nthWeekdayOfMonth(year, 11, 0, 1), 2, 0, 0);
+        return true;
+    case DstRule::Europe:
+        startLocal = DateTime(year, 3, lastWeekdayOfMonth(year, 3, 0), 2, 0, 0);
+        endLocal = DateTime(year, 10, lastWeekdayOfMonth(year, 10, 0), 3, 0, 0);
+        return true;
+    case DstRule::Azores:
+        startLocal = DateTime(year, 3, lastWeekdayOfMonth(year, 3, 0), 0, 0, 0);
+        endLocal = DateTime(year, 10, lastWeekdayOfMonth(year, 10, 0), 1, 0, 0);
+        return true;
+    case DstRule::Australia:
+        startLocal = DateTime(year, 10, nthWeekdayOfMonth(year, 10, 0, 1), 2, 0, 0);
+        endLocal = DateTime(year, 4, nthWeekdayOfMonth(year, 4, 0, 1), 3, 0, 0);
+        return true;
+    case DstRule::NewZealand:
+        startLocal = DateTime(year, 9, lastWeekdayOfMonth(year, 9, 0), 2, 0, 0);
+        endLocal = DateTime(year, 4, nthWeekdayOfMonth(year, 4, 0, 1), 3, 0, 0);
+        return true;
+    case DstRule::None:
+    default:
+        break;
+    }
+
+    startLocal = endLocal = DateTime(2000, 1, 1, 0, 0, 0);
+    return false;
+}
+
 double julianDateFromUnix(time_t epoch)
 {
     return static_cast<double>(epoch) / 86400.0 + 2440587.5;
@@ -968,6 +1114,86 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 
+    const int doy = dayOfYear(localNow.year(), localNow.month(), localNow.day());
+    const int totalDays = daysInYear(localNow.year());
+    const int daysLeft = totalDays - doy;
+    const int week = weekOfYear(localNow.year(), localNow.month(), localNow.day());
+    const int monthDays = daysInMonthForYearMonth(localNow.year(), localNow.month());
+    const int monthDaysLeft = monthDays - localNow.day();
+    const int quarter = quarterOfYear(localNow.month());
+    const int weekendDays = daysUntilWeekend(localNow);
+    const double earthSunKm = earthSunDistanceAu(localNow.year(), localNow.month(), localNow.day()) * 149597870.7;
+
+    snprintf(phrase, sizeof(phrase), "Day %d of %d", doy, totalDays);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    snprintf(phrase, sizeof(phrase), "%d days left", daysLeft);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    snprintf(phrase, sizeof(phrase), "Week %d of the year", week);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    snprintf(phrase, sizeof(phrase), "%d days remain in %s", monthDaysLeft, monthNameShort(localNow.month()));
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    snprintf(phrase, sizeof(phrase), "Quarter %d of 4", quarter);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    if (weekendDays == 0)
+        snprintf(phrase, sizeof(phrase), "It is the weekend now");
+    else
+        snprintf(phrase, sizeof(phrase), "Weekend in %d days", weekendDays);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
+    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+
+    if (!timezoneIsCustom())
+    {
+        const int tzIndex = timezoneCurrentIndex();
+        if (tzIndex >= 0 && timezoneSupportsDst(static_cast<size_t>(tzIndex)))
+        {
+            const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(tzIndex));
+            const bool dstActiveNow = timezoneOffsetForUtcAtIndex(tzIndex, utcNow) != tz.offsetMinutes;
+            DateTime dstStartLocal;
+            DateTime dstEndLocal;
+            if (dstTransitionLocal(tz, localNow.year(), dstStartLocal, dstEndLocal))
+            {
+                const DateTime today(localNow.year(), localNow.month(), localNow.day(), 0, 0, 0);
+                int daysToTransition = -1;
+                const char *transitionLabel = nullptr;
+                if (dstActiveNow)
+                {
+                    DateTime endDay(dstEndLocal.year(), dstEndLocal.month(), dstEndLocal.day(), 0, 0, 0);
+                    daysToTransition = daysBetweenDates(today, endDay);
+                    transitionLabel = "DST ends";
+                }
+                else
+                {
+                    DateTime startDay(dstStartLocal.year(), dstStartLocal.month(), dstStartLocal.day(), 0, 0, 0);
+                    if (startDay < today)
+                        startDay = DateTime(localNow.year() + 1, dstStartLocal.month(), dstStartLocal.day(), 0, 0, 0);
+                    daysToTransition = daysBetweenDates(today, startDay);
+                    transitionLabel = "DST starts";
+                }
+
+                if (daysToTransition == 0)
+                    snprintf(phrase, sizeof(phrase), "%s today", transitionLabel);
+                else
+                    snprintf(phrase, sizeof(phrase), "%s in %d days", transitionLabel, daysToTransition);
+                appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            }
+
+            snprintf(phrase, sizeof(phrase), "%s now", dstActiveNow ? "DST is active" : "Standard time is active");
+            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        }
+    }
+
+    const MeteorShowerPeak *meteorPeak = nullptr;
+    int meteorDays = 0;
+    if (nextMeteorPeak(localNow, meteorPeak, meteorDays) && meteorPeak)
+    {
+        if (meteorDays == 0)
+            snprintf(phrase, sizeof(phrase), "%s peak is tonight", meteorPeak->name);
+        else
+            snprintf(phrase, sizeof(phrase), "%s peak in %d days", meteorPeak->name, meteorDays);
+        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    }
+
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), moonPhaseLabel(s_data.moonPhase));
 
     const float phase = s_data.moonPhaseFraction;
@@ -1034,14 +1260,6 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
             }
         }
     }
-
-    const int doy = dayOfYear(localNow.year(), localNow.month(), localNow.day());
-    const int totalDays = daysInYear(localNow.year());
-    const int daysLeft = totalDays - doy;
-    snprintf(phrase, sizeof(phrase), "Day %d of %d", doy, totalDays);
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
-    snprintf(phrase, sizeof(phrase), "%d days left", daysLeft);
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
 
     snprintf(page.title, sizeof(page.title), "%s", "SKY BRIEF");
     page.valid = page.marquee[0] != '\0';

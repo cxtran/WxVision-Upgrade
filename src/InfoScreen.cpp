@@ -8,9 +8,6 @@
 #include "ui_theme.h"
 #include "screen_manager.h"
 
-extern const int NUM_INFOSCREENS;
-extern const ScreenMode InfoScreenModes[];
-extern ScreenMode currentScreen;
 extern int scrollSpeed;
 extern int verticalScrollSpeed;
 extern int theme;
@@ -20,7 +17,6 @@ static RollingUpScreen s_dailyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_
 static RollingUpScreen s_liveRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_lightningRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
-static RollingUpScreen s_noaaRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static std::vector<String> s_hourlyHeaders;
 static std::vector<String> s_dailyHeaders;
 
@@ -42,65 +38,6 @@ static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
     g = clamp(g, boost);
     b = clamp(b, boost);
     return dma_display->color565(r, g, b);
-}
-
-// Simple word-wrap to fit within the small 64px screen width
-static std::vector<String> wrapToWidth(const String &text, int maxWidthPx)
-{
-    std::vector<String> out;
-    String current;
-    int currentW = 0;
-    int spaceW = getTextWidth(" ");
-    int idx = 0;
-    while (idx < text.length())
-    {
-        // read next word
-        int start = idx;
-        while (idx < text.length() && !isspace(text[idx])) idx++;
-        String word = text.substring(start, idx);
-        int wW = getTextWidth(word.c_str());
-        if (!current.isEmpty() && currentW + spaceW + wW > maxWidthPx)
-        {
-            out.push_back(current);
-            current = word;
-            currentW = wW;
-        }
-        else
-        {
-            if (!current.isEmpty())
-            {
-                current += " ";
-                currentW += spaceW;
-            }
-            current += word;
-            currentW += wW;
-        }
-        while (idx < text.length() && isspace(text[idx]))
-        {
-            idx++;
-        }
-    }
-    if (!current.isEmpty())
-        out.push_back(current);
-    if (out.empty())
-        out.push_back("");
-    return out;
-}
-
-static String truncateToWidth(const String &text, int maxWidthPx)
-{
-    if (maxWidthPx < 1)
-        return "";
-    if (getTextWidth(text.c_str()) <= maxWidthPx)
-        return text;
-
-    String out = text;
-    // Keep at least 1 char
-    while (out.length() > 1 && getTextWidth(out.c_str()) > maxWidthPx)
-    {
-        out.remove(out.length() - 1);
-    }
-    return out;
 }
 
 InfoScreen::InfoScreen(const String& title, ScreenMode mode)
@@ -158,7 +95,14 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<uint8_t> marqueeFlags;
         s_hourlyHeaders.clear();
         s_hourlyHeaders.reserve(_lineCount);
-        vec.reserve(_lineCount * 2);
+        const size_t rowCount = static_cast<size_t>(_lineCount) * 3u;
+        vec.reserve(rowCount);
+        colors.reserve(rowCount);
+        offsets.reserve(rowCount);
+        yOffsets.reserve(rowCount);
+        icons.reserve(rowCount);
+        iconColors.reserve(rowCount);
+        marqueeFlags.reserve(rowCount);
         for (int i = 0; i < _lineCount; ++i) {
             // Split on '\n' to allow fixed block entries
             const bool monoTheme = (theme == 1);
@@ -249,7 +193,15 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<const uint8_t *> icons;
         std::vector<uint16_t> iconColors;
         std::vector<uint8_t> marqueeFlags;
-        vec.reserve(_lineCount * 3);
+        const size_t rowCount = static_cast<size_t>(_lineCount) * 3u;
+        vec.reserve(rowCount);
+        colors.reserve(rowCount);
+        offsets.reserve(rowCount);
+        iconOffsets.reserve(rowCount);
+        yOffsets.reserve(rowCount);
+        icons.reserve(rowCount);
+        iconColors.reserve(rowCount);
+        marqueeFlags.reserve(rowCount);
         s_dailyHeaders.clear();
         s_dailyHeaders.reserve(_lineCount);
         const bool iconEnabled = (forecastIconSize == 16);
@@ -401,7 +353,11 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<uint16_t> colors;
         std::vector<int> offsets;
         std::vector<uint8_t> marqueeFlags;
-        vec.reserve(_lineCount * 2);
+        const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
+        vec.reserve(rowCount);
+        colors.reserve(rowCount);
+        offsets.reserve(rowCount);
+        marqueeFlags.reserve(rowCount);
         const bool monoTheme = (theme == 1);
         const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
         const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
@@ -444,7 +400,11 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<uint16_t> colors;
         std::vector<int> offsets;
         std::vector<uint8_t> marqueeFlags;
-        vec.reserve(_lineCount * 2);
+        const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
+        vec.reserve(rowCount);
+        colors.reserve(rowCount);
+        offsets.reserve(rowCount);
+        marqueeFlags.reserve(rowCount);
         const bool monoTheme = (theme == 1);
         const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
         const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
@@ -488,7 +448,11 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<uint16_t> colors;
         std::vector<int> offsets;
         std::vector<uint8_t> marqueeFlags;
-        vec.reserve(_lineCount * 2);
+        const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
+        vec.reserve(rowCount);
+        colors.reserve(rowCount);
+        offsets.reserve(rowCount);
+        marqueeFlags.reserve(rowCount);
         const bool monoTheme = (theme == 1);
         const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
         const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
