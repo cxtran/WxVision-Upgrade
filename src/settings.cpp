@@ -133,6 +133,11 @@ static void applyNoaaBuildDefaults()
 #endif
 }
 
+namespace
+{
+constexpr const char *kPrefsKeyOwmCountryCustom = "owmCtryCust";
+}
+
 void loadSettings() {
     prefs.begin("visionwx", true);
 
@@ -204,7 +209,7 @@ void loadSettings() {
     owmCity      = prefs.getString("owmCity", "");
     owmApiKey    = prefs.getString("owmApiKey", "");
     owmCountryIndex = prefs.getInt("owmCountryIndex", 0);
-    owmCountryCustom = prefs.getString("owmCountryCustom", "");
+    owmCountryCustom = prefs.getString(kPrefsKeyOwmCountryCustom, "");
     wfToken      = prefs.getString("wfToken", "");
     wfStationId  = prefs.getString("wfStationId", "");
 
@@ -288,7 +293,7 @@ void saveWeatherSettings() {
     prefs.putString("owmCity", owmCity);
     prefs.putString("owmApiKey", owmApiKey);
     prefs.putInt("owmCountryIndex", owmCountryIndex);
-    prefs.putString("owmCountryCustom", owmCountryCustom);
+    prefs.putString(kPrefsKeyOwmCountryCustom, owmCountryCustom);
     prefs.putString("wfToken", wfToken);
     prefs.putString("wfStationId", wfStationId);
     prefs.end();

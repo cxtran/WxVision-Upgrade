@@ -195,8 +195,8 @@ String finalizeSummaryParagraph(String paragraph)
 String expandSkyBriefTimeUnits(String text)
 {
     text.replace(" d ", " days ");
-    text.replace(" h ", " hours ");
-    text.replace(" m ", " minutes ");
+    text.replace(" h ", " Hr ");
+    text.replace(" m ", " Min ");
     text.replace("D ", "Days ");
 
     for (int i = 0; i < text.length(); ++i)
@@ -224,14 +224,14 @@ String expandSkyBriefTimeUnits(String text)
         else if (unit == 'h' || unit == 'H')
         {
             text.remove(unitIndex, 1);
-            text = text.substring(0, unitIndex) + " hours" + text.substring(unitIndex);
-            i = unitIndex + 5;
+            text = text.substring(0, unitIndex) + " Hr" + text.substring(unitIndex);
+            i = unitIndex + 2;
         }
         else if (unit == 'm' || unit == 'M')
         {
             text.remove(unitIndex, 1);
-            text = text.substring(0, unitIndex) + " minutes" + text.substring(unitIndex);
-            i = unitIndex + 7;
+            text = text.substring(0, unitIndex) + " Min" + text.substring(unitIndex);
+            i = unitIndex + 3;
         }
     }
 
@@ -353,18 +353,21 @@ String buildSummaryParagraph(const wxv::astronomy::SkyFactPage &page)
 
 int skyBriefSectionIndexForPhrase(const String &phrase)
 {
+    if (phrase.indexOf("DST") >= 0 || phrase.indexOf("peak") >= 0 ||
+        phrase.indexOf("Standard time") >= 0 || phrase.indexOf("weekend") >= 0)
+        return 2; // Events
     if (phrase.startsWith("Spring") || phrase.startsWith("Summer") || phrase.startsWith("Autumn") ||
         phrase.startsWith("Winter"))
         return 0; // Season
     if (phrase.startsWith("Daylight") || phrase.startsWith("Sun") || phrase.startsWith("Earth-Sun"))
         return 1; // Sun
-    if (phrase.indexOf("Moon") >= 0)
-        return 2; // Moon
     if (phrase.indexOf("Today is day") >= 0 || phrase.startsWith("Week ") || phrase.startsWith("Quarter ") ||
         phrase.startsWith("Weekend") || phrase.startsWith("It is the weekend") ||
         phrase.indexOf("remain in ") >= 0)
         return 3; // Calendar
-    return 4;     // Events
+    if (phrase.indexOf("Moon") >= 0)
+        return 4; // Moon
+    return 3;     // Calendar
 }
 
 void appendSkyBriefSentence(String &text, const String &phraseRaw)
@@ -394,9 +397,9 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
     std::vector<SkyBriefSection> sections = {
         {"SEASON", ""},
         {"SUN", ""},
-        {"MOON", ""},
+        {"EVENTS", ""},
         {"CALENDAR", ""},
-        {"EVENTS", ""}};
+        {"MOON", ""}};
 
     std::vector<String> phrases = splitSummaryPhrasesRobust(page.marquee);
     for (size_t i = 0; i < phrases.size(); ++i)
@@ -407,6 +410,9 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
         const int sectionIndex = skyBriefSectionIndexForPhrase(normalized);
         appendSkyBriefSentence(sections[sectionIndex].text, normalized);
     }
+
+    if (sections[2].text.length() == 0)
+        sections[2].text = "No special sky events right now.";
 
     for (size_t i = 0; i < sections.size(); ++i)
     {
