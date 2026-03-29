@@ -105,6 +105,9 @@ static constexpr uint32_t kAppDeviceBroadcastMinMs = 10000u;
 static constexpr uint32_t kAppAlertBroadcastMinMs = 1000u;
 static constexpr uint32_t kAppLightningBroadcastMinMs = 5000u;
 static constexpr uint16_t kMaxAppWsClients = 2;
+static String g_otaLastError;
+static bool g_otaUploadStarted = false;
+static bool g_otaUploadFinished = false;
 
 #define WEB_UI_DISABLED 0
 #define WEB_UI_MINIMAL 1
@@ -1515,7 +1518,7 @@ static const char kMinimalOtaPage2[] PROGMEM = R"rawliteral(
 </head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
 function pollForReturn(attempt){if(attempt>25){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
-document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setMsg('Upload complete. Rebooting device...',true);fetch('/reboot').catch(function(){});pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
+document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setMsg('Upload complete. Rebooting device...',true);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
 </script></body></html>
 )rawliteral";
 #endif
@@ -5211,31 +5214,69 @@ void setupWebServer() {
 
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *req) {
-      bool ok = !Update.hasError();
+      bool ok = g_otaUploadStarted && g_otaUploadFinished && !Update.hasError();
       otaInProgress = false;
       if (ok) {
-        // OTA page handles success messaging; keep response minimal
+        g_webPendingReboot = true;
+        g_webRebootAtMs = millis() + 250;
         req->send(200, "text/plain", "OK");
       } else {
-        req->send(200, "text/html",
-                  "<h2>Update FAILED!</h2><p>Please check the firmware file and try again.</p>"
-                  "<a href='/ota'>Back to OTA page</a>");
+        const String msg = g_otaLastError.length() ? g_otaLastError : String("OTA update failed.");
+        req->send(500, "text/plain", msg);
       }
+      g_otaUploadStarted = false;
+      g_otaUploadFinished = false;
+      g_otaLastError = "";
     },
     [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!index) {
         Serial.printf("OTA Update Start: %s\n", filename.c_str());
-        Update.begin(UPDATE_SIZE_UNKNOWN);
+        g_otaUploadStarted = true;
+        g_otaUploadFinished = false;
+        g_otaLastError = "";
+        otaInProgress = false;
+
+        if (filename.isEmpty()) {
+          g_otaLastError = "Missing firmware filename.";
+          Serial.println("[OTA] Missing firmware filename.");
+          return;
+        }
+
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+          g_otaLastError = "Not enough space for firmware.";
+          Serial.println("[OTA] Update.begin failed.");
+          Update.printError(Serial);
+          return;
+        }
+
         otaInProgress = true;
         // Show upgrade message on display
         if (dma_display) {
           wxv::notify::showNotification(wxv::notify::NotifyId::Upgrading, dma_display->color565(0, 255, 255));
         }
       }
-      if (Update.write(data, len) != len) { Serial.println("OTA Write Fail!"); }
+
+      if (!g_otaLastError.isEmpty()) {
+        return;
+      }
+
+      if (Update.write(data, len) != len) {
+        g_otaLastError = "Firmware write failed.";
+        Serial.println("[OTA] Update.write failed.");
+        Update.printError(Serial);
+        return;
+      }
+
       if (final) {
-        if (Update.end(true)) { Serial.println("OTA Update Success."); }
-        else { Serial.println("OTA Update Error!"); }
+        if (Update.end(true)) {
+          g_otaUploadFinished = true;
+          Serial.println("OTA Update Success.");
+        }
+        else {
+          g_otaLastError = "Firmware finalize failed.";
+          Serial.println("[OTA] Update.end failed.");
+          Update.printError(Serial);
+        }
         otaInProgress = false;
       }
     }

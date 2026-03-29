@@ -5,7 +5,6 @@
 #include "time.h"
 #include "RTClib.h"
 #include <ESP32-HUB75-MatrixPanel-I2S-DMA.h>
-#include <ArduinoOTA.h>
 #include <Preferences.h>
 #include <math.h>
 #include "display.h"
@@ -101,7 +100,6 @@ bool initialSetupAwaitingWifi = false;
 bool udpListening = false;
 
 String deviceHostname;
-static bool otaInitialized = false;
 static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
@@ -217,14 +215,6 @@ static void startMdnsService(bool wifiConnected)
 static void refreshNetworkServices(bool wifiConnected)
 {
     ensureHostname();
-
-    if (!otaInitialized)
-    {
-        ArduinoOTA.setHostname(deviceHostname.c_str());
-        ArduinoOTA.begin();
-        otaInitialized = true;
-        Serial.printf("[OTA] Ready (%s.local)\n", deviceHostname.c_str());
-    }
 
     setupWebServer();
     startMdnsService(wifiConnected);
@@ -741,11 +731,6 @@ void loop()
     }
 
     // --- Main background tasks ---
-    if (wifiConnected || apActive)
-    {
-        ArduinoOTA.handle();
-    }
-
     if (udpListening)
     {
         fetchTempestData();
