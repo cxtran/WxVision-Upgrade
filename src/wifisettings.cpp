@@ -338,6 +338,28 @@ static String wifiFailureReasonForStatus(wl_status_t status, bool timedOut)
     return "WIFI FAIL";
 }
 
+static void showWifiFailureNotification(WifiStatusReason reasonCode, const String &fallbackReason)
+{
+    if (dma_display == nullptr || isSplashActive())
+        return;
+
+    switch (reasonCode)
+    {
+    case WifiStatusReason::SSID_NOT_FOUND:
+        wxv::notify::showNotification(wxv::notify::NotifyId::WifiNoNet, myRED, myWHITE);
+        return;
+    case WifiStatusReason::AUTH_FAILED:
+        wxv::notify::showNotification(wxv::notify::NotifyId::WifiAuthFail, myRED, myWHITE);
+        return;
+    case WifiStatusReason::CONNECT_TIMEOUT:
+        wxv::notify::showNotification(wxv::notify::NotifyId::WifiTimeout, myRED, myWHITE);
+        return;
+    default:
+        wxv::notify::showNotification(wxv::notify::NotifyId::WifiFail, myRED, myWHITE, fallbackReason);
+        return;
+    }
+}
+
 static void beginWifiConnectAttempt(bool showDisplayStatus, bool backgroundAttempt, bool preserveApMode)
 {
     ensureWiFiEventHook();
@@ -385,7 +407,7 @@ static void beginWifiConnectAttempt(bool showDisplayStatus, bool backgroundAttem
             wifiSaveLastReason();
             if (showDisplayStatus && dma_display != nullptr && !isSplashActive())
             {
-                wxv::notify::showNotification(wxv::notify::NotifyId::WifiFail, myRED, myWHITE, "NO NET");
+                showWifiFailureNotification(WifiStatusReason::SSID_NOT_FOUND, "NO NET");
             }
             wifiScheduleRetry(WIFI_SSID_RESCAN_MS);
         }
@@ -606,7 +628,7 @@ void serviceWiFiConnection()
 
         if (wifiConnectShowDisplay && dma_display != nullptr && !isSplashActive())
         {
-            wxv::notify::showNotification(wxv::notify::NotifyId::WifiConnected, myBLUE, myWHITE, "IP READY");
+            wxv::notify::showNotification(wxv::notify::NotifyId::WifiConnected, myBLUE, myWHITE);
         }
 
         menuActive = false;
@@ -702,7 +724,7 @@ void serviceWiFiConnection()
 
     if (wifiConnectShowDisplay && dma_display != nullptr && !isSplashActive())
     {
-        wxv::notify::showNotification(wxv::notify::NotifyId::WifiFail, myRED, myWHITE, failReason);
+        showWifiFailureNotification(reasonCode, failReason);
     }
 
     // Keep credentials unchanged and avoid forcing WiFi selection prompts.

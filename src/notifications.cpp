@@ -13,14 +13,14 @@ constexpr bool fits(const char (&txt)[N]) {
   return (N - 1U) <= kMaxChars;
 }
 
-static_assert(fits("WIFI SCAN"), "notify text too long");
 static_assert(fits("WIFI"), "notify text too long");
-static_assert(fits("CONNECTING"), "notify text too long");
-static_assert(fits("WIFI CONN"), "notify text too long");
+static_assert(fits("SCANNING"), "notify text too long");
+static_assert(fits("CONNECT"), "notify text too long");
 static_assert(fits("WIFI OK"), "notify text too long");
-static_assert(fits("WIFI FAIL"), "notify text too long");
-static_assert(fits("NO NET"), "notify text too long");
-static_assert(fits("AUTH FAIL"), "notify text too long");
+static_assert(fits("CONNECTED"), "notify text too long");
+static_assert(fits("FAILED"), "notify text too long");
+static_assert(fits("NO NETWORK"), "notify text too long");
+static_assert(fits("AUTH ERROR"), "notify text too long");
 static_assert(fits("TIMEOUT"), "notify text too long");
 static_assert(fits("NTP SYNC"), "notify text too long");
 static_assert(fits("NTP OK"), "notify text too long");
@@ -40,11 +40,11 @@ static_assert(fits("RESETTING"), "notify text too long");
 
 NotificationText textFor(NotifyId id) {
   switch (id) {
-    case NotifyId::WifiConnecting: return {"WIFI", "CONNECTING", true};
-    case NotifyId::WifiConnected: return {"WIFI CONN", nullptr, false};
-    case NotifyId::WifiFail: return {"WIFI FAIL", nullptr, false};
-    case NotifyId::WifiNoNet: return {"WIFI", "NO NET", false};
-    case NotifyId::WifiAuthFail: return {"WIFI", "AUTH FAIL", false};
+    case NotifyId::WifiConnecting: return {"WIFI", "CONNECT", true};
+    case NotifyId::WifiConnected: return {"WIFI OK", "CONNECTED", false};
+    case NotifyId::WifiFail: return {"WIFI", "FAILED", false};
+    case NotifyId::WifiNoNet: return {"WIFI", "NO NETWORK", false};
+    case NotifyId::WifiAuthFail: return {"WIFI", "AUTH ERROR", false};
     case NotifyId::NtpSync: return {"NTP SYNC", nullptr, true};
     case NotifyId::NtpOk: return {"NTP OK", nullptr, false};
     case NotifyId::NtpFail: return {"NTP FAIL", nullptr, false};
@@ -54,8 +54,8 @@ NotificationText textFor(NotifyId id) {
     case NotifyId::WeatherFail: return {"WX FAIL", nullptr, false};
     case NotifyId::SensorFail: return {"SNSR FAIL", nullptr, false};
     case NotifyId::SystemError: return {"SYS ERR", nullptr, false};
-    case NotifyId::WifiScan: return {"WIFI SCAN", nullptr, true};
-    case NotifyId::WifiTimeout: return {"TIMEOUT", nullptr, false};
+    case NotifyId::WifiScan: return {"WIFI", "SCANNING", true};
+    case NotifyId::WifiTimeout: return {"WIFI", "TIMEOUT", false};
     case NotifyId::OtaUpdate: return {"OTA UPDATE", nullptr, false};
     case NotifyId::Upgrading: return {"UPGRADE", nullptr, true};
     case NotifyId::Restoring: return {"RESTORE", nullptr, true};
@@ -69,7 +69,6 @@ String clampNotifyLine(const String& line) {
   String out = line;
   out.trim();
   out.toUpperCase();
-  out.replace(".", "");
   out.replace("!", "");
   out.replace(":", "");
   out.replace("-", " ");
@@ -125,13 +124,15 @@ void showNotification(NotifyId id, uint16_t line1Color, uint16_t line2Color, con
     dma_display->setCursor(x, 12);
     dma_display->print(l1);
   } else {
-    // Two-line professional staggered layout:
-    // line1 left aligned at X=1; line2 right aligned to end at X=63.
-    dma_display->setCursor(1, 8);
+    // Two-line layout: center both lines for a cleaner, more balanced notification.
+    int line1W = getTextWidth(l1.c_str());
+    int x1 = (64 - line1W) / 2;
+    if (x1 < 0) x1 = 0;
+    dma_display->setCursor(x1, 7);
     dma_display->print(l1);
 
     int line2W = getTextWidth(l2.c_str());
-    int x2 = 63 - line2W;
+    int x2 = (64 - line2W) / 2;
     if (x2 < 0) x2 = 0;
     dma_display->setTextColor(line2Color);
     dma_display->setCursor(x2, 18);
