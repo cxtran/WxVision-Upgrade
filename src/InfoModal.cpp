@@ -1080,6 +1080,9 @@ void InfoModal::handleIR(uint32_t code)
                 case MENU_ALARM:
                     showAlarmSettingsModal();
                     break;
+                case MENU_MQTT:
+                    showMqttSettingsModal();
+                    break;
                 case MENU_NOAA:
                     showNoaaSettingsModal();
                     break;
@@ -1732,6 +1735,15 @@ void InfoModal::handleIR(uint32_t code)
                     break;
                 case MENU_DISPLAY:
                     showDisplaySettingsModal();
+                    break;
+                case MENU_ALARM:
+                    showAlarmSettingsModal();
+                    break;
+                case MENU_MQTT:
+                    showMqttSettingsModal();
+                    break;
+                case MENU_NOAA:
+                    showNoaaSettingsModal();
                     break;
                 case MENU_WEATHER:
                     showWeatherSettingsModal();

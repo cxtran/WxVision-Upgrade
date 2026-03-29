@@ -84,6 +84,19 @@ extern String owmCountryCustom;
 extern String wfToken;
 extern String wfStationId;
 
+// --- MQTT ---
+extern bool mqttEnabled;
+extern bool mqttPublishTemp;
+extern bool mqttPublishHumidity;
+extern bool mqttPublishCO2;
+extern bool mqttPublishPressure;
+extern bool mqttPublishLight;
+extern String mqttHost;
+extern uint16_t mqttPort;
+extern String mqttUser;
+extern String mqttPass;
+extern String mqttDeviceId;
+
 // --- Calibration ---
 extern float tempOffset;   // degrees C
 extern int humOffset;    // %
@@ -107,6 +120,7 @@ void saveAllSettings();
 void saveWeatherSettings();
 void saveAlarmSettings();
 void saveNoaaSettings();
+void saveMqttSettings();
 
 // --- UI helpers ---
 void toggleDayFormat(int dir);

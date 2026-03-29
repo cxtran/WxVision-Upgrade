@@ -30,6 +30,7 @@
 #include "app_state.h"
 #include "weather_provider.h"
 #include "screen_manager.h"
+#include "mqtt_client.h"
 #include "generated_web_assets.h"
 #include <new>
 
@@ -1579,12 +1580,13 @@ struct AppSettingsDirtyFlags
   bool noaa = false;
   bool dateTime = false;
   bool worldTime = false;
+  bool mqtt = false;
 };
 
-static constexpr size_t kAppSettingsSectionCount = 12;
+static constexpr size_t kAppSettingsSectionCount = 13;
 static const char *const kAppSettingsSections[kAppSettingsSectionCount] = {
     "device", "units", "display", "wf-tempest", "forecast-ui", "calibration",
-    "alarms", "noaa", "location", "datetime", "world-time", "sound"};
+    "alarms", "noaa", "location", "datetime", "world-time", "sound", "mqtt"};
 
 struct AppSettingsSnapshot
 {
@@ -1941,6 +1943,21 @@ static void serializeAppSoundSettings(JsonObject obj)
   obj["alarmSound"] = alarmSoundMode;
 }
 
+static void serializeAppMqttSettings(JsonObject obj)
+{
+  obj["enabled"] = mqttEnabled;
+  obj["host"] = mqttHost;
+  obj["port"] = mqttPort;
+  obj["username"] = mqttUser;
+  obj["password"] = mqttPass;
+  obj["deviceId"] = mqttDeviceId;
+  obj["publishTemp"] = mqttPublishTemp;
+  obj["publishHumidity"] = mqttPublishHumidity;
+  obj["publishCO2"] = mqttPublishCO2;
+  obj["publishPressure"] = mqttPublishPressure;
+  obj["publishLight"] = mqttPublishLight;
+}
+
 static void serializeAppSettingsSection(JsonObject root, const char *section)
 {
   JsonObject obj = root[section].to<JsonObject>();
@@ -1968,6 +1985,8 @@ static void serializeAppSettingsSection(JsonObject root, const char *section)
     serializeAppWorldTimeSettings(obj);
   else if (strcmp(section, "sound") == 0)
     serializeAppSoundSettings(obj);
+  else if (strcmp(section, "mqtt") == 0)
+    serializeAppMqttSettings(obj);
 }
 
 static bool isKnownAppSettingsSection(const char *section)
@@ -2009,6 +2028,8 @@ static String buildAppSettingsJson(const char *section = nullptr)
       serializeAppWorldTimeSettings(doc.to<JsonObject>());
     else if (strcmp(section, "sound") == 0)
       serializeAppSoundSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "mqtt") == 0)
+      serializeAppMqttSettings(doc.to<JsonObject>());
   }
   else
   {
@@ -2129,6 +2150,11 @@ static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
     saveDateTimeSettings();
   if (dirty.worldTime)
     saveWorldTimeSettings();
+  if (dirty.mqtt)
+  {
+    saveMqttSettings();
+    mqttApplySettings();
+  }
 }
 
 static bool applyAppDeviceSettings(JsonObjectConst obj, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty)
@@ -2943,6 +2969,80 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
   return fieldErrors.size() == 0;
 }
 
+static bool applyAppMqttSettings(JsonObjectConst obj, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty)
+{
+  if (obj.isNull())
+    return true;
+
+  if (!obj["enabled"].isNull())
+  {
+    mqttEnabled = obj["enabled"].as<bool>();
+    dirty.mqtt = true;
+  }
+  if (!obj["host"].isNull())
+  {
+    mqttHost = obj["host"].as<String>();
+    mqttHost.trim();
+    dirty.mqtt = true;
+  }
+  if (!obj["port"].isNull())
+  {
+    int value = obj["port"].as<int>();
+    if (value < 1 || value > 65535)
+      setFieldError(fieldErrors, "port", "must be between 1 and 65535");
+    else
+    {
+      mqttPort = static_cast<uint16_t>(value);
+      dirty.mqtt = true;
+    }
+  }
+  if (!obj["username"].isNull())
+  {
+    mqttUser = obj["username"].as<String>();
+    mqttUser.trim();
+    dirty.mqtt = true;
+  }
+  if (!obj["password"].isNull())
+  {
+    mqttPass = obj["password"].as<String>();
+    mqttPass.trim();
+    dirty.mqtt = true;
+  }
+  if (!obj["deviceId"].isNull())
+  {
+    mqttDeviceId = obj["deviceId"].as<String>();
+    mqttDeviceId.trim();
+    dirty.mqtt = true;
+  }
+  if (!obj["publishTemp"].isNull())
+  {
+    mqttPublishTemp = obj["publishTemp"].as<bool>();
+    dirty.mqtt = true;
+  }
+  if (!obj["publishHumidity"].isNull())
+  {
+    mqttPublishHumidity = obj["publishHumidity"].as<bool>();
+    dirty.mqtt = true;
+  }
+  if (!obj["publishCO2"].isNull())
+  {
+    mqttPublishCO2 = obj["publishCO2"].as<bool>();
+    dirty.mqtt = true;
+  }
+  if (!obj["publishPressure"].isNull())
+  {
+    mqttPublishPressure = obj["publishPressure"].as<bool>();
+    dirty.mqtt = true;
+  }
+  if (!obj["publishLight"].isNull())
+  {
+    mqttPublishLight = obj["publishLight"].as<bool>();
+    dirty.mqtt = true;
+  }
+
+  return fieldErrors.size() == 0;
+}
+
 static bool applyAppSettingsSection(const char *section, JsonVariantConst value, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty)
 {
   JsonObjectConst obj = value.as<JsonObjectConst>();
@@ -2976,6 +3076,8 @@ static bool applyAppSettingsSection(const char *section, JsonVariantConst value,
     return applyAppWorldTimeSettings(obj, fieldErrors, dirty);
   if (strcmp(section, "sound") == 0)
     return applyAppSoundSettings(obj, fieldErrors, dirty);
+  if (strcmp(section, "mqtt") == 0)
+    return applyAppMqttSettings(obj, fieldErrors, dirty);
 
   setFieldError(fieldErrors, "section", "unsupported section");
   return false;
@@ -4852,6 +4954,7 @@ void setupWebServer() {
   registerAppSettingsGet("/api/app/settings/datetime", "datetime");
   registerAppSettingsGet("/api/app/settings/world-time", "world-time");
   registerAppSettingsGet("/api/app/settings/sound", "sound");
+  registerAppSettingsGet("/api/app/settings/mqtt", "mqtt");
 
   server.on("/api/app/settings", HTTP_GET, [](AsyncWebServerRequest *req) {
     sendAppJson(req, buildAppSettingsJson());
@@ -4869,6 +4972,7 @@ void setupWebServer() {
   registerAppSettingsPost("/api/app/settings/datetime", "datetime");
   registerAppSettingsPost("/api/app/settings/world-time", "world-time");
   registerAppSettingsPost("/api/app/settings/sound", "sound");
+  registerAppSettingsPost("/api/app/settings/mqtt", "mqtt");
 
   server.on("/api/app/remote", HTTP_POST,
     [](AsyncWebServerRequest *req) {},

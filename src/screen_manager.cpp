@@ -136,6 +136,7 @@ bool isRotationBlocked()
            deviceModal.isActive() ||
            wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
+           mqttModal.isActive() ||
            weatherModal.isActive() ||
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
@@ -160,6 +161,7 @@ bool isTemporaryAlertBlocked()
            wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
            alarmModal.isActive() ||
+           mqttModal.isActive() ||
            weatherModal.isActive() ||
            tempestModal.isActive() ||
            calibrationModal.isActive() ||

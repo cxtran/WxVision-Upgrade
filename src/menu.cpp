@@ -90,6 +90,7 @@ InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
 InfoModal unitSettingsModal("Units");
 InfoModal alarmModal("Alarm");
+InfoModal mqttModal("MQTT");
 InfoModal noaaModal("Alerts");
 InfoModal locationModal("Location");
 InfoModal worldTimeModal("World Time");
@@ -258,6 +259,11 @@ void handleIRKey(IRCodes::WxKey key)
     if (displayModal.isActive())
     {
         displayModal.handleIR(legacyCode);
+        return;
+    }
+    if (mqttModal.isActive())
+    {
+        mqttModal.handleIR(legacyCode);
         return;
     }
     if (weatherModal.isActive())
@@ -544,11 +550,11 @@ void showMainMenuModal()
 
     String items[] = {
         "Device", "WiFi", "Display", "World Time", "Alarm",
-        "Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
+        "MQTT", "Alerts", "OW Map", "WF Tempest", "Calibration", "System", "Exit Menu"};
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
-        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    mainMenuModal.setLines(items, types, 11);
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
+    mainMenuModal.setLines(items, types, 12);
     mainMenuModal.setShowForwardArrow(true);
 
     mainMenuModal.setCallback([](bool accepted, int btnIdx)
@@ -566,12 +572,13 @@ void showMainMenuModal()
             case 2: showDisplaySettingsModal(); return;
             case 3: showWorldTimeModal(); return;
             case 4: showAlarmSettingsModal(); return;
-            case 5: showNoaaSettingsModal(); return;
-            case 6: showWeatherSettingsModal(); return;
-            case 7: showWfTempestModal(); return;
-            case 8: showCalibrationModal(); return;
-            case 9: showSystemModal(); return;
-            case 10: // Exit Menu
+            case 5: showMqttSettingsModal(); return;
+            case 6: showNoaaSettingsModal(); return;
+            case 7: showWeatherSettingsModal(); return;
+            case 8: showWfTempestModal(); return;
+            case 9: showCalibrationModal(); return;
+            case 10: showSystemModal(); return;
+            case 11: // Exit Menu
                 mainMenuModal.hide(); // Explicitly hide for "Exit Menu" selection
                 exitToHomeScreen();
                 return;

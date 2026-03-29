@@ -49,4 +49,18 @@
 //==========================
 #define WEATHERFLOW_UDP_PORT 50222
 
+//==========================
+// MQTT / Home Assistant
+//==========================
+#define MQTT_ENABLE false
+#define MQTT_HOST ""
+#define MQTT_PORT 1883
+#define MQTT_USER ""
+#define MQTT_PASS ""
+#define MQTT_DEVICE_ID "wxvision01"
+#define MQTT_PUB_INTERVAL_MS 15000UL
+#define MQTT_RETRY_INTERVAL_MS 5000UL
+#define MQTT_BUFFER_SIZE 768
+#define MQTT_KEEPALIVE_SEC 15
+
 #endif

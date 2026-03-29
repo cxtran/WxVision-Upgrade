@@ -1,4 +1,5 @@
 #include <Preferences.h>
+#include "config.h"
 #include "settings.h"
 #include "sensors.h"
 #include "units.h"   // <-- add this
@@ -108,6 +109,19 @@ String wfStationId = "";
 int owmCountryIndex = 0;
 String owmCountryCustom = "";
 
+// --- MQTT ---
+bool mqttEnabled = MQTT_ENABLE;
+bool mqttPublishTemp = true;
+bool mqttPublishHumidity = true;
+bool mqttPublishCO2 = true;
+bool mqttPublishPressure = true;
+bool mqttPublishLight = true;
+String mqttHost = MQTT_HOST;
+uint16_t mqttPort = MQTT_PORT;
+String mqttUser = MQTT_USER;
+String mqttPass = MQTT_PASS;
+String mqttDeviceId = MQTT_DEVICE_ID;
+
 // --- Calibration ---
 float tempOffset = wxv::defaults::kTempOffsetDefaultC;   // degrees C
 int humOffset = wxv::defaults::kHumOffsetDefault;    // %
@@ -212,6 +226,22 @@ void loadSettings() {
     owmCountryCustom = prefs.getString(kPrefsKeyOwmCountryCustom, "");
     wfToken      = prefs.getString("wfToken", "");
     wfStationId  = prefs.getString("wfStationId", "");
+
+    // MQTT
+    mqttEnabled = prefs.getBool("mqttEnabled", MQTT_ENABLE);
+    mqttPublishTemp = prefs.getBool("mqttPubTemp", true);
+    mqttPublishHumidity = prefs.getBool("mqttPubHum", true);
+    mqttPublishCO2 = prefs.getBool("mqttPubCO2", true);
+    mqttPublishPressure = prefs.getBool("mqttPubPres", true);
+    mqttPublishLight = prefs.getBool("mqttPubLight", true);
+    mqttHost = prefs.getString("mqttHost", MQTT_HOST);
+    mqttPort = static_cast<uint16_t>(constrain(prefs.getUInt("mqttPort", MQTT_PORT), 1U, 65535U));
+    mqttUser = prefs.getString("mqttUser", MQTT_USER);
+    mqttPass = prefs.getString("mqttPass", MQTT_PASS);
+    mqttDeviceId = prefs.getString("mqttDevId", MQTT_DEVICE_ID);
+    mqttDeviceId.trim();
+    if (mqttDeviceId.isEmpty())
+        mqttDeviceId = MQTT_DEVICE_ID;
 
     // Calibration
     if (prefs.isKey("tempOffsetF")) {
@@ -348,6 +378,22 @@ void saveNoaaSettings() {
     prefs.end();
 }
 
+void saveMqttSettings() {
+    prefs.begin("visionwx", false);
+    prefs.putBool("mqttEnabled", mqttEnabled);
+    prefs.putBool("mqttPubTemp", mqttPublishTemp);
+    prefs.putBool("mqttPubHum", mqttPublishHumidity);
+    prefs.putBool("mqttPubCO2", mqttPublishCO2);
+    prefs.putBool("mqttPubPres", mqttPublishPressure);
+    prefs.putBool("mqttPubLight", mqttPublishLight);
+    prefs.putString("mqttHost", mqttHost);
+    prefs.putUInt("mqttPort", constrain(static_cast<unsigned int>(mqttPort), 1U, 65535U));
+    prefs.putString("mqttUser", mqttUser);
+    prefs.putString("mqttPass", mqttPass);
+    prefs.putString("mqttDevId", mqttDeviceId);
+    prefs.end();
+}
+
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
@@ -355,6 +401,7 @@ void saveAllSettings() {
     saveCalibrationSettings();
     saveAlarmSettings();
     saveNoaaSettings();
+    saveMqttSettings();
     saveDateTimeSettings();
     // Persist unit preferences too
     saveUnits();

@@ -48,6 +48,7 @@
 #include "weather_provider.h"
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
+#include "mqtt_client.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -304,6 +305,7 @@ static bool isRotationBlocked()
            deviceModal.isActive() ||
            wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
+           mqttModal.isActive() ||
            weatherModal.isActive() ||
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
@@ -522,6 +524,7 @@ void setup()
     // Ensure TCP/IP stack is initialised even if we stay offline
     WiFi.mode(WIFI_STA);
     wifiInitStateMachine();
+    mqttInit();
     splashUpdate("WiFi Prep", 5, 6);
 
     if (initialSetupRequired)
@@ -623,6 +626,7 @@ void loop()
     wifiLoop(apActive);
     wifiConnected = (WiFi.status() == WL_CONNECTED);
     apActive = isAccessPointActive();
+    mqttLoop();
 
     if (wifiConnected && apActive)
     {
@@ -667,10 +671,12 @@ void loop()
         {
             refreshNetworkServices(true);
             restartAutomaticTimeSync();
+            mqttOnWifiConnected();
         }
         else if (wifiDisconnected)
         {
             stopMdnsService();
+            mqttOnWifiDisconnected();
         }
         lastWifiState = wifiConnected;
         lastApState = apActive;
@@ -837,6 +843,7 @@ void loop()
         !deviceModal.isActive() &&
         !wifiSettingsModal.isActive() &&
         !displayModal.isActive() &&
+        !mqttModal.isActive() &&
         !alarmModal.isActive() &&
         !weatherModal.isActive() &&
         !tempestModal.isActive() &&
@@ -1014,6 +1021,13 @@ void loop()
     {
         displayModal.tick();
         displayModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
+        delay(5);
+        return;
+    }
+    if (mqttModal.isActive())
+    {
+        mqttModal.tick();
+        mqttModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(5);
         return;
     }
@@ -1365,6 +1379,7 @@ void loop()
         deviceModal.isActive() ||
         wifiSettingsModal.isActive() ||
         displayModal.isActive() ||
+        mqttModal.isActive() ||
         weatherModal.isActive() ||
         tempestModal.isActive() ||
         calibrationModal.isActive() ||

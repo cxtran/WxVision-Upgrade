@@ -8,6 +8,7 @@ VisionWX is ESP32 firmware for a 64x32 HUB75 RGB matrix weather display with on-
 - On-device modal menu system (IR + physical buttons)
 - Web UI for full settings/configuration (`data/config.html`)
 - Indoor environmental data (SCD40/AHT20/BMP280)
+- MQTT with Home Assistant discovery
 - Weather/forecast/current condition screens
 - Lunar section with Vietnamese text support
 - OTA, mDNS, Wi-Fi scanning/reconnect, AP fallback
@@ -36,6 +37,48 @@ VisionWX is ESP32 firmware for a 64x32 HUB75 RGB matrix weather display with on-
   - Reset button labels aligned with firmware behavior.
   - Remote learning actions use `Learn Remote` / `Clear Learned Remote`.
   - Confirmation prompts added for reset actions.
+- Added MQTT settings and Home Assistant discovery/state publishing on the current branch.
+
+## MQTT / Home Assistant
+
+MQTT can be configured from the on-device `MQTT` menu. The firmware supports broker host, port, username, password, device ID, and per-sensor publish toggles.
+
+Home Assistant discovery entities currently include:
+
+- Temperature
+- Humidity
+- CO2
+- Pressure
+- Light
+- WiFi RSSI
+- Free Heap
+- Uptime
+- Firmware Version
+- MQTT Connected
+- NOAA Alert Active
+- NOAA Alert Count
+- NOAA Alert Headline
+- Brightness
+- Auto Brightness
+- Display Enabled
+- Restart button
+
+Published topic groups include:
+
+- `wxvision/state/*` for sensor values
+- `wxvision/system/*` for diagnostics and MQTT status
+- `wxvision/alert/*` for NOAA alert state
+- `wxvision/display/*` for display state/control
+- `wxvision/cmd/*` for command topics
+- `wxvision/status` for broker availability
+
+Supported remote controls over MQTT:
+
+- Set brightness
+- Toggle auto brightness
+- Toggle display on/off
+- Restart device
+- Switch screens by command topic
 
 ## Project Layout
 

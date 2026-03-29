@@ -29,6 +29,7 @@ void showMainMenuModal();
 void showDeviceSettingsModal();
 void showDisplaySettingsModal();
 void showAlarmSettingsModal();
+void showMqttSettingsModal();
 void showNoaaSettingsModal();
 void requestNoaaSettingsModalRefresh();
 void showDeviceLocationModal();
@@ -67,6 +68,7 @@ enum MenuLevel {
     MENU_WIFISETTINGS,
     MENU_DISPLAY,
     MENU_ALARM,
+    MENU_MQTT,
     MENU_NOAA,
     MENU_WEATHER,
     MENU_TEMPEST,
@@ -154,6 +156,7 @@ extern InfoModal setupPromptModal;
 extern InfoModal wifiSettingsModal;
 extern InfoModal unitSettingsModal;
 extern InfoModal alarmModal;
+extern InfoModal mqttModal;
 extern InfoModal noaaModal;
 extern InfoModal locationModal;
 extern InfoModal worldTimeModal;
