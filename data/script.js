@@ -1112,6 +1112,8 @@ function loadAll(background){
       if (uPressEl) uPressEl.value = (typeof s.units.press !== 'undefined' ? s.units.press : 0);
       var uPrecipEl = document.getElementById('uPrecip');
       if (uPrecipEl) uPrecipEl.value = (typeof s.units.precip !== 'undefined' ? s.units.precip : 0);
+      var uDistanceEl = document.getElementById('uDistance');
+      if (uDistanceEl) uDistanceEl.value = (typeof s.units.distance !== 'undefined' ? s.units.distance : 1);
       var uClockEl = document.getElementById('uClock');
       if (uClockEl) uClockEl.value = (s.units.clock24h ? 1 : 0);
       alarmClockIs24 = !!s.units.clock24h;
@@ -1390,6 +1392,7 @@ function readSettingsForm() {
       wind:   +(byId('uWind')?.value ?? 0),
       press:  +(byId('uPress')?.value ?? 0),
       precip: +(byId('uPrecip')?.value ?? 0),
+      distance: +(byId('uDistance')?.value ?? 1),
       clock24h: +(byId('uClock')?.value ?? 1) === 1
     },
     dayFormat:   +(byId('dayFormat')?.value ?? 0),

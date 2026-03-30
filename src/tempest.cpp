@@ -1340,12 +1340,7 @@ static String ageLongAgo(unsigned long ageMs)
 
 static String formatLightningDistance(double km)
 {
-    if (isnan(km))
-        return "--";
-
-    const bool imperialDistance = useImperial;
-    const double displayValue = imperialDistance ? (km * 0.621371) : km;
-    return String(displayValue, 1) + (imperialDistance ? "mi" : "km");
+    return fmtDistanceKm(km, 1);
 }
 
 static bool isLightningSummaryFresh(unsigned long nowMs)

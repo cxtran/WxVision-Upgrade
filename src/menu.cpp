@@ -157,7 +157,7 @@ int dtFmt24;
 int dtDateFmt;
 int dtNtpPreset;
 int dtAutoDst;
-int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
+int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel, unitDistanceSel;
 
 const char *mainMenu[] = {"Device", "WiFi", "Display", "OW Map", "WF Tempest", "Calibration", "System", "World Time", "Exit Menu"};
 const int mainCount = sizeof(mainMenu) / sizeof(mainMenu[0]);

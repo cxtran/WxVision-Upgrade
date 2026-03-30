@@ -1518,10 +1518,12 @@ static const char kMinimalOtaPage[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 static const char kMinimalOtaPage2[] PROGMEM = R"rawliteral(
-</head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
+</head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><div class="row"><div id="progressWrap" style="display:none;width:100%;margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="margin:0">Upload Progress</label><span id="progressText">0%</span></div><div style="width:100%;height:12px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151"><div id="progressBar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4)"></div></div></div></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
+function setProgress(pct){var wrap=document.getElementById('progressWrap');var bar=document.getElementById('progressBar');var text=document.getElementById('progressText');if(!wrap||!bar||!text)return;var safe=Math.max(0,Math.min(100,Math.round(pct||0)));wrap.style.display='block';bar.style.width=safe+'%';text.textContent=safe+'%';}
+function resetProgress(){var wrap=document.getElementById('progressWrap');if(wrap)wrap.style.display='none';setProgress(0);}
 function pollForReturn(attempt){if(attempt>25){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
-document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setMsg('Upload complete. Rebooting device...',true);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
+document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;resetProgress();setProgress(0);setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.upload.onprogress=function(event){if(!event.lengthComputable)return;setProgress((event.loaded/event.total)*100);};xhr.upload.onload=function(){setProgress(100);};xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setProgress(100);setMsg('Upload complete. Rebooting device...',true);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
 </script></body></html>
 )rawliteral";
 #endif
@@ -1534,6 +1536,7 @@ static void unitsToJson(JsonObject obj)
   obj["wind"] = static_cast<uint8_t>(units.wind);
   obj["press"] = static_cast<uint8_t>(units.press);
   obj["precip"] = static_cast<uint8_t>(units.precip);
+  obj["distance"] = static_cast<uint8_t>(units.distance);
   obj["clock24h"] = units.clock24h;
 }
 static void applyLegacyUnitsInt(int legacy)
@@ -1544,6 +1547,7 @@ static void applyLegacyUnitsInt(int legacy)
     units.wind = WindUnit::MPH;
     units.press = PressUnit::INHG;
     units.precip = PrecipUnit::INCH;
+    units.distance = DistanceUnit::MILE;
   }
   else
   {
@@ -1551,6 +1555,7 @@ static void applyLegacyUnitsInt(int legacy)
     units.wind = WindUnit::MPS;
     units.press = PressUnit::HPA;
     units.precip = PrecipUnit::MM;
+    units.distance = DistanceUnit::KM;
   }
 }
 static void jsonToUnits(JsonVariantConst v)
@@ -1571,6 +1576,8 @@ static void jsonToUnits(JsonVariantConst v)
     units.press = static_cast<PressUnit>(obj["press"].as<uint8_t>());
   if (!obj["precip"].isNull())
     units.precip = static_cast<PrecipUnit>(obj["precip"].as<uint8_t>());
+  if (!obj["distance"].isNull())
+    units.distance = static_cast<DistanceUnit>(obj["distance"].as<uint8_t>());
   if (!obj["clock24h"].isNull())
     units.clock24h = obj["clock24h"].as<bool>();
 }
@@ -1628,6 +1635,21 @@ static const char *pressUnitName(PressUnit value)
 static const char *precipUnitName(PrecipUnit value)
 {
   return (value == PrecipUnit::INCH) ? "in" : "mm";
+}
+
+static const char *distanceUnitName(DistanceUnit value)
+{
+  switch (value)
+  {
+  case DistanceUnit::M:
+    return "m";
+  case DistanceUnit::FEET:
+    return "feet";
+  case DistanceUnit::MILE:
+    return "mile";
+  default:
+    return "km";
+  }
 }
 
 static TempUnit tempUnitFromName(String value, bool &ok)
@@ -1710,6 +1732,34 @@ static PrecipUnit precipUnitFromName(String value, bool &ok)
   }
   ok = false;
   return units.precip;
+}
+
+static DistanceUnit distanceUnitFromName(String value, bool &ok)
+{
+  value.trim();
+  value.toLowerCase();
+  if (value == "m" || value == "meter" || value == "meters")
+  {
+    ok = true;
+    return DistanceUnit::M;
+  }
+  if (value == "km" || value == "kilometer" || value == "kilometers")
+  {
+    ok = true;
+    return DistanceUnit::KM;
+  }
+  if (value == "feet" || value == "foot" || value == "ft")
+  {
+    ok = true;
+    return DistanceUnit::FEET;
+  }
+  if (value == "mile" || value == "miles" || value == "mi")
+  {
+    ok = true;
+    return DistanceUnit::MILE;
+  }
+  ok = false;
+  return units.distance;
 }
 
 static const char *alarmRepeatName(AlarmRepeatMode mode)
@@ -1800,6 +1850,7 @@ static void serializeAppUnitsSettings(JsonObject obj)
   obj["wind"] = windUnitName(units.wind);
   obj["pressure"] = pressUnitName(units.press);
   obj["rain"] = precipUnitName(units.precip);
+  obj["distance"] = distanceUnitName(units.distance);
   obj["clock24h"] = units.clock24h;
 }
 
@@ -2291,6 +2342,18 @@ static bool applyAppUnitsSettings(JsonObjectConst obj, JsonObject fieldErrors, A
     else
     {
       units.precip = value;
+      dirty.unitPrefs = true;
+    }
+  }
+  if (!obj["distance"].isNull())
+  {
+    bool ok = false;
+    DistanceUnit value = distanceUnitFromName(obj["distance"].as<String>(), ok);
+    if (!ok)
+      setFieldError(fieldErrors, "distance", "must be m, km, feet, or mile");
+    else
+    {
+      units.distance = value;
       dirty.unitPrefs = true;
     }
   }

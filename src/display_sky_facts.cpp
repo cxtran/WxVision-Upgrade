@@ -142,7 +142,6 @@ String normalizeSummaryPhrase(String phrase)
     phrase.replace("Day ", "Today is day ");
     phrase.replace(" days left", " days remain in the year");
     phrase.replace(" days remain in the year ", " days remain in the year. ");
-    phrase.replace(" is here", " has arrived");
     phrase.replace("above horizon", "above the horizon");
     phrase.replace("below horizon", "below the horizon");
     phrase.replace("Sun set ", "Sunset was ");
@@ -813,6 +812,10 @@ void syncSkyBriefParagraphState(const wxv::astronomy::SkyFactPage &page, bool fo
     if (!marqueeChanged)
         return;
 
+    String currentTitle;
+    if (!forceReset && !s_skyBriefSubpages.empty() && s_skyBriefSubpageIndex < s_skyBriefSubpages.size())
+        currentTitle = s_skyBriefSubpages[s_skyBriefSubpageIndex].title;
+
     const String nextParagraph = buildSummaryParagraph(page);
     const std::vector<SkyBriefSubpage> nextSubpages = buildSkyBriefSubpages(page);
     snprintf(s_skyBriefLastMarquee, sizeof(s_skyBriefLastMarquee), "%s", page.marquee);
@@ -820,6 +823,17 @@ void syncSkyBriefParagraphState(const wxv::astronomy::SkyFactPage &page, bool fo
     s_skyBriefParagraphText = nextParagraph;
     s_skyBriefWrappedLines = wrapSkyBriefText(s_skyBriefParagraphText, kSkyBriefBodyWidthPx);
     s_skyBriefSubpageIndex = 0;
+    if (!forceReset && currentTitle.length() > 0)
+    {
+        for (size_t i = 0; i < s_skyBriefSubpages.size(); ++i)
+        {
+            if (s_skyBriefSubpages[i].title == currentTitle)
+            {
+                s_skyBriefSubpageIndex = i;
+                break;
+            }
+        }
+    }
     resetSkyBriefParagraphPager(millis());
 }
 
@@ -922,6 +936,17 @@ void advanceSkyBriefParagraphPage(unsigned long nowMs)
     setSkyBriefParagraphStart(0, nowMs);
 }
 
+static String skyBriefSectionKey(const String &title)
+{
+    const int spacePos = title.indexOf(' ');
+    if (spacePos < 0)
+        return title;
+    const String suffix = title.substring(spacePos + 1);
+    if (suffix.length() > 0 && isDigit(suffix.charAt(0)))
+        return title.substring(0, spacePos);
+    return title;
+}
+
 void stepSkyBriefParagraphManual(int direction, unsigned long nowMs)
 {
     if (s_skyBriefSubpages.empty())
@@ -933,10 +958,20 @@ void stepSkyBriefParagraphManual(int direction, unsigned long nowMs)
         return;
     }
 
-    if (s_skyBriefSubpageIndex > 0)
-        s_skyBriefSubpageIndex--;
+    const String currentSection = skyBriefSectionKey(s_skyBriefSubpages[s_skyBriefSubpageIndex].title);
+    size_t firstIndexInSection = s_skyBriefSubpageIndex;
+    size_t lastIndexInSection = s_skyBriefSubpageIndex;
+    while (firstIndexInSection > 0 &&
+           skyBriefSectionKey(s_skyBriefSubpages[firstIndexInSection - 1u].title) == currentSection)
+        --firstIndexInSection;
+    while ((lastIndexInSection + 1u) < s_skyBriefSubpages.size() &&
+           skyBriefSectionKey(s_skyBriefSubpages[lastIndexInSection + 1u].title) == currentSection)
+        ++lastIndexInSection;
+
+    if (s_skyBriefSubpageIndex > firstIndexInSection)
+        --s_skyBriefSubpageIndex;
     else
-        s_skyBriefSubpageIndex = s_skyBriefSubpages.size() - 1u;
+        s_skyBriefSubpageIndex = lastIndexInSection;
     setSkyBriefParagraphStart(0, nowMs);
 }
 
@@ -1181,6 +1216,11 @@ void drawSkyFactPageImpl(const wxv::astronomy::SkyFactPage &page)
         dma_display->setTextColor(normal);
         dma_display->setCursor(16, 22);
         dma_display->print(page.line2);
+        if (page.line3[0] != '\0')
+        {
+            dma_display->setCursor(12, 28);
+            dma_display->print(page.line3);
+        }
         break;
     default:
         switch (page.lineCount)
@@ -1405,14 +1445,16 @@ void resetSkyBriefScreenState()
 void handleSkyBriefDownPress()
 {
     const wxv::astronomy::SkyFactPage &page = wxv::astronomy::skySummaryPage();
-    syncSkyBriefParagraphState(page, true);
-    stepSkyBriefParagraphManual(1, millis());
+    syncSkyBriefParagraphState(page, false);
+    stepSkyBriefParagraphManual(-1, millis());
     drawSkyBriefScreen();
 }
 
 void handleSkyBriefUpPress()
 {
-    stepSkyBriefParagraphManual(-1, millis());
+    const wxv::astronomy::SkyFactPage &page = wxv::astronomy::skySummaryPage();
+    syncSkyBriefParagraphState(page, false);
+    stepSkyBriefParagraphManual(1, millis());
     drawSkyBriefScreen();
 }
 

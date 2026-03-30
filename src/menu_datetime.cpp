@@ -17,7 +17,7 @@ extern int dtFmt24;
 extern int dtDateFmt;
 extern int dtNtpPreset;
 extern int dtAutoDst;
-extern int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel;
+extern int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel, unitDistanceSel;
 
 void showDateTimeModal()
 {
@@ -404,21 +404,37 @@ void showUnitSettingsModal()
         break;
     }
     unitPrecipSel = (units.precip == PrecipUnit::INCH) ? 1 : 0;
+    switch (units.distance)
+    {
+    case DistanceUnit::M:
+        unitDistanceSel = 0;
+        break;
+    case DistanceUnit::FEET:
+        unitDistanceSel = 2;
+        break;
+    case DistanceUnit::MILE:
+        unitDistanceSel = 3;
+        break;
+    default:
+        unitDistanceSel = 1;
+        break;
+    }
 
     static const char *tempOpts[] = {"Celsius", "Fahrenheit"};
     static const char *pressOpts[] = {"hPa", "inHg"};
     static const char *clockOpts[] = {"12h", "24h"};
     static const char *windOpts[] = {"m/s", "mph", "knots", "km/h"};
     static const char *precipOpts[] = {"mm", "inches"};
+    static const char *distanceOpts[] = {"m", "km", "feet", "mile"};
 
-    String labels[] = {"Temperature", "Pressure", "Clock Format", "Wind Speed", "Precipitation"};
-    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
-    int *chooserRefs[] = {&unitTempSel, &unitPressSel, &unitClockSel, &unitWindSel, &unitPrecipSel};
-    const char *const *chooserOpts[] = {tempOpts, pressOpts, clockOpts, windOpts, precipOpts};
-    int chooserCounts[] = {2, 2, 2, 4, 2};
+    String labels[] = {"Temperature", "Pressure", "Clock Format", "Wind Speed", "Precipitation", "Distance"};
+    InfoFieldType types[] = {InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser, InfoChooser};
+    int *chooserRefs[] = {&unitTempSel, &unitPressSel, &unitClockSel, &unitWindSel, &unitPrecipSel, &unitDistanceSel};
+    const char *const *chooserOpts[] = {tempOpts, pressOpts, clockOpts, windOpts, precipOpts, distanceOpts};
+    int chooserCounts[] = {2, 2, 2, 4, 2, 4};
 
-    unitSettingsModal.setLines(labels, types, 5);
-    unitSettingsModal.setValueRefs(nullptr, 0, chooserRefs, 5, chooserOpts, chooserCounts);
+    unitSettingsModal.setLines(labels, types, 6);
+    unitSettingsModal.setValueRefs(nullptr, 0, chooserRefs, 6, chooserOpts, chooserCounts);
 
     unitSettingsModal.setCallback([](bool /*accepted*/, int) {
         unitTempSel = constrain(unitTempSel, 0, 1);
@@ -426,6 +442,7 @@ void showUnitSettingsModal()
         unitClockSel = constrain(unitClockSel, 0, 1);
         unitWindSel = constrain(unitWindSel, 0, 3);
         unitPrecipSel = constrain(unitPrecipSel, 0, 1);
+        unitDistanceSel = constrain(unitDistanceSel, 0, 3);
 
         uint16_t prevSig = unitSignature();
         int prevFmt24 = fmt24;
@@ -450,6 +467,21 @@ void showUnitSettingsModal()
             break;
         }
         units.precip = (unitPrecipSel == 1) ? PrecipUnit::INCH : PrecipUnit::MM;
+        switch (unitDistanceSel)
+        {
+        case 0:
+            units.distance = DistanceUnit::M;
+            break;
+        case 2:
+            units.distance = DistanceUnit::FEET;
+            break;
+        case 3:
+            units.distance = DistanceUnit::MILE;
+            break;
+        default:
+            units.distance = DistanceUnit::KM;
+            break;
+        }
 
         uint16_t newSig = unitSignature();
 

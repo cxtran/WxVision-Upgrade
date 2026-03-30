@@ -27,6 +27,7 @@
 #include "wifisettings.h"
 #include "web.h"
 #include "buzzer.h"
+#include "notifications.h"
 #include "menu.h"
 #include "alarm.h"
 #include "noaa.h"
@@ -586,6 +587,8 @@ void loop()
     // Pause normal rendering during OTA uploads; keep lightweight processing only
     if (otaInProgress)
     {
+        if (dma_display != nullptr)
+            wxv::notify::showNotification(wxv::notify::NotifyId::Upgrading, dma_display->color565(0, 255, 255));
         delay(50);
         return;
     }

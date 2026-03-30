@@ -12,6 +12,7 @@ static const char* K_TEMP  = "u_temp";
 static const char* K_WIND  = "u_wind";
 static const char* K_PRESS = "u_press";
 static const char* K_PREC  = "u_prec";
+static const char* K_DIST  = "u_dist";
 static const char* K_24H   = "u_24h";
 
 void loadUnits() {
@@ -20,6 +21,7 @@ void loadUnits() {
   units.wind    = static_cast<WindUnit>(   u_prefs.getUChar(K_WIND,  static_cast<uint8_t>(WindUnit::MPS)));
   units.press   = static_cast<PressUnit>(  u_prefs.getUChar(K_PRESS, static_cast<uint8_t>(PressUnit::HPA)));
   units.precip  = static_cast<PrecipUnit>( u_prefs.getUChar(K_PREC,  static_cast<uint8_t>(PrecipUnit::MM)));
+  units.distance= static_cast<DistanceUnit>(u_prefs.getUChar(K_DIST, static_cast<uint8_t>(DistanceUnit::KM)));
   units.clock24h= u_prefs.getBool(K_24H, wxv::defaults::kDefaults.timeFormat == wxv::defaults::TimeFormat::H24);
   u_prefs.end();
 }
@@ -30,6 +32,7 @@ void saveUnits() {
   u_prefs.putUChar(K_WIND,  static_cast<uint8_t>(units.wind));
   u_prefs.putUChar(K_PRESS, static_cast<uint8_t>(units.press));
   u_prefs.putUChar(K_PREC,  static_cast<uint8_t>(units.precip));
+  u_prefs.putUChar(K_DIST,  static_cast<uint8_t>(units.distance));
   u_prefs.putBool (K_24H,   units.clock24h);
   u_prefs.end();
   applyUnitPreferences();
@@ -52,6 +55,14 @@ String fmtPrecip(double mm, uint8_t dp) {
   if (isnan(mm)) return F("--");
   return String(dispPrecip(mm), (unsigned int)dp) + precipSuffix();
 }
+String fmtDistanceMeters(double meters, uint8_t dp) {
+  if (isnan(meters)) return F("--");
+  return String(dispDistanceMeters(meters), (unsigned int)dp) + distanceSuffix();
+}
+String fmtDistanceKm(double km, uint8_t dp) {
+  if (isnan(km)) return F("--");
+  return String(dispDistanceKm(km), (unsigned int)dp) + distanceSuffix();
+}
 
 // ---- toggles & presets ----
 void toggleTempUnit() {
@@ -72,12 +83,20 @@ void togglePrecipUnit() {
   units.precip = (units.precip == PrecipUnit::MM) ? PrecipUnit::INCH : PrecipUnit::MM;
   saveUnits();
 }
+void cycleDistanceUnit() {
+  units.distance = (units.distance == DistanceUnit::M) ? DistanceUnit::KM :
+                   (units.distance == DistanceUnit::KM) ? DistanceUnit::FEET :
+                   (units.distance == DistanceUnit::FEET) ? DistanceUnit::MILE :
+                   DistanceUnit::M;
+  saveUnits();
+}
 
 void setMetric() {
   units.temp   = TempUnit::C;
   units.wind   = WindUnit::MPS;
   units.press  = PressUnit::HPA;
   units.precip = PrecipUnit::MM;
+  units.distance = DistanceUnit::KM;
   saveUnits();
 }
 void setImperial() {
@@ -85,5 +104,6 @@ void setImperial() {
   units.wind   = WindUnit::MPH;
   units.press  = PressUnit::INHG;
   units.precip = PrecipUnit::INCH;
+  units.distance = DistanceUnit::MILE;
   saveUnits();
 }

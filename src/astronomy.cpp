@@ -609,6 +609,39 @@ bool computeMoonHorizontal(const DateTime &utcNow, double latDeg, double lonDeg,
     return isfinite(azimuthDegOut) && isfinite(altitudeDegOut);
 }
 
+float computeMoonDistanceKm(const DateTime &utcNow)
+{
+    const double jd = julianDateFromUnix(static_cast<time_t>(utcNow.unixtime()));
+    const double d = jd - 2451543.5;
+
+    const double e = 0.054900;
+    const double a = 60.2666;
+    const double M = normalizeDegrees(115.3654 + 13.0649929509 * d);
+    double eccentricAnomalyDeg = M + (e * sin(M * kDegToRad) * (1.0 + e * cos(M * kDegToRad))) * kRadToDeg;
+    for (uint8_t iter = 0; iter < 5; ++iter)
+    {
+        const double eccentricAnomalyRad = eccentricAnomalyDeg * kDegToRad;
+        eccentricAnomalyDeg -= (eccentricAnomalyDeg - e * sin(eccentricAnomalyRad) * kRadToDeg - M) /
+                               (1.0 - e * cos(eccentricAnomalyRad));
+    }
+
+    const double sunPerihelionDeg = 282.9404 + 4.70935E-5 * d;
+    const double sunMeanAnomalyDeg = normalizeDegrees(356.0470 + 0.9856002585 * d);
+    const double moonMeanLongitudeDeg = normalizeDegrees(M + 318.0634 + 0.1643573223 * d + 125.1228 - 0.0529538083 * d);
+    const double sunMeanLongitudeDeg = normalizeDegrees(sunMeanAnomalyDeg + sunPerihelionDeg);
+    const double elongationDeg = normalizeDegrees(moonMeanLongitudeDeg - sunMeanLongitudeDeg);
+
+    const double eccentricAnomalyRad = eccentricAnomalyDeg * kDegToRad;
+    const double xv = a * (cos(eccentricAnomalyRad) - e);
+    const double yv = a * (sqrt(1.0 - e * e) * sin(eccentricAnomalyRad));
+    double r = sqrt(xv * xv + yv * yv);
+    r += -0.58 * cos((M - 2.0 * elongationDeg) * kDegToRad) -
+         0.46 * cos((2.0 * elongationDeg) * kDegToRad);
+
+    constexpr double kEarthRadiusKm = 6378.14;
+    return static_cast<float>(r * kEarthRadiusKm);
+}
+
 bool computeMoonAltitudeForLocal(const DateTime &localTime, double latDeg, double lonDeg, float &altitudeDegOut)
 {
     const DateTime utcTime = localToUtc(localTime, timezoneOffsetForLocal(localTime));
@@ -1027,6 +1060,8 @@ void buildMoonFact()
     const int daysToFull = static_cast<int>(roundf((((phase <= 0.5f) ? (0.5f - phase) : (1.5f - phase)) * static_cast<float>(kMoonSynodicDays))));
     const int daysToNew = static_cast<int>(roundf((((phase <= 0.01f) ? 0.0f : (1.0f - phase)) * static_cast<float>(kMoonSynodicDays))));
     char line2[24];
+    char line3[24];
+    line3[0] = '\0';
     if (daysToFull <= daysToNew && daysToFull <= 7)
         snprintf(line2, sizeof(line2), "Full in %dd", daysToFull);
     else if (daysToNew < daysToFull && daysToNew <= 7)
@@ -1034,8 +1069,41 @@ void buildMoonFact()
     else
         snprintf(line2, sizeof(line2), "Lit %u%%", static_cast<unsigned>(s_data.moonIlluminationPct));
 
-    setFactLines(page, "MOON", shortMoonPhaseLabel(s_data.moonPhase), line2);
+    if (isfinite(s_data.moonDistanceKm))
+    {
+        String moonDistance = fmtDistanceKm(s_data.moonDistanceKm, 0);
+        snprintf(line3, sizeof(line3), "%s", moonDistance.c_str());
+    }
+
+    setFactLines(page, "MOON", shortMoonPhaseLabel(s_data.moonPhase), line2, line3);
     appendFactPage(page);
+}
+
+static void formatSeasonSummaryPhrase(char *buffer, size_t bufferSize,
+                                      const char *seasonName,
+                                      time_t seasonElapsed,
+                                      time_t seasonDuration)
+{
+    if (!buffer || bufferSize == 0)
+        return;
+
+    if (!seasonName || seasonName[0] == '\0' || seasonDuration <= 0)
+    {
+        snprintf(buffer, bufferSize, "Season update");
+        return;
+    }
+
+    const double progress = constrain(static_cast<double>(seasonElapsed) / static_cast<double>(seasonDuration), 0.0, 1.0);
+    if (progress < 0.18)
+        snprintf(buffer, bufferSize, "%s has arrived", seasonName);
+    else if (progress < 0.45)
+        snprintf(buffer, bufferSize, "Early %s is underway", seasonName);
+    else if (progress < 0.72)
+        snprintf(buffer, bufferSize, "Mid-%s is here", seasonName);
+    else if (progress < 0.92)
+        snprintf(buffer, bufferSize, "Late %s is settling in", seasonName);
+    else
+        snprintf(buffer, bufferSize, "%s is nearly over", seasonName);
 }
 
 void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool southernHemisphere)
@@ -1049,14 +1117,28 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     SeasonEventUtc nextEvent{};
     const bool hasSeasonBounds = seasonBoundsForUtc(utcNow, currentEvent, nextEvent);
 
-    char phrase[48];
+    char phrase[80];
     phrase[0] = '\0';
 
     if (hasSeasonBounds)
     {
         const char *seasonName = seasonNameForMarker(kSeasonMarkers[currentEvent.markerIndex & 3], southernHemisphere);
-        snprintf(phrase, sizeof(phrase), "%s is here", seasonName);
+        const time_t nowEpoch = static_cast<time_t>(utcNow.unixtime());
+        const time_t seasonDuration = nextEvent.epoch - currentEvent.epoch;
+        const time_t seasonElapsed = nowEpoch - currentEvent.epoch;
+        formatSeasonSummaryPhrase(phrase, sizeof(phrase), seasonName, seasonElapsed, seasonDuration);
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        if (seasonDuration > 0)
+        {
+            const int seasonElapsedDays = static_cast<int>(seasonElapsed / 86400);
+            const int seasonTotalDays = static_cast<int>((seasonDuration + 86399) / 86400);
+            const int seasonProgressPct = static_cast<int>(lround(
+                constrain(static_cast<double>(seasonElapsed) / static_cast<double>(seasonDuration), 0.0, 1.0) * 100.0));
+            snprintf(phrase, sizeof(phrase), "%s day %d of %d", seasonName, seasonElapsedDays + 1, max(1, seasonTotalDays));
+            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            snprintf(phrase, sizeof(phrase), "%s %d%% complete", seasonName, seasonProgressPct);
+            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        }
 
         const DateTime dayStart(localNow.year(), localNow.month(), localNow.day(), 0, 0, 0);
         const DateTime nextUtc(static_cast<uint32_t>(nextEvent.epoch));
@@ -1139,7 +1221,14 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     else
         snprintf(phrase, sizeof(phrase), "Weekend in %d days", weekendDays);
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
-    snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
+    if (units.distance == DistanceUnit::KM)
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
+    else if (units.distance == DistanceUnit::MILE)
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million mile", km_to_miles(earthSunKm) / 1000000.0);
+    else if (units.distance == DistanceUnit::M)
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e m", earthSunKm * 1000.0);
+    else
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e feet", meters_to_feet(earthSunKm * 1000.0));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
 
     if (!timezoneIsCustom())
@@ -1172,14 +1261,21 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                 }
 
                 if (daysToTransition == 0)
-                    snprintf(phrase, sizeof(phrase), "%s today", transitionLabel);
+                    snprintf(phrase, sizeof(phrase), "%s and %s today",
+                             dstActiveNow ? "DST is active" : "Standard time is active",
+                             dstActiveNow ? "ends" : "starts");
                 else
-                    snprintf(phrase, sizeof(phrase), "%s in %d days", transitionLabel, daysToTransition);
+                    snprintf(phrase, sizeof(phrase), "%s and %s in %d days",
+                             dstActiveNow ? "DST is active" : "Standard time is active",
+                             dstActiveNow ? "ends" : "starts",
+                             daysToTransition);
                 appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
             }
-
-            snprintf(phrase, sizeof(phrase), "%s now", dstActiveNow ? "DST is active" : "Standard time is active");
-            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            else
+            {
+                snprintf(phrase, sizeof(phrase), "%s now", dstActiveNow ? "DST is active" : "Standard time is active");
+                appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            }
         }
     }
 
@@ -1216,6 +1312,13 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
 
         snprintf(phrase, sizeof(phrase), "Moon %s",
                  (s_data.moonAltitudeDeg > 0.0f) ? "above horizon" : "below horizon");
+        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    }
+
+    if (isfinite(s_data.moonDistanceKm))
+    {
+        String moonDistance = fmtDistanceKm(s_data.moonDistanceKm, 0);
+        snprintf(phrase, sizeof(phrase), "Moon distance %s", moonDistance.c_str());
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 
@@ -1319,6 +1422,7 @@ void updateAstronomyData(bool force)
     s_data.moonPhaseFraction = computeMoonPhaseFraction(utcNow);
     s_data.moonPhase = phaseFromFraction(s_data.moonPhaseFraction);
     s_data.moonIlluminationPct = static_cast<uint8_t>(roundf((1.0f - cosf(2.0f * static_cast<float>(kPi) * s_data.moonPhaseFraction)) * 50.0f));
+    s_data.moonDistanceKm = computeMoonDistanceKm(utcNow);
 
     if (!hasLocation)
         return;

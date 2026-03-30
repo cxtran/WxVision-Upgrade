@@ -5,7 +5,7 @@
 
 namespace wxv::astronomy
 {
-constexpr size_t kSkyFactMarqueeLen = 512;
+constexpr size_t kSkyFactMarqueeLen = 1024;
 
 enum class SkyFactType : uint8_t
 {
@@ -53,6 +53,7 @@ struct AstronomyData
     float moonPhaseFraction = 0.0f;
     uint8_t moonIlluminationPct = 0;
     MoonPhase moonPhase = MoonPhase::NewMoon;
+    float moonDistanceKm = NAN;
     int localDateKey = 0;
     int minuteBucket = -1;
     unsigned long lastRefreshMs = 0;
