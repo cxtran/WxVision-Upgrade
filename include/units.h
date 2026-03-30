@@ -97,7 +97,6 @@ String fmtTemp  (double c,   uint8_t dp = 1);
 String fmtWind  (double mps, uint8_t dp = 1);
 String fmtPress (double hpa, uint8_t dp = 1);
 String fmtPrecip(double mm,  uint8_t dp = 2);
-String fmtDistanceMeters(double meters, uint8_t dp = 1);
 String fmtDistanceKm(double km, uint8_t dp = 1);
 
 // Load/save from NVS (ESP32 Preferences)
@@ -109,7 +108,6 @@ void toggleTempUnit();
 void cycleWindUnit();
 void togglePressUnit();
 void togglePrecipUnit();
-void cycleDistanceUnit();
 
 // Quick presets
 void setMetric();   // C, m/s, hPa, mm

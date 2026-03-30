@@ -55,10 +55,6 @@ String fmtPrecip(double mm, uint8_t dp) {
   if (isnan(mm)) return F("--");
   return String(dispPrecip(mm), (unsigned int)dp) + precipSuffix();
 }
-String fmtDistanceMeters(double meters, uint8_t dp) {
-  if (isnan(meters)) return F("--");
-  return String(dispDistanceMeters(meters), (unsigned int)dp) + distanceSuffix();
-}
 String fmtDistanceKm(double km, uint8_t dp) {
   if (isnan(km)) return F("--");
   return String(dispDistanceKm(km), (unsigned int)dp) + distanceSuffix();
@@ -81,13 +77,6 @@ void togglePressUnit() {
 }
 void togglePrecipUnit() {
   units.precip = (units.precip == PrecipUnit::MM) ? PrecipUnit::INCH : PrecipUnit::MM;
-  saveUnits();
-}
-void cycleDistanceUnit() {
-  units.distance = (units.distance == DistanceUnit::M) ? DistanceUnit::KM :
-                   (units.distance == DistanceUnit::KM) ? DistanceUnit::FEET :
-                   (units.distance == DistanceUnit::FEET) ? DistanceUnit::MILE :
-                   DistanceUnit::M;
   saveUnits();
 }
 

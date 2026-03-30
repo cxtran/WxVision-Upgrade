@@ -1332,12 +1332,10 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
             {
                 const DateTime today(localNow.year(), localNow.month(), localNow.day(), 0, 0, 0);
                 int daysToTransition = -1;
-                const char *transitionLabel = nullptr;
                 if (dstActiveNow)
                 {
                     DateTime endDay(dstEndLocal.year(), dstEndLocal.month(), dstEndLocal.day(), 0, 0, 0);
                     daysToTransition = daysBetweenDates(today, endDay);
-                    transitionLabel = "DST ends";
                 }
                 else
                 {
@@ -1345,7 +1343,6 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                     if (startDay < today)
                         startDay = DateTime(localNow.year() + 1, dstStartLocal.month(), dstStartLocal.day(), 0, 0, 0);
                     daysToTransition = daysBetweenDates(today, startDay);
-                    transitionLabel = "DST starts";
                 }
 
                 if (daysToTransition == 0)
