@@ -402,7 +402,10 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
     }
 
     if (cur == nullptr || JSON.typeof_(cur) != "object") {
-        memset(&currentCond, 0, sizeof(CurrentConditions));
+        currentCond = CurrentConditions{};
+        currentCond.humidity = -1;
+        currentCond.uv = -1;
+        currentCond.precipProb = -1;
         Serial.println("[FORECAST] No valid current_conditions object");
         return;
     }
