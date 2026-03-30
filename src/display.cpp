@@ -4209,6 +4209,21 @@ struct WeatherIconVariant
     const uint8_t *night;
 };
 
+enum class IconGroup : uint8_t
+{
+    Clear,
+    PartlyCloudy,
+    Cloudy,
+    Overcast,
+    Fog,
+    Drizzle,
+    Rain,
+    Thunder,
+    Snow,
+    Windy,
+    Unknown
+};
+
 String normalizeWeatherIconKey(String input)
 {
     input.trim();
@@ -4225,6 +4240,125 @@ bool isNightWeatherIconKey(const String &key)
     return key.endsWith("n") || key.indexOf("night") >= 0;
 }
 
+bool parseWeatherConditionCode(const String &key, int &codeOut)
+{
+    if (key.length() == 0)
+        return false;
+
+    char *end = nullptr;
+    long parsed = strtol(key.c_str(), &end, 10);
+    if (end == key.c_str() || *end != '\0')
+        return false;
+
+    codeOut = static_cast<int>(parsed);
+    return true;
+}
+
+IconGroup weatherIconGroupFromProviderCode(int code)
+{
+    switch (code)
+    {
+    case 0:
+        return IconGroup::Clear;
+    case 1:
+    case 2:
+        return IconGroup::PartlyCloudy;
+    case 3:
+        return IconGroup::Overcast;
+    case 45:
+    case 48:
+        return IconGroup::Fog;
+    case 51:
+    case 53:
+    case 55:
+        return IconGroup::Drizzle;
+    case 56:
+    case 57:
+    case 66:
+    case 67:
+    case 71:
+    case 73:
+    case 75:
+    case 77:
+    case 85:
+    case 86:
+        return IconGroup::Snow;
+    case 61:
+    case 63:
+    case 65:
+    case 80:
+    case 81:
+    case 82:
+        return IconGroup::Rain;
+    case 95:
+    case 96:
+    case 99:
+        return IconGroup::Thunder;
+    default:
+        break;
+    }
+
+    return IconGroup::Unknown;
+}
+
+IconGroup classifyWeatherIconGroup(const String &key)
+{
+    if (key.startsWith("01"))
+        return IconGroup::Clear;
+    if (key.startsWith("02") || key.startsWith("03"))
+        return IconGroup::PartlyCloudy;
+    if (key.startsWith("04"))
+        return IconGroup::Overcast;
+    if (key.startsWith("09") || key.startsWith("10"))
+        return IconGroup::Rain;
+    if (key.startsWith("11"))
+        return IconGroup::Thunder;
+    if (key.startsWith("13"))
+        return IconGroup::Snow;
+    if (key.startsWith("50"))
+        return IconGroup::Fog;
+
+    int providerCode = -1;
+    if (parseWeatherConditionCode(key, providerCode))
+    {
+        IconGroup fromCode = weatherIconGroupFromProviderCode(providerCode);
+        if (fromCode != IconGroup::Unknown)
+            return fromCode;
+    }
+
+    if (key.indexOf("thunder") >= 0 || key.indexOf("tstorm") >= 0 || key.indexOf("storm") >= 0 ||
+        key.indexOf("lightning") >= 0 || key.indexOf("squall") >= 0 || key.indexOf("tornado") >= 0 ||
+        key.indexOf("hail") >= 0)
+        return IconGroup::Thunder;
+    if (key.indexOf("snow") >= 0 || key.indexOf("sleet") >= 0 || key.indexOf("flurr") >= 0 ||
+        key.indexOf("ice pellet") >= 0 || key.indexOf("wintry") >= 0 ||
+        key.indexOf("freezing rain") >= 0 || key.indexOf("freezing drizzle") >= 0)
+        return IconGroup::Snow;
+    if (key.indexOf("drizzle") >= 0)
+        return IconGroup::Drizzle;
+    if (key.indexOf("rain") >= 0 || key.indexOf("showers") >= 0 || key.indexOf("shower") >= 0)
+        return IconGroup::Rain;
+    if (key.indexOf("fog") >= 0 || key.indexOf("mist") >= 0 || key.indexOf("haze") >= 0 ||
+        key.indexOf("smoke") >= 0 || key.indexOf("dust") >= 0 || key.indexOf("sand") >= 0 ||
+        key.indexOf("ash") >= 0)
+        return IconGroup::Fog;
+    if (key.indexOf("overcast") >= 0 || key.indexOf("mostly cloudy") >= 0)
+        return IconGroup::Overcast;
+    if (key.indexOf("partly") >= 0 || key.indexOf("few cloud") >= 0 || key.indexOf("mostly clear") >= 0 ||
+        key.indexOf("mostly sunny") >= 0 || key.indexOf("scattered cloud") >= 0 ||
+        key.indexOf("broken cloud") >= 0)
+        return IconGroup::PartlyCloudy;
+    if (key.indexOf("cloud") >= 0)
+        return IconGroup::Cloudy;
+    if (key.indexOf("wind") >= 0 || key.indexOf("breez") >= 0 || key.indexOf("gust") >= 0)
+        return IconGroup::Windy;
+    if (key.indexOf("clear") >= 0 || key.indexOf("sunny") >= 0 || key.indexOf("fair") >= 0 ||
+        key.indexOf("weather") >= 0)
+        return IconGroup::Clear;
+
+    return IconGroup::Unknown;
+}
+
 const uint8_t *selectWeatherIconVariant(const WeatherIconVariant &variant, bool actualNight)
 {
     if (actualNight && variant.night != nullptr)
@@ -4236,50 +4370,7 @@ const uint8_t *selectWeatherIconVariant(const WeatherIconVariant &variant, bool 
 
 WeatherIconVariant weatherIconVariantFromGroup(const String &key)
 {
-    enum class IconGroup : uint8_t
-    {
-        Clear,
-        PartlyCloudy,
-        Cloudy,
-        Overcast,
-        Fog,
-        Drizzle,
-        Rain,
-        Thunder,
-        Snow,
-        Windy,
-        Unknown
-    };
-
-    auto classifyGroup = [](const String &k) -> IconGroup {
-        if (k.indexOf("thunder") >= 0 || k.indexOf("tstorm") >= 0 || k.indexOf("storm") >= 0 ||
-            k.indexOf("squall") >= 0 || k.indexOf("tornado") >= 0)
-            return IconGroup::Thunder;
-        if (k.indexOf("snow") >= 0 || k.indexOf("sleet") >= 0 || k.indexOf("flurr") >= 0 ||
-            k.indexOf("freezing rain") >= 0 || k.indexOf("freezing drizzle") >= 0)
-            return IconGroup::Snow;
-        if (k.indexOf("drizzle") >= 0)
-            return IconGroup::Drizzle;
-        if (k.indexOf("rain") >= 0 || k.indexOf("shower") >= 0)
-            return IconGroup::Rain;
-        if (k.indexOf("fog") >= 0 || k.indexOf("mist") >= 0 || k.indexOf("haze") >= 0 ||
-            k.indexOf("smoke") >= 0 || k.indexOf("dust") >= 0 || k.indexOf("sand") >= 0 || k.indexOf("ash") >= 0)
-            return IconGroup::Fog;
-        if (k.indexOf("overcast") >= 0)
-            return IconGroup::Overcast;
-        if (k.indexOf("partly") >= 0 || k.indexOf("few cloud") >= 0 || k.indexOf("mostly clear") >= 0 ||
-            k.indexOf("scattered cloud") >= 0)
-            return IconGroup::PartlyCloudy;
-        if (k.indexOf("cloud") >= 0 || k.indexOf("broken cloud") >= 0)
-            return IconGroup::Cloudy;
-        if (k.indexOf("wind") >= 0 || k.indexOf("breez") >= 0 || k.indexOf("gust") >= 0)
-            return IconGroup::Windy;
-        if (k.indexOf("clear") >= 0 || k.indexOf("sunny") >= 0 || k.indexOf("fair") >= 0 || k.indexOf("weather") >= 0)
-            return IconGroup::Clear;
-        return IconGroup::Unknown;
-    };
-
-    switch (classifyGroup(key))
+    switch (classifyWeatherIconGroup(key))
     {
     case IconGroup::Thunder:
         return {icon_thunder, nullptr};
@@ -4291,7 +4382,6 @@ WeatherIconVariant weatherIconVariantFromGroup(const String &key)
     case IconGroup::Fog:
         return {icon_fog, nullptr};
     case IconGroup::Overcast:
-        return {icon_overcast, nullptr};
     case IconGroup::PartlyCloudy:
     case IconGroup::Cloudy:
     case IconGroup::Windy:
@@ -4306,21 +4396,7 @@ WeatherIconVariant weatherIconVariantFromGroup(const String &key)
 
 WeatherIconVariant weatherIconVariantFromCodeKey(const String &key)
 {
-    if (key.startsWith("01"))
-        return {icon_clear, icon_clear_night};
-    if (key.startsWith("02") || key.startsWith("03"))
-        return {icon_cloudy, icon_cloud_night};
-    if (key.startsWith("04"))
-        return {icon_overcast, nullptr};
-    if (key.startsWith("09") || key.startsWith("10"))
-        return {icon_rain, nullptr};
-    if (key.startsWith("11"))
-        return {icon_thunder, nullptr};
-    if (key.startsWith("13"))
-        return {icon_snow, nullptr};
-    if (key.startsWith("50"))
-        return {icon_fog, nullptr};
-    return {nullptr, nullptr};
+    return weatherIconVariantFromGroup(key);
 }
 } // namespace
 
@@ -4341,54 +4417,42 @@ const uint8_t *getWeatherIconFromCondition(String condition)
 
 const uint16_t getIconColorFromCondition(String condition)
 {
-    String key = condition;
-    key.toLowerCase();
-    key.replace('_', ' ');
-    key.replace('-', ' ');
+    const String key = normalizeWeatherIconKey(condition);
     const bool isNight = (key.indexOf("night") >= 0) || key.endsWith("n");
-
-    const bool thunder = (key.indexOf("thunder") >= 0) || (key.indexOf("storm") >= 0);
-    const bool snow = (key.indexOf("snow") >= 0) || (key.indexOf("sleet") >= 0) || (key.indexOf("flurr") >= 0) ||
-                      (key.indexOf("freezing rain") >= 0) || (key.indexOf("freezing drizzle") >= 0);
-    const bool rain = (key.indexOf("rain") >= 0) || (key.indexOf("drizzle") >= 0) || (key.indexOf("shower") >= 0);
-    const bool fog = (key.indexOf("fog") >= 0) || (key.indexOf("mist") >= 0) || (key.indexOf("haze") >= 0) ||
-                     (key.indexOf("smoke") >= 0) || (key.indexOf("dust") >= 0) || (key.indexOf("sand") >= 0) || (key.indexOf("ash") >= 0);
-    const bool overcast = (key.indexOf("overcast") >= 0);
-    const bool cloudy = (key.indexOf("cloud") >= 0) || (key.indexOf("partly") >= 0);
-    const bool clear = (key.indexOf("clear") >= 0) || (key.indexOf("sunny") >= 0) || (key.indexOf("fair") >= 0) || (key.indexOf("weather") >= 0);
+    const IconGroup group = classifyWeatherIconGroup(key);
 
     if (isNight)
     {
-        if (thunder)
+        if (group == IconGroup::Thunder)
             return dma_display->color565(180, 120, 255);
-        if (snow)
+        if (group == IconGroup::Snow)
             return dma_display->color565(170, 220, 255);
-        if (rain)
+        if (group == IconGroup::Rain || group == IconGroup::Drizzle)
             return dma_display->color565(0, 120, 200);
-        if (fog)
+        if (group == IconGroup::Fog)
             return dma_display->color565(120, 140, 180);
-        if (overcast)
+        if (group == IconGroup::Overcast)
             return dma_display->color565(135, 145, 160);
-        if (cloudy)
+        if (group == IconGroup::Cloudy || group == IconGroup::PartlyCloudy || group == IconGroup::Windy)
             return dma_display->color565(120, 160, 220);
-        if (clear)
+        if (group == IconGroup::Clear || group == IconGroup::Unknown)
             return myBLUE;
         return myBLUE;
     }
 
-    if (thunder)
+    if (group == IconGroup::Thunder)
         return dma_display->color565(255, 255, 0);
-    if (snow)
+    if (group == IconGroup::Snow)
         return dma_display->color565(220, 255, 255);
-    if (rain)
+    if (group == IconGroup::Rain || group == IconGroup::Drizzle)
         return dma_display->color565(0, 200, 255);
-    if (fog)
+    if (group == IconGroup::Fog)
         return dma_display->color565(180, 180, 180);
-    if (overcast)
+    if (group == IconGroup::Overcast)
         return dma_display->color565(145, 150, 155);
-    if (cloudy)
+    if (group == IconGroup::Cloudy || group == IconGroup::PartlyCloudy || group == IconGroup::Windy)
         return dma_display->color565(180, 180, 180);
-    if (clear)
+    if (group == IconGroup::Clear || group == IconGroup::Unknown)
         return dma_display->color565(255, 255, 0);
     return dma_display->color565(255, 255, 0);
 }
