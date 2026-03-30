@@ -274,6 +274,7 @@ void loadSettings() {
 }
 
 void saveDeviceSettings() {
+    const bool showedBusy = dma_display != nullptr && !isSplashActive();
     if (dma_display != nullptr && !isSplashActive()) {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "SAVING");
     }
@@ -289,6 +290,9 @@ void saveDeviceSettings() {
     prefs.putInt("buzzTone", constrain(buzzerToneSet, 0, 6));
     prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 4));
     prefs.end();
+    if (showedBusy) {
+        themeRefreshPending = true;
+    }
     // Units are saved via saveUnits() (see saveAllSettings())
 }
 

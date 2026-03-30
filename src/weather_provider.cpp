@@ -240,21 +240,33 @@ IWeatherProvider &activeProvider()
 bool fetchActiveProviderData()
 {
     const auto caps = activeProvider().capabilities();
+    const bool showedBusy = caps.usesCloudFetch && dma_display != nullptr && !isSplashActive();
     if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
     {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
     }
-    return activeProvider().fetch();
+    const bool ok = activeProvider().fetch();
+    if (showedBusy)
+    {
+        themeRefreshPending = true;
+    }
+    return ok;
 }
 
 bool fetchProviderData(int source)
 {
     const auto caps = providerForDataSource(source).capabilities();
+    const bool showedBusy = caps.usesCloudFetch && dma_display != nullptr && !isSplashActive();
     if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
     {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
     }
-    return providerForDataSource(source).fetch();
+    const bool ok = providerForDataSource(source).fetch();
+    if (showedBusy)
+    {
+        themeRefreshPending = true;
+    }
+    return ok;
 }
 
 bool readActiveProviderSnapshot(WeatherSnapshot &out)

@@ -4727,7 +4727,8 @@ void fetchWeatherFromOWM()
 {
     if (WiFi.status() != WL_CONNECTED)
         return;
-    if (dma_display != nullptr && !isSplashActive())
+    const bool showedBusy = dma_display != nullptr && !isSplashActive();
+    if (showedBusy)
     {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
     }
@@ -4759,6 +4760,7 @@ void fetchWeatherFromOWM()
 
     if (apiKey.isEmpty()) {
         Serial.println("[OWM] Missing API key or city; skip fetch");
+        if (showedBusy) themeRefreshPending = true;
         return;
     }
 
@@ -4770,6 +4772,7 @@ void fetchWeatherFromOWM()
 
     if (!hasValidCoords && selectedCity.isEmpty()) {
         Serial.println("[OWM] Missing city and invalid lat/lon; skip fetch");
+        if (showedBusy) themeRefreshPending = true;
         return;
     }
 
@@ -4789,11 +4792,15 @@ void fetchWeatherFromOWM()
     url += "&units=" + units + "&appid=" + apiKey;
     String jsonBuffer = httpGETRequest(url.c_str());
     if (jsonBuffer == "{}")
+    {
+        if (showedBusy) themeRefreshPending = true;
         return;
+    }
     JSONVar data = JSON.parse(jsonBuffer);
     if (JSON.typeof_(data) == "undefined")
     {
         Serial.println("Failed to parse weather JSON");
+        if (showedBusy) themeRefreshPending = true;
         return;
     }
     auto toCelsius = [](double raw) -> double {
@@ -5148,6 +5155,7 @@ void fetchWeatherFromOWM()
     }
 
     needScrollRebuild = true;
+    if (showedBusy) themeRefreshPending = true;
 }
 
 void drawOWMScreen()
@@ -5759,7 +5767,8 @@ void serviceScrollRebuild()
     if (!needScrollRebuild)
         return;
 
-    if (dma_display != nullptr && !isSplashActive())
+    const bool showedBusy = dma_display != nullptr && !isSplashActive();
+    if (showedBusy)
     {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "REFRESH");
     }
@@ -5773,6 +5782,10 @@ void serviceScrollRebuild()
     text_Length_In_Pixel = getTextWidth(scrolling_Text.c_str());
 
     needScrollRebuild = false;
+    if (showedBusy)
+    {
+        themeRefreshPending = true;
+    }
 }
 
 void applyUnitPreferences()
