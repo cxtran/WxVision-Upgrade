@@ -26,6 +26,85 @@ constexpr double kDegToRad = kPi / 180.0;
 constexpr double kRadToDeg = 180.0 / kPi;
 constexpr double kMoonSynodicDays = 29.530588853;
 
+const char *dayWord(int count)
+{
+    return (count == 1) ? "day" : "days";
+}
+
+const char *mileWord(double value)
+{
+    return (fabs(value - 1.0) < 0.05) ? "mile" : "miles";
+}
+
+const char *meterWord(double value)
+{
+    return (fabs(value - 1.0) < 0.05) ? "meter" : "meters";
+}
+
+const char *footWord(double value)
+{
+    return (fabs(value - 1.0) < 0.05) ? "foot" : "feet";
+}
+
+void formatUnsignedWithCommas(unsigned long value, char *out, size_t outSize)
+{
+    if (!out || outSize == 0)
+        return;
+
+    char digits[24];
+    snprintf(digits, sizeof(digits), "%lu", value);
+    const size_t len = strlen(digits);
+    size_t commaCount = (len > 0) ? ((len - 1) / 3) : 0;
+    if (len + commaCount + 1 > outSize)
+    {
+        snprintf(out, outSize, "%s", digits);
+        return;
+    }
+
+    size_t src = len;
+    size_t dst = len + commaCount;
+    out[dst--] = '\0';
+    int group = 0;
+    while (src > 0)
+    {
+        out[dst--] = digits[--src];
+        ++group;
+        if (group == 3 && src > 0)
+        {
+            out[dst--] = ',';
+            group = 0;
+        }
+    }
+}
+
+void formatMoonEarthDistancePhrase(double moonDistanceKm, char *out, size_t outSize)
+{
+    if (!out || outSize == 0)
+        return;
+
+    char valueText[24];
+    if (units.distance == DistanceUnit::KM)
+    {
+        formatUnsignedWithCommas(static_cast<unsigned long>(lround(moonDistanceKm)), valueText, sizeof(valueText));
+        snprintf(out, outSize, "Moon-Earth distance %s km", valueText);
+    }
+    else if (units.distance == DistanceUnit::MILE)
+    {
+        formatUnsignedWithCommas(static_cast<unsigned long>(lround(km_to_miles(moonDistanceKm))), valueText, sizeof(valueText));
+        snprintf(out, outSize, "Moon-Earth distance %s miles", valueText);
+    }
+    else if (units.distance == DistanceUnit::M)
+    {
+        formatUnsignedWithCommas(static_cast<unsigned long>(lround(moonDistanceKm * 1000.0)), valueText, sizeof(valueText));
+        snprintf(out, outSize, "Moon-Earth distance %s meters", valueText);
+    }
+    else
+    {
+        formatUnsignedWithCommas(static_cast<unsigned long>(lround(meters_to_feet(moonDistanceKm * 1000.0))), valueText, sizeof(valueText));
+        snprintf(out, outSize, "Moon-Earth distance %s feet", valueText);
+    }
+}
+
 double normalizeDegrees(double deg)
 {
     while (deg < 0.0)
@@ -1208,27 +1287,36 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
 
     snprintf(phrase, sizeof(phrase), "Day %d of %d", doy, totalDays);
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
-    snprintf(phrase, sizeof(phrase), "%d days left", daysLeft);
+    snprintf(phrase, sizeof(phrase), "%d %s left", daysLeft, dayWord(daysLeft));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     snprintf(phrase, sizeof(phrase), "Week %d of the year", week);
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
-    snprintf(phrase, sizeof(phrase), "%d days remain in %s", monthDaysLeft, monthNameShort(localNow.month()));
+    snprintf(phrase, sizeof(phrase), "%d %s remain in %s", monthDaysLeft, dayWord(monthDaysLeft), monthNameShort(localNow.month()));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     snprintf(phrase, sizeof(phrase), "Quarter %d of 4", quarter);
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     if (weekendDays == 0)
         snprintf(phrase, sizeof(phrase), "It is the weekend now");
     else
-        snprintf(phrase, sizeof(phrase), "Weekend in %d days", weekendDays);
+        snprintf(phrase, sizeof(phrase), "Weekend in %d %s", weekendDays, dayWord(weekendDays));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     if (units.distance == DistanceUnit::KM)
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
     else if (units.distance == DistanceUnit::MILE)
-        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million mile", km_to_miles(earthSunKm) / 1000000.0);
+    {
+        const double millionMiles = km_to_miles(earthSunKm) / 1000000.0;
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million %s", millionMiles, mileWord(millionMiles));
+    }
     else if (units.distance == DistanceUnit::M)
-        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e m", earthSunKm * 1000.0);
+    {
+        const double meters = earthSunKm * 1000.0;
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e %s", meters, meterWord(meters));
+    }
     else
-        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e feet", meters_to_feet(earthSunKm * 1000.0));
+    {
+        const double feet = meters_to_feet(earthSunKm * 1000.0);
+        snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e %s", feet, footWord(feet));
+    }
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
 
     if (!timezoneIsCustom())
@@ -1265,10 +1353,11 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                              dstActiveNow ? "DST is active" : "Standard time is active",
                              dstActiveNow ? "ends" : "starts");
                 else
-                    snprintf(phrase, sizeof(phrase), "%s and %s in %d days",
+                    snprintf(phrase, sizeof(phrase), "%s and %s in %d %s",
                              dstActiveNow ? "DST is active" : "Standard time is active",
                              dstActiveNow ? "ends" : "starts",
-                             daysToTransition);
+                             daysToTransition,
+                             dayWord(daysToTransition));
                 appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
             }
             else
@@ -1286,7 +1375,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         if (meteorDays == 0)
             snprintf(phrase, sizeof(phrase), "%s peak is tonight", meteorPeak->name);
         else
-            snprintf(phrase, sizeof(phrase), "%s peak in %d days", meteorPeak->name, meteorDays);
+            snprintf(phrase, sizeof(phrase), "%s peak in %d %s", meteorPeak->name, meteorDays, dayWord(meteorDays));
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 
@@ -1296,9 +1385,9 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     const int daysToFull = static_cast<int>(roundf((((phase <= 0.5f) ? (0.5f - phase) : (1.5f - phase)) * static_cast<float>(kMoonSynodicDays))));
     const int daysToNew = static_cast<int>(roundf((((phase <= 0.01f) ? 0.0f : (1.0f - phase)) * static_cast<float>(kMoonSynodicDays))));
     if (daysToFull <= daysToNew && daysToFull <= 7)
-        snprintf(phrase, sizeof(phrase), "Full Moon in %dd", daysToFull);
+        snprintf(phrase, sizeof(phrase), "Full Moon in %d %s", daysToFull, dayWord(daysToFull));
     else if (daysToNew < daysToFull && daysToNew <= 10)
-        snprintf(phrase, sizeof(phrase), "New Moon in %dd", daysToNew);
+        snprintf(phrase, sizeof(phrase), "New Moon in %d %s", daysToNew, dayWord(daysToNew));
     else
         snprintf(phrase, sizeof(phrase), "Moon lit %u%%", static_cast<unsigned>(s_data.moonIlluminationPct));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
@@ -1317,8 +1406,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
 
     if (isfinite(s_data.moonDistanceKm))
     {
-        String moonDistance = fmtDistanceKm(s_data.moonDistanceKm, 0);
-        snprintf(phrase, sizeof(phrase), "Moon distance %s", moonDistance.c_str());
+        formatMoonEarthDistancePhrase(s_data.moonDistanceKm, phrase, sizeof(phrase));
         appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
     }
 

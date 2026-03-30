@@ -140,7 +140,9 @@ String normalizeSummaryPhrase(String phrase)
     phrase.replace("Moonset ", "Moonset is ");
     phrase.replace("Daylight ", "Daylight lasts ");
     phrase.replace("Day ", "Today is day ");
+    phrase.replace(" day left", " day remains in the year");
     phrase.replace(" days left", " days remain in the year");
+    phrase.replace(" day remain in the year ", " day remains in the year. ");
     phrase.replace(" days remain in the year ", " days remain in the year. ");
     phrase.replace("above horizon", "above the horizon");
     phrase.replace("below horizon", "below the horizon");
@@ -162,7 +164,7 @@ String normalizeSummaryPhrase(String phrase)
     phrase.replace("..", ".");
     phrase.replace(",,", ",");
     phrase.replace(kEllipsisToken, "...");
-    if (phrase.endsWith("days remain in the year"))
+    if (phrase.endsWith("day remains in the year") || phrase.endsWith("days remain in the year"))
         phrase += ".";
     phrase.trim();
     return phrase;
@@ -194,8 +196,8 @@ String finalizeSummaryParagraph(String paragraph)
 String expandSkyBriefTimeUnits(String text)
 {
     text.replace(" d ", " days ");
-    text.replace(" h ", " Hr ");
-    text.replace(" m ", " Min ");
+    text.replace(" h ", " hour ");
+    text.replace(" m ", " minute ");
     text.replace("D ", "Days ");
 
     for (int i = 0; i < text.length(); ++i)
@@ -217,20 +219,35 @@ String expandSkyBriefTimeUnits(String text)
         if (unit == 'd')
         {
             text.remove(unitIndex, 1);
-            text = text.substring(0, unitIndex) + " days" + text.substring(unitIndex);
-            i = unitIndex + 4;
+            int valueStart = i;
+            while (valueStart > 0 && isDigit(text.charAt(valueStart - 1)))
+                --valueStart;
+            const int value = text.substring(valueStart, unitIndex).toInt();
+            const String unitWord = (value == 1) ? " day" : " days";
+            text = text.substring(0, unitIndex) + unitWord + text.substring(unitIndex);
+            i = unitIndex + unitWord.length() - 1;
         }
         else if (unit == 'h' || unit == 'H')
         {
             text.remove(unitIndex, 1);
-            text = text.substring(0, unitIndex) + " Hr" + text.substring(unitIndex);
-            i = unitIndex + 2;
+            int valueStart = i;
+            while (valueStart > 0 && isDigit(text.charAt(valueStart - 1)))
+                --valueStart;
+            const int value = text.substring(valueStart, unitIndex).toInt();
+            const String unitWord = (value == 1) ? " hour" : " hours";
+            text = text.substring(0, unitIndex) + unitWord + text.substring(unitIndex);
+            i = unitIndex + unitWord.length() - 1;
         }
         else if (unit == 'm' || unit == 'M')
         {
             text.remove(unitIndex, 1);
-            text = text.substring(0, unitIndex) + " Min" + text.substring(unitIndex);
-            i = unitIndex + 3;
+            int valueStart = i;
+            while (valueStart > 0 && isDigit(text.charAt(valueStart - 1)))
+                --valueStart;
+            const int value = text.substring(valueStart, unitIndex).toInt();
+            const String unitWord = (value == 1) ? " minute" : " minutes";
+            text = text.substring(0, unitIndex) + unitWord + text.substring(unitIndex);
+            i = unitIndex + unitWord.length() - 1;
         }
     }
 
@@ -354,19 +371,19 @@ int skyBriefSectionIndexForPhrase(const String &phrase)
 {
     if (phrase.indexOf("DST") >= 0 || phrase.indexOf("peak") >= 0 ||
         phrase.indexOf("Standard time") >= 0 || phrase.indexOf("weekend") >= 0)
-        return 2; // Events
+        return 3; // Events
     if (phrase.startsWith("Spring") || phrase.startsWith("Summer") || phrase.startsWith("Autumn") ||
         phrase.startsWith("Winter"))
         return 0; // Season
     if (phrase.startsWith("Daylight") || phrase.startsWith("Sun") || phrase.startsWith("Earth-Sun"))
         return 1; // Sun
+    if (phrase.indexOf("Moon") >= 0)
+        return 2; // Moon
     if (phrase.indexOf("Today is day") >= 0 || phrase.startsWith("Week ") || phrase.startsWith("Quarter ") ||
         phrase.startsWith("Weekend") || phrase.startsWith("It is the weekend") ||
         phrase.indexOf("remain in ") >= 0)
-        return 3; // Calendar
-    if (phrase.indexOf("Moon") >= 0)
-        return 4; // Moon
-    return 3;     // Calendar
+        return 4; // Calendar
+    return 4;     // Calendar
 }
 
 void appendSkyBriefSentence(String &text, const String &phraseRaw)
@@ -396,9 +413,9 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
     std::vector<SkyBriefSection> sections = {
         {"SEASON", ""},
         {"SUN", ""},
+        {"MOON", ""},
         {"EVENTS", ""},
-        {"CALENDAR", ""},
-        {"MOON", ""}};
+        {"CALENDAR", ""}};
 
     std::vector<String> phrases = splitSummaryPhrasesRobust(page.marquee);
     for (size_t i = 0; i < phrases.size(); ++i)
@@ -410,8 +427,8 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
         appendSkyBriefSentence(sections[sectionIndex].text, normalized);
     }
 
-    if (sections[2].text.length() == 0)
-        sections[2].text = "No special sky events right now.";
+    if (sections[3].text.length() == 0)
+        sections[3].text = "No special sky events right now.";
 
     for (size_t i = 0; i < sections.size(); ++i)
     {

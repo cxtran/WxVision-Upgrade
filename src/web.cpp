@@ -2178,7 +2178,11 @@ static bool broadcastChangedAppSettingsSections(const AppSettingsSnapshot *snaps
 static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
 {
   if (dirty.unitPrefs)
+  {
     saveUnits();
+    serviceScrollRebuild();
+    refreshVisibleScreen();
+  }
   fmt24 = units.clock24h ? 1 : 0;
   if (dirty.device)
     saveDeviceSettings();
