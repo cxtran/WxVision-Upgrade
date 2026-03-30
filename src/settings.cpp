@@ -4,6 +4,7 @@
 #include "sensors.h"
 #include "units.h"   // <-- add this
 #include "display.h"
+#include "notifications.h"
 #include "default_values.h"
 #include "noaa.h"
 
@@ -273,6 +274,9 @@ void loadSettings() {
 }
 
 void saveDeviceSettings() {
+    if (dma_display != nullptr && !isSplashActive()) {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "SAVING");
+    }
     prefs.begin("visionwx", false);
     prefs.putString("wifiSSID", wifiSSID);
     prefs.putString("wifiPass", wifiPass);

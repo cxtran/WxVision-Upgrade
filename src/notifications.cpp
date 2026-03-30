@@ -36,6 +36,8 @@ static_assert(fits("UPGRADE"), "notify text too long");
 static_assert(fits("RESTORE"), "notify text too long");
 static_assert(fits("FACT RESET"), "notify text too long");
 static_assert(fits("RESETTING"), "notify text too long");
+static_assert(fits("SYSTEM"), "notify text too long");
+static_assert(fits("BUSY"), "notify text too long");
 }  // namespace
 
 NotificationText textFor(NotifyId id) {
@@ -61,6 +63,7 @@ NotificationText textFor(NotifyId id) {
     case NotifyId::Restoring: return {"RESTORE", nullptr, true};
     case NotifyId::FactoryReset: return {"FACT RESET", nullptr, false};
     case NotifyId::Resetting: return {"RESETTING", nullptr, true};
+    case NotifyId::Busy: return {"SYSTEM", "BUSY", true};
     default: return {"SYS ERR", nullptr, false};
   }
 }

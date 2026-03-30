@@ -29,6 +29,7 @@
 #include "app_state.h"
 #include "ui_theme.h"
 #include "display_widgets.h"
+#include "notifications.h"
 
 static AppState &app = appState();
 #define scrollLevel app.scrollLevel
@@ -4726,6 +4727,10 @@ void fetchWeatherFromOWM()
 {
     if (WiFi.status() != WL_CONNECTED)
         return;
+    if (dma_display != nullptr && !isSplashActive())
+    {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
+    }
     String units = useImperial ? "imperial" : "metric";
 
     String apiKey = owmApiKey;
@@ -5753,6 +5758,11 @@ void serviceScrollRebuild()
 {
     if (!needScrollRebuild)
         return;
+
+    if (dma_display != nullptr && !isSplashActive())
+    {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "REFRESH");
+    }
 
     // Rebuild the line using the latest units + data
     createScrollingText();

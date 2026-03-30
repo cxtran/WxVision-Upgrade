@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "display.h"
 #include "display_runtime.h"
+#include "notifications.h"
 
 namespace
 {
@@ -238,11 +239,21 @@ IWeatherProvider &activeProvider()
 
 bool fetchActiveProviderData()
 {
+    const auto caps = activeProvider().capabilities();
+    if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
+    {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
+    }
     return activeProvider().fetch();
 }
 
 bool fetchProviderData(int source)
 {
+    const auto caps = providerForDataSource(source).capabilities();
+    if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
+    {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
+    }
     return providerForDataSource(source).fetch();
 }
 

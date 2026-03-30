@@ -33,7 +33,8 @@ enum class NotifyId : uint8_t {
   Upgrading,
   Restoring,
   FactoryReset,
-  Resetting
+  Resetting,
+  Busy
 };
 
 struct NotificationText {
