@@ -866,6 +866,7 @@ void loop()
     }
 
     handleAutoRotate(now);
+    handleReturnToDefault(now);
     const bool temporaryAlertActive = isTemporaryAlertActive();
     const bool sectionHeadingActive = isSectionHeadingActive();
     if (sectionHeadingActive)
@@ -1238,6 +1239,7 @@ void loop()
     {
         if (handleLunarLuckInput(code))
         {
+            noteScreenRotation(millis());
             return;
         }
     }
@@ -1247,11 +1249,13 @@ void loop()
         if (key == IRCodes::WxKey::Down)
         {
             handle24HourSectionDownPress();
+            noteScreenRotation(millis());
             return;
         }
         if (key == IRCodes::WxKey::Up)
         {
             handle24HourSectionUpPress();
+            noteScreenRotation(millis());
             return;
         }
     }
@@ -1260,11 +1264,13 @@ void loop()
     if (key == IRCodes::WxKey::Down && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionDownPress();
+        noteScreenRotation(millis());
         return;
     }
     if (key == IRCodes::WxKey::Up && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionUpPress();
+        noteScreenRotation(millis());
         return;
     }
 
@@ -1272,6 +1278,7 @@ void loop()
         (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down))
     {
         stepNoaaAlertsScreen((key == IRCodes::WxKey::Down) ? 1 : -1);
+        noteScreenRotation(millis());
         return;
     }
     if (currentScreen == SCREEN_NOAA_ALERT && key == IRCodes::WxKey::Ok)
@@ -1288,6 +1295,7 @@ void loop()
             showSectionHeading("WIFI BUSY", nullptr, 1200);
         else
             showSectionHeading("NOAA OFF", nullptr, 1200);
+        noteScreenRotation(millis());
         return;
     }
     // --- BEGIN WORLD TIME FEATURE ---
@@ -1300,6 +1308,7 @@ void loop()
         else
             worldClockHandleStep((key == IRCodes::WxKey::Up) ? -1 : 1);
         drawWorldClockScreen();
+        noteScreenRotation(millis());
         return;
     }
     // --- END WORLD TIME FEATURE ---
@@ -1312,6 +1321,7 @@ void loop()
             handleAstronomyUpPress();
         else
             handleAstronomySelectPress();
+        noteScreenRotation(millis());
         return;
     }
 
@@ -1322,18 +1332,21 @@ void loop()
             handleSkyBriefDownPress();
         else if (key == IRCodes::WxKey::Up)
             handleSkyBriefUpPress();
+        noteScreenRotation(millis());
         return;
     }
 
     if (is24HourSectionScreen(currentScreen) && key == IRCodes::WxKey::Ok)
     {
         handle24HourSectionSelectPress();
+        noteScreenRotation(millis());
         return;
     }
 
     if (currentScreen == SCREEN_PREDICT && key == IRCodes::WxKey::Ok)
     {
         handlePredictionSelectPress();
+        noteScreenRotation(millis());
         return;
     }
 
@@ -1351,6 +1364,7 @@ void loop()
     {
         showMainMenuModal();
         playBuzzerTone(3000, 100);
+        noteScreenRotation(millis());
         delay(100);
         return;
     }
@@ -1670,11 +1684,13 @@ void loop()
             if (key == IRCodes::WxKey::Up)
             {
                 stepNoaaAlertsScreen(-1);
+                noteScreenRotation(millis());
                 continue;
             }
             if (key == IRCodes::WxKey::Down)
             {
                 stepNoaaAlertsScreen(1);
+                noteScreenRotation(millis());
                 continue;
             }
             if (key == IRCodes::WxKey::Ok)
@@ -1691,6 +1707,7 @@ void loop()
                     showSectionHeading("WIFI BUSY", nullptr, 1200);
                 else
                     showSectionHeading("NOAA OFF", nullptr, 1200);
+                noteScreenRotation(millis());
                 continue;
             }
             if (key == IRCodes::WxKey::Left)
@@ -1758,6 +1775,7 @@ void loop()
             if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
             {
                 showMainMenuModal();
+                noteScreenRotation(millis());
                 return;
             }
         }

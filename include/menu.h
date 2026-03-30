@@ -102,7 +102,6 @@ extern void saveDateTimeSettings();
 extern void displayClock();
 extern void displayDate();
 extern void displayWeatherData();
-extern void fetchWeatherFromOWM();
 
 extern bool reset_Time_and_Date_Display;
 

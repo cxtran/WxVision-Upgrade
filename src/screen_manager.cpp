@@ -45,6 +45,7 @@ struct TemporaryHeadingAlert
 };
 
 unsigned long s_lastAutoRotateMillis = 0;
+unsigned long s_lastScreenInteractionMillis = 0;
 bool s_sectionHeadingActive = false;
 bool s_sectionHeadingRendered = false;
 unsigned long s_sectionHeadingStartMs = 0;
@@ -67,6 +68,8 @@ uint32_t s_temporaryAlertSignature = 0;
 
 bool isRotationBlocked();
 bool isTemporaryAlertBlocked();
+void handleReturnToDefault(unsigned long now);
+ScreenMode configuredDefaultScreenInternal();
 bool isAlertDuplicate(const char *text, uint32_t signature)
 {
     if (s_temporaryAlertActive)
@@ -451,6 +454,12 @@ void playScreenRevealEffect(ScreenMode mode)
 void noteScreenRotation(unsigned long now)
 {
     s_lastAutoRotateMillis = now;
+    s_lastScreenInteractionMillis = now;
+}
+
+ScreenMode configuredDefaultScreen()
+{
+    return configuredDefaultScreenInternal();
 }
 
 void ensureCurrentScreenAllowed()
@@ -619,12 +628,12 @@ void handleAutoRotate(unsigned long now)
 
     if (autoRotate == 0)
     {
-        noteScreenRotation(now);
+        s_lastAutoRotateMillis = now;
         return;
     }
     if (isRotationBlocked())
     {
-        noteScreenRotation(now);
+        s_lastAutoRotateMillis = now;
         return;
     }
     unsigned long intervalMs = (autoRotateInterval > 0)
@@ -634,6 +643,41 @@ void handleAutoRotate(unsigned long now)
     {
         rotateScreen(+1);
     }
+}
+
+void handleReturnToDefault(unsigned long now)
+{
+    if (returnToDefaultSec <= 0)
+    {
+        s_lastScreenInteractionMillis = now;
+        return;
+    }
+
+    if (autoRotate != 0 || s_sectionHeadingActive || s_temporaryAlertActive)
+    {
+        s_lastScreenInteractionMillis = now;
+        return;
+    }
+
+    if (isRotationBlocked() || isScreenOff())
+    {
+        s_lastScreenInteractionMillis = now;
+        return;
+    }
+
+    ScreenMode defaultScreen = configuredDefaultScreenInternal();
+    if (!screenIsAllowed(defaultScreen))
+        defaultScreen = enforceAllowedScreen(defaultScreen);
+
+    if (currentScreen == defaultScreen)
+    {
+        s_lastScreenInteractionMillis = now;
+        return;
+    }
+
+    const unsigned long timeoutMs = static_cast<unsigned long>(returnToDefaultSec) * 1000UL;
+    if (now - s_lastScreenInteractionMillis >= timeoutMs)
+        transitionToScreen(defaultScreen);
 }
 
 bool serviceSectionHeading(unsigned long now)
@@ -823,3 +867,78 @@ bool serviceTemporaryAlertHeading(unsigned long now)
     }
     return true;
 }
+
+void refreshVisibleScreen()
+{
+    switch (currentScreen)
+    {
+    case SCREEN_CLOCK:
+        drawClockScreen();
+        break;
+    case SCREEN_WORLD_CLOCK:
+        drawWorldClockScreen();
+        break;
+    case SCREEN_ASTRONOMY:
+        drawAstronomyScreen();
+        break;
+    case SCREEN_SKY_BRIEF:
+        drawSkyBriefScreen();
+        break;
+    case SCREEN_UDP_DATA:
+        showUdpScreen();
+        break;
+    case SCREEN_LIGHTNING:
+        showLightningScreen();
+        break;
+    case SCREEN_UDP_FORECAST:
+        showForecastScreen();
+        break;
+    case SCREEN_WIND_DIR:
+        showWindDirectionScreen();
+        break;
+    case SCREEN_ENV_INDEX:
+        showEnvironmentalQualityScreen();
+        break;
+    case SCREEN_TEMP_HISTORY:
+    case SCREEN_HUM_HISTORY:
+    case SCREEN_CO2_HISTORY:
+    case SCREEN_BARO_HISTORY:
+        draw24HourSectionScreen();
+        break;
+    case SCREEN_PREDICT:
+        resetPredictionRenderState();
+        drawPredictionScreen();
+        break;
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
+    case SCREEN_LUNAR_LUCK:
+        drawLunarLuckScreen();
+        break;
+#endif
+    case SCREEN_CONDITION_SCENE:
+        drawConditionSceneScreen();
+        break;
+    case SCREEN_CURRENT:
+        showCurrentConditionsScreen();
+        break;
+    case SCREEN_HOURLY:
+        showHourlyForecastScreen();
+        break;
+    case SCREEN_NOAA_ALERT:
+        drawNoaaAlertsScreen();
+        break;
+    case SCREEN_OWM:
+        reset_Time_and_Date_Display = true;
+        drawOWMScreen();
+        break;
+    default:
+        break;
+    }
+}
+
+namespace
+{
+ScreenMode configuredDefaultScreenInternal()
+{
+    return SCREEN_CLOCK;
+}
+} // namespace

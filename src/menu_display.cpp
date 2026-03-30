@@ -66,6 +66,9 @@ void showDisplaySettingsModal()
     static const int rotateIntervalValues[] = {5, 10, 15, 20, 30, 45, 60, 90, 120};
     static const char *rotateIntervalOpt[] = {"5 s", "10 s", "15 s", "20 s", "30 s", "45 s", "60 s", "90 s", "120 s"};
     const int rotateIntervalCount = sizeof(rotateIntervalValues) / sizeof(rotateIntervalValues[0]);
+    static const int returnToDefaultValues[] = {0, 15, 30, 60, 120, 300, 600, 900, 1800};
+    static const char *returnToDefaultOpt[] = {"Disabled", "15 s", "30 s", "1 min", "2 min", "5 min", "10 min", "15 min", "30 min"};
+    const int returnToDefaultCount = sizeof(returnToDefaultValues) / sizeof(returnToDefaultValues[0]);
 
     static int rotateIntervalIndex = 0;
     rotateIntervalIndex = 0;
@@ -81,6 +84,23 @@ void showDisplaySettingsModal()
         {
             bestIntervalDiff = diff;
             rotateIntervalIndex = i;
+        }
+    }
+
+    static int returnToDefaultIndex = 0;
+    returnToDefaultIndex = 0;
+    int bestReturnDiff = (returnToDefaultValues[0] > returnToDefaultSec)
+                             ? returnToDefaultValues[0] - returnToDefaultSec
+                             : returnToDefaultSec - returnToDefaultValues[0];
+    for (int i = 1; i < returnToDefaultCount; ++i)
+    {
+        int diff = (returnToDefaultValues[i] > returnToDefaultSec)
+                       ? returnToDefaultValues[i] - returnToDefaultSec
+                       : returnToDefaultSec - returnToDefaultValues[i];
+        if (diff < bestReturnDiff)
+        {
+            bestReturnDiff = diff;
+            returnToDefaultIndex = i;
         }
     }
 
@@ -146,6 +166,7 @@ void showDisplaySettingsModal()
     addChooserLine("Vert Scroll", &vScrollLevelTemp, speedOpts, 10);
     addChooserLine("Auto Rotate", &autoRotateTemp, autoRotateOpt, 2);
     addChooserLine("Rotate Interval", &rotateIntervalIndex, rotateIntervalOpt, rotateIntervalCount);
+    addChooserLine("Return Default", &returnToDefaultIndex, returnToDefaultOpt, returnToDefaultCount);
 
     static char customMsgBuf[64];
     strncpy(customMsgBuf, customMsg.c_str(), sizeof(customMsgBuf));
@@ -170,6 +191,7 @@ void showDisplaySettingsModal()
         verticalScrollSpeed = scrollDelays[verticalScrollLevel];
         setAutoRotateEnabled(autoRotateTemp > 0, true);
         setAutoRotateInterval(rotateIntervalValues[rotateIntervalIndex], true);
+        returnToDefaultSec = returnToDefaultValues[returnToDefaultIndex];
         customMsg = String(customMsgBuf);
         bool prevAutoTheme = autoThemeSchedule;
         bool prevAmbient = autoThemeAmbient;
@@ -190,8 +212,8 @@ void showDisplaySettingsModal()
         {
             forceAutoThemeSchedule();
         }
-        Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d vScrollLevel=%d -> vScrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds dayStart=%d nightStart=%d autoThemeMode=%d luxThr=%d\n",
-                      brightness, scrollLevel + 1, scrollSpeed, verticalScrollLevel + 1, verticalScrollSpeed, autoBrightness, autoRotate, autoRotateInterval,
+        Serial.printf("[Saved] brightness=%d, scrollLevel=%d -> scrollSpeed=%d vScrollLevel=%d -> vScrollSpeed=%d autoBrightness=%d autoRotate=%d interval=%ds returnDefault=%ds dayStart=%d nightStart=%d autoThemeMode=%d luxThr=%d\n",
+                      brightness, scrollLevel + 1, scrollSpeed, verticalScrollLevel + 1, verticalScrollSpeed, autoBrightness, autoRotate, autoRotateInterval, returnToDefaultSec,
                       dayThemeStartMinutes, nightThemeStartMinutes, autoThemeModeTemp, autoThemeLightThreshold);
         displayModal.hide();
         currentMenuLevel = MENU_MAIN;

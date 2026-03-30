@@ -975,22 +975,9 @@ void exitToHomeScreen()
 {
     menuStack.clear();
     menuActive = false;
-    ScreenMode desiredHome = homeScreenForDataSource();
-    currentScreen = enforceAllowedScreen(desiredHome);
-    if (currentScreen == SCREEN_OWM)
-    {
-        dma_display->fillScreen(0);
-        if (isDataSourceOwm())
-        {
-            fetchWeatherFromOWM();
-        }
-        drawOWMScreen();
-    }
-    else
-    {
-        dma_display->fillScreen(0);
-        drawClockScreen();
-    }
+    currentScreen = SCREEN_CLOCK;
+    dma_display->fillScreen(0);
+    drawClockScreen();
     reset_Time_and_Date_Display = false;
 }
 

@@ -123,7 +123,7 @@ void drawWeatherScreen();
 void drawUdpDataScreen();
 void drawSettingsScreen();
 void displayWeatherData();
-void fetchWeatherFromOWM();
+void fetchWeatherFromOWM(bool showBusy = true);
 void createScrollingText();
 void drawLunarLuckScreen();
 // display.h

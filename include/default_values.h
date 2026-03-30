@@ -145,6 +145,7 @@ struct DefaultConfig {
   int scrollLevel;            // 0..9
   bool autoBrightnessEnabled;
   bool sceneClockEnabled;
+  int returnToDefaultSec;    // 0 disables auto-return, otherwise timeout in seconds
   int splashDurationSec;      // 1..10
   int buzzerVolume;           // 0..100
   int buzzerToneSet;          // 0..6
@@ -264,6 +265,7 @@ static const DefaultConfig kDefaults = {
     7,          // scrollLevel
     true,       // autoBrightnessEnabled
     true,       // sceneClockEnabled
+    0,          // returnToDefaultSec
     3,          // splashDurationSec
     kSoundVolumeDefault,        // buzzerVolume
     static_cast<int>(kSoundProfileDefault),          // buzzerToneSet

@@ -5,6 +5,7 @@
 #include "display.h"
 #include "display_runtime.h"
 #include "notifications.h"
+#include "screen_manager.h"
 
 namespace
 {
@@ -248,7 +249,7 @@ bool fetchActiveProviderData()
     const bool ok = activeProvider().fetch();
     if (showedBusy)
     {
-        themeRefreshPending = true;
+        refreshVisibleScreen();
     }
     return ok;
 }
@@ -264,7 +265,7 @@ bool fetchProviderData(int source)
     const bool ok = providerForDataSource(source).fetch();
     if (showedBusy)
     {
-        themeRefreshPending = true;
+        refreshVisibleScreen();
     }
     return ok;
 }

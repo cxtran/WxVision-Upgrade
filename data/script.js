@@ -1142,6 +1142,13 @@ function loadAll(background){
   if (brightnessEl) brightnessEl.value = (typeof s.brightness !== 'undefined' ? s.brightness : 10);
     var autoBrightnessEl = document.getElementById('autoBrightness');
     if (autoBrightnessEl) autoBrightnessEl.value = (s.autoBrightness ? 1 : 0);
+    var returnToDefaultEl = document.getElementById('returnToDefaultSec');
+    if (returnToDefaultEl) {
+      var returnToDefaultVal = parseInt(s.returnToDefaultSec, 10);
+      if (!isFinite(returnToDefaultVal) || returnToDefaultVal < 0) returnToDefaultVal = 0;
+      returnToDefaultEl.value = String(returnToDefaultVal);
+      if (returnToDefaultEl.value !== String(returnToDefaultVal)) returnToDefaultEl.value = '0';
+    }
     var splashDurationEl = document.getElementById('splashDuration');
     if (splashDurationEl) splashDurationEl.value = (typeof s.splashDuration !== 'undefined' ? s.splashDuration : 3);
     var scrollLevelEl = document.getElementById('scrollLevel');
@@ -1410,6 +1417,14 @@ function readSettingsForm() {
     nightThemeStart: getTimeMinutes('nightThemeStart', 1200),
     brightness:  +(byId('brightness')?.value ?? 10),
     autoBrightness: +(byId('autoBrightness')?.value ?? 0),
+    returnToDefaultSec: (function(){
+      var v = parseInt(byId('returnToDefaultSec')?.value ?? 0, 10);
+      if (!isFinite(v)) v = 0;
+      v = clamp(v, 0, 3600);
+      var el = byId('returnToDefaultSec');
+      if (el) el.value = String(v);
+      return v;
+    })(),
     splashDuration: splashDuration,
     scrollLevel: +(byId('scrollLevel')?.value ?? 7),
     customMsg:   byId('customMsg')?.value || '',
@@ -1570,7 +1585,7 @@ async function saveDisplaySettings(event){
     event.preventDefault();
   }
   const payload = pickSettings(readSettingsForm(), [
-    'theme','autoThemeMode','themeLightThreshold','dayThemeStart','nightThemeStart','brightness','autoBrightness','splashDuration','scrollLevel','customMsg'
+    'theme','autoThemeMode','themeLightThreshold','dayThemeStart','nightThemeStart','brightness','autoBrightness','returnToDefaultSec','splashDuration','scrollLevel','customMsg'
   ]);
   await submitSettings(payload, 'saveDisplayMsg');
 }

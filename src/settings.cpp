@@ -7,6 +7,7 @@
 #include "notifications.h"
 #include "default_values.h"
 #include "noaa.h"
+#include "screen_manager.h"
 
 // Preferences storage object
 Preferences prefs;
@@ -53,6 +54,7 @@ const int scrollDelays[] = {
     wxv::defaults::kScrollDelays[9]};
 bool autoBrightness = wxv::defaults::kDefaults.autoBrightnessEnabled;
 bool sceneClockEnabled = wxv::defaults::kDefaults.sceneClockEnabled;
+int returnToDefaultSec = wxv::defaults::kDefaults.returnToDefaultSec;
 int splashDurationSec = wxv::defaults::kDefaults.splashDurationSec;
 bool themeRefreshPending = false;
 int buzzerVolume = wxv::defaults::kDefaults.buzzerVolume;
@@ -209,6 +211,8 @@ void loadSettings() {
     customMsg    = prefs.getString("customMsg", "");
     autoBrightness = prefs.getBool("autoBrightness", wxv::defaults::kDefaults.autoBrightnessEnabled);
       sceneClockEnabled = prefs.getBool("sceneClock", wxv::defaults::kDefaults.sceneClockEnabled);
+      returnToDefaultSec = prefs.getInt("returnDefSec", wxv::defaults::kDefaults.returnToDefaultSec);
+      returnToDefaultSec = constrain(returnToDefaultSec, 0, 3600);
       splashDurationSec = prefs.getInt("splashDur", wxv::defaults::kDefaults.splashDurationSec);
       splashDurationSec = constrain(splashDurationSec, 1, 10);
       buzzerVolume = constrain(prefs.getInt("buzzVol", wxv::defaults::kDefaults.buzzerVolume), 0, 100);
@@ -291,7 +295,7 @@ void saveDeviceSettings() {
     prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 4));
     prefs.end();
     if (showedBusy) {
-        themeRefreshPending = true;
+        refreshVisibleScreen();
     }
     // Units are saved via saveUnits() (see saveAllSettings())
 }
@@ -312,6 +316,8 @@ void saveDisplaySettings() {
         prefs.putInt("scrollLevel", scrollLevel);  // persist level only
         prefs.putInt("vScrollLevel", verticalScrollLevel);
         prefs.putString("customMsg", customMsg);
+        returnToDefaultSec = constrain(returnToDefaultSec, 0, 3600);
+        prefs.putInt("returnDefSec", returnToDefaultSec);
         splashDurationSec = constrain(splashDurationSec, 1, 10);
         prefs.putInt("splashDur", splashDurationSec);
         prefs.putInt("fcLines", constrain(forecastLinesPerDay, 2, 3));

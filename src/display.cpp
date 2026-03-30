@@ -30,6 +30,7 @@
 #include "ui_theme.h"
 #include "display_widgets.h"
 #include "notifications.h"
+#include "screen_manager.h"
 
 static AppState &app = appState();
 #define scrollLevel app.scrollLevel
@@ -4787,11 +4788,11 @@ bool handleLunarLuckInput(uint32_t code)
     return false;
 }
 
-void fetchWeatherFromOWM()
+void fetchWeatherFromOWM(bool showBusy)
 {
     if (WiFi.status() != WL_CONNECTED)
         return;
-    const bool showedBusy = dma_display != nullptr && !isSplashActive();
+    const bool showedBusy = showBusy && dma_display != nullptr && !isSplashActive();
     if (showedBusy)
     {
         wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
@@ -4824,7 +4825,7 @@ void fetchWeatherFromOWM()
 
     if (apiKey.isEmpty()) {
         Serial.println("[OWM] Missing API key or city; skip fetch");
-        if (showedBusy) themeRefreshPending = true;
+        if (showedBusy) refreshVisibleScreen();
         return;
     }
 
@@ -4836,7 +4837,7 @@ void fetchWeatherFromOWM()
 
     if (!hasValidCoords && selectedCity.isEmpty()) {
         Serial.println("[OWM] Missing city and invalid lat/lon; skip fetch");
-        if (showedBusy) themeRefreshPending = true;
+        if (showedBusy) refreshVisibleScreen();
         return;
     }
 
@@ -4857,14 +4858,14 @@ void fetchWeatherFromOWM()
     String jsonBuffer = httpGETRequest(url.c_str());
     if (jsonBuffer == "{}")
     {
-        if (showedBusy) themeRefreshPending = true;
+        if (showedBusy) refreshVisibleScreen();
         return;
     }
     JSONVar data = JSON.parse(jsonBuffer);
     if (JSON.typeof_(data) == "undefined")
     {
         Serial.println("Failed to parse weather JSON");
-        if (showedBusy) themeRefreshPending = true;
+        if (showedBusy) refreshVisibleScreen();
         return;
     }
     auto toCelsius = [](double raw) -> double {
@@ -5219,7 +5220,7 @@ void fetchWeatherFromOWM()
     }
 
     needScrollRebuild = true;
-    if (showedBusy) themeRefreshPending = true;
+    if (showedBusy) refreshVisibleScreen();
 }
 
 void drawOWMScreen()
@@ -5275,7 +5276,9 @@ void drawOWMScreen()
         if ((s_lastOwmFetchAttemptMs == 0) || (nowMs - s_lastOwmFetchAttemptMs >= dueInterval))
         {
             s_lastOwmFetchAttemptMs = nowMs;
-            fetchWeatherFromOWM();
+            // Screen-owned OWM refreshes should stay quiet to avoid overlay flicker
+            // while the OWM screen itself is rendering.
+            fetchWeatherFromOWM(false);
             reset_Time_and_Date_Display = true;
             displayWeatherData();
             needScrollRebuild = true; // new values -> refresh marquee text
@@ -5848,7 +5851,7 @@ void serviceScrollRebuild()
     needScrollRebuild = false;
     if (showedBusy)
     {
-        themeRefreshPending = true;
+        refreshVisibleScreen();
     }
 }
 

@@ -22,6 +22,7 @@ AppState &appState()
         verticalScrollSpeed,
         scrollLevel,
         verticalScrollLevel,
+        returnToDefaultSec,
         splashDurationSec,
         autoBrightness,
         customMsg,

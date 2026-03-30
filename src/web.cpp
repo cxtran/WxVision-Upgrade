@@ -264,6 +264,7 @@ struct AppRuntimeState
     bool autoRotateEnabled = false;
     int rotateIntervalSec = 15;
     char manualScreenName[24] = "Main";
+    int returnToDefaultSec = 0;
     bool noaaEnabled = false;
     bool lightningEnabled = false;
     bool soundEnabled = false;
@@ -1043,6 +1044,7 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     display["autoRotate"] = state.settings.autoRotateEnabled;
     display["rotateIntervalSec"] = state.settings.rotateIntervalSec;
     display["manualScreen"] = state.settings.manualScreenName;
+    display["returnToDefaultSec"] = state.settings.returnToDefaultSec;
 
     JsonObject alerts = doc["alerts"].to<JsonObject>();
     alerts["noaaEnabled"] = state.settings.noaaEnabled;
@@ -1344,6 +1346,7 @@ static void refreshAppRuntimeState(bool force = false)
   next.settings.autoRotateEnabled = autoRotate != 0;
   next.settings.rotateIntervalSec = autoRotateInterval;
   copyToBuffer(next.settings.manualScreenName, sizeof(next.settings.manualScreenName), manualScreenLabel(manualScreen));
+  next.settings.returnToDefaultSec = returnToDefaultSec;
   next.settings.noaaEnabled = noaaAlertsEnabled;
   next.settings.lightningEnabled = g_appLightningEnabled;
   next.settings.soundEnabled = (buzzerVolume > 0);
@@ -1817,6 +1820,7 @@ static void serializeAppDisplaySettings(JsonObject obj)
   obj["verticalScrollSpeed"] = verticalScrollSpeed;
   obj["customMessage"] = customMsg;
   obj["sceneClockEnabled"] = sceneClockEnabled;
+  obj["returnToDefaultSec"] = returnToDefaultSec;
   obj["splashDurationSec"] = splashDurationSec;
 }
 
@@ -2392,6 +2396,17 @@ static bool applyAppDisplaySettings(JsonObjectConst obj, JsonObject fieldErrors,
   {
     sceneClockEnabled = obj["sceneClockEnabled"].as<bool>();
     dirty.display = true;
+  }
+  if (!obj["returnToDefaultSec"].isNull())
+  {
+    int value = obj["returnToDefaultSec"].as<int>();
+    if (value < 0 || value > 3600)
+      setFieldError(fieldErrors, "returnToDefaultSec", "must be between 0 and 3600");
+    else
+    {
+      returnToDefaultSec = value;
+      dirty.display = true;
+    }
   }
   if (!obj["splashDurationSec"].isNull())
   {
@@ -4005,6 +4020,7 @@ void setupWebServer() {
     doc["autoRotate"]       = autoRotate;
     doc["autoRotateInterval"] = autoRotateInterval;
     doc["manualScreen"]     = manualScreen;
+    doc["returnToDefaultSec"] = returnToDefaultSec;
     doc["theme"]            = theme;
     bool isAmbientMode = autoThemeAmbient;
     bool isScheduledMode = (!isAmbientMode && autoThemeSchedule);
@@ -4225,6 +4241,11 @@ void setupWebServer() {
             const char* s = v.as<const char*>();
             autoBrightness = (strcmp(s, "1")==0 || strcasecmp(s, "true")==0);
           }
+          dirtyDisplay = true;
+        }
+        if (!doc["returnToDefaultSec"].isNull()) {
+          int nextTimeout = constrain((int)(doc["returnToDefaultSec"] | returnToDefaultSec), 0, 3600);
+          returnToDefaultSec = nextTimeout;
           dirtyDisplay = true;
         }
           if (!doc["splashDuration"].isNull()) {
@@ -5250,8 +5271,10 @@ void setupWebServer() {
         }
 
         otaInProgress = true;
-        // Show upgrade message on display
+        // Clear the panel first so no previous-screen artifacts remain visible
+        // before the OTA status card is drawn.
         if (dma_display) {
+          dma_display->fillScreen(0);
           wxv::notify::showNotification(wxv::notify::NotifyId::Upgrading, dma_display->color565(0, 255, 255));
         }
       }

@@ -21,6 +21,7 @@ struct AppState
     int &verticalScrollSpeed;
     int &scrollLevel;
     int &verticalScrollLevel;
+    int &returnToDefaultSec;
     int &splashDurationSec;
     bool &autoBrightness;
     String &customMsg;
