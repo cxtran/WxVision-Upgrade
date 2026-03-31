@@ -7,6 +7,8 @@
 #include "settings.h"
 #include "ui_theme.h"
 
+#if WXV_ENABLE_NOAA_ALERTS
+
 namespace
 {
     struct AlertPage
@@ -1421,3 +1423,24 @@ bool stepNoaaAlertSelection(int direction)
 
     return false;
 }
+
+#else
+
+void drawNoaaAlertsScreen() {}
+
+void resetNoaaAlertsScreenPager() {}
+
+void tickNoaaAlertsScreen() {}
+
+void stepNoaaAlertsScreen(int direction)
+{
+    (void)direction;
+}
+
+bool stepNoaaAlertSelection(int direction)
+{
+    (void)direction;
+    return false;
+}
+
+#endif

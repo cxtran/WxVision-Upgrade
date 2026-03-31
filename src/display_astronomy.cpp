@@ -11,6 +11,7 @@
 #include "ui_theme.h"
 #include "units.h"
 
+#if WXV_ENABLE_ASTRONOMY
 namespace
 {
 constexpr unsigned long kAstronomyPageAutoMs = 4200UL;
@@ -1064,3 +1065,11 @@ void resetAstronomyScreenState()
     s_astronomyLastMinute = -1;
     s_astronomyRotationPaused = false;
 }
+#else
+void drawAstronomyScreen() {}
+void tickAstronomyScreen() {}
+void handleAstronomyDownPress() {}
+void handleAstronomyUpPress() {}
+void handleAstronomySelectPress() {}
+void resetAstronomyScreenState() {}
+#endif

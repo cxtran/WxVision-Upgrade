@@ -55,8 +55,12 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_CLOCK,
     SCREEN_OWM,
     SCREEN_WORLD_CLOCK,
+#if WXV_ENABLE_ASTRONOMY
     SCREEN_ASTRONOMY,
+#endif
+#if WXV_ENABLE_SKY_BRIEF
     SCREEN_SKY_BRIEF,
+#endif
     SCREEN_CONDITION_SCENE,
     SCREEN_UDP_DATA,
     SCREEN_LIGHTNING,
@@ -66,7 +70,9 @@ const ScreenMode InfoScreenModes[] = {
     SCREEN_WIND_DIR,
     SCREEN_ENV_INDEX,
     SCREEN_TEMP_HISTORY,
+#if WXV_ENABLE_NEXT24H_PREDICTION
     SCREEN_PREDICT,
+#endif
     SCREEN_NOAA_ALERT,
 #if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     SCREEN_LUNAR_LUCK,
@@ -696,9 +702,9 @@ void loop()
             resetLunarLuckSectionRotation();
         if (currentScreen == SCREEN_WORLD_CLOCK)
             resetWorldClockScreenState();
-        if (currentScreen == SCREEN_ASTRONOMY)
+        if (WXV_ENABLE_ASTRONOMY && currentScreen == SCREEN_ASTRONOMY)
             resetAstronomyScreenState();
-        if (currentScreen == SCREEN_SKY_BRIEF)
+        if (WXV_ENABLE_SKY_BRIEF && currentScreen == SCREEN_SKY_BRIEF)
             resetSkyBriefScreenState();
     }
 
@@ -859,7 +865,7 @@ void loop()
         }
         else if (!isScreenOff())
         {
-            if (currentScreen == SCREEN_PREDICT)
+            if (WXV_ENABLE_NEXT24H_PREDICTION && currentScreen == SCREEN_PREDICT)
             {
                 resetPredictionRenderState();
             }
@@ -1264,13 +1270,13 @@ void loop()
     }
 
     // Pause/resume Next 24h scroll with Down/Up when on prediction screen
-    if (key == IRCodes::WxKey::Down && currentScreen == SCREEN_PREDICT)
+    if (WXV_ENABLE_NEXT24H_PREDICTION && key == IRCodes::WxKey::Down && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionDownPress();
         noteScreenRotation(millis());
         return;
     }
-    if (key == IRCodes::WxKey::Up && currentScreen == SCREEN_PREDICT)
+    if (WXV_ENABLE_NEXT24H_PREDICTION && key == IRCodes::WxKey::Up && currentScreen == SCREEN_PREDICT)
     {
         handlePredictionUpPress();
         noteScreenRotation(millis());
@@ -1315,7 +1321,7 @@ void loop()
         return;
     }
     // --- END WORLD TIME FEATURE ---
-    if (currentScreen == SCREEN_ASTRONOMY &&
+    if (WXV_ENABLE_ASTRONOMY && currentScreen == SCREEN_ASTRONOMY &&
         (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down || key == IRCodes::WxKey::Ok))
     {
         if (key == IRCodes::WxKey::Down)
@@ -1328,7 +1334,7 @@ void loop()
         return;
     }
 
-    if (currentScreen == SCREEN_SKY_BRIEF &&
+    if (WXV_ENABLE_SKY_BRIEF && currentScreen == SCREEN_SKY_BRIEF &&
         (key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down || key == IRCodes::WxKey::Ok))
     {
         if (key == IRCodes::WxKey::Down)
@@ -1346,7 +1352,7 @@ void loop()
         return;
     }
 
-    if (currentScreen == SCREEN_PREDICT && key == IRCodes::WxKey::Ok)
+    if (WXV_ENABLE_NEXT24H_PREDICTION && currentScreen == SCREEN_PREDICT && key == IRCodes::WxKey::Ok)
     {
         handlePredictionSelectPress();
         noteScreenRotation(millis());
@@ -1501,7 +1507,7 @@ void loop()
         }
     }
 
-    if (currentScreen == SCREEN_ASTRONOMY)
+    if (WXV_ENABLE_ASTRONOMY && currentScreen == SCREEN_ASTRONOMY)
     {
         if (needsClear || renderDue(RenderSlot::AstronomyMain, now, 60000UL))
         {
@@ -1518,7 +1524,7 @@ void loop()
         }
     }
 
-    if (currentScreen == SCREEN_SKY_BRIEF)
+    if (WXV_ENABLE_SKY_BRIEF && currentScreen == SCREEN_SKY_BRIEF)
     {
         if (needsClear || renderDue(RenderSlot::SkyBriefMain, now, 60000UL))
         {
@@ -1608,7 +1614,7 @@ void loop()
         delay(5);
     }
 
-    if (currentScreen == SCREEN_PREDICT)
+    if (WXV_ENABLE_NEXT24H_PREDICTION && currentScreen == SCREEN_PREDICT)
     {
         if (!anyModalOrInfoScreenActive &&
             (needsClear || renderDue(RenderSlot::PredictMain, now, kRenderChartMs)))

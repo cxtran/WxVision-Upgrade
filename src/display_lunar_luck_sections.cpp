@@ -4,6 +4,8 @@
 #include "display.h"
 #include "display_lunar_luck_state.h"
 
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
+
 extern size_t buildNormalized(char *dst, size_t dstCap, const char *src);
 extern size_t summarizeListToBullets(char *dst, size_t cap, const char *src, int maxItems);
 
@@ -294,3 +296,46 @@ void buildLuckSections(
     hdrNew[TITLE_MAX - 1] = '\0';
     setSectionStartState();
 }
+
+#else
+
+void buildLuckSections(
+    int lunarDay, int lunarMonth, int lunarYear,
+    const char *canChiDay, const char *canChiMonth, const char *solarTerm, const char *canChiYear,
+    const char *hop1, const char *hop2, const char *ky,
+    const char *gioTotRawOrPreformatted,
+    int score,
+    const char *categoryName,
+    const char *focusPhrase,
+    const char *headlineRaw,
+    const char *nenLamRaw,
+    const char *nenTranhRaw,
+    const char *xuatHanhLine,
+    int xuatHanhTone,
+    const char *xuatHanhName,
+    const char *caDaoLine)
+{
+    (void)lunarDay;
+    (void)lunarMonth;
+    (void)lunarYear;
+    (void)canChiDay;
+    (void)canChiMonth;
+    (void)solarTerm;
+    (void)canChiYear;
+    (void)hop1;
+    (void)hop2;
+    (void)ky;
+    (void)gioTotRawOrPreformatted;
+    (void)score;
+    (void)categoryName;
+    (void)focusPhrase;
+    (void)headlineRaw;
+    (void)nenLamRaw;
+    (void)nenTranhRaw;
+    (void)xuatHanhLine;
+    (void)xuatHanhTone;
+    (void)xuatHanhName;
+    (void)caDaoLine;
+}
+
+#endif

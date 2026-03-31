@@ -22,10 +22,11 @@ bool screenIsAllowed(ScreenMode mode)
     case SCREEN_CONDITION_SCENE:
         return !isDataSourceNone();
     case SCREEN_ASTRONOMY:
+        return WXV_ENABLE_ASTRONOMY;
     case SCREEN_SKY_BRIEF:
-        return true;
-    case SCREEN_SKY_FACTS:
-        return false;
+        return WXV_ENABLE_SKY_BRIEF;
+    case SCREEN_PREDICT:
+        return WXV_ENABLE_NEXT24H_PREDICTION;
     case SCREEN_NOAA_ALERT:
         return noaaAlertsEnabled;
     case SCREEN_LUNAR_LUCK:

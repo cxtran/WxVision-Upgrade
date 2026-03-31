@@ -121,6 +121,19 @@ static bool g_otaUploadFinished = false;
 #error "WEB_UI_MODE must be WEB_UI_DISABLED (0), WEB_UI_MINIMAL (1), or WEB_UI_FULL (2)."
 #endif
 
+#if WEB_UI_MODE == WEB_UI_DISABLED
+
+void setupWebServer() {}
+
+void webTick() {}
+
+void broadcastAppSettingsUpdate(const char *section)
+{
+    (void)section;
+}
+
+#else
+
 namespace
 {
 volatile bool g_webPendingQuickRestore = false;
@@ -3211,11 +3224,17 @@ static const char *screenModeLabel(ScreenMode mode)
   case SCREEN_WORLD_CLOCK:
     return "World Clock";
   case SCREEN_ASTRONOMY:
+#if WXV_ENABLE_ASTRONOMY
     return "Astronomy";
-  case SCREEN_SKY_FACTS:
-    return "Sky Facts";
+#else
+    return "Astronomy (disabled)";
+#endif
   case SCREEN_SKY_BRIEF:
+#if WXV_ENABLE_SKY_BRIEF
     return "Sky Brief";
+#else
+    return "Sky Brief (disabled)";
+#endif
   case SCREEN_OWM:
     return "Forecast (OWM)";
   case SCREEN_UDP_DATA:
@@ -5402,6 +5421,8 @@ void setupWebServer() {
   webServerRunning = true;
   Serial.println("[Web] Async server started.");
 }
+
+#endif
 
 
 

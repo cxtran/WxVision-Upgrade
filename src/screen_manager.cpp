@@ -227,9 +227,13 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         subtitle = "Last 24-HR";
         return true;
     case SCREEN_PREDICT:
+#if WXV_ENABLE_NEXT24H_PREDICTION
         title = "Next 24-HR";
         subtitle = "Prediction";
         return true;
+#else
+        return false;
+#endif
     case SCREEN_NOAA_ALERT:
         title = "NOAA Alerts";
         subtitle = nullptr;
@@ -243,13 +247,21 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         subtitle = nullptr;
         return true;
     case SCREEN_ASTRONOMY:
+#if WXV_ENABLE_ASTRONOMY
         title = "Astronomy";
         subtitle = "Sun & Moon";
         return true;
+#else
+        return false;
+#endif
     case SCREEN_SKY_BRIEF:
+#if WXV_ENABLE_SKY_BRIEF
         title = "Sky Brief";
         subtitle = "Summary";
         return true;
+#else
+        return false;
+#endif
 #if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:
         title = "Lunar Calendar";
@@ -273,12 +285,16 @@ void enterScreen(ScreenMode mode)
         drawWorldClockScreen();
         break;
     case SCREEN_ASTRONOMY:
+#if WXV_ENABLE_ASTRONOMY
         resetAstronomyScreenState();
         drawAstronomyScreen();
+#endif
         break;
     case SCREEN_SKY_BRIEF:
+#if WXV_ENABLE_SKY_BRIEF
         resetSkyBriefScreenState();
         drawSkyBriefScreen();
+#endif
         break;
     case SCREEN_UDP_DATA:
         showUdpScreen();
@@ -304,8 +320,10 @@ void enterScreen(ScreenMode mode)
         draw24HourSectionScreen();
         break;
     case SCREEN_PREDICT:
+#if WXV_ENABLE_NEXT24H_PREDICTION
         resetPredictionRenderState();
         drawPredictionScreen();
+#endif
         break;
 #if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:
@@ -395,7 +413,9 @@ void renderScreenContents(ScreenMode mode)
         draw24HourSectionScreen();
         break;
     case SCREEN_PREDICT:
+#if WXV_ENABLE_NEXT24H_PREDICTION
         drawPredictionScreen();
+#endif
         break;
     case SCREEN_NOAA_ALERT:
         drawNoaaAlertsScreen();
@@ -879,10 +899,14 @@ void refreshVisibleScreen()
         drawWorldClockScreen();
         break;
     case SCREEN_ASTRONOMY:
+#if WXV_ENABLE_ASTRONOMY
         drawAstronomyScreen();
+#endif
         break;
     case SCREEN_SKY_BRIEF:
+#if WXV_ENABLE_SKY_BRIEF
         drawSkyBriefScreen();
+#endif
         break;
     case SCREEN_UDP_DATA:
         showUdpScreen();
@@ -906,8 +930,10 @@ void refreshVisibleScreen()
         draw24HourSectionScreen();
         break;
     case SCREEN_PREDICT:
+#if WXV_ENABLE_NEXT24H_PREDICTION
         resetPredictionRenderState();
         drawPredictionScreen();
+#endif
         break;
 #if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     case SCREEN_LUNAR_LUCK:

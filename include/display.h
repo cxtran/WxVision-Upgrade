@@ -17,6 +17,18 @@
 #define WXV_ENABLE_LUNAR_CALENDAR 1
 #endif
 
+#ifndef WXV_ENABLE_ASTRONOMY
+#define WXV_ENABLE_ASTRONOMY 1
+#endif
+
+#ifndef WXV_ENABLE_SKY_BRIEF
+#define WXV_ENABLE_SKY_BRIEF 1
+#endif
+
+#ifndef WXV_ENABLE_NEXT24H_PREDICTION
+#define WXV_ENABLE_NEXT24H_PREDICTION 1
+#endif
+
 #ifndef WXV_ENABLE_LUNAR_LUCK
 #define WXV_ENABLE_LUNAR_LUCK WXV_ENABLE_LUNAR_CALENDAR
 #endif
@@ -53,9 +65,7 @@ enum ScreenMode {
     SCREEN_CLOCK,
     SCREEN_WORLD_CLOCK,
     SCREEN_ASTRONOMY,
-    SCREEN_SKY_FACTS,
     SCREEN_SKY_BRIEF,
-    SCREEN_LUNAR_VI,
     SCREEN_LUNAR_LUCK,
     SCREEN_NOAA_ALERT,
     SCREEN_COUNT
@@ -117,7 +127,6 @@ void drawClockDateLine(const DateTime &now);
 void drawClockPulseDot(int second);
 void tickClockWorldTimeMarquee();
 void drawAstronomyScreen();
-void drawSkyFactsScreen();
 void drawSkyBriefScreen();
 void drawWeatherScreen();
 void drawUdpDataScreen();
@@ -139,7 +148,6 @@ ScreenMode homeScreenForDataSource();
 
 void drawConditionSceneScreen();
 void tickAstronomyScreen();
-void tickSkyFactsScreen();
 void tickSkyBriefScreen();
 void drawNoaaAlertsScreen();
 void tickNoaaAlertsScreen();
@@ -159,10 +167,6 @@ void handleAstronomyUpPress();
 void handleAstronomySelectPress();
 void resetAstronomyScreenState();
 void resetSkyBriefScreenState();
-void handleSkyFactsDownPress();
-void handleSkyFactsUpPress();
-void handleSkyFactsSelectPress();
-void resetSkyFactsScreenState();
 
 // Splash screen helpers
 void splashBegin(uint16_t minimumMs);

@@ -90,6 +90,39 @@ static ScrollLine s_tempScroll(PANEL_RES_X, 60);
 static ScrollLine s_co2Scroll(PANEL_RES_X, 60);
 static ScrollLine s_humScroll(PANEL_RES_X, 60);
 static ScrollLine s_baroScroll(PANEL_RES_X, 60);
+static constexpr unsigned long kPredictPageAutoMs = 4200UL;
+static constexpr unsigned long kPredictManualHoldMs = 5000UL;
+static const ScreenMode kHistory24Pages[] = {
+    SCREEN_TEMP_HISTORY,
+    SCREEN_HUM_HISTORY,
+    SCREEN_CO2_HISTORY,
+    SCREEN_BARO_HISTORY};
+static constexpr uint8_t kHistory24PageCount = sizeof(kHistory24Pages) / sizeof(kHistory24Pages[0]);
+static uint8_t s_history24PageIndex = 0;
+static unsigned long s_history24LastSwitchMs = 0;
+static unsigned long s_history24ManualHoldUntilMs = 0;
+static bool s_history24RotationPaused = false;
+static bool s_history24WaitForMarqueeCycle = false;
+static int8_t s_history24ArmedPageIndex = -1;
+
+static ScrollLine *scrollFor24HourPage(ScreenMode mode)
+{
+    switch (mode)
+    {
+    case SCREEN_TEMP_HISTORY:
+        return &s_tempScroll;
+    case SCREEN_HUM_HISTORY:
+        return &s_humScroll;
+    case SCREEN_CO2_HISTORY:
+        return &s_co2Scroll;
+    case SCREEN_BARO_HISTORY:
+        return &s_baroScroll;
+    default:
+        return nullptr;
+    }
+}
+
+#if WXV_ENABLE_NEXT24H_PREDICTION
 
 enum class PredictPageId : uint8_t
 {
@@ -149,8 +182,6 @@ static unsigned long s_predictManualHoldUntilMs = 0;
 static bool s_predictRotationPaused = false;
 static bool s_predictTransitionActive = false;
 static unsigned long s_predictTransitionStartMs = 0;
-static constexpr unsigned long kPredictPageAutoMs = 4200UL;
-static constexpr unsigned long kPredictManualHoldMs = 5000UL;
 static constexpr unsigned long kPredictTransitionMs = 180UL;
 static constexpr int kPredictMeaningGapPx = 12;
 static bool s_predictMeaningCycleDone = false;
@@ -171,35 +202,7 @@ static unsigned long predictMeaningStepMs()
     return static_cast<unsigned long>(constrain(scrollSpeed, 12, 120));
 }
 
-static const ScreenMode kHistory24Pages[] = {
-    SCREEN_TEMP_HISTORY,
-    SCREEN_HUM_HISTORY,
-    SCREEN_CO2_HISTORY,
-    SCREEN_BARO_HISTORY};
-static constexpr uint8_t kHistory24PageCount = sizeof(kHistory24Pages) / sizeof(kHistory24Pages[0]);
-static uint8_t s_history24PageIndex = 0;
-static unsigned long s_history24LastSwitchMs = 0;
-static unsigned long s_history24ManualHoldUntilMs = 0;
-static bool s_history24RotationPaused = false;
-static bool s_history24WaitForMarqueeCycle = false;
-static int8_t s_history24ArmedPageIndex = -1;
-
-static ScrollLine *scrollFor24HourPage(ScreenMode mode)
-{
-    switch (mode)
-    {
-    case SCREEN_TEMP_HISTORY:
-        return &s_tempScroll;
-    case SCREEN_HUM_HISTORY:
-        return &s_humScroll;
-    case SCREEN_CO2_HISTORY:
-        return &s_co2Scroll;
-    case SCREEN_BARO_HISTORY:
-        return &s_baroScroll;
-    default:
-        return nullptr;
-    }
-}
+#endif
 
 String formatTempShort(float tempC, uint8_t decimals)
 {
@@ -378,6 +381,8 @@ void draw24HourSectionPageBar(uint8_t activePage)
     (void)activePage;
     // Page indicator intentionally disabled.
 }
+
+#if WXV_ENABLE_NEXT24H_PREDICTION
 
 static void resetPredictMeaningScroll(unsigned long nowMs)
 {
@@ -813,8 +818,12 @@ static void renderPredictPage(unsigned long nowMs)
         }
     }
 }
+
+#endif
+
 } // namespace
 
+#if WXV_ENABLE_NEXT24H_PREDICTION
 void resetPredictionRenderState()
 {
     s_predictStaticDirty = true;
@@ -824,6 +833,7 @@ void resetPredictionRenderState()
     s_predictLastTheme = -1;
     s_predictRotationPaused = false;
 }
+#endif
 
 void updateGraphData()
 {
@@ -1438,6 +1448,7 @@ void drawCo2HistoryScreen()
     // No current marker/label on the chart per request
 }
 
+#if WXV_ENABLE_NEXT24H_PREDICTION
 void drawPredictionScreen()
 {
     if (!dma_display)
@@ -1899,6 +1910,8 @@ void drawPredictionScreen()
     renderPredictPage(nowMs);
 }
 
+#endif
+
 // Tick functions to animate marquee between full redraws
 void tickTemperatureHistoryMarquee()
 {
@@ -2095,6 +2108,8 @@ void handle24HourSectionSelectPress()
     draw24HourSectionScreen();
 }
 
+#if WXV_ENABLE_NEXT24H_PREDICTION
+
 void tickPredictionScreen()
 {
     if (!dma_display || !s_predictSnapshot.ready || s_predictPageCount == 0)
@@ -2181,3 +2196,19 @@ void handlePredictionSelectPress()
         s_predictLastSwitchMs = millis();
     renderPredictPage(millis());
 }
+
+#else
+
+void resetPredictionRenderState() {}
+
+void drawPredictionScreen() {}
+
+void tickPredictionScreen() {}
+
+void handlePredictionDownPress() {}
+
+void handlePredictionUpPress() {}
+
+void handlePredictionSelectPress() {}
+
+#endif

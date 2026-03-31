@@ -2,6 +2,8 @@
 
 #include <math.h>
 
+#if WXV_ENABLE_LUNAR_CALENDAR
+
 static long getNewMoonDay(int k, int timeZoneHours)
 {
     double T = k / 1236.85;
@@ -162,3 +164,26 @@ LunarDate convertSolar2Lunar(int dd, int mm, int yy, int timeZoneMinutes)
     ld.leap = lunarLeap;
     return ld;
 }
+
+#else
+
+long jdFromDate(int dd, int mm, int yy)
+{
+    (void)dd;
+    (void)mm;
+    (void)yy;
+    return 0;
+}
+
+LunarDate convertSolar2Lunar(int dd, int mm, int yy, int timeZoneMinutes)
+{
+    (void)dd;
+    (void)mm;
+    (void)yy;
+    (void)timeZoneMinutes;
+
+    LunarDate ld{};
+    return ld;
+}
+
+#endif

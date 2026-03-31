@@ -4489,6 +4489,7 @@ void drawSettingsScreen()
 
 void drawLunarLuckScreen()
 {
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     if (!lunarLuckInitialized)
     {
         rebuildLunarForOffset();
@@ -4501,10 +4502,12 @@ void drawLunarLuckScreen()
             rebuildLunarForOffset();
     }
     renderCurrentLunarLuckSection();
+#endif
 }
 
 void resetLunarLuckSectionRotation()
 {
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     if (g_sectionCount == 0)
         return;
     lunarLuckRotationPaused = false;
@@ -4524,6 +4527,7 @@ void resetLunarLuckSectionRotation()
     strncpy(hdrNew, g_sections[0].title ? g_sections[0].title : "", TITLE_MAX - 1);
     hdrNew[TITLE_MAX - 1] = '\0';
     setSectionStartState();
+#endif
 }
 
 // OWS Weather /////////////////////////////////////////////////////////////////////////////////////////
@@ -4638,6 +4642,7 @@ void getTimeFromRTC()
 
 void tickLunarLuckMarquee()
 {
+#if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
     if (!dma_display)
         return;
 
@@ -4702,6 +4707,7 @@ void tickLunarLuckMarquee()
             renderCurrentLunarLuckSection();
         }
     }
+#endif
 }
 
 void adjustLunarLuckSpeed(int delta)
@@ -4726,6 +4732,10 @@ void adjustLunarLuckSpeed(int delta)
 
 bool handleLunarLuckInput(uint32_t code)
 {
+#if !(WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK)
+    (void)code;
+    return false;
+#else
     if (currentScreen != SCREEN_LUNAR_LUCK)
         return false;
 
@@ -4786,6 +4796,7 @@ bool handleLunarLuckInput(uint32_t code)
     }
 
     return false;
+#endif
 }
 
 void fetchWeatherFromOWM(bool showBusy)

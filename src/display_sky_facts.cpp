@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "ui_theme.h"
 
+#if WXV_ENABLE_ASTRONOMY || WXV_ENABLE_SKY_BRIEF
 namespace
 {
 constexpr unsigned long kSkyFactsPageAutoMs = 4200UL;
@@ -1479,3 +1480,17 @@ void drawSkyFactSubpage(const wxv::astronomy::SkyFactPage &page)
 {
     drawSkyFactPageImpl(page);
 }
+#else
+void drawSkyFactsScreen() {}
+void tickSkyFactsScreen() {}
+void drawSkyBriefScreen() {}
+void tickSkyBriefScreen() {}
+void drawSkyFactSubpage(const wxv::astronomy::SkyFactPage &) {}
+void handleSkyFactsDownPress() {}
+void handleSkyFactsUpPress() {}
+void handleSkyFactsSelectPress() {}
+void handleSkyBriefDownPress() {}
+void handleSkyBriefUpPress() {}
+void resetSkyFactsScreenState() {}
+void resetSkyBriefScreenState() {}
+#endif

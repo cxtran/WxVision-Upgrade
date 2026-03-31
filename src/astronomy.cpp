@@ -9,6 +9,7 @@
 
 namespace wxv::astronomy
 {
+#if WXV_ENABLE_ASTRONOMY || WXV_ENABLE_SKY_BRIEF
 namespace
 {
 AstronomyData s_data;
@@ -1639,5 +1640,49 @@ const SkyFactPage &skySummaryPage()
 {
     return s_summaryPage;
 }
+
+#else
+namespace
+{
+AstronomyData s_data;
+SkyFactPage s_emptyPage;
+}
+
+void updateAstronomyData(bool)
+{
+}
+
+const AstronomyData &astronomyData()
+{
+    return s_data;
+}
+
+const char *moonPhaseLabel(MoonPhase phase)
+{
+    static const char *kPhaseLabels[] = {
+        "New Moon", "Waxing Crescent", "First Quarter", "Waxing Gibbous",
+        "Full Moon", "Waning Gibbous", "Last Quarter", "Waning Crescent"};
+    return kPhaseLabels[static_cast<uint8_t>(phase) & 7];
+}
+
+void updateSkyFacts(bool)
+{
+}
+
+size_t skyFactCount()
+{
+    return 0;
+}
+
+const SkyFactPage &skyFactPage(size_t)
+{
+    return s_emptyPage;
+}
+
+const SkyFactPage &skySummaryPage()
+{
+    return s_emptyPage;
+}
+#endif
 
 } // namespace wxv::astronomy
