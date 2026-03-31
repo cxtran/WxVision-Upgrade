@@ -221,7 +221,7 @@ struct AppRuntimeState
     float tempF = NAN;
     float pressureInHg = NAN;
     int humidity = -1;
-    char condition[40] = "";
+    char condition[32] = "";
     char updatedIso[32] = "";
     uint32_t updatedEpoch = 0;
   } weather;
@@ -237,10 +237,10 @@ struct AppRuntimeState
     float lightLux = NAN;
     int eqi = -1;
     char band[16] = "";
-    char freshness[24] = "";
-    char summary[64] = "";
-    char action[64] = "";
-    char trend[24] = "";
+    char freshness[16] = "";
+    char summary[48] = "";
+    char action[48] = "";
+    char trend[16] = "";
     char sensorStatus[16] = "";
     uint32_t sensorAgeSec = 0;
   } indoor;
@@ -250,15 +250,15 @@ struct AppRuntimeState
     char id[28] = "";
     char source[8] = "";
     char severity[12] = "";
-    char headline[72] = "";
-    char expires[32] = "";
+    char headline[64] = "";
+    char expires[28] = "";
   };
 
   struct AlertsInfo
   {
     size_t activeCount = 0;
     char highestSeverity[16] = "none";
-    char primaryMessage[768] = "";
+    char primaryMessage[384] = "";
     AlertItem items[3];
     size_t itemCount = 0;
   } alerts;
@@ -283,17 +283,6 @@ struct AppRuntimeState
     bool soundEnabled = false;
   } settings;
 
-  String stateJson;
-  String dashboardJson;
-  String alertsJson;
-  String lightningJson;
-  String deviceJson;
-  String settingsJson;
-  String weatherWsJson;
-  String indoorWsJson;
-  String deviceWsJson;
-  String alertWsJson;
-  String lightningWsJson;
   uint32_t weatherWsSig = 0;
   uint32_t indoorWsSig = 0;
   uint32_t deviceWsSig = 0;
@@ -867,222 +856,294 @@ static void serializeCompactFloat(JsonVariant dst, float value, uint8_t digits =
     dst.set(nullptr);
 }
 
+static String buildAppStateJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  JsonObject device = doc["device"].to<JsonObject>();
+  device["name"] = state.device.name;
+  device["ip"] = state.device.ip;
+  device["online"] = state.device.online;
+  device["uptimeSec"] = state.device.uptimeSec;
+  device["currentScreen"] = state.device.currentScreen;
+
+  JsonObject wifi = doc["wifi"].to<JsonObject>();
+  wifi["ssid"] = state.wifi.ssid;
+  wifi["rssi"] = state.wifi.rssi;
+
+  JsonObject time = doc["time"].to<JsonObject>();
+  time["local"] = state.time.localIso;
+  time["timezone"] = state.time.timezone;
+  time["display"] = state.time.display;
+
+  JsonObject location = doc["location"].to<JsonObject>();
+  serializeCompactFloat(location["lat"], state.location.lat, 4);
+  serializeCompactFloat(location["lon"], state.location.lon, 4);
+
+  JsonObject weather = doc["weather"].to<JsonObject>();
+  weather["source"] = state.weather.source;
+  serializeCompactFloat(weather["tempF"], state.weather.tempF);
+  serializeCompactFloat(weather["pressureInHg"], state.weather.pressureInHg, 2);
+  if (state.weather.humidity >= 0)
+    weather["humidity"] = state.weather.humidity;
+  else
+    weather["humidity"] = nullptr;
+  weather["condition"] = state.weather.condition;
+  weather["updated"] = state.weather.updatedIso[0] ? state.weather.updatedIso : nullptr;
+
+  JsonObject indoor = doc["indoor"].to<JsonObject>();
+  serializeCompactFloat(indoor["tempF"], state.indoor.tempF);
+  if (state.indoor.humidity >= 0)
+    indoor["humidity"] = state.indoor.humidity;
+  else
+    indoor["humidity"] = nullptr;
+  serializeCompactFloat(indoor["ahtTempF"], state.indoor.ahtTempF);
+  if (state.indoor.ahtHumidity >= 0)
+    indoor["ahtHumidity"] = state.indoor.ahtHumidity;
+  else
+    indoor["ahtHumidity"] = nullptr;
+  if (state.indoor.co2ppm > 0)
+    indoor["co2ppm"] = state.indoor.co2ppm;
+  else
+    indoor["co2ppm"] = nullptr;
+  serializeCompactFloat(indoor["pressureInHg"], state.indoor.pressureInHg, 2);
+  serializeCompactFloat(indoor["lightLux"], state.indoor.lightLux, 1);
+  if (state.indoor.eqi >= 0)
+    indoor["eqi"] = state.indoor.eqi;
+  else
+    indoor["eqi"] = nullptr;
+  indoor["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+  indoor["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
+  indoor["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+  indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
+  indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
+  indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
+
+  JsonObject alerts = doc["alerts"].to<JsonObject>();
+  alerts["activeCount"] = state.alerts.activeCount;
+  alerts["highestSeverity"] = state.alerts.highestSeverity;
+  if (state.alerts.itemCount > 0)
+  {
+    alerts["headline"] = state.alerts.items[0].headline;
+    alerts["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+  }
+  else
+  {
+    alerts["headline"] = nullptr;
+    alerts["message"] = nullptr;
+  }
+
+  JsonObject lightning = doc["lightning"].to<JsonObject>();
+  lightning["enabled"] = state.lightning.enabled;
+  serializeCompactFloat(lightning["lastDistanceMi"], state.lightning.lastDistanceMi);
+  lightning["strikeCount"] = state.lightning.strikeCount;
+
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildAppDashboardJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["time"] = state.time.display;
+  serializeCompactFloat(doc["tempF"], state.weather.tempF);
+  if (state.weather.humidity >= 0)
+    doc["humidity"] = state.weather.humidity;
+  else
+    doc["humidity"] = nullptr;
+  doc["condition"] = state.weather.condition;
+  serializeCompactFloat(doc["indoorTempF"], state.indoor.tempF);
+  if (state.indoor.humidity >= 0)
+    doc["indoorHumidity"] = state.indoor.humidity;
+  else
+    doc["indoorHumidity"] = nullptr;
+  if (state.indoor.co2ppm > 0)
+    doc["co2ppm"] = state.indoor.co2ppm;
+  else
+    doc["co2ppm"] = nullptr;
+  if (state.indoor.eqi >= 0)
+    doc["indoorEqi"] = state.indoor.eqi;
+  else
+    doc["indoorEqi"] = nullptr;
+  doc["indoorBand"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+  doc["indoorSummary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+  doc["alertCount"] = state.alerts.activeCount;
+  doc["currentScreen"] = state.device.currentScreen;
+  doc["rssi"] = state.wifi.rssi;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildAppAlertsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["activeCount"] = state.alerts.activeCount;
+  doc["highestSeverity"] = state.alerts.highestSeverity;
+  if (state.alerts.itemCount > 0)
+  {
+    doc["headline"] = state.alerts.items[0].headline;
+    doc["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+  }
+  else
+  {
+    doc["headline"] = nullptr;
+    doc["message"] = nullptr;
+  }
+  JsonArray items = doc["items"].to<JsonArray>();
+  for (size_t i = 0; i < state.alerts.itemCount; ++i)
+  {
+    JsonObject item = items.add<JsonObject>();
+    item["id"] = state.alerts.items[i].id;
+    item["source"] = state.alerts.items[i].source;
+    item["severity"] = state.alerts.items[i].severity;
+    item["headline"] = state.alerts.items[i].headline;
+    item["expires"] = state.alerts.items[i].expires[0] ? state.alerts.items[i].expires : nullptr;
+  }
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildAppLightningJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["enabled"] = state.lightning.enabled;
+  serializeCompactFloat(doc["lastDistanceMi"], state.lightning.lastDistanceMi);
+  doc["lastTimestamp"] = state.lightning.lastTimestamp[0] ? state.lightning.lastTimestamp : nullptr;
+  doc["strikeCount"] = state.lightning.strikeCount;
+  doc["level"] = state.lightning.level;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildAppDeviceJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["name"] = state.device.name;
+  doc["ip"] = state.device.ip;
+  doc["mac"] = state.device.mac;
+  doc["ssid"] = state.wifi.ssid;
+  doc["rssi"] = state.wifi.rssi;
+  doc["uptimeSec"] = state.device.uptimeSec;
+  doc["currentScreen"] = state.device.currentScreen;
+  doc["dataSource"] = state.device.dataSourceName;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildWeatherWsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["type"] = "weather_update";
+  doc["ts"] = state.time.localIso;
+  JsonObject data = doc["data"].to<JsonObject>();
+  serializeCompactFloat(data["tempF"], state.weather.tempF);
+  serializeCompactFloat(data["pressureInHg"], state.weather.pressureInHg, 2);
+  if (state.weather.humidity >= 0)
+    data["humidity"] = state.weather.humidity;
+  else
+    data["humidity"] = nullptr;
+  data["condition"] = state.weather.condition;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildIndoorWsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["type"] = "indoor_update";
+  doc["ts"] = state.time.localIso;
+  JsonObject data = doc["data"].to<JsonObject>();
+  serializeCompactFloat(data["tempF"], state.indoor.tempF);
+  serializeCompactFloat(data["ahtTempF"], state.indoor.ahtTempF);
+  if (state.indoor.humidity >= 0)
+    data["humidity"] = state.indoor.humidity;
+  else
+    data["humidity"] = nullptr;
+  if (state.indoor.ahtHumidity >= 0)
+    data["ahtHumidity"] = state.indoor.ahtHumidity;
+  else
+    data["ahtHumidity"] = nullptr;
+  if (state.indoor.co2ppm > 0)
+    data["co2ppm"] = state.indoor.co2ppm;
+  else
+    data["co2ppm"] = nullptr;
+  serializeCompactFloat(data["pressureInHg"], state.indoor.pressureInHg, 2);
+  serializeCompactFloat(data["lightLux"], state.indoor.lightLux, 1);
+  if (state.indoor.eqi >= 0)
+    data["eqi"] = state.indoor.eqi;
+  else
+    data["eqi"] = nullptr;
+  data["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+  data["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
+  data["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+  data["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
+  data["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
+  data["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  data["sensorAgeSec"] = state.indoor.sensorAgeSec;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildDeviceWsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["type"] = "device_update";
+  doc["ts"] = state.time.localIso;
+  JsonObject data = doc["data"].to<JsonObject>();
+  data["currentScreen"] = state.device.currentScreen;
+  data["uptimeSec"] = state.device.uptimeSec;
+  data["rssi"] = state.wifi.rssi;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildAlertWsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["type"] = "alert_update";
+  doc["ts"] = state.time.localIso;
+  JsonObject data = doc["data"].to<JsonObject>();
+  data["activeCount"] = state.alerts.activeCount;
+  data["highestSeverity"] = state.alerts.highestSeverity;
+  if (state.alerts.itemCount > 0)
+  {
+    data["headline"] = state.alerts.items[0].headline;
+    data["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+  }
+  else
+  {
+    data["headline"] = nullptr;
+    data["message"] = nullptr;
+  }
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildLightningWsJson(const AppRuntimeState &state)
+{
+  JsonDocument doc;
+  doc["type"] = "lightning_update";
+  doc["ts"] = state.time.localIso;
+  JsonObject data = doc["data"].to<JsonObject>();
+  serializeCompactFloat(data["lastDistanceMi"], state.lightning.lastDistanceMi);
+  data["strikeCount"] = state.lightning.strikeCount;
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
 static void rebuildAppRuntimeJson(AppRuntimeState &state)
 {
   {
-    JsonDocument doc;
-    JsonObject device = doc["device"].to<JsonObject>();
-    device["name"] = state.device.name;
-    device["ip"] = state.device.ip;
-    device["online"] = state.device.online;
-    device["uptimeSec"] = state.device.uptimeSec;
-    device["currentScreen"] = state.device.currentScreen;
-
-    JsonObject wifi = doc["wifi"].to<JsonObject>();
-    wifi["ssid"] = state.wifi.ssid;
-    wifi["rssi"] = state.wifi.rssi;
-
-    JsonObject time = doc["time"].to<JsonObject>();
-    time["local"] = state.time.localIso;
-    time["timezone"] = state.time.timezone;
-    time["display"] = state.time.display;
-
-    JsonObject location = doc["location"].to<JsonObject>();
-    serializeCompactFloat(location["lat"], state.location.lat, 4);
-    serializeCompactFloat(location["lon"], state.location.lon, 4);
-
-    JsonObject weather = doc["weather"].to<JsonObject>();
-    weather["source"] = state.weather.source;
-    serializeCompactFloat(weather["tempF"], state.weather.tempF);
-    serializeCompactFloat(weather["pressureInHg"], state.weather.pressureInHg, 2);
-    if (state.weather.humidity >= 0)
-      weather["humidity"] = state.weather.humidity;
-    else
-      weather["humidity"] = nullptr;
-    weather["condition"] = state.weather.condition;
-    weather["updated"] = state.weather.updatedIso[0] ? state.weather.updatedIso : nullptr;
-
-    JsonObject indoor = doc["indoor"].to<JsonObject>();
-    serializeCompactFloat(indoor["tempF"], state.indoor.tempF);
-    if (state.indoor.humidity >= 0)
-      indoor["humidity"] = state.indoor.humidity;
-    else
-      indoor["humidity"] = nullptr;
-    serializeCompactFloat(indoor["ahtTempF"], state.indoor.ahtTempF);
-    if (state.indoor.ahtHumidity >= 0)
-      indoor["ahtHumidity"] = state.indoor.ahtHumidity;
-    else
-      indoor["ahtHumidity"] = nullptr;
-    if (state.indoor.co2ppm > 0)
-      indoor["co2ppm"] = state.indoor.co2ppm;
-    else
-      indoor["co2ppm"] = nullptr;
-    serializeCompactFloat(indoor["pressureInHg"], state.indoor.pressureInHg, 2);
-    serializeCompactFloat(indoor["lightLux"], state.indoor.lightLux, 1);
-    if (state.indoor.eqi >= 0)
-      indoor["eqi"] = state.indoor.eqi;
-    else
-      indoor["eqi"] = nullptr;
-    indoor["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
-    indoor["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
-    indoor["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
-    indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
-    indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
-    indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
-    indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
-
-    JsonObject alerts = doc["alerts"].to<JsonObject>();
-    alerts["activeCount"] = state.alerts.activeCount;
-    alerts["highestSeverity"] = state.alerts.highestSeverity;
-    if (state.alerts.itemCount > 0)
-    {
-      alerts["headline"] = state.alerts.items[0].headline;
-      if (state.alerts.primaryMessage[0] != '\0')
-        alerts["message"] = state.alerts.primaryMessage;
-      else
-        alerts["message"] = nullptr;
-    }
-    else
-    {
-      alerts["headline"] = nullptr;
-      alerts["message"] = nullptr;
-    }
-
-    JsonObject lightning = doc["lightning"].to<JsonObject>();
-    lightning["enabled"] = state.lightning.enabled;
-    serializeCompactFloat(lightning["lastDistanceMi"], state.lightning.lastDistanceMi);
-    lightning["strikeCount"] = state.lightning.strikeCount;
-
-    state.stateJson = "";
-    serializeJson(doc, state.stateJson);
-  }
-
-  {
-    JsonDocument doc;
-    doc["time"] = state.time.display;
-    serializeCompactFloat(doc["tempF"], state.weather.tempF);
-    if (state.weather.humidity >= 0)
-      doc["humidity"] = state.weather.humidity;
-    else
-      doc["humidity"] = nullptr;
-    doc["condition"] = state.weather.condition;
-    serializeCompactFloat(doc["indoorTempF"], state.indoor.tempF);
-    if (state.indoor.humidity >= 0)
-      doc["indoorHumidity"] = state.indoor.humidity;
-    else
-      doc["indoorHumidity"] = nullptr;
-    if (state.indoor.co2ppm > 0)
-      doc["co2ppm"] = state.indoor.co2ppm;
-    else
-      doc["co2ppm"] = nullptr;
-    if (state.indoor.eqi >= 0)
-      doc["indoorEqi"] = state.indoor.eqi;
-    else
-      doc["indoorEqi"] = nullptr;
-    doc["indoorBand"] = state.indoor.band[0] ? state.indoor.band : nullptr;
-    doc["indoorSummary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
-    doc["alertCount"] = state.alerts.activeCount;
-    doc["currentScreen"] = state.device.currentScreen;
-    doc["rssi"] = state.wifi.rssi;
-
-    state.dashboardJson = "";
-    serializeJson(doc, state.dashboardJson);
-  }
-
-  {
-    JsonDocument doc;
-    doc["activeCount"] = state.alerts.activeCount;
-    doc["highestSeverity"] = state.alerts.highestSeverity;
-    if (state.alerts.itemCount > 0)
-    {
-      doc["headline"] = state.alerts.items[0].headline;
-      if (state.alerts.primaryMessage[0] != '\0')
-        doc["message"] = state.alerts.primaryMessage;
-      else
-        doc["message"] = nullptr;
-    }
-    else
-    {
-      doc["headline"] = nullptr;
-      doc["message"] = nullptr;
-    }
-    JsonArray items = doc["items"].to<JsonArray>();
-    for (size_t i = 0; i < state.alerts.itemCount; ++i)
-    {
-      JsonObject item = items.add<JsonObject>();
-      item["id"] = state.alerts.items[i].id;
-      item["source"] = state.alerts.items[i].source;
-      item["severity"] = state.alerts.items[i].severity;
-      item["headline"] = state.alerts.items[i].headline;
-      if (state.alerts.items[i].expires[0])
-        item["expires"] = state.alerts.items[i].expires;
-      else
-        item["expires"] = nullptr;
-    }
-
-    state.alertsJson = "";
-    serializeJson(doc, state.alertsJson);
-  }
-
-  {
-    JsonDocument doc;
-    doc["enabled"] = state.lightning.enabled;
-    serializeCompactFloat(doc["lastDistanceMi"], state.lightning.lastDistanceMi);
-    doc["lastTimestamp"] = state.lightning.lastTimestamp[0] ? state.lightning.lastTimestamp : nullptr;
-    doc["strikeCount"] = state.lightning.strikeCount;
-    doc["level"] = state.lightning.level;
-
-    state.lightningJson = "";
-    serializeJson(doc, state.lightningJson);
-  }
-
-  {
-    JsonDocument doc;
-    doc["name"] = state.device.name;
-    doc["ip"] = state.device.ip;
-    doc["mac"] = state.device.mac;
-    doc["ssid"] = state.wifi.ssid;
-    doc["rssi"] = state.wifi.rssi;
-    doc["uptimeSec"] = state.device.uptimeSec;
-    doc["currentScreen"] = state.device.currentScreen;
-    doc["dataSource"] = state.device.dataSourceName;
-
-    state.deviceJson = "";
-    serializeJson(doc, state.deviceJson);
-  }
-
-  {
-    JsonDocument doc;
-    JsonObject display = doc["display"].to<JsonObject>();
-    display["autoRotate"] = state.settings.autoRotateEnabled;
-    display["rotateIntervalSec"] = state.settings.rotateIntervalSec;
-    display["manualScreen"] = state.settings.manualScreenName;
-    display["returnToDefaultSec"] = state.settings.returnToDefaultSec;
-
-    JsonObject alerts = doc["alerts"].to<JsonObject>();
-    alerts["noaaEnabled"] = state.settings.noaaEnabled;
-    alerts["lightningEnabled"] = state.settings.lightningEnabled;
-    alerts["soundEnabled"] = state.settings.soundEnabled;
-
-    state.settingsJson = "";
-    serializeJson(doc, state.settingsJson);
-  }
-
-  {
-    JsonDocument doc;
-    doc["type"] = "weather_update";
-    doc["ts"] = state.time.localIso;
-    JsonObject data = doc["data"].to<JsonObject>();
-    serializeCompactFloat(data["tempF"], state.weather.tempF);
-    serializeCompactFloat(data["pressureInHg"], state.weather.pressureInHg, 2);
-    if (state.weather.humidity >= 0)
-      data["humidity"] = state.weather.humidity;
-    else
-      data["humidity"] = nullptr;
-    data["condition"] = state.weather.condition;
-
-    state.weatherWsJson = "";
-    serializeJson(doc, state.weatherWsJson);
     uint32_t sig = kSigSeed;
     sig = hashAppend(sig, state.weather.tempF, 1);
     sig = hashAppend(sig, state.weather.humidity);
@@ -1091,40 +1152,6 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
   }
 
   {
-    JsonDocument doc;
-    doc["type"] = "indoor_update";
-    doc["ts"] = state.time.localIso;
-    JsonObject data = doc["data"].to<JsonObject>();
-    serializeCompactFloat(data["tempF"], state.indoor.tempF);
-    serializeCompactFloat(data["ahtTempF"], state.indoor.ahtTempF);
-    if (state.indoor.humidity >= 0)
-      data["humidity"] = state.indoor.humidity;
-    else
-      data["humidity"] = nullptr;
-    if (state.indoor.ahtHumidity >= 0)
-      data["ahtHumidity"] = state.indoor.ahtHumidity;
-    else
-      data["ahtHumidity"] = nullptr;
-    if (state.indoor.co2ppm > 0)
-      data["co2ppm"] = state.indoor.co2ppm;
-    else
-      data["co2ppm"] = nullptr;
-    serializeCompactFloat(data["pressureInHg"], state.indoor.pressureInHg, 2);
-    serializeCompactFloat(data["lightLux"], state.indoor.lightLux, 1);
-    if (state.indoor.eqi >= 0)
-      data["eqi"] = state.indoor.eqi;
-    else
-      data["eqi"] = nullptr;
-    data["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
-    data["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
-    data["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
-    data["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
-    data["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
-    data["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
-    data["sensorAgeSec"] = state.indoor.sensorAgeSec;
-
-    state.indoorWsJson = "";
-    serializeJson(doc, state.indoorWsJson);
     uint32_t sig = kSigSeed;
     sig = hashAppend(sig, state.indoor.tempF, 1);
     sig = hashAppend(sig, state.indoor.humidity);
@@ -1136,16 +1163,6 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
   }
 
   {
-    JsonDocument doc;
-    doc["type"] = "device_update";
-    doc["ts"] = state.time.localIso;
-    JsonObject data = doc["data"].to<JsonObject>();
-    data["currentScreen"] = state.device.currentScreen;
-    data["uptimeSec"] = state.device.uptimeSec;
-    data["rssi"] = state.wifi.rssi;
-
-    state.deviceWsJson = "";
-    serializeJson(doc, state.deviceWsJson);
     uint32_t sig = kSigSeed;
     sig = hashAppend(sig, state.device.currentScreen);
     sig = hashAppend(sig, state.device.uptimeSec);
@@ -1154,28 +1171,6 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
   }
 
   {
-    JsonDocument doc;
-    doc["type"] = "alert_update";
-    doc["ts"] = state.time.localIso;
-    JsonObject data = doc["data"].to<JsonObject>();
-    data["activeCount"] = state.alerts.activeCount;
-    data["highestSeverity"] = state.alerts.highestSeverity;
-    if (state.alerts.itemCount > 0)
-    {
-      data["headline"] = state.alerts.items[0].headline;
-      if (state.alerts.primaryMessage[0] != '\0')
-        data["message"] = state.alerts.primaryMessage;
-      else
-        data["message"] = nullptr;
-    }
-    else
-    {
-      data["headline"] = nullptr;
-      data["message"] = nullptr;
-    }
-
-    state.alertWsJson = "";
-    serializeJson(doc, state.alertWsJson);
     uint32_t sig = kSigSeed;
     sig = hashAppend(sig, static_cast<uint32_t>(state.alerts.activeCount));
     sig = hashAppend(sig, state.alerts.highestSeverity);
@@ -1186,15 +1181,6 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
   }
 
   {
-    JsonDocument doc;
-    doc["type"] = "lightning_update";
-    doc["ts"] = state.time.localIso;
-    JsonObject data = doc["data"].to<JsonObject>();
-    serializeCompactFloat(data["lastDistanceMi"], state.lightning.lastDistanceMi);
-    data["strikeCount"] = state.lightning.strikeCount;
-
-    state.lightningWsJson = "";
-    serializeJson(doc, state.lightningWsJson);
     uint32_t sig = kSigSeed;
     sig = hashAppend(sig, state.lightning.lastDistanceMi, 1);
     sig = hashAppend(sig, state.lightning.strikeCount);
@@ -1410,35 +1396,35 @@ static void appRuntimeBroadcastTick()
   if (g_appRuntime.weatherWsSig != g_lastWeatherWsSig &&
       static_cast<uint32_t>(nowMs - g_appRuntime.lastWeatherBroadcastMs) >= kAppWeatherBroadcastMinMs)
   {
-    g_appWs.textAll(g_appRuntime.weatherWsJson);
+    g_appWs.textAll(buildWeatherWsJson(g_appRuntime));
     g_lastWeatherWsSig = g_appRuntime.weatherWsSig;
     g_appRuntime.lastWeatherBroadcastMs = nowMs;
   }
   if (g_appRuntime.indoorWsSig != g_lastIndoorWsSig &&
       static_cast<uint32_t>(nowMs - g_appRuntime.lastIndoorBroadcastMs) >= kAppIndoorBroadcastMinMs)
   {
-    g_appWs.textAll(g_appRuntime.indoorWsJson);
+    g_appWs.textAll(buildIndoorWsJson(g_appRuntime));
     g_lastIndoorWsSig = g_appRuntime.indoorWsSig;
     g_appRuntime.lastIndoorBroadcastMs = nowMs;
   }
   if (g_appRuntime.deviceWsSig != g_lastDeviceWsSig &&
       static_cast<uint32_t>(nowMs - g_appRuntime.lastDeviceBroadcastMs) >= kAppDeviceBroadcastMinMs)
   {
-    g_appWs.textAll(g_appRuntime.deviceWsJson);
+    g_appWs.textAll(buildDeviceWsJson(g_appRuntime));
     g_lastDeviceWsSig = g_appRuntime.deviceWsSig;
     g_appRuntime.lastDeviceBroadcastMs = nowMs;
   }
   if (g_appRuntime.alertWsSig != g_lastAlertWsSig &&
       static_cast<uint32_t>(nowMs - g_appRuntime.lastAlertBroadcastMs) >= kAppAlertBroadcastMinMs)
   {
-    g_appWs.textAll(g_appRuntime.alertWsJson);
+    g_appWs.textAll(buildAlertWsJson(g_appRuntime));
     g_lastAlertWsSig = g_appRuntime.alertWsSig;
     g_appRuntime.lastAlertBroadcastMs = nowMs;
   }
   if (g_appRuntime.lightningWsSig != g_lastLightningWsSig &&
       static_cast<uint32_t>(nowMs - g_appRuntime.lastLightningBroadcastMs) >= kAppLightningBroadcastMinMs)
   {
-    g_appWs.textAll(g_appRuntime.lightningWsJson);
+    g_appWs.textAll(buildLightningWsJson(g_appRuntime));
     g_lastLightningWsSig = g_appRuntime.lightningWsSig;
     g_appRuntime.lastLightningBroadcastMs = nowMs;
   }
@@ -4966,27 +4952,27 @@ void setupWebServer() {
 
   server.on("/api/app/state", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, g_appRuntime.stateJson);
+    sendAppJson(req, buildAppStateJson(g_appRuntime));
   });
 
   server.on("/api/app/dashboard", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, g_appRuntime.dashboardJson);
+    sendAppJson(req, buildAppDashboardJson(g_appRuntime));
   });
 
   server.on("/api/app/alerts", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, g_appRuntime.alertsJson);
+    sendAppJson(req, buildAppAlertsJson(g_appRuntime));
   });
 
   server.on("/api/app/lightning", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, g_appRuntime.lightningJson);
+    sendAppJson(req, buildAppLightningJson(g_appRuntime));
   });
 
   server.on("/api/app/device", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, g_appRuntime.deviceJson);
+    sendAppJson(req, buildAppDeviceJson(g_appRuntime));
   });
 
   auto registerAppSettingsGet = [&](const char *path, const char *section) {

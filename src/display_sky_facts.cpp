@@ -14,7 +14,6 @@
 #if WXV_ENABLE_ASTRONOMY || WXV_ENABLE_SKY_BRIEF
 namespace
 {
-constexpr unsigned long kSkyFactsPageAutoMs = 4200UL;
 constexpr int kSummaryRepeatGapPx = 4;
 constexpr unsigned long kSummaryStartDelayMs = 2000UL;
 constexpr unsigned long kSkyBriefParagraphPageDwellMs = 2400UL;
@@ -28,13 +27,9 @@ constexpr int kSkyBriefVisibleLines = ui_theme::Layout::kBodyVisibleLines;
 constexpr int kSkyBriefBodyLeftX = 1;
 constexpr int kSkyBriefBodyWidthPx = PANEL_RES_X - 2;
 
-uint8_t s_skyFactsPageIndex = 0;
-unsigned long s_skyFactsLastSwitchMs = 0;
-bool s_skyFactsRotationPaused = false;
 int s_skyFactsLastTheme = -1;
 int s_skyFactsLastDateKey = -1;
 int s_skyFactsLastMinute = -1;
-size_t s_skyFactsLastCount = 0;
 int s_summaryMarqueeOffset = 0;
 int s_summaryMarqueeWidth = 0;
 unsigned long s_summaryMarqueeLastStepMs = 0;
@@ -125,6 +120,11 @@ std::vector<String> splitSummaryPhrasesClean(const char *raw)
         startPos = sep + 1;
     }
     return fallback;
+}
+
+const char *summaryMarqueeText(const wxv::astronomy::SkyFactPage &page)
+{
+    return page.marquee ? page.marquee : "";
 }
 
 String normalizeSummaryPhrase(String phrase)
@@ -310,17 +310,18 @@ std::vector<String> splitSummaryPhrasesRobust(const char *raw)
 
 void buildSummaryLayout(const wxv::astronomy::SkyFactPage &page, String &line1, String &line2, String &ticker)
 {
+    const char *marquee = summaryMarqueeText(page);
     if (page.line1[0] != '\0')
         line1 = page.line1;
     if (page.line2[0] != '\0')
         line2 = page.line2;
-    if (page.marquee[0] != '\0')
-        ticker = page.marquee;
+    if (marquee[0] != '\0')
+        ticker = marquee;
 
     if (line1.length() > 0 || line2.length() > 0)
         return;
 
-    std::vector<String> phrases = splitSummaryPhrasesRobust(page.marquee);
+    std::vector<String> phrases = splitSummaryPhrasesRobust(marquee);
     if (!phrases.empty())
         line1 = normalizeSummaryPhrase(phrases[0]);
     if (phrases.size() > 1)
@@ -337,7 +338,7 @@ void buildSummaryLayout(const wxv::astronomy::SkyFactPage &page, String &line1, 
 
 String buildSummaryParagraph(const wxv::astronomy::SkyFactPage &page)
 {
-    std::vector<String> phrases = splitSummaryPhrasesRobust(page.marquee);
+    std::vector<String> phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
     String paragraph;
     for (size_t i = 0; i < phrases.size(); ++i)
     {
@@ -418,7 +419,7 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
         {"EVENTS", ""},
         {"CALENDAR", ""}};
 
-    std::vector<String> phrases = splitSummaryPhrasesRobust(page.marquee);
+    std::vector<String> phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
     for (size_t i = 0; i < phrases.size(); ++i)
     {
         const String normalized = expandSkyBriefTimeUnits(normalizeSummaryPhrase(phrases[i]));
@@ -826,7 +827,8 @@ void resetSkyBriefParagraphPager(unsigned long nowMs)
 
 void syncSkyBriefParagraphState(const wxv::astronomy::SkyFactPage &page, bool forceReset)
 {
-    const bool marqueeChanged = forceReset || strncmp(s_skyBriefLastMarquee, page.marquee, sizeof(s_skyBriefLastMarquee)) != 0;
+    const char *marquee = summaryMarqueeText(page);
+    const bool marqueeChanged = forceReset || strncmp(s_skyBriefLastMarquee, marquee, sizeof(s_skyBriefLastMarquee)) != 0;
     if (!marqueeChanged)
         return;
 
@@ -836,7 +838,7 @@ void syncSkyBriefParagraphState(const wxv::astronomy::SkyFactPage &page, bool fo
 
     const String nextParagraph = buildSummaryParagraph(page);
     const std::vector<SkyBriefSubpage> nextSubpages = buildSkyBriefSubpages(page);
-    snprintf(s_skyBriefLastMarquee, sizeof(s_skyBriefLastMarquee), "%s", page.marquee);
+    snprintf(s_skyBriefLastMarquee, sizeof(s_skyBriefLastMarquee), "%s", marquee);
     s_skyBriefSubpages = nextSubpages;
     s_skyBriefParagraphText = nextParagraph;
     s_skyBriefWrappedLines = wrapSkyBriefText(s_skyBriefParagraphText, kSkyBriefBodyWidthPx);
@@ -1268,7 +1270,6 @@ void drawSkyBriefScreen()
     s_skyFactsLastTheme = theme;
     s_skyFactsLastDateKey = astro.localDateKey;
     s_skyFactsLastMinute = astro.localMinutes;
-    s_skyFactsLastCount = 1;
 
     const wxv::astronomy::SkyFactPage &page = wxv::astronomy::skySummaryPage();
     syncSkyBriefParagraphState(page, false);
@@ -1303,145 +1304,6 @@ void tickSkyBriefScreen()
         advanceSkyBriefParagraphPage(nowMs);
         drawSkyBriefParagraphPage(nowMs);
     }
-}
-
-void drawSkyFactsScreen()
-{
-    wxv::astronomy::updateSkyFacts();
-    const size_t count = wxv::astronomy::skyFactCount();
-    const wxv::astronomy::AstronomyData &astro = wxv::astronomy::astronomyData();
-    s_skyFactsLastTheme = theme;
-    s_skyFactsLastDateKey = astro.localDateKey;
-    s_skyFactsLastMinute = astro.localMinutes;
-    s_skyFactsLastCount = count;
-
-    if (count == 0)
-    {
-        wxv::astronomy::SkyFactPage empty;
-        snprintf(empty.title, sizeof(empty.title), "%s", "SKY");
-        snprintf(empty.line1, sizeof(empty.line1), "%s", "Facts unavailable");
-        empty.valid = true;
-        empty.lineCount = 1;
-        drawSkyFactPageImpl(empty);
-        return;
-    }
-
-    if (s_skyFactsPageIndex >= count)
-        s_skyFactsPageIndex = 0;
-    drawSkyFactPageImpl(wxv::astronomy::skyFactPage(s_skyFactsPageIndex));
-}
-
-void tickSkyFactsScreen()
-{
-    wxv::astronomy::updateSkyFacts();
-    const wxv::astronomy::AstronomyData &astro = wxv::astronomy::astronomyData();
-    const size_t count = wxv::astronomy::skyFactCount();
-    const unsigned long nowMs = millis();
-
-    if (theme != s_skyFactsLastTheme ||
-        astro.localDateKey != s_skyFactsLastDateKey ||
-        astro.localMinutes != s_skyFactsLastMinute ||
-        count != s_skyFactsLastCount)
-    {
-        drawSkyFactsScreen();
-        return;
-    }
-
-    if (s_skyFactsLastSwitchMs == 0)
-        s_skyFactsLastSwitchMs = nowMs;
-
-    if (s_skyFactsRotationPaused || count <= 1)
-    {
-        const wxv::astronomy::SkyFactPage &page = wxv::astronomy::skyFactPage(s_skyFactsPageIndex);
-        if (page.type == wxv::astronomy::SkyFactType::Summary &&
-            page.marquee[0] != '\0' &&
-            s_summaryMarqueeWidth > PANEL_RES_X &&
-            nowMs >= s_summaryMarqueeStartAfterMs &&
-            nowMs - s_summaryMarqueeLastStepMs >= effectiveSummaryStepMs())
-        {
-            const unsigned long summaryStepMs = effectiveSummaryStepMs();
-            const unsigned long elapsed = nowMs - s_summaryMarqueeLastStepMs;
-            const unsigned long steps = elapsed / summaryStepMs;
-            s_summaryMarqueeLastStepMs += steps * summaryStepMs;
-            s_summaryMarqueeOffset += static_cast<int>(steps);
-            const int cycle = summaryCycleWidth();
-            if (cycle > 0)
-                s_summaryMarqueeOffset %= cycle;
-            drawSummaryPage(page);
-        }
-        return;
-    }
-
-    if (nowMs - s_skyFactsLastSwitchMs >= kSkyFactsPageAutoMs)
-    {
-        s_skyFactsPageIndex = static_cast<uint8_t>((s_skyFactsPageIndex + 1u) % count);
-        s_skyFactsLastSwitchMs = nowMs;
-        resetSummaryMarquee();
-        drawSkyFactsScreen();
-        return;
-    }
-
-    const wxv::astronomy::SkyFactPage &page = wxv::astronomy::skyFactPage(s_skyFactsPageIndex);
-    if (page.type == wxv::astronomy::SkyFactType::Summary &&
-        page.marquee[0] != '\0' &&
-        s_summaryMarqueeWidth > PANEL_RES_X &&
-        nowMs >= s_summaryMarqueeStartAfterMs &&
-        nowMs - s_summaryMarqueeLastStepMs >= effectiveSummaryStepMs())
-    {
-        const unsigned long summaryStepMs = effectiveSummaryStepMs();
-        const unsigned long elapsed = nowMs - s_summaryMarqueeLastStepMs;
-        const unsigned long steps = elapsed / summaryStepMs;
-        s_summaryMarqueeLastStepMs += steps * summaryStepMs;
-        s_summaryMarqueeOffset += static_cast<int>(steps);
-        const int cycle = summaryCycleWidth();
-        if (cycle > 0)
-            s_summaryMarqueeOffset %= cycle;
-        drawSummaryPage(page);
-    }
-}
-
-void handleSkyFactsDownPress()
-{
-    const size_t count = wxv::astronomy::skyFactCount();
-    if (count <= 1)
-        return;
-    s_skyFactsPageIndex = static_cast<uint8_t>((s_skyFactsPageIndex + 1u) % count);
-    s_skyFactsLastSwitchMs = millis();
-    resetSummaryMarquee();
-    drawSkyFactsScreen();
-}
-
-void handleSkyFactsUpPress()
-{
-    const size_t count = wxv::astronomy::skyFactCount();
-    if (count <= 1)
-        return;
-    int next = static_cast<int>(s_skyFactsPageIndex) - 1;
-    if (next < 0)
-        next = static_cast<int>(count) - 1;
-    s_skyFactsPageIndex = static_cast<uint8_t>(next);
-    s_skyFactsLastSwitchMs = millis();
-    resetSummaryMarquee();
-    drawSkyFactsScreen();
-}
-
-void handleSkyFactsSelectPress()
-{
-    s_skyFactsRotationPaused = !s_skyFactsRotationPaused;
-    s_skyFactsLastSwitchMs = millis();
-    drawSkyFactsScreen();
-}
-
-void resetSkyFactsScreenState()
-{
-    s_skyFactsPageIndex = 0;
-    s_skyFactsLastSwitchMs = millis();
-    s_skyFactsRotationPaused = false;
-    s_skyFactsLastTheme = -1;
-    s_skyFactsLastDateKey = -1;
-    s_skyFactsLastMinute = -1;
-    s_skyFactsLastCount = 0;
-    resetSummaryMarquee();
 }
 
 void resetSkyBriefScreenState()
@@ -1481,16 +1343,10 @@ void drawSkyFactSubpage(const wxv::astronomy::SkyFactPage &page)
     drawSkyFactPageImpl(page);
 }
 #else
-void drawSkyFactsScreen() {}
-void tickSkyFactsScreen() {}
 void drawSkyBriefScreen() {}
 void tickSkyBriefScreen() {}
 void drawSkyFactSubpage(const wxv::astronomy::SkyFactPage &) {}
-void handleSkyFactsDownPress() {}
-void handleSkyFactsUpPress() {}
-void handleSkyFactsSelectPress() {}
 void handleSkyBriefDownPress() {}
 void handleSkyBriefUpPress() {}
-void resetSkyFactsScreenState() {}
 void resetSkyBriefScreenState() {}
 #endif

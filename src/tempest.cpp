@@ -180,7 +180,6 @@ void updateTempestFromUDP(const char* jsonStr) {
         tempest.lightningSummaryLastUpdate = millis();
         tempest.battery       = (double)obs[16];
         tempest.reportInt     = (int)obs[17];
-        tempest.lastObsTime   = String((uint32_t)obs[0]);
         tempest.lastUpdate    = millis();
         tempest.obsWindAvg    = tempest.windAvg;
         tempest.obsWindDir    = tempest.windDir;
@@ -418,7 +417,6 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
     currentCond.windAvg      = (JSON.typeof_(cur["wind_avg"]) == "number") ? (double)cur["wind_avg"] : NAN;
     currentCond.windGust     = (JSON.typeof_(cur["wind_gust"]) == "number") ? (double)cur["wind_gust"] : NAN;
     currentCond.windDir      = (JSON.typeof_(cur["wind_direction"]) == "number") ? (double)cur["wind_direction"] : NAN;
-    currentCond.windCardinal = (JSON.typeof_(cur["wind_direction_cardinal"]) == "string") ? (const char*)cur["wind_direction_cardinal"] : "";
     currentCond.uv           = (JSON.typeof_(cur["uv"]) == "number") ? (int)cur["uv"] : -1;
     currentCond.precipProb   = (JSON.typeof_(cur["precip_probability"]) == "number") ? (int)cur["precip_probability"] : -1;
     currentCond.cond         = (JSON.typeof_(cur["conditions"]) == "string") ? (const char*)cur["conditions"] : "";
@@ -441,7 +439,6 @@ void updateDailyForecastFromJson(const String& jsonStr) {
             f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
             f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
             f.conditions = (JSON.typeof_(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
-            f.icon       = (JSON.typeof_(d["icon"])       == "string") ? (const char*)d["icon"]       : "";
             f.sunrise    = (JSON.typeof_(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
             f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
             f.dayNum     = (JSON.typeof_(d["day_num"])    == "number") ? (int)d["day_num"]    : 0;
@@ -641,7 +638,6 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         JSONVar precipArr = daily["precip_probability"];
         if (arrLen(precipArr) == 0) precipArr = daily["precip_probability_max"];
         JSONVar condArr = daily["conditions"];
-        JSONVar iconArr = daily["icon"];
         JSONVar sunriseArr = daily["sunrise"];
         JSONVar sunsetArr = daily["sunset"];
 
@@ -657,7 +653,6 @@ void updateDailyForecastFromJson(const String& jsonStr) {
             double precip = arrNum(precipArr, i);
             f.rainChance = isnan(precip) ? -1 : static_cast<int>(precip);
             f.conditions = arrStr(condArr, i);
-            f.icon = arrStr(iconArr, i);
             double sunrise = arrNum(sunriseArr, i);
             double sunset = arrNum(sunsetArr, i);
             f.sunrise = isnan(sunrise) ? 0U : static_cast<uint32_t>(sunrise);
@@ -813,7 +808,6 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
         fh.temp       = (JSON.typeof_(h["air_temperature"])    == "number") ? (double)h["air_temperature"] : NAN;
         fh.rainChance = (JSON.typeof_(h["precip_probability"]) == "number") ? (int)h["precip_probability"] : -1;
         fh.conditions = (JSON.typeof_(h["conditions"])         == "string") ? String((const char*)h["conditions"]) : "";
-        fh.icon       = (JSON.typeof_(h["icon"])               == "string") ? String((const char*)h["icon"])       : "";
         fh.time       = (JSON.typeof_(h["time"])               == "number") ? (uint32_t)(double)h["time"]          : 0;
 
         parsed[count] = fh;
@@ -900,15 +894,6 @@ static String openMeteoConditionFromCode(int code) {
     }
 }
 
-static String windCardinalFromDegrees(double deg) {
-    if (isnan(deg)) return "";
-    static const char* labels[8] = {"N","NE","E","SE","S","SW","W","NW"};
-    double normalized = fmod(deg, 360.0);
-    if (normalized < 0) normalized += 360.0;
-    int idx = static_cast<int>(floor((normalized + 22.5) / 45.0)) % 8;
-    return String(labels[idx]);
-}
-
 static bool resolveOpenMeteoCoordinates(double &lat, double &lon) {
     // Prefer user-configured device location first (shared with NOAA).
     if (noaaLatitude >= -90.0f && noaaLatitude <= 90.0f &&
@@ -979,7 +964,6 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
         currentCond.windAvg = toNumber(current, "wind_speed_10m");
         currentCond.windGust = toNumber(current, "wind_gusts_10m");
         currentCond.windDir = toNumber(current, "wind_direction_10m");
-        currentCond.windCardinal = windCardinalFromDegrees(currentCond.windDir);
         currentCond.time = static_cast<uint32_t>(toInt(current, "time", 0));
         int code = toInt(current, "weather_code", -1);
         currentCond.cond = openMeteoConditionFromCode(code);
@@ -1015,7 +999,6 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
             f.rainChance = arrInt(pArr, i, -1);
             int code = arrInt(cArr, i, -1);
             f.conditions = openMeteoConditionFromCode(code);
-            f.icon = f.conditions;
             f.sunrise = static_cast<uint32_t>(arrInt(srArr, i, 0));
             f.sunset = static_cast<uint32_t>(arrInt(ssArr, i, 0));
             forecast.days[forecast.numDays++] = f;
@@ -1041,28 +1024,6 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
             h.rainChance = arrInt(pArr, i, -1);
             int code = arrInt(cArr, i, -1);
             h.conditions = openMeteoConditionFromCode(code);
-            h.icon = h.conditions;
-
-            // Add "night" marker where possible so existing icon mapper picks correct style.
-            bool isNight = false;
-            time_t htt = static_cast<time_t>(h.time);
-            struct tm *hti = localtime(&htt);
-            if (hti) {
-                for (int di = 0; di < forecast.numDays; ++di) {
-                    const ForecastDay &d = forecast.days[di];
-                    if (d.monthNum == (hti->tm_mon + 1) && d.dayNum == hti->tm_mday &&
-                        d.sunrise > 0 && d.sunset > 0) {
-                        isNight = !(h.time >= d.sunrise && h.time < d.sunset);
-                        break;
-                    }
-                }
-                if (forecast.numDays == 0) {
-                    isNight = (hti->tm_hour < 6 || hti->tm_hour >= 18);
-                }
-            }
-            if (isNight && h.icon.length() > 0 && h.icon.indexOf("night") < 0) {
-                h.icon += " night";
-            }
 
             forecast.hours[forecast.numHours++] = h;
         }
@@ -1268,7 +1229,6 @@ void resetForecastModelData() {
     tempest.obsWindDir = NAN;
     tempest.rapidWindAvg = NAN;
     tempest.rapidWindDir = NAN;
-    tempest.lastObsTime = "";
     tempest.lightningSummaryEpoch = 0;
     tempest.lightningSummaryLastUpdate = 0;
     tempest.lightningLastEventEpoch = 0;
@@ -1301,7 +1261,7 @@ String getTempestField(const char* field) {
     if (!strcmp(field, "strikedist"))  return formatLightningDistance(tempest.strikeDist);
     if (!strcmp(field, "strike_last")) return formatWindTimestamp(tempest.lightningLastEventEpoch);
     if (!strcmp(field, "strike_age"))  return lightningAgeShort(millis(), tempest.lightningLastEventUpdate);
-    if (!strcmp(field, "obs_time"))    return tempest.lastObsTime;
+    if (!strcmp(field, "obs_time"))    return formatWindTimestamp(tempest.obsEpoch);
     return "";
 }
 
@@ -1573,7 +1533,7 @@ void showForecastScreen() {
     }
     for (int i = 0; i < num; ++i) {
         const ForecastDay& f = forecast.days[i];
-        String iconKey = f.conditions.length() ? f.conditions : f.icon;
+        String iconKey = f.conditions;
         String tempUnit = (units.temp == TempUnit::F) ? "F" : "C";
 
         String hiText = "--";
@@ -1676,7 +1636,7 @@ void showHourlyForecastScreen() {
 
         // Keep hourly entries to a predictable 3-line block.
         // Icon hint is consumed by the renderer and not shown in text.
-        String iconKey = h.conditions.length() ? h.conditions : h.icon;
+        String iconKey = h.conditions;
         auto isNightAt = [&](time_t epoch, const tm* tmi) -> bool {
             if (!tmi) return false;
             const int month = tmi->tm_mon + 1;
@@ -1784,9 +1744,10 @@ void showCurrentConditionsScreen() {
 
     String lines[8];
     int lineCount = 0;
+    const String currentWindDir = formatWindDirectionLabel(currentCond.windDir);
     lines[lineCount++] = "Source: " + sourceAge;
     lines[lineCount++] = "Temp:   " + compactTemp(currentCond.temp) + " Feels " + compactTemp(currentCond.feelsLike);
-    lines[lineCount++] = "Wind:   " + compactWind(currentCond.windAvg, currentCond.windCardinal) + " G" + (isnan(currentCond.windGust) ? String("--") : fmtWind(currentCond.windGust, 1));
+    lines[lineCount++] = "Wind:   " + compactWind(currentCond.windAvg, (currentWindDir == "--") ? String("") : currentWindDir) + " G" + (isnan(currentCond.windGust) ? String("--") : fmtWind(currentCond.windGust, 1));
     lines[lineCount++] = "Press:  " + compactPress(currentCond.pressure);
     lines[lineCount++] = "Hum:    " + compactHum(currentCond.humidity);
     lines[lineCount++] = "Cond:   " + compactCondition(currentCond.cond);

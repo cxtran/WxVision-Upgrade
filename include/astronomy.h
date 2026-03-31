@@ -5,7 +5,7 @@
 
 namespace wxv::astronomy
 {
-constexpr size_t kSkyFactMarqueeLen = 1024;
+constexpr size_t kSkyFactMarqueeLen = 640;
 
 enum class SkyFactType : uint8_t
 {
@@ -75,7 +75,7 @@ struct SkyFactPage
     char line1[24] = "";
     char line2[24] = "";
     char line3[24] = "";
-    char marquee[kSkyFactMarqueeLen] = "";
+    const char *marquee = nullptr;
 };
 
 void updateAstronomyData(bool force = false);

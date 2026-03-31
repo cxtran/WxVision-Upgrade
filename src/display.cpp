@@ -587,10 +587,8 @@ static const char *toneLabelVN(LuckTone t)
 }
 
 LuckSection g_sections[MAX_SECTIONS];
-static char g_sectionContent[MAX_SECTIONS][CONTENT_MAX];
 char g_goiyContent[GOIY_CONTENT_MAX];
 uint8_t g_sectionCount = 0;
-static char g_titleTopic[TITLE_MAX];
 
 uint8_t currentSectionIndex = 0;
 static int16_t marqueeOffsetPx = 0;
@@ -878,36 +876,6 @@ int measureTextWidthPx(const char *s, uint16_t len)
             ++glyphs;
     }
     return glyphs * 6;
-}
-
-static void addSection(const char *title, const char *contentSrc, bool normalize, bool summarize, int maxItems,
-                       char *contentBuf = nullptr, size_t contentCap = 0)
-{
-    if (g_sectionCount >= MAX_SECTIONS)
-        return;
-
-    LuckSection &sec = g_sections[g_sectionCount];
-    sec.title = title ? title : "";
-    if (!contentBuf || contentCap == 0)
-    {
-        contentBuf = g_sectionContent[g_sectionCount];
-        contentCap = CONTENT_MAX;
-    }
-    sec.content = contentBuf;
-    sec.contentCap = static_cast<uint16_t>(contentCap);
-    sec.content[0] = '\0';
-
-    if (summarize)
-        summarizeListToBullets(sec.content, sec.contentCap, contentSrc, maxItems);
-    else if (normalize)
-        buildNormalized(sec.content, sec.contentCap, contentSrc);
-    else if (contentSrc)
-        safeAppend(sec.content, sec.contentCap, contentSrc);
-
-    sec.contentLen = static_cast<uint16_t>(strlen(sec.content));
-    sec.contentWidthPx = static_cast<int16_t>(measureTextWidthPx(sec.content, sec.contentLen));
-    sec.marquee = (sec.contentWidthPx > PANEL_RES_X);
-    ++g_sectionCount;
 }
 
 enum ViToneMarkBits : uint16_t
@@ -4466,27 +4434,6 @@ const uint16_t getDayNightColorFromCode(String code)
         return myBLUE; // night color
 }
 
-void drawWeatherScreen()
-{
-    dma_display->fillScreen(0);
-    dma_display->setCursor(0, 8);
-    dma_display->setTextColor(dma_display->color565(80, 255, 255));
-    dma_display->setTextSize(2);
-    dma_display->print("72 F");
-    dma_display->setTextSize(1);
-    dma_display->setCursor(0, 26);
-    dma_display->print("Clear Sky");
-}
-
-void drawSettingsScreen()
-{
-    dma_display->fillScreen(0);
-    dma_display->setCursor(2, 10);
-    dma_display->setTextColor(dma_display->color565(255, 255, 255));
-    dma_display->print("Settings");
-    // Draw options, etc.
-}
-
 void drawLunarLuckScreen()
 {
 #if WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK
@@ -4949,17 +4896,6 @@ void fetchWeatherFromOWM(bool showBusy)
 
     // Map OWM payload into shared current/weather model so Wx screens behave
     // the same way as Open-Meteo/forecast providers.
-    auto windCardinalFromDeg = [](double deg) -> String {
-        if (isnan(deg))
-            return "";
-        static const char *labels[8] = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"};
-        double normalized = fmod(deg, 360.0);
-        if (normalized < 0)
-            normalized += 360.0;
-        int idx = static_cast<int>(floor((normalized + 22.5) / 45.0)) % 8;
-        return String(labels[idx]);
-    };
-
     currentCond.temp = tempC;
     currentCond.feelsLike = feelsC;
     currentCond.dewPoint = NAN;
@@ -4972,7 +4908,6 @@ void fetchWeatherFromOWM(bool showBusy)
     currentCond.precipProb = -1;
     currentCond.cond = str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions;
     currentCond.icon = str_Weather_Icon;
-    currentCond.windCardinal = windCardinalFromDeg(windDir);
     currentCond.time = isnan(obsTime) ? 0U : static_cast<uint32_t>(obsTime);
 
     tempest.temperature = currentCond.temp;
@@ -5118,7 +5053,7 @@ void fetchWeatherFromOWM(bool showBusy)
                 dayBestNoonDelta[i] = 9999;
             }
 
-            auto upsertDay = [&](const ForecastHour &hour, double highC, double lowC, int rainChance, const String &cond, const String &icon) {
+            auto upsertDay = [&](const ForecastHour &hour, double highC, double lowC, int rainChance, const String &cond) {
                 time_t tt = static_cast<time_t>(hour.time);
                 struct tm *ti = localtime(&tt);
                 if (!ti) return;
@@ -5155,7 +5090,6 @@ void fetchWeatherFromOWM(bool showBusy)
                 if (day.conditions.length() == 0 || noonDelta < dayBestNoonDelta[dayIdx]) {
                     dayBestNoonDelta[dayIdx] = noonDelta;
                     day.conditions = cond;
-                    day.icon = icon;
                 }
             };
 
@@ -5195,7 +5129,6 @@ void fetchWeatherFromOWM(bool showBusy)
                                     double pop = readNumber(item, "pop");
                                     hour.rainChance = isnan(pop) ? -1 : static_cast<int>(lround(pop * 100.0));
                                     hour.conditions = (JSON.typeof_(weather0["description"]) == "string") ? String((const char*)weather0["description"]) : "";
-                                    hour.icon = (JSON.typeof_(weather0["icon"]) == "string") ? String((const char*)weather0["icon"]) : "";
 
                                     if (parsedForecast.numHours < MAX_FORECAST_HOURS) {
                                         parsedForecast.hours[parsedForecast.numHours++] = hour;
@@ -5205,7 +5138,7 @@ void fetchWeatherFromOWM(bool showBusy)
                                     double lowC = toCelsius(readNumber(itemMain, "temp_min"));
                                     if (isnan(highC)) highC = hour.temp;
                                     if (isnan(lowC)) lowC = hour.temp;
-                                    upsertDay(hour, highC, lowC, hour.rainChance, hour.conditions, hour.icon);
+                                    upsertDay(hour, highC, lowC, hour.rainChance, hour.conditions);
                                 }
                             }
                             ++i;

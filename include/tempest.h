@@ -28,7 +28,6 @@ struct CurrentConditions {
     int    precipProb = -1;
     String cond;
     String icon;
-    String windCardinal;
     uint32_t time = 0;
 };
 
@@ -58,7 +57,6 @@ struct TempestData {
     uint32_t lightningLastEventEnergy = 0;
     double battery;
     int    reportInt;
-    String lastObsTime;
     unsigned long lastUpdate;
     double obsWindAvg = NAN;
     double obsWindDir = NAN;
@@ -76,7 +74,6 @@ struct ForecastDay {
     double lowTemp = NAN;
     int rainChance = -1;
     String conditions;
-    String icon;
     uint32_t sunrise = 0;
     uint32_t sunset = 0;
     int dayNum = 0;
@@ -89,7 +86,6 @@ struct ForecastHour {
     double temp = NAN;
     int rainChance = -1;
     String conditions;
-    String icon;
     uint32_t time = 0;
 };
 

@@ -16,6 +16,7 @@ AstronomyData s_data;
 constexpr size_t kMaxSkyFactPages = 5;
 SkyFactPage s_skyFactPages[kMaxSkyFactPages];
 SkyFactPage s_summaryPage;
+char s_summaryMarquee[kSkyFactMarqueeLen] = "";
 size_t s_skyFactCount = 0;
 int s_skyFactsDateKey = 0;
 int s_skyFactsMinute = -1;
@@ -1232,8 +1233,11 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
 {
     SkyFactPage page;
     clearFactPage(page, SkyFactType::Summary);
+    s_summaryMarquee[0] = '\0';
+    page.marquee = s_summaryMarquee;
+    char *summary = s_summaryMarquee;
 
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), "NOW");
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), "NOW");
 
     SeasonEventUtc currentEvent{};
     SeasonEventUtc nextEvent{};
@@ -1249,7 +1253,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         const time_t seasonDuration = nextEvent.epoch - currentEvent.epoch;
         const time_t seasonElapsed = nowEpoch - currentEvent.epoch;
         formatSeasonSummaryPhrase(phrase, sizeof(phrase), seasonName, seasonElapsed, seasonDuration);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
         if (seasonDuration > 0)
         {
             const int seasonElapsedDays = static_cast<int>(seasonElapsed / 86400);
@@ -1257,9 +1261,9 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
             const int seasonProgressPct = static_cast<int>(lround(
                 constrain(static_cast<double>(seasonElapsed) / static_cast<double>(seasonDuration), 0.0, 1.0) * 100.0));
             snprintf(phrase, sizeof(phrase), "%s day %d of %d", seasonName, seasonElapsedDays + 1, max(1, seasonTotalDays));
-            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
             snprintf(phrase, sizeof(phrase), "%s %d%% complete", seasonName, seasonProgressPct);
-            appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+            appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
         }
 
         const DateTime dayStart(localNow.year(), localNow.month(), localNow.day(), 0, 0, 0);
@@ -1270,7 +1274,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         const int daysUntilSeason = daysBetweenDates(dayStart, nextLocalDay);
         const char *nextSeason = seasonNameForMarker(kSeasonMarkers[nextEvent.markerIndex & 3], southernHemisphere);
         snprintf(phrase, sizeof(phrase), "%s in %dd", nextSeason, daysUntilSeason);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
     if (s_data.hasSunTimes && s_data.sunriseMinutes >= 0 && s_data.sunsetMinutes >= 0)
@@ -1279,7 +1283,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         char daylightText[20];
         formatHoursMinutes(daylightMinutes, daylightText, sizeof(daylightText));
         snprintf(phrase, sizeof(phrase), "Daylight %s", daylightText);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
 
         char sunPhrase[24];
         if (s_data.localMinutes < s_data.sunriseMinutes)
@@ -1300,14 +1304,14 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
             formatRelativeMinutes(s_data.localMinutes - s_data.sunsetMinutes, relative, sizeof(relative));
             snprintf(sunPhrase, sizeof(sunPhrase), "Sun set %s ago", relative);
         }
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), sunPhrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), sunPhrase);
 
         char riseText[12];
         char setText[12];
         formatClockMinutesCompact(s_data.sunriseMinutes, riseText, sizeof(riseText));
         formatClockMinutesCompact(s_data.sunsetMinutes, setText, sizeof(setText));
         snprintf(phrase, sizeof(phrase), "Sun Times %s-%s", riseText, setText);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
     if (s_data.hasSunAzimuth && s_data.hasSunAltitude)
@@ -1315,7 +1319,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         snprintf(phrase, sizeof(phrase), "Sun Position %+d\xC2\xB0 %s",
                  static_cast<int>(roundf(s_data.sunAltitudeDeg)),
                  compassLabelForDegrees(s_data.sunAzimuthDeg));
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
     const int doy = dayOfYear(localNow.year(), localNow.month(), localNow.day());
@@ -1332,20 +1336,20 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     phrase[0] = '\0';
 
     snprintf(phrase, sizeof(phrase), "Day %d of %d", doy, totalDays);
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     snprintf(phrase, sizeof(phrase), "%d %s left", daysLeft, dayWord(daysLeft));
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     snprintf(phrase, sizeof(phrase), "Week %d of the year", week);
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     snprintf(phrase, sizeof(phrase), "%d %s remain in %s", monthDaysLeft, dayWord(monthDaysLeft), monthNameShort(localNow.month()));
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     snprintf(phrase, sizeof(phrase), "Quarter %d of 4", quarter);
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     if (weekendDays == 0)
         snprintf(phrase, sizeof(phrase), "It is the weekend now");
     else
         snprintf(phrase, sizeof(phrase), "Weekend in %d %s", weekendDays, dayWord(weekendDays));
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     if (isfinite(s_data.earthSunDistanceKm) && units.distance == DistanceUnit::KM)
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
     else if (isfinite(s_data.earthSunDistanceKm) && units.distance == DistanceUnit::MILE)
@@ -1364,7 +1368,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e %s", feet, footWord(feet));
     }
     if (phrase[0] != '\0')
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
 
     if (!timezoneIsCustom())
     {
@@ -1402,12 +1406,12 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                              dstActiveNow ? "ends" : "starts",
                              daysToTransition,
                              dayWord(daysToTransition));
-                appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+                appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
             }
             else
             {
                 snprintf(phrase, sizeof(phrase), "%s now", dstActiveNow ? "DST is active" : "Standard time is active");
-                appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+                appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
             }
         }
     }
@@ -1420,10 +1424,10 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
             snprintf(phrase, sizeof(phrase), "%s peak is tonight", meteorPeak->name);
         else
             snprintf(phrase, sizeof(phrase), "%s peak in %d %s", meteorPeak->name, meteorDays, dayWord(meteorDays));
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), moonPhaseLabel(s_data.moonPhase));
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), moonPhaseLabel(s_data.moonPhase));
 
     const float phase = s_data.moonPhaseFraction;
     const int daysToFull = static_cast<int>(roundf((((phase <= 0.5f) ? (0.5f - phase) : (1.5f - phase)) * static_cast<float>(kMoonSynodicDays))));
@@ -1434,24 +1438,24 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         snprintf(phrase, sizeof(phrase), "New Moon in %d %s", daysToNew, dayWord(daysToNew));
     else
         snprintf(phrase, sizeof(phrase), "Moon lit %u%%", static_cast<unsigned>(s_data.moonIlluminationPct));
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
 
     if (s_data.hasMoonAltitude && s_data.hasMoonAzimuth)
     {
         snprintf(phrase, sizeof(phrase), "Moon Position %+d\xC2\xB0 %s",
                  static_cast<int>(roundf(s_data.moonAltitudeDeg)),
                  compassLabelForDegrees(s_data.moonAzimuthDeg));
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
 
         snprintf(phrase, sizeof(phrase), "Moon %s",
                  (s_data.moonAltitudeDeg > 0.0f) ? "above horizon" : "below horizon");
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
     if (isfinite(s_data.moonDistanceKm))
     {
         formatMoonEarthDistancePhrase(s_data.moonDistanceKm, phrase, sizeof(phrase));
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
     }
 
     if (s_data.hasMoonTimes && (s_data.moonriseMinutes >= 0 || s_data.moonsetMinutes >= 0))
@@ -1461,9 +1465,9 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
         formatClockMinutesCompact(s_data.moonriseMinutes, riseText, sizeof(riseText));
         formatClockMinutesCompact(s_data.moonsetMinutes, setText, sizeof(setText));
         snprintf(phrase, sizeof(phrase), "Moonrise %s", riseText);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
         snprintf(phrase, sizeof(phrase), "Moonset %s", setText);
-        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+        appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
 
         if (s_data.localMinutes >= 0)
         {
@@ -1477,7 +1481,7 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                     char relative[16];
                     formatRelativeMinutes(delta, relative, sizeof(relative));
                     snprintf(phrase, sizeof(phrase), "Moonrise in %s", relative);
-                    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+                    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
                 }
             }
             else if (s_data.moonAltitudeDeg > 0.0f && s_data.moonsetMinutes >= 0)
@@ -1490,14 +1494,14 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
                     char relative[16];
                     formatRelativeMinutes(delta, relative, sizeof(relative));
                     snprintf(phrase, sizeof(phrase), "Moonset in %s", relative);
-                    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+                    appendSummaryPhrase(summary, sizeof(s_summaryMarquee), phrase);
                 }
             }
         }
     }
 
     snprintf(page.title, sizeof(page.title), "%s", "SKY BRIEF");
-    page.valid = page.marquee[0] != '\0';
+    page.valid = summary[0] != '\0';
     page.lineCount = page.valid ? 1 : 0;
     s_summaryPage = page;
 }
@@ -1608,6 +1612,7 @@ void updateSkyFacts(bool force)
     for (size_t i = 0; i < kMaxSkyFactPages; ++i)
         s_skyFactPages[i] = SkyFactPage{};
     s_summaryPage = SkyFactPage{};
+    s_summaryMarquee[0] = '\0';
     const bool southernHemisphere = s_data.hasLocation && s_data.latitude < 0.0;
     buildSeasonFact(localNow, utcNow, southernHemisphere);
     buildEquinoxFact(localNow);
