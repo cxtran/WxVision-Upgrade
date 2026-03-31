@@ -14,7 +14,7 @@ constexpr uint8_t kDigitBitmapRows = 5;
 constexpr uint8_t kDigitBitmapCols = 3;
 
 // Source pattern provided by user: 1..9, 0, :, slot 21 (A), slot 22 (P)
-const uint8_t kSevenSegmentDigits[13][kDigitBitmapRows] PROGMEM = {
+const uint8_t kSevenSegmentDigits[14][kDigitBitmapRows] PROGMEM = {
     {0x40, 0xc0, 0x40, 0x40, 0xe0}, // 1
     {0xe0, 0x20, 0xe0, 0x80, 0xe0}, // 2
     {0xe0, 0x20, 0x60, 0x20, 0xe0}, // 3
@@ -27,7 +27,8 @@ const uint8_t kSevenSegmentDigits[13][kDigitBitmapRows] PROGMEM = {
     {0xe0, 0xa0, 0xa0, 0xa0, 0xe0}, // 0
     {0x00, 0x40, 0x00, 0x40, 0x00}, // :
     {0x40, 0xa0, 0xe0, 0xa0, 0xa0}, // A
-    {0xe0, 0xa0, 0xe0, 0x80, 0x80}  // P
+    {0xe0, 0xa0, 0xe0, 0x80, 0x80}, // P
+    {0x00, 0x00, 0x00, 0x00, 0x40}  // .
 };
 
 int bitmapIndexForChar(char digit)
@@ -47,6 +48,7 @@ int bitmapIndexForChar(char digit)
     case ':': return 10;
     case 'A': return 11;
     case 'P': return 12;
+    case '.': return 13;
     default: return -1;
     }
 }

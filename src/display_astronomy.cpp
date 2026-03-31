@@ -6,6 +6,7 @@
 #include "display.h"
 #include "display_sky_facts.h"
 #include "display_seven_segment.h"
+#include "display_widgets.h"
 #include "settings.h"
 #include "ui_theme.h"
 #include "units.h"
@@ -13,7 +14,16 @@
 namespace
 {
 constexpr unsigned long kAstronomyPageAutoMs = 4200UL;
-constexpr uint8_t kAstronomyBasePageCount = 5;
+constexpr uint8_t kAstronomyBasePageCount = 6;
+
+const uint8_t distance_unit[2][10] PROGMEM = {
+    {
+        0x80, 0x00, 0x80, 0x00, 0xaf, 0x00, 0xca, 0x80, 0xaa, 0x80
+    },
+    {
+        0x02, 0x00, 0x00, 0x00, 0xfa, 0x00, 0xaa, 0x00, 0xaa, 0x00
+    }
+};
 
 uint8_t s_astronomyPageIndex = 0;
 unsigned long s_astronomyLastSwitchMs = 0;
@@ -82,6 +92,26 @@ uint16_t passedSkyFillColor()
 uint16_t timeColor()
 {
     return ui_theme::applyGraphicColor(dma_display->color565(236, 245, 255));
+}
+
+uint16_t orbitColor()
+{
+    return ui_theme::applyGraphicColor(dma_display->color565(224, 236, 255));
+}
+
+uint16_t earthColor()
+{
+    return ui_theme::applyGraphicColor(dma_display->color565(98, 180, 255));
+}
+
+uint16_t landColor()
+{
+    return ui_theme::applyGraphicColor(dma_display->color565(116, 212, 128));
+}
+
+uint16_t cloudColor()
+{
+    return ui_theme::applyGraphicColor(dma_display->color565(224, 242, 255));
 }
 
 void drawHeader(const char *title)
@@ -579,6 +609,243 @@ void drawAstronomyGraphicPage(const wxv::astronomy::AstronomyData &data)
     drawSceneStyleTime(PANEL_RES_X - sceneStyleTimeWidth(data.sunsetMinutes) - 2, timeY, data.sunsetMinutes, timeColor());
 }
 
+void drawTinyEarth(int cx, int cy)
+{
+    const uint16_t ocean = earthColor();
+    const uint16_t land = landColor();
+    const uint16_t cloud = cloudColor();
+
+    dma_display->fillCircle(cx, cy, 2, ocean);
+    dma_display->drawPixel(cx - 1, cy - 1, land);
+    dma_display->drawPixel(cx - 1, cy, land);
+    dma_display->drawPixel(cx, cy + 1, land);
+    dma_display->drawPixel(cx + 1, cy, land);
+    dma_display->drawPixel(cx, cy - 1, cloud);
+    dma_display->drawPixel(cx + 1, cy - 1, cloud);
+}
+
+void drawOrbitEllipse(int cx, int cy, int rx, int ry, uint16_t color)
+{
+    const uint16_t softColor = ui_theme::applyGraphicColor(dma_display->color565(120, 150, 190));
+    int lastX = cx + rx;
+    int lastY = cy;
+    bool drawBright = true;
+
+    for (int deg = 6; deg <= 360; deg += 6)
+    {
+        const float a = static_cast<float>(deg) * static_cast<float>(M_PI) / 180.0f;
+        const int x = cx + static_cast<int>(roundf(cosf(a) * rx));
+        const int y = cy + static_cast<int>(roundf(sinf(a) * ry));
+        dma_display->drawLine(lastX, lastY, x, y, drawBright ? color : softColor);
+        lastX = x;
+        lastY = y;
+        drawBright = !drawBright;
+    }
+}
+
+void drawOrbitSun(int cx, int cy)
+{
+    const uint16_t glow = ui_theme::applyGraphicColor(dma_display->color565(138, 74, 0));
+    const uint16_t core = ui_theme::applyGraphicColor(dma_display->color565(255, 188, 48));
+    const uint16_t hot = ui_theme::applyGraphicColor(dma_display->color565(255, 236, 150));
+    const uint16_t ray = ui_theme::applyGraphicColor(dma_display->color565(255, 164, 52));
+
+    dma_display->fillCircle(cx, cy, 4, glow);
+    dma_display->fillCircle(cx, cy, 3, core);
+    dma_display->drawPixel(cx, cy, hot);
+    dma_display->drawPixel(cx - 1, cy, hot);
+    dma_display->drawPixel(cx, cy - 1, hot);
+    dma_display->drawPixel(cx - 2, cy, ray);
+    dma_display->drawPixel(cx + 2, cy, ray);
+    dma_display->drawPixel(cx, cy - 2, ray);
+    dma_display->drawPixel(cx, cy + 2, ray);
+    dma_display->drawPixel(cx - 2, cy - 2, ray);
+    dma_display->drawPixel(cx + 2, cy + 2, ray);
+    dma_display->drawPixel(cx - 2, cy + 2, ray);
+    dma_display->drawPixel(cx + 2, cy - 2, ray);
+}
+
+void drawDigitalText(int x, int y, const String &text, uint16_t color)
+{
+    wxv::seg7::Metrics metrics;
+    metrics.digitWidth = 3;
+    metrics.digitHeight = 5;
+    metrics.colonWidth = 1;
+    metrics.spacing = 1;
+
+    int cursorX = x;
+    for (size_t i = 0; i < text.length(); ++i)
+    {
+        const char c = text.charAt(i);
+        if ((c >= '0' && c <= '9') || c == 'A' || c == 'P' || c == ':')
+        {
+            wxv::seg7::drawDigit(cursorX, y, c, color, 1, metrics);
+            cursorX += metrics.digitWidth + metrics.spacing;
+        }
+        else if (c == '.')
+        {
+            wxv::seg7::drawDigit(cursorX - 1, y, c, color, 1, metrics);
+            cursorX += 2;
+        }
+        else if (c == '-')
+        {
+            dma_display->drawFastHLine(cursorX, y + 2, 2, color);
+            cursorX += 3;
+        }
+        else
+        {
+            cursorX += 2;
+        }
+    }
+}
+
+int measureDigitalTextWidth(const String &text)
+{
+    wxv::seg7::Metrics metrics;
+    metrics.digitWidth = 3;
+    metrics.digitHeight = 5;
+    metrics.colonWidth = 1;
+    metrics.spacing = 1;
+
+    int width = 0;
+    for (size_t i = 0; i < text.length(); ++i)
+    {
+        const char c = text.charAt(i);
+        if ((c >= '0' && c <= '9') || c == 'A' || c == 'P' || c == ':')
+        {
+            width += metrics.digitWidth + metrics.spacing;
+        }
+        else if (c == '.')
+        {
+            width += 2;
+        }
+        else if (c == '-')
+        {
+            width += 3;
+        }
+        else
+        {
+            width += 2;
+        }
+    }
+    return width;
+}
+
+void splitEarthSunDistanceCompact(const wxv::astronomy::AstronomyData &data, String &numberText, String &unitText)
+{
+    if (!isfinite(data.earthSunDistanceKm))
+    {
+        numberText = "--";
+        unitText = "";
+        return;
+    }
+
+    char buf[16];
+    if (units.distance == DistanceUnit::KM)
+    {
+        snprintf(buf, sizeof(buf), "%.1f", data.earthSunDistanceKm / 1000000.0f);
+        numberText = String(buf);
+        unitText = "km";
+    }
+    else if (units.distance == DistanceUnit::MILE)
+    {
+        snprintf(buf, sizeof(buf), "%.1f", km_to_miles(data.earthSunDistanceKm) / 1000000.0);
+        numberText = String(buf);
+        unitText = "mi";
+    }
+    else if (units.distance == DistanceUnit::M)
+    {
+        snprintf(buf, sizeof(buf), "%.2f", static_cast<double>(data.earthSunDistanceKm) * 1000.0 / 1.0e11);
+        numberText = String(buf);
+        unitText = "e11m";
+    }
+    else
+    {
+        snprintf(buf, sizeof(buf), "%.2f", meters_to_feet(static_cast<double>(data.earthSunDistanceKm) * 1000.0) / 1.0e11);
+        numberText = String(buf);
+        unitText = "e11ft";
+    }
+}
+
+void drawDistanceUnit(int x, int y)
+{
+    if (units.distance == DistanceUnit::KM)
+    {
+        ui_theme::drawBitmapThemed(x, y, distance_unit[0], 9, 5, bodyLabel());
+        return;
+    }
+
+    if (units.distance == DistanceUnit::MILE)
+    {
+        ui_theme::drawBitmapThemed(x, y, distance_unit[1], 9, 5, bodyLabel());
+        return;
+    }
+
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(bodyLabel());
+    dma_display->setCursor(x, y);
+    dma_display->print(units.distance == DistanceUnit::M ? "m" : "ft");
+}
+
+void drawEarthOrbitPage(const wxv::astronomy::AstronomyData &data)
+{
+    drawHeader("Orbit");
+
+    constexpr int centerX = 32;
+    constexpr int centerY = 17;
+    constexpr int orbitRx = 24;
+    constexpr int orbitRy = 9;
+    constexpr float eccentricity = 0.0167f;
+
+    const int focusOffset = max(1, static_cast<int>(roundf(eccentricity * orbitRx)));
+    const int sunX = centerX - focusOffset;
+    const int sunY = centerY;
+
+    drawOrbitEllipse(centerX, centerY, orbitRx, orbitRy, orbitColor());
+    drawOrbitSun(sunX, sunY);
+
+    drawDigitalText(1, 15, "P", bodyLabel());
+    drawDigitalText(PANEL_RES_X - 4, 15, "A", bodyLabel());
+
+    if (isfinite(data.earthOrbitEccentricAnomalyDeg))
+    {
+        const float eccentricAnomaly = data.earthOrbitEccentricAnomalyDeg * static_cast<float>(M_PI) / 180.0f;
+        const int earthX = centerX - static_cast<int>(roundf(cosf(eccentricAnomaly) * orbitRx));
+        const int earthY = centerY + static_cast<int>(roundf(sinf(eccentricAnomaly) * orbitRy));
+        drawTinyEarth(earthX, earthY);
+    }
+
+    char dateBuf[16];
+    snprintf(dateBuf, sizeof(dateBuf), "%02d-%02d", (data.localDateKey / 100) % 100, data.localDateKey % 100);
+    drawDigitalText(46, 27, String(dateBuf), ui_theme::applyGraphicColor(dma_display->color565(255, 196, 96)));
+
+    String numberText;
+    String unitText;
+    splitEarthSunDistanceCompact(data, numberText, unitText);
+    const int valueX = 1;
+    const int valueY = 27;
+    const int valueWidth = measureDigitalTextWidth(numberText);
+    const int unitX = valueX + valueWidth + 2;
+
+    drawDigitalText(valueX, valueY, numberText, bodyValue());
+    dma_display->setFont(&Font5x7Uts);
+    dma_display->setTextSize(1);
+    dma_display->setTextColor(bodyLabel());
+    dma_display->setCursor(unitX, valueY);
+    dma_display->print("M");
+    if (units.distance == DistanceUnit::KM || units.distance == DistanceUnit::MILE)
+    {
+        drawDistanceUnit(unitX + 6, valueY);
+    }
+    else
+    {
+        dma_display->setTextColor(bodyLabel());
+        dma_display->setCursor(unitX + 6, valueY);
+        dma_display->print(unitText);
+    }
+}
+
 void drawAzimuthPage(const wxv::astronomy::AstronomyData &data)
 {
     drawHeader("Azimuth");
@@ -706,15 +973,18 @@ void drawAstronomyScreen()
     switch (s_astronomyPageIndex)
     {
     case 0:
-        drawAstronomyGraphicPage(data);
+        drawEarthOrbitPage(data);
         break;
     case 1:
-        drawAzimuthPage(data);
+        drawAstronomyGraphicPage(data);
         break;
     case 2:
-        drawSunTimesPage(data);
+        drawAzimuthPage(data);
         break;
     case 3:
+        drawSunTimesPage(data);
+        break;
+    case 4:
         drawElevationPage(data);
         break;
     default:

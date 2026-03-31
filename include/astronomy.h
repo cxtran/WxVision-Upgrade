@@ -54,6 +54,10 @@ struct AstronomyData
     uint8_t moonIlluminationPct = 0;
     MoonPhase moonPhase = MoonPhase::NewMoon;
     float moonDistanceKm = NAN;
+    float earthSunDistanceAu = NAN;
+    float earthSunDistanceKm = NAN;
+    float earthOrbitLongitudeDeg = NAN;
+    float earthOrbitEccentricAnomalyDeg = NAN;
     int localDateKey = 0;
     int minuteBucket = -1;
     unsigned long lastRefreshMs = 0;

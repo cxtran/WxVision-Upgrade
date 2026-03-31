@@ -146,7 +146,7 @@ const web_assets::EmbeddedAsset *findEmbeddedAsset(const char *path)
 
 void sendEmbeddedAsset(AsyncWebServerRequest *req, const web_assets::EmbeddedAsset &asset)
 {
-  AsyncWebServerResponse *res = req->beginResponse(200, asset.contentType, asset.data, asset.size);
+  AsyncWebServerResponse *res = req->beginResponse_P(200, asset.contentType, asset.data, asset.size);
   res->addHeader("Cache-Control", asset.cacheControl);
   req->send(res);
 }

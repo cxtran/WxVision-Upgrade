@@ -46,6 +46,8 @@ const char *footWord(double value)
     return (fabs(value - 1.0) < 0.05) ? "foot" : "feet";
 }
 
+double julianDateFromUnix(time_t epoch);
+
 void formatUnsignedWithCommas(unsigned long value, char *out, size_t outSize)
 {
     if (!out || outSize == 0)
@@ -189,8 +191,24 @@ int dayOfYear(int year, int month, int day)
 
 int weekOfYear(int year, int month, int day)
 {
+    auto isoWeeksInYear = [](int y) -> int
+    {
+        const bool leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+        const int jan1Dow = DateTime(y, 1, 1, 0, 0, 0).dayOfTheWeek(); // 0=Sunday
+        const int isoJan1 = (jan1Dow == 0) ? 7 : jan1Dow;               // 1=Monday..7=Sunday
+        return (isoJan1 == 4 || (isoJan1 == 3 && leap)) ? 53 : 52;
+    };
+
     const int doy = dayOfYear(year, month, day);
-    return ((doy - 1) / 7) + 1;
+    const int dow = DateTime(year, month, day, 0, 0, 0).dayOfTheWeek(); // 0=Sunday
+    const int isoDow = (dow == 0) ? 7 : dow;                             // 1=Monday..7=Sunday
+    int week = (doy - isoDow + 10) / 7;
+
+    if (week < 1)
+        return isoWeeksInYear(year - 1);
+    if (week > isoWeeksInYear(year))
+        return 1;
+    return week;
 }
 
 const char *monthNameShort(int month)
@@ -216,10 +234,34 @@ int daysUntilWeekend(const DateTime &localNow)
     return 6 - dow;
 }
 
-double earthSunDistanceAu(int year, int month, int day)
+void computeEarthOrbitState(const DateTime &utcNow, float &distanceAuOut, float &heliocentricLongitudeDegOut, float &eccentricAnomalyDegOut)
 {
-    const double gamma = (2.0 * kPi / 365.0) * (static_cast<double>(dayOfYear(year, month, day)) - 1.0);
-    return 1.00014 - 0.01671 * cos(gamma) - 0.00014 * cos(2.0 * gamma);
+    const double jd = julianDateFromUnix(static_cast<time_t>(utcNow.unixtime())) +
+                      (static_cast<double>(utcNow.second()) / 86400.0);
+    const double d = jd - 2451543.5;
+
+    const double w = normalizeDegrees(282.9404 + 4.70935e-5 * d);
+    const double e = 0.016709 - 1.151e-9 * d;
+    const double M = normalizeDegrees(356.0470 + 0.9856002585 * d);
+    const double Mrad = M * kDegToRad;
+
+    double E = M + (180.0 / kPi) * e * sin(Mrad) * (1.0 + e * cos(Mrad));
+    for (int i = 0; i < 3; ++i)
+    {
+        const double Erad = E * kDegToRad;
+        E = E - (E - (180.0 / kPi) * e * sin(Erad) - M) / (1.0 - e * cos(Erad));
+    }
+
+    const double Erad = E * kDegToRad;
+    const double xv = cos(Erad) - e;
+    const double yv = sqrt(1.0 - e * e) * sin(Erad);
+    const double v = atan2(yv, xv) * kRadToDeg;
+    const double r = sqrt(xv * xv + yv * yv);
+    const double lon = normalizeDegrees(v + w);
+
+    distanceAuOut = static_cast<float>(r);
+    heliocentricLongitudeDegOut = static_cast<float>(lon);
+    eccentricAnomalyDegOut = static_cast<float>(normalizeDegrees(E));
 }
 
 struct MeteorShowerPeak
@@ -1283,7 +1325,10 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     const int monthDaysLeft = monthDays - localNow.day();
     const int quarter = quarterOfYear(localNow.month());
     const int weekendDays = daysUntilWeekend(localNow);
-    const double earthSunKm = earthSunDistanceAu(localNow.year(), localNow.month(), localNow.day()) * 149597870.7;
+    const double earthSunKm = isfinite(s_data.earthSunDistanceKm)
+                                  ? static_cast<double>(s_data.earthSunDistanceKm)
+                                  : 0.0;
+    phrase[0] = '\0';
 
     snprintf(phrase, sizeof(phrase), "Day %d of %d", doy, totalDays);
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
@@ -1300,24 +1345,25 @@ void buildSummaryFact(const DateTime &localNow, const DateTime &utcNow, bool sou
     else
         snprintf(phrase, sizeof(phrase), "Weekend in %d %s", weekendDays, dayWord(weekendDays));
     appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
-    if (units.distance == DistanceUnit::KM)
+    if (isfinite(s_data.earthSunDistanceKm) && units.distance == DistanceUnit::KM)
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million km", earthSunKm / 1000000.0);
-    else if (units.distance == DistanceUnit::MILE)
+    else if (isfinite(s_data.earthSunDistanceKm) && units.distance == DistanceUnit::MILE)
     {
         const double millionMiles = km_to_miles(earthSunKm) / 1000000.0;
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.1f million %s", millionMiles, mileWord(millionMiles));
     }
-    else if (units.distance == DistanceUnit::M)
+    else if (isfinite(s_data.earthSunDistanceKm) && units.distance == DistanceUnit::M)
     {
         const double meters = earthSunKm * 1000.0;
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e %s", meters, meterWord(meters));
     }
-    else
+    else if (isfinite(s_data.earthSunDistanceKm))
     {
         const double feet = meters_to_feet(earthSunKm * 1000.0);
         snprintf(phrase, sizeof(phrase), "Earth-Sun distance %.3e %s", feet, footWord(feet));
     }
-    appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
+    if (phrase[0] != '\0')
+        appendSummaryPhrase(page.marquee, sizeof(page.marquee), phrase);
 
     if (!timezoneIsCustom())
     {
@@ -1508,6 +1554,9 @@ void updateAstronomyData(bool force)
     s_data.moonPhase = phaseFromFraction(s_data.moonPhaseFraction);
     s_data.moonIlluminationPct = static_cast<uint8_t>(roundf((1.0f - cosf(2.0f * static_cast<float>(kPi) * s_data.moonPhaseFraction)) * 50.0f));
     s_data.moonDistanceKm = computeMoonDistanceKm(utcNow);
+    computeEarthOrbitState(utcNow, s_data.earthSunDistanceAu, s_data.earthOrbitLongitudeDeg, s_data.earthOrbitEccentricAnomalyDeg);
+    if (isfinite(s_data.earthSunDistanceAu))
+        s_data.earthSunDistanceKm = s_data.earthSunDistanceAu * 149597870.7f;
 
     if (!hasLocation)
         return;
