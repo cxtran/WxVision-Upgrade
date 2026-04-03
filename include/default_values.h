@@ -161,6 +161,12 @@ struct DefaultConfig {
   bool envAlertHumidityEnabled;
   int defaultNtpPreset;       // existing storage mapping
   int dateFormatStorage;      // existing storage mapping
+  bool cloudEnabled;
+  const char* cloudApiBaseUrl;
+  const char* cloudRelayUrl;
+  uint32_t cloudHeartbeatIntervalMs;
+  uint32_t cloudReconnectInitialMs;
+  uint32_t cloudReconnectMaxMs;
 };
 
 // Calibration defaults and allowed ranges:
@@ -280,7 +286,13 @@ static const DefaultConfig kDefaults = {
     true,       // envAlertTempEnabled
     true,       // envAlertHumidityEnabled
     1,          // defaultNtpPreset
-    0           // dateFormatStorage
+    0,          // dateFormatStorage
+    true,       // cloudEnabled
+    "https://api.wxvisions.com",
+    "wss://relay.wxvisions.com/ws/device",
+    30000,      // cloudHeartbeatIntervalMs
+    5000,       // cloudReconnectInitialMs
+    60000       // cloudReconnectMaxMs
 };
 
 // Explicit storage mappings for compatibility with existing Preferences keys.

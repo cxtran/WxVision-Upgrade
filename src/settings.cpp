@@ -125,6 +125,14 @@ String mqttUser = MQTT_USER;
 String mqttPass = MQTT_PASS;
 String mqttDeviceId = MQTT_DEVICE_ID;
 
+// --- Cloud ---
+bool cloudEnabled = wxv::defaults::kDefaults.cloudEnabled;
+String cloudApiBaseUrl = wxv::defaults::kDefaults.cloudApiBaseUrl;
+String cloudRelayUrl = wxv::defaults::kDefaults.cloudRelayUrl;
+uint32_t cloudHeartbeatIntervalMs = wxv::defaults::kDefaults.cloudHeartbeatIntervalMs;
+uint32_t cloudReconnectInitialMs = wxv::defaults::kDefaults.cloudReconnectInitialMs;
+uint32_t cloudReconnectMaxMs = wxv::defaults::kDefaults.cloudReconnectMaxMs;
+
 // --- Calibration ---
 float tempOffset = wxv::defaults::kTempOffsetDefaultC;   // degrees C
 int humOffset = wxv::defaults::kHumOffsetDefault;    // %
@@ -247,6 +255,26 @@ void loadSettings() {
     mqttDeviceId.trim();
     if (mqttDeviceId.isEmpty())
         mqttDeviceId = MQTT_DEVICE_ID;
+
+    // Cloud
+    cloudEnabled = prefs.getBool("cloudEnabled", wxv::defaults::kDefaults.cloudEnabled);
+    cloudApiBaseUrl = prefs.getString("cloudApiBase", wxv::defaults::kDefaults.cloudApiBaseUrl);
+    cloudRelayUrl = prefs.getString("cloudRelayUrl", wxv::defaults::kDefaults.cloudRelayUrl);
+    cloudHeartbeatIntervalMs = constrain(
+        prefs.getUInt("cloudHbMs", wxv::defaults::kDefaults.cloudHeartbeatIntervalMs),
+        10000U, 300000U);
+    cloudReconnectInitialMs = constrain(
+        prefs.getUInt("cloudRcInit", wxv::defaults::kDefaults.cloudReconnectInitialMs),
+        1000U, 120000U);
+    cloudReconnectMaxMs = constrain(
+        prefs.getUInt("cloudRcMax", wxv::defaults::kDefaults.cloudReconnectMaxMs),
+        cloudReconnectInitialMs, 600000U);
+    cloudApiBaseUrl.trim();
+    cloudRelayUrl.trim();
+    if (cloudApiBaseUrl.isEmpty())
+        cloudApiBaseUrl = wxv::defaults::kDefaults.cloudApiBaseUrl;
+    if (cloudRelayUrl.isEmpty())
+        cloudRelayUrl = wxv::defaults::kDefaults.cloudRelayUrl;
 
     // Calibration
     if (prefs.isKey("tempOffsetF")) {
@@ -408,6 +436,17 @@ void saveMqttSettings() {
     prefs.end();
 }
 
+void saveCloudSettings() {
+    prefs.begin("visionwx", false);
+    prefs.putBool("cloudEnabled", cloudEnabled);
+    prefs.putString("cloudApiBase", cloudApiBaseUrl);
+    prefs.putString("cloudRelayUrl", cloudRelayUrl);
+    prefs.putUInt("cloudHbMs", constrain(cloudHeartbeatIntervalMs, 10000U, 300000U));
+    prefs.putUInt("cloudRcInit", constrain(cloudReconnectInitialMs, 1000U, 120000U));
+    prefs.putUInt("cloudRcMax", constrain(cloudReconnectMaxMs, cloudReconnectInitialMs, 600000U));
+    prefs.end();
+}
+
 void saveAllSettings() {
     saveDeviceSettings();
     saveDisplaySettings();
@@ -416,6 +455,7 @@ void saveAllSettings() {
     saveAlarmSettings();
     saveNoaaSettings();
     saveMqttSettings();
+    saveCloudSettings();
     saveDateTimeSettings();
     // Persist unit preferences too
     saveUnits();

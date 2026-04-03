@@ -98,6 +98,14 @@ extern String mqttUser;
 extern String mqttPass;
 extern String mqttDeviceId;
 
+// --- Cloud ---
+extern bool cloudEnabled;
+extern String cloudApiBaseUrl;
+extern String cloudRelayUrl;
+extern uint32_t cloudHeartbeatIntervalMs;
+extern uint32_t cloudReconnectInitialMs;
+extern uint32_t cloudReconnectMaxMs;
+
 // --- Calibration ---
 extern float tempOffset;   // degrees C
 extern int humOffset;    // %
@@ -122,6 +130,7 @@ void saveWeatherSettings();
 void saveAlarmSettings();
 void saveNoaaSettings();
 void saveMqttSettings();
+void saveCloudSettings();
 
 // --- UI helpers ---
 void toggleDayFormat(int dir);

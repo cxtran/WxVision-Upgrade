@@ -32,6 +32,9 @@
 #include "screen_manager.h"
 #include "mqtt_client.h"
 #include "generated_web_assets.h"
+#include "web.h"
+#include "cloud_manager.h"
+#include "device_identity.h"
 #include <new>
 
 static AppState &app = appState();
@@ -95,6 +98,7 @@ bool otaInProgress = false;
 AsyncWebServer server(80);
 static AsyncWebSocket g_appWs("/ws/app");
 static bool webServerRunning = false;
+static uint16_t g_activeAppWsClients = 0;
 static constexpr size_t kMaxSettingsBodyBytes = 8192;
 static constexpr size_t kMaxTimeBodyBytes = 2048;
 static constexpr size_t kMaxWorldTimeBodyBytes = 8192;
@@ -1022,6 +1026,7 @@ static String buildAppLightningJson(const AppRuntimeState &state)
 static String buildAppDeviceJson(const AppRuntimeState &state)
 {
   JsonDocument doc;
+  const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
   doc["name"] = state.device.name;
   doc["ip"] = state.device.ip;
   doc["mac"] = state.device.mac;
@@ -1030,6 +1035,18 @@ static String buildAppDeviceJson(const AppRuntimeState &state)
   doc["uptimeSec"] = state.device.uptimeSec;
   doc["currentScreen"] = state.device.currentScreen;
   doc["dataSource"] = state.device.dataSourceName;
+  doc["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
+  doc["discoveredName"] = wxv::cloud::deviceIdentity().name;
+  doc["firmwareVersion"] = String(__DATE__) + " " + String(__TIME__);
+  doc["cloudEnabled"] = cloudEnabled;
+  doc["cloudRegistered"] = cloud.registered;
+  doc["relayConnected"] = cloud.relayConnected;
+  doc["relayAuthenticated"] = cloud.relayAuthenticated;
+  doc["cloudTimeReady"] = cloud.timeReady;
+  doc["cloudLastError"] = cloud.lastError;
+  doc["cloudHeartbeatFailures"] = cloud.heartbeatFailures;
+  doc["cloudLastRegisterStatusCode"] = cloud.lastRegisterStatusCode;
+  doc["cloudLastRegisterDetail"] = cloud.lastRegisterDetail;
   String payload;
   serializeJson(doc, payload);
   return payload;
@@ -1374,10 +1391,23 @@ static String appHelloMessage()
   doc["ts"] = g_appRuntime.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
   data["deviceName"] = g_appRuntime.device.name;
+  data["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
+  data["discoveredName"] = wxv::cloud::deviceIdentity().name;
+  data["firmwareVersion"] = String(__DATE__) + " " + String(__TIME__);
   data["protocolVersion"] = 1;
   String payload;
   serializeJson(doc, payload);
   return payload;
+}
+
+String buildAppHelloMessage()
+{
+  return appHelloMessage();
+}
+
+bool isLocalAppClientConnected()
+{
+  return g_activeAppWsClients > 0;
 }
 
 static void appRuntimeBroadcastTick()
@@ -1595,16 +1625,25 @@ struct AppSettingsDirtyFlags
   bool mqtt = false;
 };
 
-static constexpr size_t kAppSettingsSectionCount = 13;
+static constexpr size_t kAppSettingsSectionCount = 14;
 static const char *const kAppSettingsSections[kAppSettingsSectionCount] = {
     "device", "units", "display", "wf-tempest", "forecast-ui", "calibration",
-    "alarms", "noaa", "location", "datetime", "world-time", "sound", "mqtt"};
+    "alarms", "noaa", "location", "datetime", "world-time", "sound", "mqtt", "cloud"};
 
 struct AppSettingsSnapshot
 {
   const char *section = nullptr;
   String payload;
 };
+
+static bool isKnownAppSettingsSection(const char *section);
+static String buildAppSettingsJson(const char *section);
+static AppSettingsSnapshot captureAppSettingsSnapshot(const char *section);
+static bool broadcastChangedAppSettingsSections(const AppSettingsSnapshot *snapshots,
+                                                size_t snapshotCount,
+                                                bool collapseMultipleToAll);
+static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty);
+static bool applyAppSettingsSection(const char *section, JsonVariantConst value, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty);
 
 static const char *tempUnitName(TempUnit value)
 {
@@ -1841,6 +1880,9 @@ static void serializeAppDeviceSettings(JsonObject obj)
   obj["autoRotate"] = autoRotate != 0;
   obj["rotateIntervalSec"] = autoRotateInterval;
   obj["manualScreen"] = manualScreenLabel(manualScreen);
+  obj["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
+  obj["deviceName"] = wxv::cloud::deviceIdentity().name;
+  obj["cloudEnabled"] = cloudEnabled;
 }
 
 static void serializeAppUnitsSettings(JsonObject obj)
@@ -2015,6 +2057,35 @@ static void serializeAppMqttSettings(JsonObject obj)
   obj["publishLight"] = mqttPublishLight;
 }
 
+static void serializeAppCloudSettings(JsonObject obj)
+{
+  const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
+  obj["enabled"] = cloudEnabled;
+  obj["apiBaseUrl"] = cloudApiBaseUrl;
+  obj["relayUrl"] = cloudRelayUrl;
+  obj["heartbeatIntervalMs"] = cloudHeartbeatIntervalMs;
+  obj["reconnectInitialMs"] = cloudReconnectInitialMs;
+  obj["reconnectMaxMs"] = cloudReconnectMaxMs;
+  obj["registered"] = cloud.registered;
+  obj["relayConnected"] = cloud.relayConnected;
+  obj["relayAuthenticated"] = cloud.relayAuthenticated;
+  obj["jobRunning"] = cloud.jobRunning;
+  obj["identityReady"] = cloud.identityReady;
+  obj["timeReady"] = cloud.timeReady;
+  obj["lastRegisterMs"] = cloud.lastRegisterMs;
+  obj["lastHeartbeatMs"] = cloud.lastHeartbeatMs;
+  obj["nextRegisterAttemptMs"] = cloud.nextRegisterAttemptMs;
+  obj["nextRelayAttemptMs"] = cloud.nextRelayAttemptMs;
+  obj["registerBackoffMs"] = cloud.registerBackoffMs;
+  obj["relayBackoffMs"] = cloud.relayBackoffMs;
+  obj["heartbeatFailures"] = cloud.heartbeatFailures;
+  obj["lastError"] = cloud.lastError;
+  obj["lastRegisterStatusCode"] = cloud.lastRegisterStatusCode;
+  obj["lastHeartbeatStatusCode"] = cloud.lastHeartbeatStatusCode;
+  obj["lastRegisterDetail"] = cloud.lastRegisterDetail;
+  obj["lastHeartbeatDetail"] = cloud.lastHeartbeatDetail;
+}
+
 static void serializeAppSettingsSection(JsonObject root, const char *section)
 {
   JsonObject obj = root[section].to<JsonObject>();
@@ -2044,6 +2115,8 @@ static void serializeAppSettingsSection(JsonObject root, const char *section)
     serializeAppSoundSettings(obj);
   else if (strcmp(section, "mqtt") == 0)
     serializeAppMqttSettings(obj);
+  else if (strcmp(section, "cloud") == 0)
+    serializeAppCloudSettings(obj);
 }
 
 static bool isKnownAppSettingsSection(const char *section)
@@ -2056,7 +2129,7 @@ static bool isKnownAppSettingsSection(const char *section)
   return false;
 }
 
-static String buildAppSettingsJson(const char *section = nullptr)
+static String buildAppSettingsJson(const char *section)
 {
   JsonDocument doc;
   if (section && *section)
@@ -2087,6 +2160,8 @@ static String buildAppSettingsJson(const char *section = nullptr)
       serializeAppSoundSettings(doc.to<JsonObject>());
     else if (strcmp(section, "mqtt") == 0)
       serializeAppMqttSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "cloud") == 0)
+      serializeAppCloudSettings(doc.to<JsonObject>());
   }
   else
   {
@@ -2155,7 +2230,7 @@ static size_t collectChangedAppSettingsSections(const AppSettingsSnapshot *snaps
 
 static bool broadcastChangedAppSettingsSections(const AppSettingsSnapshot *snapshots,
                                                 size_t snapshotCount,
-                                                bool collapseMultipleToAll = true)
+                                                bool collapseMultipleToAll)
 {
   const char *changed[kAppSettingsSectionCount] = {};
   size_t changedCount = collectChangedAppSettingsSections(
@@ -2215,6 +2290,10 @@ static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
   {
     saveMqttSettings();
     mqttApplySettings();
+  }
+  if (dirty.weather)
+  {
+    // no-op hook placeholder kept for symmetry with remote cloud bridge
   }
 }
 
@@ -3127,6 +3206,63 @@ static bool applyAppMqttSettings(JsonObjectConst obj, JsonObject fieldErrors, Ap
   return fieldErrors.size() == 0;
 }
 
+static bool applyAppCloudSettings(JsonObjectConst obj, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty)
+{
+  (void)dirty;
+  if (obj.isNull())
+    return true;
+
+  if (!obj["enabled"].isNull())
+    cloudEnabled = obj["enabled"].as<bool>();
+
+  if (!obj["apiBaseUrl"].isNull())
+  {
+    cloudApiBaseUrl = obj["apiBaseUrl"].as<String>();
+    cloudApiBaseUrl.trim();
+    if (cloudApiBaseUrl.isEmpty())
+      setFieldError(fieldErrors, "apiBaseUrl", "must not be empty");
+  }
+
+  if (!obj["relayUrl"].isNull())
+  {
+    cloudRelayUrl = obj["relayUrl"].as<String>();
+    cloudRelayUrl.trim();
+    if (cloudRelayUrl.isEmpty())
+      setFieldError(fieldErrors, "relayUrl", "must not be empty");
+  }
+
+  if (!obj["heartbeatIntervalMs"].isNull())
+  {
+    uint32_t value = obj["heartbeatIntervalMs"].as<uint32_t>();
+    if (value < 10000U || value > 300000U)
+      setFieldError(fieldErrors, "heartbeatIntervalMs", "must be between 10000 and 300000");
+    else
+      cloudHeartbeatIntervalMs = value;
+  }
+
+  if (!obj["reconnectInitialMs"].isNull())
+  {
+    uint32_t value = obj["reconnectInitialMs"].as<uint32_t>();
+    if (value < 1000U || value > 120000U)
+      setFieldError(fieldErrors, "reconnectInitialMs", "must be between 1000 and 120000");
+    else
+      cloudReconnectInitialMs = value;
+  }
+
+  if (!obj["reconnectMaxMs"].isNull())
+  {
+    uint32_t value = obj["reconnectMaxMs"].as<uint32_t>();
+    if (value < cloudReconnectInitialMs || value > 600000U)
+      setFieldError(fieldErrors, "reconnectMaxMs", "must be >= reconnectInitialMs and <= 600000");
+    else
+      cloudReconnectMaxMs = value;
+  }
+
+  if (fieldErrors.size() == 0)
+    saveCloudSettings();
+  return fieldErrors.size() == 0;
+}
+
 static bool applyAppSettingsSection(const char *section, JsonVariantConst value, JsonObject fieldErrors, AppSettingsDirtyFlags &dirty)
 {
   JsonObjectConst obj = value.as<JsonObjectConst>();
@@ -3162,8 +3298,480 @@ static bool applyAppSettingsSection(const char *section, JsonVariantConst value,
     return applyAppSoundSettings(obj, fieldErrors, dirty);
   if (strcmp(section, "mqtt") == 0)
     return applyAppMqttSettings(obj, fieldErrors, dirty);
+  if (strcmp(section, "cloud") == 0)
+    return applyAppCloudSettings(obj, fieldErrors, dirty);
 
   setFieldError(fieldErrors, "section", "unsupported section");
+  return false;
+}
+
+static void setAppApiJsonBody(AppApiResponse &response, int statusCode, const String &body)
+{
+  response.statusCode = statusCode;
+  response.contentType = "application/json";
+  response.body = body;
+}
+
+static String formatUptime(unsigned long seconds);
+static String formatEpochLocalTime(uint32_t epoch);
+
+static String buildStatusJsonPayload()
+{
+  size_t heapTotal = 327680; // align with System Info modal
+  size_t heapFree = ESP.getFreeHeap();
+  if (heapFree > heapTotal) {
+    heapTotal = heapFree;
+  }
+  size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
+
+  JsonDocument doc;
+  String dispTemp;
+  String humidityValue;
+  String conditionsValue = str_Weather_Conditions;
+  uint32_t weatherUpdatedEpoch = 0;
+
+  if (isDataSourceForecastModel()) {
+    dispTemp = fmtTemp(currentCond.temp, 0);
+    humidityValue = (currentCond.humidity >= 0) ? String(currentCond.humidity) : "--";
+    if (!currentCond.cond.isEmpty()) conditionsValue = currentCond.cond;
+    weatherUpdatedEpoch = currentCond.time;
+  } else {
+    dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
+    humidityValue = str_Humd;
+  }
+
+  doc["wifiSSID"] = WiFi.SSID();
+  doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
+  doc["hostname"] = deviceHostname;
+  doc["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
+  doc["discoveredName"] = wxv::cloud::deviceIdentity().name;
+  doc["firmwareVersion"] = String(__DATE__) + " " + String(__TIME__);
+  doc["ip"] = WiFi.localIP().toString();
+  doc["mac"] = WiFi.macAddress();
+  doc["rssi"] = WiFi.RSSI();
+  float luxNow = getLastRawLux();
+  doc["lux"] = isfinite(luxNow) ? luxNow : NAN;
+
+  unsigned long uptimeSec = millis() / 1000UL;
+  doc["uptimeSec"] = uptimeSec;
+  doc["uptime"] = formatUptime(uptimeSec);
+
+  const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
+  JsonObject cloudObj = doc["cloud"].to<JsonObject>();
+  cloudObj["enabled"] = cloudEnabled;
+  cloudObj["identityReady"] = cloud.identityReady;
+  cloudObj["timeReady"] = cloud.timeReady;
+  cloudObj["registered"] = cloud.registered;
+  cloudObj["relayConnected"] = cloud.relayConnected;
+  cloudObj["relayAuthenticated"] = cloud.relayAuthenticated;
+  cloudObj["jobRunning"] = cloud.jobRunning;
+  cloudObj["lastRegisterMs"] = cloud.lastRegisterMs;
+  cloudObj["lastHeartbeatMs"] = cloud.lastHeartbeatMs;
+  cloudObj["nextRegisterAttemptMs"] = cloud.nextRegisterAttemptMs;
+  cloudObj["nextRelayAttemptMs"] = cloud.nextRelayAttemptMs;
+  cloudObj["registerBackoffMs"] = cloud.registerBackoffMs;
+  cloudObj["relayBackoffMs"] = cloud.relayBackoffMs;
+  cloudObj["heartbeatFailures"] = cloud.heartbeatFailures;
+  cloudObj["lastError"] = cloud.lastError;
+  cloudObj["lastRegisterStatusCode"] = cloud.lastRegisterStatusCode;
+  cloudObj["lastHeartbeatStatusCode"] = cloud.lastHeartbeatStatusCode;
+  cloudObj["lastRegisterDetail"] = cloud.lastRegisterDetail;
+  cloudObj["lastHeartbeatDetail"] = cloud.lastHeartbeatDetail;
+
+  doc["freeHeap"] = heapFree;
+  doc["heapTotal"] = heapTotal;
+  doc["heapFree"] = heapFree;
+  doc["heapUsed"] = heapUsed;
+  doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
+
+  size_t fsTotal = SPIFFS.totalBytes();
+  size_t fsUsed = SPIFFS.usedBytes();
+  size_t fsFree = (fsTotal > fsUsed) ? (fsTotal - fsUsed) : 0;
+  doc["fsTotal"] = fsTotal;
+  doc["fsUsed"] = fsUsed;
+  doc["fsFree"] = fsFree;
+  doc["fsUsedPercent"] = (fsTotal > 0) ? static_cast<uint8_t>((fsUsed * 100 + fsTotal / 2) / fsTotal) : 0;
+
+  size_t sketchSize = ESP.getSketchSize();
+  const esp_partition_t *running = esp_ota_get_running_partition();
+  size_t flashTotal = running ? running->size : 0;
+  size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+  if (flashTotal == 0) {
+    size_t sketchFree = ESP.getFreeSketchSpace();
+    flashTotal = sketchSize + sketchFree;
+    flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
+  }
+  doc["flashTotal"] = flashTotal;
+  doc["flashUsed"] = sketchSize;
+  doc["flashFree"] = flashFree;
+  doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
+
+  doc["dataSource"] = dataSource;
+  doc["dataSourceLabel"] = dataSourceLabel(dataSource);
+  bool screenOff = isScreenOff();
+  doc["screenOff"] = screenOff;
+  doc["screen"] = static_cast<uint8_t>(currentScreen);
+  doc["screenLabel"] = screenOff ? "Screen Off" : screenModeLabel(currentScreen);
+
+  doc["temp"] = dispTemp;
+  doc["humidity"] = humidityValue;
+  doc["conditions"] = conditionsValue;
+  doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
+  doc["locationLat"] = noaaLatitude;
+  doc["locationLon"] = noaaLongitude;
+  doc["weatherUpdatedEpoch"] = weatherUpdatedEpoch;
+  doc["weatherUpdated"] = formatEpochLocalTime(weatherUpdatedEpoch);
+
+  if (!isnan(SCD40_temp)) {
+    float indoorCal = SCD40_temp + tempOffset;
+    doc["indoorTemp"] = fmtTemp(indoorCal, 1);
+    doc["indoorTempRaw"] = indoorCal;
+    doc["indoorTempSensor"] = SCD40_temp;
+  }
+  if (!isnan(SCD40_hum)) {
+    float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
+    if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
+    if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
+    doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
+    doc["indoorHumidityRaw"] = indoorHumCal;
+    doc["indoorHumiditySensor"] = SCD40_hum;
+  }
+  if (SCD40_co2 > 0) {
+    doc["co2"] = SCD40_co2;
+  }
+
+  if (!isnan(aht20_temp)) {
+    float ahtCal = aht20_temp + tempOffset;
+    doc["ahtTemp"] = fmtTemp(ahtCal, 1);
+    doc["ahtTempRaw"] = ahtCal;
+    doc["ahtTempSensor"] = aht20_temp;
+  }
+  if (!isnan(aht20_hum)) {
+    float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
+    if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
+    if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
+    doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
+    doc["ahtHumidityRaw"] = ahtHumCal;
+    doc["ahtHumiditySensor"] = aht20_hum;
+  }
+  if (!isnan(bmp280_pressure)) {
+    doc["pressure"] = fmtPress(bmp280_pressure, 1);
+    doc["pressureRaw"] = bmp280_pressure;
+  }
+
+  const IndoorDerivedState indoorDerived = buildIndoorDerivedState();
+  if (indoorDerived.eqi >= 0)
+    doc["indoorEqi"] = indoorDerived.eqi;
+  doc["indoorBand"] = indoorBandLabel(indoorDerived.overallBand);
+  doc["indoorFreshness"] = indoorDerived.freshness;
+  doc["indoorSummary"] = indoorDerived.summary;
+  doc["indoorAction"] = indoorDerived.action;
+  doc["indoorTrend"] = indoorDerived.trend;
+  doc["indoorSensorStatus"] = indoorDerived.sensorStatus;
+  doc["indoorSensorAgeSec"] = indoorDerived.sensorAgeSec;
+  if (isfinite(indoorDerived.co2SlopePpmPerHour))
+    doc["co2SlopePpmPerHour"] = serialized(String(indoorDerived.co2SlopePpmPerHour, 1));
+  else
+    doc["co2SlopePpmPerHour"] = nullptr;
+  if (isfinite(indoorDerived.co2Delta30m))
+    doc["co2Delta30m"] = serialized(String(indoorDerived.co2Delta30m, 0));
+  else
+    doc["co2Delta30m"] = nullptr;
+
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+static String buildValidationErrorPayload(JsonObject fieldErrors)
+{
+  JsonDocument doc;
+  doc["ok"] = false;
+  doc["error"] = "validation_failed";
+  JsonObject out = doc["fieldErrors"].to<JsonObject>();
+  for (JsonPair pair : fieldErrors)
+    out[pair.key().c_str()] = pair.value().as<const char *>();
+
+  String payload;
+  serializeJson(doc, payload);
+  return payload;
+}
+
+bool handleAppApiRequest(const String &method, const String &path, const String &requestBody, AppApiResponse &response)
+{
+  String normalizedMethod = method;
+  normalizedMethod.trim();
+  normalizedMethod.toUpperCase();
+
+  String normalizedPath = path;
+  normalizedPath.trim();
+  if (normalizedPath.isEmpty())
+    return false;
+
+  if (normalizedMethod == "GET")
+  {
+    if (normalizedPath == "/status.json")
+    {
+      setAppApiJsonBody(response, 200, buildStatusJsonPayload());
+      return true;
+    }
+    if (normalizedPath == "/api/app/state")
+    {
+      refreshAppRuntimeState();
+      setAppApiJsonBody(response, 200, buildAppStateJson(g_appRuntime));
+      return true;
+    }
+    if (normalizedPath == "/api/app/dashboard")
+    {
+      refreshAppRuntimeState();
+      setAppApiJsonBody(response, 200, buildAppDashboardJson(g_appRuntime));
+      return true;
+    }
+    if (normalizedPath == "/api/app/alerts")
+    {
+      refreshAppRuntimeState();
+      setAppApiJsonBody(response, 200, buildAppAlertsJson(g_appRuntime));
+      return true;
+    }
+    if (normalizedPath == "/api/app/lightning")
+    {
+      refreshAppRuntimeState();
+      setAppApiJsonBody(response, 200, buildAppLightningJson(g_appRuntime));
+      return true;
+    }
+    if (normalizedPath == "/api/app/device")
+    {
+      refreshAppRuntimeState();
+      setAppApiJsonBody(response, 200, buildAppDeviceJson(g_appRuntime));
+      return true;
+    }
+    if (normalizedPath == "/api/app/settings")
+    {
+      setAppApiJsonBody(response, 200, buildAppSettingsJson(nullptr));
+      return true;
+    }
+    if (normalizedPath.startsWith("/api/app/settings/"))
+    {
+      String section = normalizedPath.substring(strlen("/api/app/settings/"));
+      if (!isKnownAppSettingsSection(section.c_str()))
+        return false;
+      setAppApiJsonBody(response, 200, buildAppSettingsJson(section.c_str()));
+      return true;
+    }
+    return false;
+  }
+
+  if (normalizedMethod != "POST")
+    return false;
+
+  if (normalizedPath == "/api/app/remote")
+  {
+    JsonDocument doc;
+    if (deserializeJson(doc, requestBody) != DeserializationError::Ok)
+    {
+      setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return true;
+    }
+
+    String button = doc["button"].as<String>();
+    button.trim();
+    if (button.isEmpty())
+    {
+      setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"missing button\"}");
+      return true;
+    }
+    if (!enqueueAppButton(button))
+    {
+      setAppApiJsonBody(response, 503, "{\"ok\":false,\"error\":\"busy or invalid button\"}");
+      return true;
+    }
+
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["button"] = button;
+    resp["queued"] = true;
+    String payload;
+    serializeJson(resp, payload);
+    setAppApiJsonBody(response, 200, payload);
+    return true;
+  }
+
+  if (normalizedPath == "/api/app/action")
+  {
+    JsonDocument doc;
+    if (deserializeJson(doc, requestBody) != DeserializationError::Ok)
+    {
+      setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return true;
+    }
+
+    String action = doc["action"].as<String>();
+    action.trim();
+    action.toLowerCase();
+
+    bool ok = false;
+    bool queued = false;
+    String allSettingsSnapshot = buildAppSettingsJson(nullptr);
+    if (action == "sync_ntp")
+    {
+      ok = true;
+      queued = queueNtpSyncTask();
+    }
+    else if (action == "refresh_alerts")
+    {
+      NoaaManualFetchResult result = requestNoaaManualFetch();
+      ok = (result == NOAA_MANUAL_FETCH_STARTED || result == NOAA_MANUAL_FETCH_BUSY);
+      queued = (result == NOAA_MANUAL_FETCH_STARTED);
+    }
+    else if (action == "reboot")
+    {
+      g_webPendingReboot = true;
+      g_webRebootAtMs = millis() + 150;
+      ok = true;
+      queued = true;
+    }
+    else if (action == "reconnect_wifi")
+    {
+      wifiMarkManualConnect();
+      ok = startBackgroundWifiReconnect(isAccessPointActive());
+      queued = ok;
+    }
+    else if (action == "save_settings")
+    {
+      saveAllSettings();
+      saveWorldTimeSettings();
+      refreshAppRuntimeState(true);
+      ok = true;
+    }
+    else if (action == "restore_defaults")
+    {
+      g_webPendingQuickRestore = true;
+      broadcastAppSettingsUpdate("all");
+      ok = true;
+      queued = true;
+    }
+    JsonDocument resp;
+    resp["ok"] = ok;
+    resp["action"] = action;
+    resp["queued"] = queued;
+    if (!ok)
+      resp["error"] = "unsupported action";
+    String payload;
+    serializeJson(resp, payload);
+    setAppApiJsonBody(response, ok ? 200 : 400, payload);
+    if (ok && action == "save_settings" && buildAppSettingsJson(nullptr) != allSettingsSnapshot)
+      broadcastAppSettingsUpdate("all");
+    return true;
+  }
+
+  if (normalizedPath == "/api/app/settings")
+  {
+    JsonDocument doc;
+    if (deserializeJson(doc, requestBody) != DeserializationError::Ok || !doc.is<JsonObject>())
+    {
+      setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return true;
+    }
+
+    JsonDocument errorsDoc;
+    JsonObject allErrors = errorsDoc.to<JsonObject>();
+    AppSettingsDirtyFlags dirty;
+    JsonObjectConst root = doc.as<JsonObjectConst>();
+    AppSettingsSnapshot snapshots[kAppSettingsSectionCount];
+    size_t snapshotCount = 0;
+    for (JsonPairConst pair : root)
+    {
+      const char *section = pair.key().c_str();
+      if (!isKnownAppSettingsSection(section))
+        continue;
+
+      bool alreadyCaptured = false;
+      for (size_t i = 0; i < snapshotCount; ++i)
+      {
+        if (strcmp(snapshots[i].section, section) == 0)
+        {
+          alreadyCaptured = true;
+          break;
+        }
+      }
+      if (!alreadyCaptured && snapshotCount < kAppSettingsSectionCount)
+        snapshots[snapshotCount++] = captureAppSettingsSnapshot(section);
+
+      JsonDocument sectionErrorsDoc;
+      JsonObject sectionErrors = sectionErrorsDoc.to<JsonObject>();
+      applyAppSettingsSection(section, pair.value(), sectionErrors, dirty);
+      if (sectionErrors.size() != 0)
+      {
+        JsonObject out = allErrors[section].to<JsonObject>();
+        for (JsonPair item : sectionErrors)
+          out[item.key().c_str()] = item.value().as<const char *>();
+      }
+    }
+
+    if (allErrors.size() != 0)
+    {
+      JsonDocument resp;
+      resp["ok"] = false;
+      resp["error"] = "validation_failed";
+      JsonObject out = resp["fieldErrors"].to<JsonObject>();
+      for (JsonPair pair : allErrors)
+      {
+        JsonObject sectionOut = out[pair.key().c_str()].to<JsonObject>();
+        for (JsonPairConst item : pair.value().as<JsonObjectConst>())
+          sectionOut[item.key().c_str()] = item.value().as<const char *>();
+      }
+      String payload;
+      serializeJson(resp, payload);
+      setAppApiJsonBody(response, 400, payload);
+      return true;
+    }
+
+    persistAppSettingsChanges(dirty);
+    refreshAppRuntimeState(true);
+    broadcastChangedAppSettingsSections(snapshots, snapshotCount, true);
+    setAppApiJsonBody(response, 200, "{\"ok\":true,\"saved\":true,\"applied\":true}");
+    return true;
+  }
+
+  if (normalizedPath.startsWith("/api/app/settings/"))
+  {
+    String section = normalizedPath.substring(strlen("/api/app/settings/"));
+    if (!isKnownAppSettingsSection(section.c_str()))
+      return false;
+
+    JsonDocument doc;
+    if (deserializeJson(doc, requestBody) != DeserializationError::Ok || !doc.is<JsonObject>())
+    {
+      setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
+      return true;
+    }
+
+    JsonDocument errorDoc;
+    JsonObject fieldErrors = errorDoc.to<JsonObject>();
+    AppSettingsDirtyFlags dirty;
+    AppSettingsSnapshot snapshot = captureAppSettingsSnapshot(section.c_str());
+    applyAppSettingsSection(section.c_str(), doc.as<JsonObjectConst>(), fieldErrors, dirty);
+    if (fieldErrors.size() != 0)
+    {
+      setAppApiJsonBody(response, 400, buildValidationErrorPayload(fieldErrors));
+      return true;
+    }
+
+    persistAppSettingsChanges(dirty);
+    refreshAppRuntimeState(true);
+    broadcastChangedAppSettingsSections(&snapshot, 1, false);
+
+    JsonDocument resp;
+    resp["ok"] = true;
+    resp["saved"] = true;
+    resp["applied"] = true;
+    resp["section"] = section;
+    String payload;
+    serializeJson(resp, payload);
+    setAppApiJsonBody(response, 200, payload);
+    return true;
+  }
+
   return false;
 }
 
@@ -3654,153 +4262,14 @@ void setupWebServer() {
 #endif
 
   server.on("/status.json", HTTP_GET, [](AsyncWebServerRequest *req) {
-    static String cachedPayload;
-    static uint32_t cacheBuiltAt = 0;
-    uint32_t now = millis();
-    bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 2000u;
-    if (refreshCache) {
-      // Capture heap before request-local JSON/String allocations so this aligns
-      // with System Info style reporting.
-      size_t heapTotal = 327680; // align with System Info modal
-      size_t heapFree = ESP.getFreeHeap();
-      if (heapFree > heapTotal) {
-        heapTotal = heapFree;
+      static String cachedPayload;
+      static uint32_t cacheBuiltAt = 0;
+      uint32_t now = millis();
+      bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 2000u;
+      if (refreshCache) {
+        cachedPayload = buildStatusJsonPayload();
+        cacheBuiltAt = now;
       }
-      size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
-
-      JsonDocument doc;
-      String dispTemp;
-      String humidityValue;
-      String conditionsValue = str_Weather_Conditions;
-      uint32_t weatherUpdatedEpoch = 0;
-
-      if (isDataSourceForecastModel()) {
-        dispTemp = fmtTemp(currentCond.temp, 0);
-        humidityValue = (currentCond.humidity >= 0) ? String(currentCond.humidity) : "--";
-        if (!currentCond.cond.isEmpty()) conditionsValue = currentCond.cond;
-        weatherUpdatedEpoch = currentCond.time;
-      } else {
-        dispTemp = fmtTemp(atof(str_Temp.c_str()), 0);
-        humidityValue = str_Humd;
-      }
-
-      doc["wifiSSID"] = WiFi.SSID();
-      doc["wifiStatus"] = (WiFi.status() == WL_CONNECTED) ? "Connected" : "Disconnected";
-      doc["hostname"] = deviceHostname;
-      doc["ip"] = WiFi.localIP().toString();
-      doc["mac"] = WiFi.macAddress();
-      doc["rssi"] = WiFi.RSSI();
-      float luxNow = getLastRawLux();
-      doc["lux"] = isfinite(luxNow) ? luxNow : NAN;
-
-      unsigned long uptimeSec = millis() / 1000UL;
-      doc["uptimeSec"] = uptimeSec;
-      doc["uptime"] = formatUptime(uptimeSec);
-
-      doc["freeHeap"] = heapFree; // legacy field
-      doc["heapTotal"] = heapTotal;
-      doc["heapFree"] = heapFree;
-      doc["heapUsed"] = heapUsed;
-      doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
-
-      size_t fsTotal = SPIFFS.totalBytes();
-      size_t fsUsed = SPIFFS.usedBytes();
-      size_t fsFree = (fsTotal > fsUsed) ? (fsTotal - fsUsed) : 0;
-      doc["fsTotal"] = fsTotal;
-      doc["fsUsed"] = fsUsed;
-      doc["fsFree"] = fsFree;
-      doc["fsUsedPercent"] = (fsTotal > 0) ? static_cast<uint8_t>((fsUsed * 100 + fsTotal / 2) / fsTotal) : 0;
-
-      size_t sketchSize = ESP.getSketchSize();
-      const esp_partition_t *running = esp_ota_get_running_partition();
-      size_t flashTotal = running ? running->size : 0;
-      size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
-      if (flashTotal == 0) {
-        size_t sketchFree = ESP.getFreeSketchSpace();
-        flashTotal = sketchSize + sketchFree;
-        flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
-      }
-      doc["flashTotal"] = flashTotal;
-      doc["flashUsed"] = sketchSize;
-      doc["flashFree"] = flashFree;
-      doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
-
-      doc["dataSource"] = dataSource;
-      doc["dataSourceLabel"] = dataSourceLabel(dataSource);
-      bool screenOff = isScreenOff();
-      doc["screenOff"] = screenOff;
-      doc["screen"] = static_cast<uint8_t>(currentScreen);
-      doc["screenLabel"] = screenOff ? "Screen Off" : screenModeLabel(currentScreen);
-
-      doc["temp"] = dispTemp;
-      doc["humidity"] = (isDataSourceForecastModel() && currentCond.humidity >= 0) ? String(currentCond.humidity) : str_Humd;
-      doc["conditions"] = (isDataSourceForecastModel() && currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
-      doc["time"] = String(chr_t_hour) + ":" + String(chr_t_minute) + ":" + String(chr_t_second);
-      doc["locationLat"] = noaaLatitude;
-      doc["locationLon"] = noaaLongitude;
-      doc["weatherUpdatedEpoch"] = weatherUpdatedEpoch;
-      doc["weatherUpdated"] = formatEpochLocalTime(weatherUpdatedEpoch);
-
-      if (!isnan(SCD40_temp)) {
-        float indoorCal = SCD40_temp + tempOffset;
-        doc["indoorTemp"] = fmtTemp(indoorCal, 1);
-        doc["indoorTempRaw"] = indoorCal;
-        doc["indoorTempSensor"] = SCD40_temp;
-      }
-      if (!isnan(SCD40_hum)) {
-        float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
-        if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
-        if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
-        doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
-        doc["indoorHumidityRaw"] = indoorHumCal;
-        doc["indoorHumiditySensor"] = SCD40_hum;
-      }
-      if (SCD40_co2 > 0) {
-        doc["co2"] = SCD40_co2;
-      }
-
-      if (!isnan(aht20_temp)) {
-        float ahtCal = aht20_temp + tempOffset;
-        doc["ahtTemp"] = fmtTemp(ahtCal, 1);
-        doc["ahtTempRaw"] = ahtCal;
-        doc["ahtTempSensor"] = aht20_temp;
-      }
-      if (!isnan(aht20_hum)) {
-        float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
-        if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
-        if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
-        doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
-        doc["ahtHumidityRaw"] = ahtHumCal;
-        doc["ahtHumiditySensor"] = aht20_hum;
-      }
-      if (!isnan(bmp280_pressure)) {
-        doc["pressure"] = fmtPress(bmp280_pressure, 1);
-        doc["pressureRaw"] = bmp280_pressure;
-      }
-
-      const IndoorDerivedState indoorDerived = buildIndoorDerivedState();
-      if (indoorDerived.eqi >= 0)
-        doc["indoorEqi"] = indoorDerived.eqi;
-      doc["indoorBand"] = indoorBandLabel(indoorDerived.overallBand);
-      doc["indoorFreshness"] = indoorDerived.freshness;
-      doc["indoorSummary"] = indoorDerived.summary;
-      doc["indoorAction"] = indoorDerived.action;
-      doc["indoorTrend"] = indoorDerived.trend;
-      doc["indoorSensorStatus"] = indoorDerived.sensorStatus;
-      doc["indoorSensorAgeSec"] = indoorDerived.sensorAgeSec;
-      if (isfinite(indoorDerived.co2SlopePpmPerHour))
-        doc["co2SlopePpmPerHour"] = serialized(String(indoorDerived.co2SlopePpmPerHour, 1));
-      else
-        doc["co2SlopePpmPerHour"] = nullptr;
-      if (isfinite(indoorDerived.co2Delta30m))
-        doc["co2Delta30m"] = serialized(String(indoorDerived.co2Delta30m, 0));
-      else
-        doc["co2Delta30m"] = nullptr;
-
-      cachedPayload = "";
-      serializeJson(doc, cachedPayload);
-      cacheBuiltAt = now;
-    }
 
     AsyncWebServerResponse *res = req->beginResponse(200, "application/json", cachedPayload);
     res->addHeader("Cache-Control", "no-store, max-age=0");
@@ -5051,9 +5520,10 @@ void setupWebServer() {
   registerAppSettingsGet("/api/app/settings/world-time", "world-time");
   registerAppSettingsGet("/api/app/settings/sound", "sound");
   registerAppSettingsGet("/api/app/settings/mqtt", "mqtt");
+  registerAppSettingsGet("/api/app/settings/cloud", "cloud");
 
   server.on("/api/app/settings", HTTP_GET, [](AsyncWebServerRequest *req) {
-    sendAppJson(req, buildAppSettingsJson());
+    sendAppJson(req, buildAppSettingsJson(nullptr));
   });
 
   registerAppSettingsPost("/api/app/settings/device", "device");
@@ -5069,6 +5539,7 @@ void setupWebServer() {
   registerAppSettingsPost("/api/app/settings/world-time", "world-time");
   registerAppSettingsPost("/api/app/settings/sound", "sound");
   registerAppSettingsPost("/api/app/settings/mqtt", "mqtt");
+  registerAppSettingsPost("/api/app/settings/cloud", "cloud");
 
   server.on("/api/app/remote", HTTP_POST,
     [](AsyncWebServerRequest *req) {},
@@ -5200,7 +5671,7 @@ void setupWebServer() {
 
       persistAppSettingsChanges(dirty);
       refreshAppRuntimeState(true);
-      broadcastChangedAppSettingsSections(snapshots, snapshotCount);
+      broadcastChangedAppSettingsSections(snapshots, snapshotCount, true);
       req->send(200, "application/json", "{\"ok\":true,\"saved\":true,\"applied\":true}");
     }
   );
@@ -5241,7 +5712,7 @@ void setupWebServer() {
 
       bool ok = false;
       bool queued = false;
-      String allSettingsSnapshot = buildAppSettingsJson();
+      String allSettingsSnapshot = buildAppSettingsJson(nullptr);
       if (action == "sync_ntp") {
         ok = true;
         queued = queueNtpSyncTask();
@@ -5280,7 +5751,7 @@ void setupWebServer() {
       String payload;
       serializeJson(resp, payload);
       req->send(ok ? 200 : 400, "application/json", payload);
-      if (ok && action == "save_settings" && buildAppSettingsJson() != allSettingsSnapshot)
+      if (ok && action == "save_settings" && buildAppSettingsJson(nullptr) != allSettingsSnapshot)
         broadcastAppSettingsUpdate("all");
     }
   );
@@ -5390,7 +5861,16 @@ void setupWebServer() {
         client->close(1008, "too many clients");
         return;
       }
+      ++g_activeAppWsClients;
+      wxv::cloud::cloudManager().noteLocalAppConnectionState(true);
       client->text(appHelloMessage());
+      return;
+    }
+    if (type == WS_EVT_DISCONNECT) {
+      if (g_activeAppWsClients > 0) {
+        --g_activeAppWsClients;
+      }
+      wxv::cloud::cloudManager().noteLocalAppConnectionState(g_activeAppWsClients > 0);
       return;
     }
     if (type == WS_EVT_DATA) {

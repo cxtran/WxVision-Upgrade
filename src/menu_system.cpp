@@ -8,6 +8,59 @@
 #include "settings.h"
 #include "system.h"
 #include "sensors.h"
+#include "cloud_manager.h"
+#include "device_identity.h"
+
+namespace
+{
+void rebuildSystemInfoModal()
+{
+    const uint32_t flashChipSize = ESP.getFlashChipSize();
+    const uint32_t sketchSize = ESP.getSketchSize();
+    (void)flashChipSize;
+
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    const uint32_t appPartition = running ? running->size : 0;
+
+    const uint32_t heapFree = ESP.getFreeHeap();
+    const uint32_t heapTotal = 327680;
+    const uint32_t heapUsed = heapTotal - heapFree;
+    const float heapPct = 100.0f * heapUsed / heapTotal;
+    const float flashPct = (appPartition > 0) ? (100.0f * sketchSize / appPartition) : 0.0f;
+
+    const uint32_t spiffsTotal = SPIFFS.totalBytes();
+    const uint32_t spiffsUsed = SPIFFS.usedBytes();
+    const float spiffsPct = (spiffsTotal > 0) ? (100.0f * spiffsUsed / spiffsTotal) : 0.0f;
+
+    const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
+    const String cloudState = !cloudEnabled ? "disabled"
+                              : cloud.registered ? "registered"
+                              : "pending";
+    const String relayState = cloud.relayConnected ? "connected" : "disconnected";
+    const String deviceUuid = wxv::cloud::deviceIdentity().uuid;
+
+    String lines[] = {
+        "FW: 1.0.0",
+        "IP: " + WiFi.localIP().toString(),
+        "mDNS: " + deviceHostname + ".local",
+        "MAC: " + WiFi.macAddress(),
+        "RSSI: " + String(WiFi.RSSI()) + " dBm",
+        "Device UUID: " + deviceUuid,
+        "Cloud: " + cloudState,
+        "Relay: " + relayState,
+        "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
+        "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
+        "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"};
+    InfoFieldType types[] = {
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
+        InfoLabel, InfoLabel, InfoLabel,
+        InfoLabel, InfoLabel, InfoLabel};
+
+    sysInfoModal.setLines(lines, types, 11);
+    sysInfoModal.setKeepOpenOnSelect(true);
+    sysInfoModal.setCallback([](bool, int) {});
+}
+} // namespace
 
 void showSystemModal()
 {
@@ -181,39 +234,6 @@ void showSystemInfoScreen()
     currentMenuLevel = MENU_SYSINFO; // You can define this enum, or use MENU_SYSTEM if preferred
     menuActive = true;
 
-    uint32_t flashChipSize = ESP.getFlashChipSize();
-    uint32_t sketchSize = ESP.getSketchSize();
-
-    const esp_partition_t *running = esp_ota_get_running_partition();
-    uint32_t appPartition = running ? running->size : 0; // dynamic slot size
-
-    uint32_t heapFree = ESP.getFreeHeap();
-    uint32_t heapTotal = 327680;
-    uint32_t heapUsed = heapTotal - heapFree;
-    float heapPct = 100.0 * heapUsed / heapTotal;
-    float flashPct = (appPartition > 0) ? (100.0 * sketchSize / appPartition) : 0;
-
-    uint32_t spiffsTotal = SPIFFS.totalBytes();
-    uint32_t spiffsUsed = SPIFFS.usedBytes();
-    float spiffsPct = (spiffsTotal > 0) ? (100.0 * spiffsUsed / spiffsTotal) : 0;
-
-    String lines[] = {
-        "FW: 1.0.0",
-        "IP: " + WiFi.localIP().toString(),
-        "mDNS: " + deviceHostname + ".local",
-        "MAC: " + WiFi.macAddress(),
-        "RSSI: " + String(WiFi.RSSI()) + " dBm",
-        "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
-        "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
-        "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"};
-    InfoFieldType types[] = {InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel};
-    sysInfoModal.setLines(lines, types, 8);
-    // Read-only screen: keep OK/Enter from triggering modal close.
-    // Back/Cancel/Menu still exits via InfoModal cancel path.
-    sysInfoModal.setKeepOpenOnSelect(true);
-
-    // Minimal callback enables stack-based X/cancel navigation!
-    sysInfoModal.setCallback([](bool, int) {});
-
+    rebuildSystemInfoModal();
     sysInfoModal.show();
 }

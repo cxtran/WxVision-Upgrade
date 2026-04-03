@@ -49,6 +49,7 @@
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
 #include "mqtt_client.h"
+#include "cloud_manager.h"
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -505,9 +506,24 @@ void setup()
     {
         Serial.println("RTC initialised successfully.");
         splashUpdate("RTC Check", 4, 6);
+
+        DateTime rtcNow = rtc.now();
+        if (rtcNow.unixtime() >= 1577836800UL)
+        {
+            setSystemTimeFromDateTime(rtcNow);
+            updateTimezoneOffsetWithUtc(rtcNow);
+            Serial.printf("[Setup] Seeded system clock from RTC: %04d-%02d-%02d %02d:%02d:%02d UTC\n",
+                          rtcNow.year(), rtcNow.month(), rtcNow.day(),
+                          rtcNow.hour(), rtcNow.minute(), rtcNow.second());
+        }
+        else
+        {
+            Serial.println("[Setup] RTC time is not valid enough to seed system clock.");
+        }
     }
 
     Serial.println("\nESP32 Weather Display");
+    wxv::cloud::cloudBegin(deviceHostname);
 
     // InfoScreen highlight preferences
     udpScreen.setHighlightEnabled(true);
@@ -626,6 +642,7 @@ void loop()
     wifiConnected = (WiFi.status() == WL_CONNECTED);
     apActive = isAccessPointActive();
     mqttLoop();
+    wxv::cloud::cloudLoop();
 
     if (wifiConnected && apActive)
     {
