@@ -24,6 +24,8 @@ enum class RenderSlot : uint8_t
     Co2HistoryMarquee,
     PredictMain,
     PredictMarquee,
+    ForecastSummaryMain,
+    ForecastSummaryTick,
     NoaaMain,
     NoaaTick,
     BaroHistoryMain,

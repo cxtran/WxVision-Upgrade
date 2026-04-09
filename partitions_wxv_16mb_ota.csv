@@ -1,5 +1,6 @@
-# 16MB flash layout for single-file firmware OTA.
-# Web UI assets are embedded in firmware, so SPIFFS is reduced and app slots are expanded.
+# VisionWX 16MB flash layout with safe dual-slot OTA.
+# New firmware is written to the inactive app slot so the current firmware
+# remains available if upload or finalize fails.
 # Name,    Type, SubType, Offset,   Size,      Flags
 nvs,       data, nvs,     0x9000,   0x5000
 otadata,   data, ota,     0xe000,   0x2000

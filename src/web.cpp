@@ -105,9 +105,43 @@ static constexpr uint32_t kAppDeviceBroadcastMinMs = 10000u;
 static constexpr uint32_t kAppAlertBroadcastMinMs = 1000u;
 static constexpr uint32_t kAppLightningBroadcastMinMs = 5000u;
 static constexpr uint16_t kMaxAppWsClients = 2;
+#ifndef WXV_TARGET_FLASH_MB
+#define WXV_TARGET_FLASH_MB 16
+#endif
+
+#ifndef WXV_TARGET_SAFE_OTA
+#define WXV_TARGET_SAFE_OTA 1
+#endif
+
+static constexpr uint32_t kRequiredFlashSizeBytes = static_cast<uint32_t>(WXV_TARGET_FLASH_MB) * 1024UL * 1024UL;
 static String g_otaLastError;
 static bool g_otaUploadStarted = false;
 static bool g_otaUploadFinished = false;
+static bool g_otaSessionActive = false;
+
+static void resetOtaUploadState()
+{
+  otaInProgress = false;
+  g_otaUploadStarted = false;
+  g_otaUploadFinished = false;
+  g_otaSessionActive = false;
+  g_otaLastError = "";
+}
+
+static void failOtaUpload(const String &message)
+{
+  if (!message.isEmpty()) {
+    g_otaLastError = message;
+  } else if (g_otaLastError.isEmpty()) {
+    g_otaLastError = "OTA update failed.";
+  }
+  if (g_otaSessionActive) {
+    Update.abort();
+  }
+  otaInProgress = false;
+  g_otaUploadFinished = false;
+  g_otaSessionActive = false;
+}
 
 #define WEB_UI_DISABLED 0
 #define WEB_UI_MINIMAL 1
@@ -3244,6 +3278,10 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Current Conditions";
   case SCREEN_HOURLY:
     return "Hourly Forecast";
+  case SCREEN_FORECAST_SUMMARY:
+    return "Forecast Summary";
+  case SCREEN_NOAA_ALERT:
+    return "NOAA Alerts";
   default:
     return "Info Screen";
   }
@@ -5308,40 +5346,68 @@ void setupWebServer() {
   server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest *req) {
       bool ok = g_otaUploadStarted && g_otaUploadFinished && !Update.hasError();
-      otaInProgress = false;
       if (ok) {
         g_webPendingReboot = true;
         g_webRebootAtMs = millis() + 250;
         req->send(200, "text/plain", "OK");
       } else {
+        if (g_otaSessionActive) {
+          failOtaUpload(g_otaLastError);
+        }
         const String msg = g_otaLastError.length() ? g_otaLastError : String("OTA update failed.");
         req->send(500, "text/plain", msg);
       }
-      g_otaUploadStarted = false;
-      g_otaUploadFinished = false;
-      g_otaLastError = "";
+      resetOtaUploadState();
     },
     [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
       if (!index) {
         Serial.printf("OTA Update Start: %s\n", filename.c_str());
+        resetOtaUploadState();
         g_otaUploadStarted = true;
-        g_otaUploadFinished = false;
-        g_otaLastError = "";
-        otaInProgress = false;
 
         if (filename.isEmpty()) {
-          g_otaLastError = "Missing firmware filename.";
+          failOtaUpload("Missing firmware filename.");
           Serial.println("[OTA] Missing firmware filename.");
           return;
         }
 
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-          g_otaLastError = "Not enough space for firmware.";
+        if (!WXV_TARGET_SAFE_OTA) {
+          failOtaUpload("This firmware target does not support safe OTA.");
+          Serial.println("[OTA] Safe OTA is disabled for this firmware target.");
+          return;
+        }
+
+        const uint32_t flashChipSize = ESP.getFlashChipSize();
+        if (flashChipSize < kRequiredFlashSizeBytes) {
+          failOtaUpload(String("Flash chip is smaller than required ") + String(WXV_TARGET_FLASH_MB) + "MB OTA layout.");
+          Serial.printf("[OTA] Flash size too small: %u bytes\n", static_cast<unsigned>(flashChipSize));
+          return;
+        }
+
+        const esp_partition_t *target = esp_ota_get_next_update_partition(nullptr);
+        if (!target) {
+          failOtaUpload("No OTA target partition available.");
+          Serial.println("[OTA] No OTA target partition.");
+          return;
+        }
+
+        if (req->contentLength() > 0 && req->contentLength() > target->size) {
+          failOtaUpload("Firmware is larger than OTA slot.");
+          Serial.printf("[OTA] Firmware too large: %u > %u\n",
+                        static_cast<unsigned>(req->contentLength()),
+                        static_cast<unsigned>(target->size));
+          return;
+        }
+
+        const size_t updateSize = req->contentLength() > 0 ? req->contentLength() : UPDATE_SIZE_UNKNOWN;
+        if (!Update.begin(updateSize, U_FLASH)) {
+          failOtaUpload("Not enough space for firmware.");
           Serial.println("[OTA] Update.begin failed.");
           Update.printError(Serial);
           return;
         }
 
+        g_otaSessionActive = true;
         otaInProgress = true;
         // Clear the panel first so no previous-screen artifacts remain visible
         // before the OTA status card is drawn.
@@ -5356,7 +5422,7 @@ void setupWebServer() {
       }
 
       if (Update.write(data, len) != len) {
-        g_otaLastError = "Firmware write failed.";
+        failOtaUpload("Firmware write failed.");
         Serial.println("[OTA] Update.write failed.");
         Update.printError(Serial);
         return;
@@ -5365,14 +5431,15 @@ void setupWebServer() {
       if (final) {
         if (Update.end(true)) {
           g_otaUploadFinished = true;
+          g_otaSessionActive = false;
+          otaInProgress = false;
           Serial.println("OTA Update Success.");
         }
         else {
-          g_otaLastError = "Firmware finalize failed.";
+          failOtaUpload("Firmware finalize failed.");
           Serial.println("[OTA] Update.end failed.");
           Update.printError(Serial);
         }
-        otaInProgress = false;
       }
     }
   );

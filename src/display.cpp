@@ -5077,6 +5077,9 @@ void fetchWeatherFromOWM(bool showBusy)
                     parsedForecast.days[dayIdx].highTemp = NAN;
                     parsedForecast.days[dayIdx].lowTemp = NAN;
                     parsedForecast.days[dayIdx].rainChance = -1;
+                    parsedForecast.days[dayIdx].precipAmount = 0.0;
+                    parsedForecast.days[dayIdx].windSpeed = NAN;
+                    parsedForecast.days[dayIdx].windGust = NAN;
                     parsedForecast.days[dayIdx].sunrise = citySunrise;
                     parsedForecast.days[dayIdx].sunset = citySunset;
                 }
@@ -5085,6 +5088,14 @@ void fetchWeatherFromOWM(bool showBusy)
                 if (isnan(day.highTemp) || (!isnan(highC) && highC > day.highTemp)) day.highTemp = highC;
                 if (isnan(day.lowTemp) || (!isnan(lowC) && lowC < day.lowTemp)) day.lowTemp = lowC;
                 if (rainChance > day.rainChance) day.rainChance = rainChance;
+                if (!isnan(hour.precipAmount))
+                {
+                    if (isnan(day.precipAmount))
+                        day.precipAmount = 0.0;
+                    day.precipAmount += hour.precipAmount;
+                }
+                if (isnan(day.windSpeed) || (!isnan(hour.windSpeed) && hour.windSpeed > day.windSpeed)) day.windSpeed = hour.windSpeed;
+                if (isnan(day.windGust) || (!isnan(hour.windGust) && hour.windGust > day.windGust)) day.windGust = hour.windGust;
 
                 const int noonDelta = abs(ti->tm_hour * 60 + ti->tm_min - (12 * 60));
                 if (day.conditions.length() == 0 || noonDelta < dayBestNoonDelta[dayIdx]) {
@@ -5121,6 +5132,9 @@ void fetchWeatherFromOWM(bool showBusy)
                             if (JSON.typeof_(item) == "object") {
                                 JSONVar itemMain = item["main"];
                                 JSONVar weather0 = item["weather"][0];
+                                JSONVar wind0 = item["wind"];
+                                JSONVar rain0 = item["rain"];
+                                JSONVar snow0 = item["snow"];
                                 uint32_t when = static_cast<uint32_t>(readNumber(item, "dt"));
                                 if (when > 0) {
                                     ForecastHour hour;
@@ -5128,6 +5142,11 @@ void fetchWeatherFromOWM(bool showBusy)
                                     hour.temp = toCelsius(readNumber(itemMain, "temp"));
                                     double pop = readNumber(item, "pop");
                                     hour.rainChance = isnan(pop) ? -1 : static_cast<int>(lround(pop * 100.0));
+                                    hour.precipAmount = readNumber(rain0, "3h");
+                                    if (isnan(hour.precipAmount))
+                                        hour.precipAmount = readNumber(snow0, "3h");
+                                    hour.windSpeed = toMetersPerSecond(readNumber(wind0, "speed"));
+                                    hour.windGust = toMetersPerSecond(readNumber(wind0, "gust"));
                                     hour.conditions = (JSON.typeof_(weather0["description"]) == "string") ? String((const char*)weather0["description"]) : "";
 
                                     if (parsedForecast.numHours < MAX_FORECAST_HOURS) {

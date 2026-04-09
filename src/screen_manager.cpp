@@ -18,6 +18,7 @@
 #include "display_runtime.h"
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
+#include "forecast_summary.h"
 
 extern ScreenMode currentScreen;
 extern InfoScreen udpScreen;
@@ -70,6 +71,7 @@ bool isRotationBlocked();
 bool isTemporaryAlertBlocked();
 void handleReturnToDefault(unsigned long now);
 ScreenMode configuredDefaultScreenInternal();
+ScreenMode nextAutoAllowedScreen(ScreenMode start, int direction);
 bool isAlertDuplicate(const char *text, uint32_t signature)
 {
     if (s_temporaryAlertActive)
@@ -238,6 +240,10 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
         title = "NOAA Alerts";
         subtitle = nullptr;
         return true;
+    case SCREEN_FORECAST_SUMMARY:
+        title = "Forecast Summary";
+        subtitle = nullptr;
+        return true;
     case SCREEN_CONDITION_SCENE:
         title = "Weather Scene";
         subtitle = nullptr;
@@ -271,6 +277,36 @@ bool headingForScreen(ScreenMode mode, const char *&title, const char *&subtitle
     default:
         return false;
     }
+}
+
+ScreenMode nextAutoAllowedScreen(ScreenMode start, int direction)
+{
+    if (direction == 0)
+        direction = 1;
+
+    int startIdx = -1;
+    for (int i = 0; i < NUM_INFOSCREENS; ++i)
+    {
+        if (InfoScreenModes[i] == start)
+        {
+            startIdx = i;
+            break;
+        }
+    }
+    if (startIdx < 0)
+        startIdx = 0;
+
+    int idx = startIdx;
+    for (int steps = 0; steps < NUM_INFOSCREENS; ++steps)
+    {
+        idx = (idx + direction + NUM_INFOSCREENS) % NUM_INFOSCREENS;
+        ScreenMode candidate = InfoScreenModes[idx];
+        if (candidate == SCREEN_FORECAST_SUMMARY && !forecastSummaryShouldAutoPresent())
+            continue;
+        if (screenIsAllowed(candidate))
+            return candidate;
+    }
+    return SCREEN_CLOCK;
 }
 
 void enterScreen(ScreenMode mode)
@@ -339,6 +375,10 @@ void enterScreen(ScreenMode mode)
     case SCREEN_HOURLY:
         showHourlyForecastScreen();
         break;
+    case SCREEN_FORECAST_SUMMARY:
+        beginForecastSummaryDisplay();
+        drawForecastSummaryScreen();
+        break;
     case SCREEN_NOAA_ALERT:
         refreshNoaaAlertsForScreenEntry();
         drawNoaaAlertsScreen();
@@ -355,6 +395,8 @@ void beginScreenTransition(ScreenMode next, unsigned long now)
 {
     if (currentScreen == SCREEN_NOAA_ALERT && next != SCREEN_NOAA_ALERT)
         resetNoaaAlertsScreenPager();
+    if (currentScreen == SCREEN_FORECAST_SUMMARY && next != SCREEN_FORECAST_SUMMARY)
+        finishForecastSummaryDisplay();
 
     hideAllInfoScreens();
 
@@ -419,6 +461,9 @@ void renderScreenContents(ScreenMode mode)
         break;
     case SCREEN_NOAA_ALERT:
         drawNoaaAlertsScreen();
+        break;
+    case SCREEN_FORECAST_SUMMARY:
+        drawForecastSummaryScreen();
         break;
     case SCREEN_CONDITION_SCENE:
         drawConditionSceneScreen();
@@ -661,7 +706,8 @@ void handleAutoRotate(unsigned long now)
                                    : 15000UL;
     if (now - s_lastAutoRotateMillis >= intervalMs)
     {
-        rotateScreen(+1);
+        ScreenMode next = nextAutoAllowedScreen(currentScreen, +1);
+        transitionToScreen(next);
     }
 }
 
@@ -951,6 +997,9 @@ void refreshVisibleScreen()
         break;
     case SCREEN_NOAA_ALERT:
         drawNoaaAlertsScreen();
+        break;
+    case SCREEN_FORECAST_SUMMARY:
+        drawForecastSummaryScreen();
         break;
     case SCREEN_OWM:
         reset_Time_and_Date_Display = true;

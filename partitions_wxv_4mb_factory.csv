@@ -1,4 +1,5 @@
-# Single-app (no OTA), 4MB flash
+# VisionWX 4MB flash layout for direct factory flashing.
+# This target fits the current firmware, but it does not provide safe dual-slot OTA.
 # Name,    Type, SubType, Offset,   Size
 nvs,       data, nvs,     0x9000,   0x5000
 phy_init,  data, phy,     0xe000,   0x1000

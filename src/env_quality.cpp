@@ -46,14 +46,76 @@ static String s_lineTexts[3];
 static bool s_prevCo2HighAlert = false;
 static bool s_prevTempHighAlert = false;
 static bool s_prevHumidityAlert = false;
+static bool s_prevPressureAlert = false;
 static bool s_prevSensorFailureAlert = false;
 static unsigned long s_lastCo2AlertMs = 0;
 static unsigned long s_lastTempAlertMs = 0;
 static unsigned long s_lastHumidityAlertMs = 0;
+static unsigned long s_lastPressureAlertMs = 0;
 static unsigned long s_lastSensorFailureAlertMs = 0;
 
 static constexpr unsigned long kEnvAlertCooldownMs = 5UL * 60UL * 1000UL;
 static constexpr uint16_t kEnvAlertDisplayMs = 4000;
+
+static const char *indoorCo2AlertTitle(float co2Ppm)
+{
+    return (!isnan(co2Ppm) && co2Ppm >= 1500.0f) ? "CO2 VERY HIGH" : "CO2 HIGH";
+}
+
+static const char *indoorCo2AlertAction(float co2Ppm)
+{
+    return (!isnan(co2Ppm) && co2Ppm >= 1500.0f) ? "VENT NOW" : "OPEN WIN";
+}
+
+static const char *indoorTempAlertTitle(float tempC)
+{
+    return (!isnan(tempC) && tempC >= 30.0f) ? "TOO HOT" : "TEMP HIGH";
+}
+
+static const char *indoorTempAlertAction(float tempC)
+{
+    return (!isnan(tempC) && tempC >= 30.0f) ? "COOL ROOM" : "RUN AC OR FAN";
+}
+
+static const char *indoorHumidityAlertTitle(float humidity)
+{
+    if (isnan(humidity))
+        return "HUMIDITY ALERT";
+    return (humidity < static_cast<float>(envAlertHumidityLowThreshold)) ? "TOO DRY" : "TOO HUMID";
+}
+
+static const char *indoorHumidityAlertAction(float humidity, float tempC)
+{
+    if (isnan(humidity))
+        return "CHECK SENSOR";
+    if (humidity < static_cast<float>(envAlertHumidityLowThreshold))
+        return "HUMIDIFY";
+    if (!isnan(tempC) && tempC > 27.0f)
+        return "RUN AC";
+    return "DEHUMIDIFY";
+}
+
+static const char *indoorPressureAlertTitle(float pressure)
+{
+    if (isnan(pressure))
+        return "PRESSURE ALERT";
+    if (pressure < 985.0f)
+        return "LOW PRESS";
+    if (pressure > 1035.0f)
+        return "HIGH PRESS";
+    return "PRESS SWING";
+}
+
+static const char *indoorPressureAlertAction(float pressure)
+{
+    if (isnan(pressure))
+        return "CHECK SENSOR";
+    if (pressure < 985.0f)
+        return "WX SHIFT";
+    if (pressure > 1035.0f)
+        return "AIR STABLE";
+    return "WATCH WX";
+}
 
 static void updateDetailsBands(EnvBand overall, EnvBand co2, EnvBand temp, EnvBand humidity, EnvBand pressure)
 {
@@ -1268,10 +1330,12 @@ void serviceEnvironmentalAlerts()
         if (humidity > 100.0f)
             humidity = 100.0f;
     }
+    const float pressure = (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f) ? bmp280_pressure : NAN;
 
     const EnvBand co2Band = bandFromCo2(co2Raw);
     const EnvBand tempBand = bandFromTemp(tempC);
     const EnvBand humBand = bandFromHumidity(humidity);
+    const EnvBand pressBand = bandFromPressure(pressure);
 
     // Drive the alert directly from the measured ppm threshold so it does not
     // depend on a secondary band classification near the cutoff.
@@ -1285,15 +1349,19 @@ void serviceEnvironmentalAlerts()
                                ((humidity < static_cast<float>(envAlertHumidityLowThreshold)) ||
                                 (humidity > static_cast<float>(envAlertHumidityHighThreshold))) &&
                                (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
+    const bool pressureWarnRaw = !isnan(pressure) &&
+                                 (pressBand == EnvBand::Poor || pressBand == EnvBand::Critical);
     const bool scd40Fault = !scd40Ready || (!scd40IsWarmingUp() && !scd40DataIsFresh(180000UL));
     const bool sensorFailure = scd40Fault || !aht20Ready || !bmp280Ready;
     const bool tempHigh = !co2High && tempHighRaw;
     const bool humidityWarn = !co2High && !tempHigh && humidityWarnRaw;
+    const bool pressureWarn = !co2High && !tempHigh && !humidityWarn && pressureWarnRaw;
 
     const bool queueSensorFailure = shouldRetriggerEnvAlert(sensorFailure, s_prevSensorFailureAlert, s_lastSensorFailureAlertMs, nowMs);
     const bool queueCo2 = shouldRetriggerEnvAlert(co2High, s_prevCo2HighAlert, s_lastCo2AlertMs, nowMs);
     const bool queueTemp = shouldRetriggerEnvAlert(tempHigh, s_prevTempHighAlert, s_lastTempAlertMs, nowMs);
     const bool queueHumidity = shouldRetriggerEnvAlert(humidityWarn, s_prevHumidityAlert, s_lastHumidityAlertMs, nowMs);
+    const bool queuePressure = shouldRetriggerEnvAlert(pressureWarn, s_prevPressureAlert, s_lastPressureAlertMs, nowMs);
 
     // Queue at most one environmental alert per pass so the highest-priority
     // condition is readable instead of being immediately followed by others.
@@ -1303,15 +1371,19 @@ void serviceEnvironmentalAlerts()
     }
     else if (queueCo2)
     {
-        queueTemporaryAlertHeading("CO2 Too High", kEnvAlertDisplayMs, 0x434F3201UL);
+        queueTemporaryAlertHeading(indoorCo2AlertTitle(co2Raw), kEnvAlertDisplayMs, 0x434F3201UL, indoorCo2AlertAction(co2Raw));
     }
     else if (queueTemp)
     {
-        queueTemporaryAlertHeading("Temperature Too High", kEnvAlertDisplayMs, 0x54454D01UL);
+        queueTemporaryAlertHeading(indoorTempAlertTitle(tempC), kEnvAlertDisplayMs, 0x54454D01UL, indoorTempAlertAction(tempC));
     }
     else if (queueHumidity)
     {
-        queueTemporaryAlertHeading("Humidity Warning", kEnvAlertDisplayMs, 0x48554D01UL);
+        queueTemporaryAlertHeading(indoorHumidityAlertTitle(humidity), kEnvAlertDisplayMs, 0x48554D01UL, indoorHumidityAlertAction(humidity, tempC));
+    }
+    else if (queuePressure)
+    {
+        queueTemporaryAlertHeading(indoorPressureAlertTitle(pressure), kEnvAlertDisplayMs, 0x50524501UL, indoorPressureAlertAction(pressure));
     }
 }
 

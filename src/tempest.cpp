@@ -438,6 +438,11 @@ void updateDailyForecastFromJson(const String& jsonStr) {
             f.highTemp   = (JSON.typeof_(d["air_temp_high"]) == "number") ? (double)d["air_temp_high"] : NAN;
             f.lowTemp    = (JSON.typeof_(d["air_temp_low"])  == "number") ? (double)d["air_temp_low"]  : NAN;
             f.rainChance = (JSON.typeof_(d["precip_probability"]) == "number") ? (int)d["precip_probability"] : -1;
+            f.precipAmount = (JSON.typeof_(d["precip"]) == "number") ? (double)d["precip"]
+                            : ((JSON.typeof_(d["precip_amount"]) == "number") ? (double)d["precip_amount"] : NAN);
+            f.windSpeed = (JSON.typeof_(d["wind_avg"]) == "number") ? (double)d["wind_avg"]
+                         : ((JSON.typeof_(d["wind_speed"]) == "number") ? (double)d["wind_speed"] : NAN);
+            f.windGust = (JSON.typeof_(d["wind_gust"]) == "number") ? (double)d["wind_gust"] : NAN;
             f.conditions = (JSON.typeof_(d["conditions"]) == "string") ? (const char*)d["conditions"] : "";
             f.sunrise    = (JSON.typeof_(d["sunrise"])    == "number") ? (uint32_t)(double)d["sunrise"] : 0;
             f.sunset     = (JSON.typeof_(d["sunset"])     == "number") ? (uint32_t)(double)d["sunset"]  : 0;
@@ -637,9 +642,14 @@ void updateDailyForecastFromJson(const String& jsonStr) {
         JSONVar loArr = daily["air_temp_low"];
         JSONVar precipArr = daily["precip_probability"];
         if (arrLen(precipArr) == 0) precipArr = daily["precip_probability_max"];
+        JSONVar precipAmtArr = daily["precip"];
+        if (arrLen(precipAmtArr) == 0) precipAmtArr = daily["precip_amount"];
         JSONVar condArr = daily["conditions"];
         JSONVar sunriseArr = daily["sunrise"];
         JSONVar sunsetArr = daily["sunset"];
+        JSONVar windArr = daily["wind_avg"];
+        if (arrLen(windArr) == 0) windArr = daily["wind_speed"];
+        JSONVar gustArr = daily["wind_gust"];
 
         int days = arrLen(timeArr);
         if (days == 0) days = arrLen(hiArr);
@@ -652,6 +662,9 @@ void updateDailyForecastFromJson(const String& jsonStr) {
             f.lowTemp = arrNum(loArr, i);
             double precip = arrNum(precipArr, i);
             f.rainChance = isnan(precip) ? -1 : static_cast<int>(precip);
+            f.precipAmount = arrNum(precipAmtArr, i);
+            f.windSpeed = arrNum(windArr, i);
+            f.windGust = arrNum(gustArr, i);
             f.conditions = arrStr(condArr, i);
             double sunrise = arrNum(sunriseArr, i);
             double sunset = arrNum(sunsetArr, i);
@@ -807,6 +820,11 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
         ForecastHour fh;
         fh.temp       = (JSON.typeof_(h["air_temperature"])    == "number") ? (double)h["air_temperature"] : NAN;
         fh.rainChance = (JSON.typeof_(h["precip_probability"]) == "number") ? (int)h["precip_probability"] : -1;
+        fh.precipAmount = (JSON.typeof_(h["precip"]) == "number") ? (double)h["precip"]
+                          : ((JSON.typeof_(h["precip_amount"]) == "number") ? (double)h["precip_amount"] : NAN);
+        fh.windSpeed = (JSON.typeof_(h["wind_avg"]) == "number") ? (double)h["wind_avg"]
+                       : ((JSON.typeof_(h["wind_speed"]) == "number") ? (double)h["wind_speed"] : NAN);
+        fh.windGust = (JSON.typeof_(h["wind_gust"]) == "number") ? (double)h["wind_gust"] : NAN;
         fh.conditions = (JSON.typeof_(h["conditions"])         == "string") ? String((const char*)h["conditions"]) : "";
         fh.time       = (JSON.typeof_(h["time"])               == "number") ? (uint32_t)(double)h["time"]          : 0;
 
@@ -981,6 +999,9 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
         JSONVar cArr = daily["weather_code"];
         JSONVar srArr = daily["sunrise"];
         JSONVar ssArr = daily["sunset"];
+        JSONVar precipAmtArr = daily["precipitation_sum"];
+        JSONVar windArr = daily["wind_speed_10m_max"];
+        JSONVar gustArr = daily["wind_gusts_10m_max"];
 
         int days = arrLen(tArr);
         if (days > MAX_FORECAST_DAYS) days = MAX_FORECAST_DAYS;
@@ -997,6 +1018,9 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
             f.highTemp = arrNum(hiArr, i);
             f.lowTemp = arrNum(loArr, i);
             f.rainChance = arrInt(pArr, i, -1);
+            f.precipAmount = arrNum(precipAmtArr, i);
+            f.windSpeed = arrNum(windArr, i);
+            f.windGust = arrNum(gustArr, i);
             int code = arrInt(cArr, i, -1);
             f.conditions = openMeteoConditionFromCode(code);
             f.sunrise = static_cast<uint32_t>(arrInt(srArr, i, 0));
@@ -1014,6 +1038,9 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
         JSONVar tempArr = hourly["temperature_2m"];
         JSONVar pArr = hourly["precipitation_probability"];
         JSONVar cArr = hourly["weather_code"];
+        JSONVar precipAmtArr = hourly["precipitation"];
+        JSONVar windArr = hourly["wind_speed_10m"];
+        JSONVar gustArr = hourly["wind_gusts_10m"];
 
         int hours = arrLen(tArr);
         if (hours > MAX_FORECAST_HOURS) hours = MAX_FORECAST_HOURS;
@@ -1022,6 +1049,9 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
             h.time = static_cast<uint32_t>(arrInt(tArr, i, 0));
             h.temp = arrNum(tempArr, i);
             h.rainChance = arrInt(pArr, i, -1);
+            h.precipAmount = arrNum(precipAmtArr, i);
+            h.windSpeed = arrNum(windArr, i);
+            h.windGust = arrNum(gustArr, i);
             int code = arrInt(cArr, i, -1);
             h.conditions = openMeteoConditionFromCode(code);
 
@@ -1063,8 +1093,8 @@ static void fetchOpenMeteoForecastData() {
     String baseQuery = String("api.open-meteo.com/v1/forecast?latitude=") + String(lat, 4) +
                        "&longitude=" + String(lon, 4) +
                        "&current=temperature_2m,apparent_temperature,dew_point_2m,relative_humidity_2m,pressure_msl,wind_speed_10m,wind_gusts_10m,wind_direction_10m,weather_code" +
-                       "&hourly=temperature_2m,precipitation_probability,weather_code" +
-                       "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code,sunrise,sunset";
+                       "&hourly=temperature_2m,precipitation_probability,precipitation,wind_speed_10m,wind_gusts_10m,weather_code" +
+                       "&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max,weather_code,sunrise,sunset";
 
     String httpPrimary = "http://" + baseQuery + "&forecast_days=10&forecast_hours=24&timezone=auto&timeformat=unixtime";
     String httpFallback = "http://" + baseQuery + "&forecast_days=10&timezone=auto&timeformat=unixtime";

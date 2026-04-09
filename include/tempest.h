@@ -73,6 +73,9 @@ struct ForecastDay {
     double highTemp = NAN;
     double lowTemp = NAN;
     int rainChance = -1;
+    double precipAmount = NAN;
+    double windSpeed = NAN;
+    double windGust = NAN;
     String conditions;
     uint32_t sunrise = 0;
     uint32_t sunset = 0;
@@ -85,6 +88,9 @@ struct ForecastDay {
 struct ForecastHour {
     double temp = NAN;
     int rainChance = -1;
+    double precipAmount = NAN;
+    double windSpeed = NAN;
+    double windGust = NAN;
     String conditions;
     uint32_t time = 0;
 };

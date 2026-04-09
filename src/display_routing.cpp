@@ -1,5 +1,7 @@
 #include "display.h"
 #include "settings.h"
+#include "forecast_summary.h"
+#include "alarm.h"
 
 bool screenIsAllowed(ScreenMode mode)
 {
@@ -29,6 +31,8 @@ bool screenIsAllowed(ScreenMode mode)
         return WXV_ENABLE_NEXT24H_PREDICTION;
     case SCREEN_NOAA_ALERT:
         return noaaAlertsEnabled;
+    case SCREEN_FORECAST_SUMMARY:
+        return forecastSummaryScreenAllowed();
     case SCREEN_LUNAR_LUCK:
         return WXV_ENABLE_LUNAR_CALENDAR && WXV_ENABLE_LUNAR_LUCK;
     default:

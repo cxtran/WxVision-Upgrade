@@ -2,6 +2,7 @@
 #include <vector>
 #include <ctype.h>
 #include "display.h"
+#include "forecast_summary.h"
 #include "noaa.h"
 #include "datetimesettings.h"
 #include "settings.h"
@@ -41,6 +42,7 @@ namespace
     static unsigned long s_alertPageRevealStartMs = 0;
     static bool s_alertCompleted = false;
     static std::vector<AlertPage> s_alertPages;
+    static unsigned long s_forecastRevealStartMs = 0;
 
     static uint32_t hashAppend(uint32_t h, const String &s)
     {
@@ -1345,6 +1347,79 @@ namespace
         dma_display->print(page.title);
 
     }
+
+    static unsigned long forecastCharRevealDelayMs(char c)
+    {
+        if (c == '.')
+            return 56UL;
+        if (c == '!' || c == '?')
+            return 50UL;
+        if (c == ',' || c == ';' || c == ':')
+            return 40UL;
+        return 28UL;
+    }
+
+    static size_t forecastRevealedCharsForElapsedMs(const String &line, unsigned long elapsedMs, unsigned long &consumedMs)
+    {
+        consumedMs = 0;
+        size_t visibleChars = 0;
+        for (int i = 0; i < line.length(); ++i)
+        {
+            const unsigned long charDelayMs = forecastCharRevealDelayMs(line.charAt(i));
+            if ((consumedMs + charDelayMs) > elapsedMs)
+                break;
+            consumedMs += charDelayMs;
+            ++visibleChars;
+        }
+        return visibleChars;
+    }
+
+    static void drawForecastSummaryBody(const ForecastSummaryMessage &msg, unsigned long nowMs)
+    {
+        const uint16_t line1Color = (theme == 1) ? ui_theme::monoHeaderFg() : ui_theme::rgb(232, 248, 255);
+        const uint16_t line2Color = (theme == 1) ? ui_theme::monoBodyText() : ui_theme::rgb(150, 236, 255);
+        const bool showCursor = ((nowMs / ALERT_CURSOR_BLINK_MS) % 2UL) == 0UL;
+        String lines[2] = {String(msg.line1), String(msg.line2)};
+        unsigned long revealElapsedMs = nowMs - s_forecastRevealStartMs;
+        bool cursorDrawn = false;
+
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
+
+        for (int i = 0; i < 2; ++i)
+        {
+            if (lines[i].length() == 0)
+                continue;
+
+            String visibleLine = lines[i];
+            if (msg.useTypewriter)
+            {
+                unsigned long consumedMs = 0;
+                const size_t visibleChars = forecastRevealedCharsForElapsedMs(lines[i], revealElapsedMs, consumedMs);
+                if (visibleChars < static_cast<size_t>(lines[i].length()))
+                {
+                    visibleLine = lines[i].substring(0, visibleChars);
+                    revealElapsedMs = 0;
+                }
+                else
+                {
+                    revealElapsedMs = (revealElapsedMs > consumedMs) ? (revealElapsedMs - consumedMs) : 0;
+                }
+
+                if (!cursorDrawn && showCursor && visibleChars < static_cast<size_t>(lines[i].length()))
+                {
+                    const int cursorX = ALERT_BODY_LEFT_X + noaaTextWidthPx(visibleLine);
+                    const int cursorY = ALERT_BODY_TOP_Y + 3 + i * ALERT_LINE_H;
+                    dma_display->drawFastVLine(cursorX, cursorY, 7, (i == 0) ? line1Color : line2Color);
+                    cursorDrawn = true;
+                }
+            }
+
+            dma_display->setTextColor((i == 0) ? line1Color : line2Color);
+            dma_display->setCursor(ALERT_BODY_LEFT_X, ALERT_BODY_TOP_Y + 3 + i * ALERT_LINE_H);
+            dma_display->print(visibleLine);
+        }
+    }
 } // namespace
 
 void drawNoaaAlertsScreen()
@@ -1424,9 +1499,47 @@ bool stepNoaaAlertSelection(int direction)
     return false;
 }
 
+void drawForecastSummaryScreen()
+{
+    if (!dma_display)
+        return;
+
+    const ForecastSummaryMessage &msg = currentForecastSummaryMessage();
+    if (!msg.available)
+        return;
+
+    const unsigned long nowMs = millis();
+    if (!forecastSummaryScreenActive())
+    {
+        s_forecastRevealStartMs = nowMs;
+        beginForecastSummaryDisplay();
+    }
+    else if (s_forecastRevealStartMs == 0)
+        s_forecastRevealStartMs = nowMs;
+
+    const uint16_t headerBg = (theme == 1) ? ui_theme::monoHeaderBg() : ui_theme::rgb(0, 46, 66);
+    const uint16_t headerFg = (theme == 1) ? ui_theme::monoHeaderFg() : ui_theme::rgb(118, 226, 250);
+
+    dma_display->fillRect(0, ALERT_BODY_TOP_Y, PANEL_RES_X, PANEL_RES_Y - ALERT_BODY_TOP_Y, myBLACK);
+    drawForecastSummaryBody(msg, nowMs);
+    dma_display->fillRect(0, ui_theme::Layout::kTitleBarY, PANEL_RES_X, ALERT_TITLE_H, headerBg);
+    dma_display->setTextColor(headerFg);
+    dma_display->setCursor(ui_theme::Layout::kTitleTextX, ui_theme::Layout::kTitleBarY);
+    dma_display->print(msg.title);
+}
+
+void tickForecastSummaryScreen()
+{
+    drawForecastSummaryScreen();
+}
+
 #else
 
 void drawNoaaAlertsScreen() {}
+
+void drawForecastSummaryScreen() {}
+
+void tickForecastSummaryScreen() {}
 
 void resetNoaaAlertsScreenPager() {}
 
