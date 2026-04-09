@@ -111,6 +111,11 @@ String deviceHostname;
 static bool mdnsRunning = false;
 static bool lastWifiState = false;
 static bool lastApState = false;
+static IPAddress lastStaIp(static_cast<uint32_t>(0));
+static IPAddress lastMdnsIp(static_cast<uint32_t>(0));
+static bool lastMdnsUsedSta = false;
+static unsigned long lastNetworkServicesRefreshAtMs = 0;
+static constexpr unsigned long kNetworkServicesRefreshCooldownMs = 2000UL;
 static void completeStartupAfterWiFi(bool force = false);
 void handleInitialSetupDecision(bool wantsWiFi);
 
@@ -195,6 +200,7 @@ static void stopMdnsService()
 
     MDNS.end();
     mdnsRunning = false;
+    lastMdnsIp = IPAddress(static_cast<uint32_t>(0));
     Serial.println("[mDNS] responder stopped.");
 }
 
@@ -202,10 +208,16 @@ static void startMdnsService(bool wifiConnected)
 {
     ensureHostname();
 
-    if (mdnsRunning)
+    const IPAddress ip = wifiConnected ? WiFi.localIP() : getAccessPointIP();
+    if (ip == IPAddress(static_cast<uint32_t>(0)))
     {
-        MDNS.end();
-        mdnsRunning = false;
+        Serial.println("[mDNS] skipped: no active IP.");
+        return;
+    }
+
+    if (mdnsRunning && lastMdnsUsedSta == wifiConnected && lastMdnsIp == ip)
+    {
+        return;
     }
 
     if (!MDNS.begin(deviceHostname.c_str()))
@@ -215,9 +227,10 @@ static void startMdnsService(bool wifiConnected)
     }
 
     MDNS.addService("http", "tcp", 80);
-    IPAddress ip = wifiConnected ? WiFi.localIP() : getAccessPointIP();
     Serial.printf("[mDNS] http://%s.local (%s)\n", deviceHostname.c_str(), ip.toString().c_str());
     mdnsRunning = true;
+    lastMdnsIp = ip;
+    lastMdnsUsedSta = wifiConnected;
 }
 
 static void refreshNetworkServices(bool wifiConnected)
@@ -226,10 +239,35 @@ static void refreshNetworkServices(bool wifiConnected)
 
     setupWebServer();
     startMdnsService(wifiConnected);
+    lastNetworkServicesRefreshAtMs = millis();
 
     IPAddress ip = wifiConnected ? WiFi.localIP() : getAccessPointIP();
     Serial.printf("[Web] Control panel: http://%s.local  (direct IP http://%s)\n",
                   deviceHostname.c_str(), ip.toString().c_str());
+}
+
+static void logNetworkServiceSnapshot(const char *reason, bool wifiConnected, bool apActive)
+{
+    const IPAddress staIp = wifiConnected ? WiFi.localIP() : IPAddress(static_cast<uint32_t>(0));
+    const IPAddress apIp = apActive ? getAccessPointIP() : IPAddress(static_cast<uint32_t>(0));
+    Serial.printf("[Net] %s wifi=%d ap=%d web=%d mdns=%d sta=%s apip=%s host=%s.local status=%s/%s\n",
+                  reason ? reason : "state",
+                  wifiConnected ? 1 : 0,
+                  apActive ? 1 : 0,
+                  webServerIsRunning() ? 1 : 0,
+                  mdnsRunning ? 1 : 0,
+                  staIp.toString().c_str(),
+                  apIp.toString().c_str(),
+                  deviceHostname.c_str(),
+                  wifiStatusCodeText(),
+                  wifiStatusReasonText());
+}
+
+static bool shouldRefreshNetworkServices()
+{
+    const unsigned long now = millis();
+    return (now - lastNetworkServicesRefreshAtMs) >=
+           kNetworkServicesRefreshCooldownMs;
 }
 
 static void attemptWifiReconnect(bool apActive)
@@ -301,6 +339,7 @@ static bool isRotationBlocked()
            dateModal.isActive() ||
            mainMenuModal.isActive() ||
            deviceModal.isActive() ||
+           dataSourceModal.isActive() ||
            wifiSettingsModal.isActive() ||
            displayModal.isActive() ||
            mqttModal.isActive() ||
@@ -333,6 +372,7 @@ static void completeStartupAfterWiFi(bool force)
         Serial.println("WiFi done.");
 
         refreshNetworkServices(true);
+        lastStaIp = WiFi.localIP();
         Serial.println("Displaying Time...");
         if (!syncTimeFromNTP())
         {
@@ -606,16 +646,16 @@ void loop()
     static bool clockSensorUpdatePending = false;
     const unsigned long blinkInterval = 500;
 
-    // Pause normal rendering during OTA uploads; keep lightweight processing only
+    webTick();
+
+    // Pause normal rendering during OTA uploads; keep lightweight processing only.
+    // Reboot handling stays active via webTick() so a successful OTA cannot get
+    // stranded on the upgrade screen if a deferred restart is pending.
     if (otaInProgress)
     {
-        if (dma_display != nullptr)
-            wxv::notify::showNotification(wxv::notify::NotifyId::Upgrading, dma_display->color565(0, 255, 255));
-        delay(50);
+        delay(5);
         return;
     }
-
-    webTick();
 
     DateTime alarmNow;
     bool haveAlarmTime = false;
@@ -685,17 +725,39 @@ void loop()
 
         if (wifiReconnected && haveStaIp)
         {
-            refreshNetworkServices(true);
+            if (shouldRefreshNetworkServices())
+            {
+                refreshNetworkServices(true);
+            }
             restartAutomaticTimeSync();
             mqttOnWifiConnected();
+            logNetworkServiceSnapshot("wifi_reconnected", wifiConnected, apActive);
         }
         else if (wifiDisconnected)
         {
             stopMdnsService();
             mqttOnWifiDisconnected();
+            lastStaIp = IPAddress(static_cast<uint32_t>(0));
+            logNetworkServiceSnapshot("wifi_disconnected", wifiConnected, apActive);
+        }
+        else
+        {
+            logNetworkServiceSnapshot("network_mode_changed", wifiConnected, apActive);
         }
         lastWifiState = wifiConnected;
         lastApState = apActive;
+    }
+
+    const IPAddress currentStaIp =
+        wifiConnected ? WiFi.localIP() : IPAddress(static_cast<uint32_t>(0));
+    if (wifiConnected &&
+        currentStaIp != IPAddress(static_cast<uint32_t>(0)) &&
+        currentStaIp != lastStaIp)
+    {
+        if (shouldRefreshNetworkServices())
+            refreshNetworkServices(true);
+        lastStaIp = currentStaIp;
+        logNetworkServiceSnapshot("sta_ip_changed", wifiConnected, apActive);
     }
 
     applyDataSourcePolicies(wifiConnected);
@@ -852,6 +914,7 @@ void loop()
         !dateModal.isActive() &&
         !mainMenuModal.isActive() &&
         !deviceModal.isActive() &&
+        !dataSourceModal.isActive() &&
         !wifiSettingsModal.isActive() &&
         !displayModal.isActive() &&
         !mqttModal.isActive() &&
@@ -1019,6 +1082,13 @@ void loop()
     {
         deviceModal.tick();
         deviceModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
+        delay(5);
+        return;
+    }
+    if (dataSourceModal.isActive())
+    {
+        dataSourceModal.tick();
+        dataSourceModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
         delay(5);
         return;
     }
@@ -1402,6 +1472,7 @@ void loop()
         dateModal.isActive() ||
         mainMenuModal.isActive() ||
         deviceModal.isActive() ||
+        dataSourceModal.isActive() ||
         wifiSettingsModal.isActive() ||
         displayModal.isActive() ||
         mqttModal.isActive() ||

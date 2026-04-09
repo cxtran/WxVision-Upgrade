@@ -1324,41 +1324,77 @@ async function uploadOtaFirmware(event){
   var progBar = document.getElementById('otaProgressBar');
   if (progRow) progRow.style.display = '';
   if (progBar) progBar.style.width = '0%';
-  try {
-    var res = await fetch('/update', {
-      method: 'POST',
-      body: (() => {
-        // Manually stream to track progress
-        var form = new FormData();
-        form.append('firmware', file, file.name);
-        return form;
-      })()
-    });
-    if (res.body && progBar) {
-      // Track progress if browser supports it
-      const reader = res.body.getReader();
-      let received = 0;
-      const total = file.size;
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        received += value.length;
-        const pct = Math.min(100, Math.round(received / total * 100));
+  await new Promise(function(resolve){
+    var uploaded = false;
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/update', true);
+    xhr.upload.onprogress = function(ev){
+      if (ev.lengthComputable && progBar){
+        var pct = Math.min(100, Math.round(ev.loaded / ev.total * 100));
         progBar.style.width = pct + '%';
       }
-    }
-    var text = await res.text();
-    if (!res.ok) throw new Error(text || 'Upload failed');
-    if (progBar) progBar.style.width = '100%';
-    setMsg('otaMsg', 'Upload ok. Device will reboot...', true);
-    setTimeout(function(){ location.reload(); }, 2000);
-  } catch (err) {
-    console.error('OTA upload failed', err);
-    setMsg('otaMsg', 'OTA failed: ' + (err.message || 'error'), false);
+    };
+    xhr.upload.onload = function(){
+      uploaded = true;
+      if (progBar) progBar.style.width = '100%';
+      setMsg('otaMsg', 'Upload sent. Waiting for device...', true);
+    };
+    xhr.onreadystatechange = function(){
+      if (xhr.readyState !== 4) return;
+      if (xhr.status >= 200 && xhr.status < 300){
+        if (progBar) progBar.style.width = '100%';
+        setMsg('otaMsg', 'Upload complete. Device will reboot shortly...', true);
+        pollForOtaReturn(0, btn);
+      } else if (uploaded && xhr.status === 0) {
+        if (progBar) progBar.style.width = '100%';
+        setMsg('otaMsg', 'Upload sent. Device is rebooting...', true);
+        pollForOtaReturn(0, btn);
+      } else {
+        setMsg('otaMsg', 'OTA failed: ' + (xhr.responseText || xhr.statusText || xhr.status), false);
+        if (btn) btn.disabled = false;
+        if (progRow) progRow.style.display = 'none';
+        if (progBar) progBar.style.width = '0%';
+      }
+      resolve();
+    };
+    xhr.onerror = function(){
+      if (uploaded){
+        if (progBar) progBar.style.width = '100%';
+        setMsg('otaMsg', 'Upload sent. Device is rebooting...', true);
+        pollForOtaReturn(0, btn);
+      } else {
+        setMsg('otaMsg', 'OTA failed: network error', false);
+        if (btn) btn.disabled = false;
+        if (progRow) progRow.style.display = 'none';
+        if (progBar) progBar.style.width = '0%';
+      }
+      resolve();
+    };
+    var form = new FormData();
+    form.append('firmware', file, file.name);
+    xhr.send(form);
+  });
+}
+
+function pollForOtaReturn(attempt, btn){
+  if (attempt > 40){
+    setMsg('otaMsg', 'Device did not come back. Power-cycle if needed.', false);
     if (btn) btn.disabled = false;
-    if (progRow) progRow.style.display = 'none';
-    if (progBar) progBar.style.width = '0%';
+    return;
   }
+  setTimeout(function(){
+    fetch('/status.json', { cache: 'no-store' })
+      .then(function(res){
+        if (!res.ok) throw new Error('offline');
+        return res.json();
+      })
+      .then(function(){
+        setMsg('otaMsg', 'Upgrade complete. New firmware is running.', true);
+      })
+      .catch(function(){
+        pollForOtaReturn(attempt + 1, btn);
+      });
+  }, 1000);
 }
 
 

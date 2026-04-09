@@ -23,7 +23,8 @@ bool RelayClient::begin(const String &url, RelayClientListener *listener)
     cfg.uri = url.c_str();
     cfg.task_prio = 4;
     cfg.task_stack = 6144;
-    cfg.buffer_size = 1024;
+    // Larger relay payloads need more headroom than the ESP-IDF default.
+    cfg.buffer_size = 4096;
     cfg.disable_auto_reconnect = true;
     cfg.transport = url.startsWith("wss://")
         ? WEBSOCKET_TRANSPORT_OVER_SSL
@@ -50,6 +51,9 @@ bool RelayClient::begin(const String &url, RelayClientListener *listener)
 
     client_ = client;
     rxBuffer_.remove(0);
+    notifiedConnected_ = false;
+    lastReceiveMs_ = 0;
+    lastConnectMs_ = 0;
     return true;
 }
 
@@ -63,6 +67,7 @@ void RelayClient::stop()
     esp_websocket_client_destroy(client);
     client_ = nullptr;
     rxBuffer_.remove(0);
+    notifiedConnected_ = false;
 }
 
 bool RelayClient::isConnected() const
@@ -95,16 +100,22 @@ void RelayClient::handleEventInternal_(int32_t eventId, void *eventData)
 {
     if (eventId == WEBSOCKET_EVENT_CONNECTED)
     {
+        notifiedConnected_ = true;
+        lastConnectMs_ = millis();
+        lastReceiveMs_ = lastConnectMs_;
         if (listener_ != nullptr)
             listener_->onRelayConnected();
         return;
     }
 
-    if (eventId == WEBSOCKET_EVENT_DISCONNECTED)
+    if (eventId == WEBSOCKET_EVENT_DISCONNECTED ||
+        eventId == WEBSOCKET_EVENT_CLOSED ||
+        eventId == WEBSOCKET_EVENT_ERROR)
     {
         rxBuffer_.remove(0);
-        if (listener_ != nullptr)
+        if (listener_ != nullptr && notifiedConnected_)
             listener_->onRelayDisconnected();
+        notifiedConnected_ = false;
         return;
     }
 
@@ -125,6 +136,10 @@ void RelayClient::handleEventInternal_(int32_t eventId, void *eventData)
 
 void RelayClient::appendMessageChunk_(const uint8_t *data, size_t len, size_t payloadOffset, size_t payloadLen, int opcode)
 {
+    lastReceiveMs_ = millis();
+
+    if (opcode == 0x9 || opcode == 0xA)
+        return;
     if (opcode != 0x1 || data == nullptr || len == 0)
         return;
 

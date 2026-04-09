@@ -502,6 +502,9 @@ void applyDataSourcePolicies(bool wifiConnected)
     static bool lastWifiConnected = false;
     static bool pendingCloudBootstrapFetch = true;
     static unsigned long earliestCloudBootstrapFetchMs = 0;
+    static unsigned long sourceBootstrapRetryUntilMs = 0;
+    static unsigned long lastSourceBootstrapRetryMs = 0;
+    const unsigned long nowMs = millis();
     bool deferBootstrapFetchUntilNextPass = false;
     int previousSource = lastSource;
     const bool wantsUdpMulticast = wxv::provider::sourceUsesUdpMulticast(dataSource);
@@ -530,13 +533,8 @@ void applyDataSourcePolicies(bool wifiConnected)
 
     if (previousSource != dataSource)
     {
-        bool prevWasForecastModel = wxv::provider::sourceIsForecastModel(previousSource);
-        bool nowIsForecastModel = wxv::provider::sourceIsForecastModel(dataSource);
         const auto caps = wxv::provider::activeProvider().capabilities();
-        if (prevWasForecastModel || nowIsForecastModel)
-        {
-            resetForecastModelData();
-        }
+        wxv::provider::notifyProviderSourceChange(previousSource, dataSource);
 
         if (wifiConnected && caps.usesUdpMulticast)
         {
@@ -544,7 +542,9 @@ void applyDataSourcePolicies(bool wifiConnected)
             // UDP, screen refresh, and a large cloud forecast fetch all start at once.
             // Give the source change a short settle window before the cloud fetch starts.
             pendingCloudBootstrapFetch = caps.usesCloudFetch;
-            earliestCloudBootstrapFetchMs = millis() + 3000UL;
+            earliestCloudBootstrapFetchMs = nowMs + 3000UL;
+            sourceBootstrapRetryUntilMs = nowMs + 20000UL;
+            lastSourceBootstrapRetryMs = 0;
             deferBootstrapFetchUntilNextPass = pendingCloudBootstrapFetch;
         }
         else if (wifiConnected)
@@ -552,11 +552,15 @@ void applyDataSourcePolicies(bool wifiConnected)
             wxv::provider::fetchActiveProviderData();
             pendingCloudBootstrapFetch = false;
             earliestCloudBootstrapFetchMs = 0;
+            sourceBootstrapRetryUntilMs = caps.usesCloudFetch ? (nowMs + 15000UL) : 0;
+            lastSourceBootstrapRetryMs = nowMs;
         }
         else
         {
             pendingCloudBootstrapFetch = caps.usesCloudFetch;
             earliestCloudBootstrapFetchMs = 0;
+            sourceBootstrapRetryUntilMs = 0;
+            lastSourceBootstrapRetryMs = 0;
         }
         ensureCurrentScreenAllowed();
 
@@ -589,7 +593,7 @@ void applyDataSourcePolicies(bool wifiConnected)
     if (!deferBootstrapFetchUntilNextPass && wifiConnected && (pendingCloudBootstrapFetch || wifiJustConnected))
     {
         if (earliestCloudBootstrapFetchMs != 0 &&
-            static_cast<int32_t>(millis() - earliestCloudBootstrapFetchMs) < 0)
+            static_cast<int32_t>(nowMs - earliestCloudBootstrapFetchMs) < 0)
         {
             lastWifiConnected = wifiConnected;
             return;
@@ -601,7 +605,28 @@ void applyDataSourcePolicies(bool wifiConnected)
             wxv::provider::fetchActiveProviderData();
             pendingCloudBootstrapFetch = false;
             earliestCloudBootstrapFetchMs = 0;
+            lastSourceBootstrapRetryMs = nowMs;
         }
+    }
+
+    const bool bootstrapSettled = !pendingCloudBootstrapFetch && earliestCloudBootstrapFetchMs == 0;
+    if (wifiConnected &&
+        bootstrapSettled &&
+        sourceBootstrapRetryUntilMs != 0 &&
+        static_cast<int32_t>(nowMs - sourceBootstrapRetryUntilMs) < 0)
+    {
+        const auto caps = wxv::provider::activeProvider().capabilities();
+        if (caps.usesCloudFetch &&
+            (lastSourceBootstrapRetryMs == 0 || (nowMs - lastSourceBootstrapRetryMs) >= 5000UL))
+        {
+            wxv::provider::fetchActiveProviderData();
+            lastSourceBootstrapRetryMs = nowMs;
+        }
+    }
+    else if (sourceBootstrapRetryUntilMs != 0)
+    {
+        sourceBootstrapRetryUntilMs = 0;
+        lastSourceBootstrapRetryMs = 0;
     }
 
     lastWifiConnected = wifiConnected;

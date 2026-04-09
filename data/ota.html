@@ -84,14 +84,14 @@
                   + '<code>http://wxvision-xxxx.local</code> or its IP address.';
               }
 
-              setMsg('Update successful \u2714 New firmware will start after reboot.', true);
+              setMsg('Update successful \u2714 Device will reboot shortly.', true);
               if (btn) btn.disabled = true;
-              triggerRebootAndPoll();
+              pollForReturn(0);
             } else if (uploaded && xhr.status === 0) {
-              // Connection dropped; treat as success and poll
-              setMsg('Upload sent. Rebooting to apply...', true);
+              // Connection dropped after upload finished; likely the device is already rebooting.
+              setMsg('Upload sent. Device is rebooting...', true);
               if (progBar) progBar.style.width = '100%';
-              triggerRebootAndPoll();
+              pollForReturn(0);
             } else {
               setMsg('OTA failed: ' + (xhr.responseText || xhr.statusText), false);
               if (btn) btn.disabled = false;
@@ -110,10 +110,10 @@
         };
         xhr.onerror = function(){
           if (uploaded){
-            // Likely rebooted; treat as success
-            setMsg('Upload sent. Rebooting to apply...', true);
+            // Likely rebooted; treat as success.
+            setMsg('Upload sent. Device is rebooting...', true);
             if (progBar) progBar.style.width = '100%';
-            triggerRebootAndPoll();
+            pollForReturn(0);
           } else {
             setMsg('OTA failed: network error', false);
             if (btn) btn.disabled = false;
@@ -124,14 +124,8 @@
         xhr.send(formData);
       });
 
-      function triggerRebootAndPoll(){
-        fetch('/reboot').catch(()=>{});
-        setMsg('Rebooting device to apply update...', true);
-        pollForReturn(0);
-      }
-
       function pollForReturn(attempt){
-        const maxAttempts = 20; // ~20 seconds
+        const maxAttempts = 40; // ~40 seconds
         setTimeout(function(){
           fetch('/status.json', { cache:'no-store' })
             .then(function(r){ return r.ok ? r.json() : null; })

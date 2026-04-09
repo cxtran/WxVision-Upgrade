@@ -25,6 +25,8 @@ public:
     void stop();
     bool isConnected() const;
     bool sendText(const String &payload);
+    uint32_t lastReceiveMs() const { return lastReceiveMs_; }
+    uint32_t lastConnectMs() const { return lastConnectMs_; }
 
 private:
     static void handleEvent_(void *handlerArgs, esp_event_base_t base, int32_t eventId, void *eventData);
@@ -34,6 +36,9 @@ private:
     void *client_ = nullptr;
     RelayClientListener *listener_ = nullptr;
     String rxBuffer_;
+    bool notifiedConnected_ = false;
+    uint32_t lastReceiveMs_ = 0;
+    uint32_t lastConnectMs_ = 0;
 };
 
 } // namespace cloud

@@ -3,7 +3,6 @@
 #include "display.h"
 #include "display_runtime.h"
 
-extern String owmCountryCode;
 extern String deviceHostname;
 
 AppState &appState()
@@ -35,7 +34,6 @@ AppState &appState()
         wfStationId,
         owmCountryIndex,
         owmCountryCustom,
-        owmCountryCode,
 
         tempOffset,
         humOffset,

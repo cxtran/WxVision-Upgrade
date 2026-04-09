@@ -145,12 +145,6 @@ bool envAlertCo2Enabled = wxv::defaults::kDefaults.envAlertCo2Enabled;
 bool envAlertTempEnabled = wxv::defaults::kDefaults.envAlertTempEnabled;
 bool envAlertHumidityEnabled = wxv::defaults::kDefaults.envAlertHumidityEnabled;
 
-// --- Date/Time/Timezone ---
-int dstAuto = 0;
-int timeZoneOffsetMinutes = 0;
-int dateFormat = wxv::defaults::kDefaults.dateFormatStorage;
-int timeFormat24h = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
-
 static void applyNoaaBuildDefaults()
 {
 #if !WXV_ENABLE_NOAA_ALERTS

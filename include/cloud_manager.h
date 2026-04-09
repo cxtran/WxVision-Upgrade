@@ -4,6 +4,8 @@
 #include <ArduinoJson.h>
 #include "relay_client.h"
 
+struct AppApiResponse;
+
 namespace wxv {
 namespace cloud {
 
@@ -19,6 +21,7 @@ struct CloudRuntimeState
     uint32_t lastRegisterMs = 0;
     uint32_t lastHeartbeatMs = 0;
     uint32_t lastRelayHeartbeatMs = 0;
+    uint32_t lastRelayReceiveMs = 0;
     uint32_t nextRegisterAttemptMs = 0;
     uint32_t nextRelayAttemptMs = 0;
     uint32_t registerBackoffMs = 0;
@@ -62,10 +65,10 @@ private:
     bool performHeartbeat_();
     bool httpPostJson_(const String &path, const String &body, int &statusCode, String &responseBody);
     void sendRelayEnvelope_(const char *type, const String &requestId, JsonVariantConst payload);
-    void sendRelayEnvelope_(const char *type, const String &requestId, const String &payloadJson, bool payloadIsRawJson);
+    void sendRelayResponse_(const String &requestId, const AppApiResponse &response);
     void handleRelayEnvelope_(JsonDocument &doc);
     void sendRelayAuth_();
-    String buildAuthPayload_() const;
+    void resetRelaySession_(const char *reason, bool backoff);
     String makeRelativePath_(const String &path) const;
     String hardwareModel_() const;
     String firmwareVersion_() const;

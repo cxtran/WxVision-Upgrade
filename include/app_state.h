@@ -34,7 +34,6 @@ struct AppState
     String &wfStationId;
     int &owmCountryIndex;
     String &owmCountryCustom;
-    String &owmCountryCode;
 
     float &tempOffset;
     int &humOffset;

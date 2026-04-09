@@ -100,6 +100,7 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
     unsigned long lastDataMs = millis();
     unsigned long startMs = lastDataMs;
     bool receivedAnyBytes = false;
+    unsigned long lastYieldMs = startMs;
     while (http.connected() || stream->available() > 0)
     {
         int available = stream->available();
@@ -112,7 +113,7 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
                               http.connected() ? 1 : 0);
                 break;
             }
-            delay(1);
+            delay(0);
             continue;
         }
 
@@ -137,6 +138,12 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
         bodyOut += buffer;
         if (contentLength > 0 && bodyOut.length() >= static_cast<unsigned>(contentLength))
             break;
+
+        if ((millis() - lastYieldMs) >= 8UL)
+        {
+            delay(0);
+            lastYieldMs = millis();
+        }
     }
 
     if (!receivedAnyBytes)
@@ -1047,7 +1054,7 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
     return (forecast.numDays > 0 || forecast.numHours > 0 || !isnan(currentCond.temp));
 }
 
-static void fetchOpenMeteoForecastData() {
+void fetchOpenMeteoForecastData() {
     if (WiFi.status() != WL_CONNECTED) {
         Serial.println("[Open-Meteo] Forecast fetch skipped (WiFi offline)");
         return;
@@ -1143,13 +1150,7 @@ static void fetchOpenMeteoForecastData() {
 }
 
 // --------- WeatherFlow Forecast Fetch ----------
-void fetchForecastData() {
-    if (isDataSourceOpenMeteo()) {
-        fetchOpenMeteoForecastData();
-        requestScrollRebuild();
-        return;
-    }
-
+void fetchWeatherFlowForecastData() {
     String stationId = wfStationId;
     String token = wfToken;
     stationId.trim();
@@ -1200,6 +1201,16 @@ void fetchForecastData() {
     http.end();
     updateForecastFromJson(payload);
     requestScrollRebuild();
+}
+
+void fetchForecastData() {
+    if (isDataSourceOpenMeteo()) {
+        fetchOpenMeteoForecastData();
+        requestScrollRebuild();
+        return;
+    }
+
+    fetchWeatherFlowForecastData();
 }
 
 void resetForecastModelData() {

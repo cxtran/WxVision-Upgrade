@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <memory>
+#include <esp_system.h>
 #include "esp_ota_ops.h"
 
 #include "settings.h"
@@ -93,7 +94,6 @@ bool otaInProgress = false;
 #define chr_t_minute app.chr_t_minute
 #define chr_t_second app.chr_t_second
 #define deviceHostname app.deviceHostname
-#define owmCountryCode app.owmCountryCode
 
 AsyncWebServer server(80);
 static AsyncWebSocket g_appWs("/ws/app");
@@ -136,6 +136,11 @@ void broadcastAppSettingsUpdate(const char *section)
     (void)section;
 }
 
+bool webServerIsRunning()
+{
+    return false;
+}
+
 #else
 
 namespace
@@ -144,12 +149,42 @@ volatile bool g_webPendingQuickRestore = false;
 volatile bool g_webPendingFactoryReset = false;
 volatile bool g_webPendingReboot = false;
 volatile uint32_t g_webRebootAtMs = 0;
+volatile bool g_rebootTaskScheduled = false;
 
 volatile bool g_ntpSyncRunning = false;
 volatile bool g_ntpSyncLastOk = false;
 
 bool g_wifiScanPrimed = false;
 bool g_wifiScanIncludeHidden = false;
+
+void rebootTask(void *param)
+{
+  const uint32_t delayMs = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(param));
+  if (delayMs > 0)
+    vTaskDelay(pdMS_TO_TICKS(delayMs));
+  esp_restart();
+}
+
+void scheduleDeferredReboot(uint32_t delayMs)
+{
+  g_webPendingReboot = true;
+  g_webRebootAtMs = millis() + delayMs;
+
+  if (g_rebootTaskScheduled)
+    return;
+
+  g_rebootTaskScheduled = true;
+  BaseType_t created = xTaskCreatePinnedToCore(
+      rebootTask,
+      "wxv-reboot",
+      4096,
+      reinterpret_cast<void *>(static_cast<uintptr_t>(delayMs)),
+      1,
+      nullptr,
+      1);
+  if (created != pdPASS)
+    g_rebootTaskScheduled = false;
+}
 
 const web_assets::EmbeddedAsset *findEmbeddedAsset(const char *path)
 {
@@ -262,7 +297,7 @@ struct AppRuntimeState
   {
     size_t activeCount = 0;
     char highestSeverity[16] = "none";
-    char primaryMessage[384] = "";
+    char primaryFullMessage[384] = "";
     AlertItem items[3];
     size_t itemCount = 0;
   } alerts;
@@ -929,7 +964,7 @@ static String buildAppStateJson(const AppRuntimeState &state)
   if (state.alerts.itemCount > 0)
   {
     alerts["headline"] = state.alerts.items[0].headline;
-    alerts["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+    alerts["message"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
   }
   else
   {
@@ -988,12 +1023,14 @@ static String buildAppAlertsJson(const AppRuntimeState &state)
   if (state.alerts.itemCount > 0)
   {
     doc["headline"] = state.alerts.items[0].headline;
-    doc["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+    doc["message"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
+    doc["fullMessage"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
   }
   else
   {
     doc["headline"] = nullptr;
     doc["message"] = nullptr;
+    doc["fullMessage"] = nullptr;
   }
   JsonArray items = doc["items"].to<JsonArray>();
   for (size_t i = 0; i < state.alerts.itemCount; ++i)
@@ -1003,6 +1040,7 @@ static String buildAppAlertsJson(const AppRuntimeState &state)
     item["source"] = state.alerts.items[i].source;
     item["severity"] = state.alerts.items[i].severity;
     item["headline"] = state.alerts.items[i].headline;
+    item["fullMessage"] = (i == 0 && state.alerts.primaryFullMessage[0]) ? state.alerts.primaryFullMessage : nullptr;
     item["expires"] = state.alerts.items[i].expires[0] ? state.alerts.items[i].expires : nullptr;
   }
   String payload;
@@ -1133,12 +1171,14 @@ static String buildAlertWsJson(const AppRuntimeState &state)
   if (state.alerts.itemCount > 0)
   {
     data["headline"] = state.alerts.items[0].headline;
-    data["message"] = state.alerts.primaryMessage[0] ? state.alerts.primaryMessage : nullptr;
+    data["message"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
+    data["fullMessage"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
   }
   else
   {
     data["headline"] = nullptr;
     data["message"] = nullptr;
+    data["fullMessage"] = nullptr;
   }
   String payload;
   serializeJson(doc, payload);
@@ -1192,8 +1232,10 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     sig = hashAppend(sig, static_cast<uint32_t>(state.alerts.activeCount));
     sig = hashAppend(sig, state.alerts.highestSeverity);
     if (state.alerts.itemCount > 0)
+    {
       sig = hashAppend(sig, state.alerts.items[0].headline);
-    sig = hashAppend(sig, state.alerts.primaryMessage);
+      sig = hashAppend(sig, state.alerts.primaryFullMessage);
+    }
     state.alertWsSig = sig;
   }
 
@@ -1311,7 +1353,7 @@ static void refreshAppRuntimeState(bool force = false)
 
   next.alerts.activeCount = noaaAlertCount();
   copyToBuffer(next.alerts.highestSeverity, sizeof(next.alerts.highestSeverity), highestAlertSeverity());
-  next.alerts.primaryMessage[0] = '\0';
+  next.alerts.primaryFullMessage[0] = '\0';
   next.alerts.itemCount = min(next.alerts.activeCount, static_cast<size_t>(3));
   for (size_t i = 0; i < next.alerts.itemCount; ++i)
   {
@@ -1325,11 +1367,13 @@ static void refreshAppRuntimeState(bool force = false)
     copyToBuffer(next.alerts.items[i].severity, sizeof(next.alerts.items[i].severity), severity);
     copyToBuffer(next.alerts.items[i].headline, sizeof(next.alerts.items[i].headline), alert.headline);
     if (i == 0)
-      buildAlertPrimaryMessage(next.alerts.primaryMessage,
-                               sizeof(next.alerts.primaryMessage),
+    {
+      buildAlertPrimaryMessage(next.alerts.primaryFullMessage,
+                               sizeof(next.alerts.primaryFullMessage),
                                alert.headline,
                                alert.description,
                                alert.instruction);
+    }
     copyToBuffer(next.alerts.items[i].expires, sizeof(next.alerts.items[i].expires), alert.expires);
   }
 
@@ -1484,14 +1528,11 @@ static const char kMinimalBaseCss[] PROGMEM = R"rawliteral(
 
 static void sendMinimalPage(AsyncWebServerRequest *req, const char *head, const char *body)
 {
-  String html;
-  html.reserve(strlen_P(head) + strlen_P(kMinimalBaseCss) + strlen_P(body) + 16);
-  html += FPSTR(head);
-  html += FPSTR(kMinimalBaseCss);
-  html += FPSTR(body);
-
-  AsyncWebServerResponse *res = req->beginResponse(200, "text/html; charset=utf-8", html);
+  AsyncResponseStream *res = req->beginResponseStream("text/html; charset=utf-8");
   res->addHeader("Cache-Control", "no-store, max-age=0");
+  res->print(FPSTR(head));
+  res->print(FPSTR(kMinimalBaseCss));
+  res->print(FPSTR(body));
   req->send(res);
 }
 
@@ -1551,8 +1592,8 @@ static const char kMinimalOtaPage2[] PROGMEM = R"rawliteral(
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
 function setProgress(pct){var wrap=document.getElementById('progressWrap');var bar=document.getElementById('progressBar');var text=document.getElementById('progressText');if(!wrap||!bar||!text)return;var safe=Math.max(0,Math.min(100,Math.round(pct||0)));wrap.style.display='block';bar.style.width=safe+'%';text.textContent=safe+'%';}
 function resetProgress(){var wrap=document.getElementById('progressWrap');if(wrap)wrap.style.display='none';setProgress(0);}
-function pollForReturn(attempt){if(attempt>25){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
-document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;btn.disabled=true;resetProgress();setProgress(0);setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.upload.onprogress=function(event){if(!event.lengthComputable)return;setProgress((event.loaded/event.total)*100);};xhr.upload.onload=function(){setProgress(100);};xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setProgress(100);setMsg('Upload complete. Rebooting device...',true);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){setMsg('OTA failed: network error',false);btn.disabled=false;};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
+function pollForReturn(attempt){if(attempt>40){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
+document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;var uploaded=false;btn.disabled=true;resetProgress();setProgress(0);setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.upload.onprogress=function(event){if(!event.lengthComputable)return;setProgress((event.loaded/event.total)*100);};xhr.upload.onload=function(){uploaded=true;setProgress(100);setMsg('Upload sent. Waiting for device...',true);};xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setProgress(100);setMsg('Upload complete. Device will reboot shortly...',true);pollForReturn(0);}else if(uploaded&&xhr.status===0){setMsg('Upload sent. Device is rebooting...',true);setProgress(100);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){if(uploaded){setMsg('Upload sent. Device is rebooting...',true);setProgress(100);pollForReturn(0);}else{setMsg('OTA failed: network error',false);btn.disabled=false;}};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
 </script></body></html>
 )rawliteral";
 #endif
@@ -1623,6 +1664,9 @@ struct AppSettingsDirtyFlags
   bool dateTime = false;
   bool worldTime = false;
   bool mqtt = false;
+  bool dataSourceChanged = false;
+  int previousDataSource = DATA_SOURCE_NONE;
+  int nextDataSource = DATA_SOURCE_NONE;
 };
 
 static constexpr size_t kAppSettingsSectionCount = 14;
@@ -2249,6 +2293,17 @@ static bool broadcastChangedAppSettingsSections(const AppSettingsSnapshot *snaps
   return true;
 }
 
+static void applyDataSourceRuntimeChange(int previousSource, int nextSource)
+{
+  if (previousSource == nextSource)
+    return;
+
+  // Let applyDataSourcePolicies() own the real provider transition so the
+  // switch happens once in the main loop instead of being duplicated here.
+  requestScrollRebuild();
+  reset_Time_and_Date_Display = true;
+}
+
 static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
 {
   if (dirty.unitPrefs)
@@ -2291,6 +2346,8 @@ static void persistAppSettingsChanges(const AppSettingsDirtyFlags &dirty)
     saveMqttSettings();
     mqttApplySettings();
   }
+  if (dirty.dataSourceChanged)
+    applyDataSourceRuntimeChange(dirty.previousDataSource, dirty.nextDataSource);
   if (dirty.weather)
   {
     // no-op hook placeholder kept for symmetry with remote cloud bridge
@@ -2334,9 +2391,16 @@ static bool applyAppDeviceSettings(JsonObjectConst obj, JsonObject fieldErrors, 
       setFieldError(fieldErrors, "dataSource", "must be between 0 and 3");
     else
     {
+      const int previousSource = dataSource;
       setDataSource(value);
       dirty.device = true;
       dirty.weather = true;
+      if (previousSource != dataSource)
+      {
+        dirty.dataSourceChanged = true;
+        dirty.previousDataSource = previousSource;
+        dirty.nextDataSource = dataSource;
+      }
     }
   }
   if (!obj["autoRotate"].isNull())
@@ -2580,19 +2644,33 @@ static bool applyAppWfTempestSettings(JsonObjectConst obj, JsonObject fieldError
       setFieldError(fieldErrors, "dataSource", "must be between 0 and 3");
     else
     {
+      const int previousSource = dataSource;
       setDataSource(value);
       dirty.device = true;
       dirty.weather = true;
+      if (previousSource != dataSource)
+      {
+        dirty.dataSourceChanged = true;
+        dirty.previousDataSource = previousSource;
+        dirty.nextDataSource = dataSource;
+      }
     }
   }
   if (!obj["selected"].isNull())
   {
+    const int previousSource = dataSource;
     if (obj["selected"].as<bool>())
       setDataSource(DATA_SOURCE_WEATHERFLOW);
     else if (dataSource == DATA_SOURCE_WEATHERFLOW)
       setDataSource(DATA_SOURCE_OWM);
     dirty.device = true;
     dirty.weather = true;
+    if (previousSource != dataSource)
+    {
+      dirty.dataSourceChanged = true;
+      dirty.previousDataSource = previousSource;
+      dirty.nextDataSource = dataSource;
+    }
   }
   if (!obj["token"].isNull())
   {
@@ -3394,10 +3472,11 @@ static String buildStatusJsonPayload()
 
   size_t sketchSize = ESP.getSketchSize();
   const esp_partition_t *running = esp_ota_get_running_partition();
+  const esp_partition_t *nextUpdate = esp_ota_get_next_update_partition(nullptr);
+  size_t sketchFree = ESP.getFreeSketchSpace();
   size_t flashTotal = running ? running->size : 0;
   size_t flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
   if (flashTotal == 0) {
-    size_t sketchFree = ESP.getFreeSketchSpace();
     flashTotal = sketchSize + sketchFree;
     flashFree = (flashTotal > sketchSize) ? (flashTotal - sketchSize) : 0;
   }
@@ -3405,6 +3484,21 @@ static String buildStatusJsonPayload()
   doc["flashUsed"] = sketchSize;
   doc["flashFree"] = flashFree;
   doc["flashUsedPercent"] = (flashTotal > 0) ? static_cast<uint8_t>((sketchSize * 100 + flashTotal / 2) / flashTotal) : 0;
+  doc["flashChipSize"] = ESP.getFlashChipSize();
+  doc["sketchSize"] = sketchSize;
+  doc["freeSketchSpace"] = sketchFree;
+  doc["otaInProgress"] = otaInProgress;
+  doc["otaUploadStarted"] = g_otaUploadStarted;
+  doc["otaUploadFinished"] = g_otaUploadFinished;
+  doc["otaLastError"] = g_otaLastError;
+  doc["runningPartitionLabel"] = running ? running->label : "";
+  doc["runningPartitionAddress"] = running ? running->address : 0;
+  doc["runningPartitionSize"] = running ? running->size : 0;
+  doc["runningPartitionSubtype"] = running ? running->subtype : -1;
+  doc["nextUpdatePartitionLabel"] = nextUpdate ? nextUpdate->label : "";
+  doc["nextUpdatePartitionAddress"] = nextUpdate ? nextUpdate->address : 0;
+  doc["nextUpdatePartitionSize"] = nextUpdate ? nextUpdate->size : 0;
+  doc["nextUpdatePartitionSubtype"] = nextUpdate ? nextUpdate->subtype : -1;
 
   doc["dataSource"] = dataSource;
   doc["dataSourceLabel"] = dataSourceLabel(dataSource);
@@ -3513,6 +3607,99 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     if (normalizedPath == "/status.json")
     {
       setAppApiJsonBody(response, 200, buildStatusJsonPayload());
+      return true;
+    }
+    if (normalizedPath == "/timezones.json")
+    {
+      JsonDocument doc;
+      JsonArray arr = doc.to<JsonArray>();
+      const size_t count = timezoneCount();
+      for (size_t i = 0; i < count; ++i)
+      {
+        const TimezoneInfo &info = timezoneInfoAt(i);
+        JsonObject o = arr.add<JsonObject>();
+        o["id"] = info.id;
+        o["city"] = info.city;
+        o["country"] = info.country;
+        o["offset"] = info.offsetMinutes;
+        o["label"] = timezoneLabelAt(i);
+        o["supportsDst"] = timezoneSupportsDst(i);
+      }
+      String payloadJson;
+      serializeJson(doc, payloadJson);
+      setAppApiJsonBody(response, 200, payloadJson);
+      return true;
+    }
+    if (normalizedPath == "/time.json")
+    {
+      JsonDocument doc;
+      doc["epoch"] = (long)currentEpoch();
+      doc["tzOffset"] = tzOffset;
+      doc["tzStdOffset"] = tzStandardOffset;
+      doc["tzName"] = timezoneIsCustom() ? "" : currentTimezoneId();
+      doc["tzAutoDst"] = tzAutoDst;
+      const int currentIdx = timezoneCurrentIndex();
+      const bool hasSelection = currentIdx >= 0;
+      if (hasSelection)
+      {
+        doc["tzLabel"] = timezoneLabelAt(static_cast<size_t>(currentIdx));
+        doc["tzSupportsDst"] = timezoneSupportsDst(static_cast<size_t>(currentIdx));
+      }
+      else
+      {
+        doc["tzLabel"] = "Custom Offset";
+        doc["tzSupportsDst"] = false;
+      }
+      doc["dateFmt"] = dateFmt;
+      doc["ntpServer"] = ntpServerHost;
+      doc["ntpPreset"] = ntpServerPreset;
+      String payloadJson;
+      serializeJson(doc, payloadJson);
+      setAppApiJsonBody(response, 200, payloadJson);
+      return true;
+    }
+    if (normalizedPath == "/worldtime.json")
+    {
+      JsonDocument doc;
+      JsonArray ids = doc["ids"].to<JsonArray>();
+      JsonArray selections = doc["selections"].to<JsonArray>();
+      const size_t count = worldTimeSelectionCount();
+      for (size_t i = 0; i < count; ++i)
+      {
+        const int tzIndex = worldTimeSelectionAt(i);
+        if (tzIndex < 0 || tzIndex >= static_cast<int>(timezoneCount()))
+          continue;
+        const TimezoneInfo &tz = timezoneInfoAt(static_cast<size_t>(tzIndex));
+        ids.add(tz.id);
+        JsonObject item = selections.add<JsonObject>();
+        item["id"] = tz.id;
+        item["index"] = tzIndex;
+        item["city"] = tz.city;
+        item["label"] = timezoneLabelAt(static_cast<size_t>(tzIndex));
+      }
+      doc["autoCycle"] = worldTimeAutoCycleEnabled();
+      JsonArray customCities = doc["customCities"].to<JsonArray>();
+      for (size_t i = 0; i < worldTimeCustomCityCount(); ++i)
+      {
+        WorldTimeCustomCity city;
+        if (!worldTimeGetCustomCity(i, city))
+          continue;
+        JsonObject c = customCities.add<JsonObject>();
+        c["name"] = city.name;
+        c["lat"] = city.lat;
+        c["lon"] = city.lon;
+        c["enabled"] = city.enabled;
+        c["tzIndex"] = city.tzIndex;
+        if (city.tzIndex >= 0 && city.tzIndex < static_cast<int>(timezoneCount()))
+        {
+          c["tzId"] = timezoneInfoAt(static_cast<size_t>(city.tzIndex)).id;
+          c["tzLabel"] = timezoneLabelAt(static_cast<size_t>(city.tzIndex));
+        }
+      }
+      doc["count"] = selections.size();
+      String payloadJson;
+      serializeJson(doc, payloadJson);
+      setAppApiJsonBody(response, 200, payloadJson);
       return true;
     }
     if (normalizedPath == "/api/app/state")
@@ -3625,8 +3812,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     }
     else if (action == "reboot")
     {
-      g_webPendingReboot = true;
-      g_webRebootAtMs = millis() + 150;
+      scheduleDeferredReboot(150);
       ok = true;
       queued = true;
     }
@@ -3999,6 +4185,7 @@ void webTick()
   if (g_webPendingReboot && static_cast<int32_t>(millis() - g_webRebootAtMs) >= 0)
   {
     g_webPendingReboot = false;
+    g_rebootTaskScheduled = false;
     ESP.restart();
     return;
   }
@@ -4016,6 +4203,11 @@ void webTick()
     factoryReset();
     return;
   }
+}
+
+bool webServerIsRunning()
+{
+  return webServerRunning;
 }
 
 void setupWebServer() {
@@ -4514,8 +4706,7 @@ void setupWebServer() {
   });
 
   server.on("/action/reboot", HTTP_POST, [](AsyncWebServerRequest *req) {
-    g_webPendingReboot = true;
-    g_webRebootAtMs = millis() + 150;
+    scheduleDeferredReboot(150);
     req->send(202, "application/json", "{\"ok\":true,\"message\":\"Reboot queued.\"}");
   });
 
@@ -4698,6 +4889,7 @@ void setupWebServer() {
           dirtyDevice = true;
         }
 
+        const int previousDataSource = dataSource;
         int newSource = dataSource;
         if (!doc["dataSource"].isNull()) {
           newSource = doc["dataSource"].as<int>();
@@ -4705,6 +4897,7 @@ void setupWebServer() {
           newSource = doc["forecastSrc"].as<int>();
         }
         setDataSource(newSource);
+        const bool dataSourceChanged = (previousDataSource != dataSource);
         if (!doc["dataSource"].isNull() || !doc["forecastSrc"].isNull()) {
           dirtyDevice = true;
           dirtyWeather = true;
@@ -5061,6 +5254,9 @@ void setupWebServer() {
           notifyNoaaSettingsChanged();
         }
         if (dirtyUnits) saveUnits();
+        if (dataSourceChanged) {
+          applyDataSourceRuntimeChange(previousDataSource, dataSource);
+        }
         forceAutoThemeSchedule();
         if (autoThemeAmbient)
         {
@@ -5072,12 +5268,6 @@ void setupWebServer() {
         req->send(200, "application/json", "{\"ok\":true}");
         broadcastChangedAppSettingsSections(
           snapshots, sizeof(snapshots) / sizeof(snapshots[0]));
-
-        if (owmCountryIndex >= 0 && owmCountryIndex < (countryCount - 1)) {
-          owmCountryCode = countryCodes[owmCountryIndex];
-        } else {
-          owmCountryCode = owmCountryCustom;
-        }
 
         if (owmSettingsChanged) {
           requestScrollRebuild();
@@ -5721,8 +5911,7 @@ void setupWebServer() {
         ok = (result == NOAA_MANUAL_FETCH_STARTED || result == NOAA_MANUAL_FETCH_BUSY);
         queued = (result == NOAA_MANUAL_FETCH_STARTED);
       } else if (action == "reboot") {
-        g_webPendingReboot = true;
-        g_webRebootAtMs = millis() + 150;
+        scheduleDeferredReboot(150);
         ok = true;
         queued = true;
       } else if (action == "reconnect_wifi") {
@@ -5771,8 +5960,7 @@ void setupWebServer() {
 #endif
 
   server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *req) {
-    g_webPendingReboot = true;
-    g_webRebootAtMs = millis() + 150;
+    scheduleDeferredReboot(150);
     req->send(202, "text/plain", "Reboot queued.");
   });
 
@@ -5781,8 +5969,7 @@ void setupWebServer() {
       bool ok = g_otaUploadStarted && g_otaUploadFinished && !Update.hasError();
       otaInProgress = false;
       if (ok) {
-        g_webPendingReboot = true;
-        g_webRebootAtMs = millis() + 250;
+        scheduleDeferredReboot(3000);
         req->send(200, "text/plain", "OK");
       } else {
         const String msg = g_otaLastError.length() ? g_otaLastError : String("OTA update failed.");
@@ -5799,6 +5986,7 @@ void setupWebServer() {
         g_otaUploadFinished = false;
         g_otaLastError = "";
         otaInProgress = false;
+        WiFi.setSleep(false);
 
         if (filename.isEmpty()) {
           g_otaLastError = "Missing firmware filename.";

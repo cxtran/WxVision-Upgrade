@@ -64,8 +64,8 @@ bool sourceIsForecastModel(int dataSource);
 
 IWeatherProvider &providerForDataSource(int dataSource);
 IWeatherProvider &activeProvider();
+void notifyProviderSourceChange(int previousSource, int nextSource);
 bool fetchActiveProviderData();
-bool fetchProviderData(int dataSource);
 bool readActiveProviderSnapshot(WeatherSnapshot &out);
 bool readProviderSnapshot(int dataSource, WeatherSnapshot &out);
 

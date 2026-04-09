@@ -14,6 +14,8 @@
 namespace wxv {
 namespace cloud {
 namespace {
+constexpr uint32_t kRelayAuthTimeoutMs = 15000UL;
+constexpr uint32_t kRelayIdleGraceMinMs = 45000UL;
 
 struct JobContext
 {
@@ -29,6 +31,7 @@ String readHttpResponseBody_(HTTPClient &http, size_t maxBytes)
         return body;
 
     const unsigned long start = millis();
+    unsigned long lastYieldMs = start;
     while ((millis() - start) < 8000UL)
     {
         while (stream->available() > 0)
@@ -40,12 +43,18 @@ String readHttpResponseBody_(HTTPClient &http, size_t maxBytes)
             if ((body.length() + static_cast<size_t>(read)) > maxBytes)
                 return body;
             body.concat(buffer, static_cast<size_t>(read));
+
+            if ((millis() - lastYieldMs) >= 8UL)
+            {
+                delay(0);
+                lastYieldMs = millis();
+            }
         }
 
         if (!http.connected() && stream->available() <= 0)
             break;
 
-        delay(10);
+        delay(0);
     }
     return body;
 }
@@ -62,6 +71,15 @@ String abbreviatedBody_(const String &body, size_t maxLen = 240)
     if (body.length() <= maxLen)
         return body;
     return body.substring(0, maxLen) + "...";
+}
+
+String jsonQuoted_(const String &value)
+{
+    JsonDocument doc;
+    doc.set(value);
+    String out;
+    serializeJson(doc, out);
+    return out;
 }
 
 String buildRelayUrlWithDeviceAuth_(const String &baseUrl, const DeviceIdentity &id)
@@ -103,6 +121,14 @@ void CloudManager::loop()
     state_.enabled = cloudEnabled;
     state_.timeReady = hasUsableTime_();
 
+    if (otaInProgress)
+    {
+        relayClient_.stop();
+        state_.relayConnected = false;
+        state_.relayAuthenticated = false;
+        return;
+    }
+
     if (!state_.enabled)
     {
         relayClient_.stop();
@@ -143,11 +169,36 @@ void CloudManager::loop()
         }
     }
 
+    if (relayClient_.isConnected())
+    {
+        state_.lastRelayReceiveMs = relayClient_.lastReceiveMs();
+
+        const uint32_t connectedAt = relayClient_.lastConnectMs();
+        if (!state_.relayAuthenticated &&
+            connectedAt != 0 &&
+            static_cast<uint32_t>(now - connectedAt) >= kRelayAuthTimeoutMs)
+        {
+            resetRelaySession_("relay_auth_timeout", true);
+            return;
+        }
+
+        const uint32_t idleBudgetMs = max<uint32_t>(cloudHeartbeatIntervalMs * 3U, kRelayIdleGraceMinMs);
+        if (state_.relayAuthenticated &&
+            state_.lastRelayReceiveMs != 0 &&
+            static_cast<uint32_t>(now - state_.lastRelayReceiveMs) >= idleBudgetMs)
+        {
+            resetRelaySession_("relay_stale", false);
+            return;
+        }
+    }
+
     if (relayClient_.isConnected() &&
+        state_.relayAuthenticated &&
         static_cast<uint32_t>(now - state_.lastRelayHeartbeatMs) >= cloudHeartbeatIntervalMs)
     {
       JsonDocument payload;
       payload["ts"] = now;
+      payload["uptime_sec"] = now / 1000UL;
       sendRelayEnvelope_("heartbeat", "", payload.as<JsonVariantConst>());
       state_.lastRelayHeartbeatMs = now;
     }
@@ -159,6 +210,8 @@ void CloudManager::onRelayConnected()
     state_.relayAuthenticated = false;
     state_.relayBackoffMs = cloudReconnectInitialMs;
     state_.lastRelayHeartbeatMs = 0;
+    state_.lastRelayReceiveMs = relayClient_.lastReceiveMs();
+    state_.lastError = "";
     sendRelayAuth_();
 }
 
@@ -166,6 +219,9 @@ void CloudManager::onRelayDisconnected()
 {
     state_.relayConnected = false;
     state_.relayAuthenticated = false;
+    state_.lastRelayReceiveMs = relayClient_.lastReceiveMs();
+    if (state_.enabled && wifiReady_())
+        state_.lastError = "relay_disconnected";
     scheduleRelayReconnect_(state_.relayBackoffMs);
     state_.relayBackoffMs = min<uint32_t>(state_.relayBackoffMs * 2U, cloudReconnectMaxMs);
 }
@@ -182,6 +238,7 @@ void CloudManager::noteLocalAppConnectionState(bool connected)
 
 void CloudManager::onRelayTextMessage(const String &message)
 {
+    state_.lastRelayReceiveMs = millis();
     JsonDocument doc;
     if (deserializeJson(doc, message) != DeserializationError::Ok || !doc.is<JsonObject>())
         return;
@@ -473,29 +530,47 @@ void CloudManager::sendRelayEnvelope_(const char *type, const String &requestId,
     relayClient_.sendText(body);
 }
 
-void CloudManager::sendRelayEnvelope_(const char *type, const String &requestId, const String &payloadJson, bool payloadIsRawJson)
+void CloudManager::resetRelaySession_(const char *reason, bool backoff)
 {
-    JsonDocument doc;
-    doc["type"] = type;
+    state_.lastError = reason ? String(reason) : String("relay_reset");
+    relayClient_.stop();
+    state_.relayConnected = false;
+    state_.relayAuthenticated = false;
+    state_.lastRelayHeartbeatMs = 0;
+    state_.lastRelayReceiveMs = 0;
+    scheduleRelayReconnect_(backoff ? state_.relayBackoffMs : cloudReconnectInitialMs);
+    state_.relayBackoffMs = backoff
+        ? min<uint32_t>(state_.relayBackoffMs * 2U, cloudReconnectMaxMs)
+        : cloudReconnectInitialMs;
+}
+
+void CloudManager::sendRelayResponse_(const String &requestId, const AppApiResponse &response)
+{
+    String envelope;
+    envelope.reserve(response.body.length() + 192);
+    envelope += "{\"type\":\"response\"";
     if (!requestId.isEmpty())
-        doc["requestId"] = requestId;
-
-    if (payloadIsRawJson)
     {
-        JsonDocument payloadDoc;
-        if (deserializeJson(payloadDoc, payloadJson) == DeserializationError::Ok)
-            doc["payload"] = payloadDoc.as<JsonVariantConst>();
-        else
-            doc["payload"] = payloadJson;
+        envelope += ",\"requestId\":";
+        envelope += jsonQuoted_(requestId);
     }
+    envelope += ",\"payload\":{\"status\":";
+    envelope += String(response.statusCode);
+    envelope += ",\"contentType\":";
+    envelope += jsonQuoted_(response.contentType);
+    envelope += ",\"body\":";
+
+    const bool isJsonBody =
+        response.body.length() > 0 &&
+        String(response.contentType).indexOf("json") >= 0 &&
+        (response.body[0] == '{' || response.body[0] == '[');
+    if (isJsonBody)
+        envelope += response.body;
     else
-    {
-        doc["payload"] = payloadJson;
-    }
+        envelope += jsonQuoted_(response.body);
 
-    String body;
-    serializeJson(doc, body);
-    relayClient_.sendText(body);
+    envelope += "}}";
+    relayClient_.sendText(envelope);
 }
 
 void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
@@ -511,9 +586,24 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
         return;
     }
 
+    if (type == "heartbeat")
+    {
+        JsonDocument payload;
+        payload["ts"] = millis();
+        sendRelayEnvelope_("heartbeat_ack", requestId, payload.as<JsonVariantConst>());
+        return;
+    }
+
+    if (type == "pong" || type == "heartbeat_ack")
+    {
+        return;
+    }
+
     if (type == "auth_ok" || type == "authenticated")
     {
         state_.relayAuthenticated = true;
+        state_.lastRelayReceiveMs = millis();
+        immediateHeartbeatRequested_ = true;
         return;
     }
 
@@ -530,8 +620,6 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
     else if (!payload["body"].isNull())
         body = payload["body"].as<String>();
 
-    // Remote relay requests intentionally reuse the same app API bridge as LAN clients.
-    // The mobile app later attaches the registered device on the backend using device_uuid.
     AppApiResponse apiResponse;
     if (!handleAppApiRequest(method, path, body, apiResponse))
     {
@@ -544,17 +632,7 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
         return;
     }
 
-    JsonDocument resp;
-    resp["status"] = apiResponse.statusCode;
-    resp["contentType"] = apiResponse.contentType;
-    const bool looksLikeJson =
-        apiResponse.body.length() > 0 &&
-        (apiResponse.body[0] == '{' || apiResponse.body[0] == '[');
-    if (looksLikeJson && String(apiResponse.contentType).indexOf("json") >= 0)
-        resp["body"] = serialized(apiResponse.body);
-    else
-        resp["body"] = apiResponse.body;
-    sendRelayEnvelope_("response", requestId, resp.as<JsonVariantConst>());
+    sendRelayResponse_(requestId, apiResponse);
 }
 
 void CloudManager::sendRelayAuth_()
@@ -565,16 +643,6 @@ void CloudManager::sendRelayAuth_()
     payload["firmware_version"] = firmwareVersion_();
     payload["hardware_model"] = hardwareModel_();
     sendRelayEnvelope_("auth", "", payload.as<JsonVariantConst>());
-}
-
-String CloudManager::buildAuthPayload_() const
-{
-    JsonDocument doc;
-    doc["device_uuid"] = deviceIdentity().uuid;
-    doc["device_secret"] = deviceIdentity().secret;
-    String body;
-    serializeJson(doc, body);
-    return body;
 }
 
 String CloudManager::makeRelativePath_(const String &path) const

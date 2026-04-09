@@ -80,6 +80,7 @@ InfoModal wifiInfoModal("WiFi Info");
 InfoModal dateModal("Date/Time");
 InfoModal mainMenuModal("Main Menu");
 InfoModal deviceModal("Device");
+InfoModal dataSourceModal("Data Source");
 InfoModal displayModal("Display");
 InfoModal weatherModal("OW Map");
 InfoModal tempestModal("WF Tempest");
@@ -101,9 +102,6 @@ int alarmSlotShown = 0;
 
 char wifiSSIDBuf[33]; // max SSID length + 1
 char wifiPassBuf[65];
-
-// --- Country Info for Weather Modal ---
-String owmCountryCode = "";
 
 // --- Menu State ---
 MenuLevel currentMenuLevel = MENU_MAIN;
@@ -254,6 +252,11 @@ void handleIRKey(IRCodes::WxKey key)
     if (deviceModal.isActive())
     {
         deviceModal.handleIR(legacyCode);
+        return;
+    }
+    if (dataSourceModal.isActive())
+    {
+        dataSourceModal.handleIR(legacyCode);
         return;
     }
     if (displayModal.isActive())

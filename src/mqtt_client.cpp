@@ -21,7 +21,6 @@ namespace
 WiFiClient s_mqttNetClient;
 PubSubClient s_mqttClient(s_mqttNetClient);
 
-StaticJsonDocument<768> s_discoveryDoc;
 char s_discoveryPayload[MQTT_BUFFER_SIZE];
 
 constexpr char kAvailabilityTopic[] = "wxvision/status";
@@ -108,9 +107,9 @@ void addDevice(JsonObject root)
     device["sw_version"] = __DATE__;
 }
 
-bool publishDiscoveryDoc(const char *topic)
+bool publishDiscoveryDoc(const char *topic, JsonDocument &doc)
 {
-    size_t len = serializeJson(s_discoveryDoc, s_discoveryPayload, sizeof(s_discoveryPayload));
+    size_t len = serializeJson(doc, s_discoveryPayload, sizeof(s_discoveryPayload));
     if (len == 0 || len >= sizeof(s_discoveryPayload))
         return false;
     return publishRetained(topic, s_discoveryPayload);
@@ -126,8 +125,8 @@ bool publishSensorDiscovery(const char *topic,
                             const char *entityCategory = nullptr,
                             const char *icon = nullptr)
 {
-    s_discoveryDoc.clear();
-    JsonObject root = s_discoveryDoc.to<JsonObject>();
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
     root["state_topic"] = stateTopic;
@@ -143,7 +142,7 @@ bool publishSensorDiscovery(const char *topic,
         root["icon"] = icon;
     addAvailability(root);
     addDevice(root);
-    return publishDiscoveryDoc(topic);
+    return publishDiscoveryDoc(topic, doc);
 }
 
 bool publishBinarySensorDiscovery(const char *topic,
@@ -156,8 +155,8 @@ bool publishBinarySensorDiscovery(const char *topic,
                                   const char *entityCategory = nullptr,
                                   const char *icon = nullptr)
 {
-    s_discoveryDoc.clear();
-    JsonObject root = s_discoveryDoc.to<JsonObject>();
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
     root["state_topic"] = stateTopic;
@@ -171,7 +170,7 @@ bool publishBinarySensorDiscovery(const char *topic,
         root["icon"] = icon;
     addAvailability(root);
     addDevice(root);
-    return publishDiscoveryDoc(topic);
+    return publishDiscoveryDoc(topic, doc);
 }
 
 bool publishSwitchDiscovery(const char *topic,
@@ -181,8 +180,8 @@ bool publishSwitchDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    s_discoveryDoc.clear();
-    JsonObject root = s_discoveryDoc.to<JsonObject>();
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
     root["state_topic"] = stateTopic;
@@ -195,7 +194,7 @@ bool publishSwitchDiscovery(const char *topic,
     root["icon"] = icon;
     addAvailability(root);
     addDevice(root);
-    return publishDiscoveryDoc(topic);
+    return publishDiscoveryDoc(topic, doc);
 }
 
 bool publishNumberDiscovery(const char *topic,
@@ -205,8 +204,8 @@ bool publishNumberDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    s_discoveryDoc.clear();
-    JsonObject root = s_discoveryDoc.to<JsonObject>();
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
     root["state_topic"] = stateTopic;
@@ -219,7 +218,7 @@ bool publishNumberDiscovery(const char *topic,
     root["step"] = 1;
     addAvailability(root);
     addDevice(root);
-    return publishDiscoveryDoc(topic);
+    return publishDiscoveryDoc(topic, doc);
 }
 
 bool publishButtonDiscovery(const char *topic,
@@ -228,8 +227,8 @@ bool publishButtonDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    s_discoveryDoc.clear();
-    JsonObject root = s_discoveryDoc.to<JsonObject>();
+    JsonDocument doc;
+    JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
     root["command_topic"] = commandTopic;
@@ -238,7 +237,7 @@ bool publishButtonDiscovery(const char *topic,
     root["icon"] = icon;
     addAvailability(root);
     addDevice(root);
-    return publishDiscoveryDoc(topic);
+    return publishDiscoveryDoc(topic, doc);
 }
 
 float currentTemperatureC()

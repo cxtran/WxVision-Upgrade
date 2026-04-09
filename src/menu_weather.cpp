@@ -289,7 +289,6 @@ void showWeatherSettingsModal()
         String prevApiKey = owmApiKey;
         int prevCountryIndex = owmCountryIndex;
         String prevCountryCustom = owmCountryCustom;
-        String prevCountryCode = owmCountryCode;
 
         int newCountryIndex = owmCountryIndexTemp;
         String newCountryCustom = String(owmCountryCustomBuf);
@@ -310,18 +309,14 @@ void showWeatherSettingsModal()
         owmCity = newCity;
         owmApiKey = newApiKey;
 
-        if (owmCountryIndex < 10)
-        {
-            owmCountryCode = countryCodes[owmCountryIndex];
-        }
-        else
-        {
-            owmCountryCode = owmCountryCustom;
-        }
+        String selectedCountryCode =
+            (owmCountryIndex >= 0 && owmCountryIndex < (countryCount - 1))
+                ? String(countryCodes[owmCountryIndex])
+                : owmCountryCustom;
 
         saveWeatherSettings();
         Serial.printf("[WeatherModal] Saved Country=%s (%s), City=%s\n",
-                      countryLabels[owmCountryIndex], owmCountryCode.c_str(), owmCity.c_str());
+                      countryLabels[owmCountryIndex], selectedCountryCode.c_str(), owmCity.c_str());
 
         if (settingsChanged)
         {

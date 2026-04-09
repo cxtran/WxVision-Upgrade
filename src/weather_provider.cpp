@@ -59,7 +59,7 @@ public:
     }
     bool fetch() override
     {
-        fetchWeatherFromOWM();
+        fetchWeatherFromOWM(false);
         return true;
     }
     bool snapshot(WeatherSnapshot &out) const override
@@ -102,11 +102,6 @@ public:
 class ForecastModelProviderBase : public IWeatherProvider
 {
 public:
-    bool fetch() override
-    {
-        fetchForecastData();
-        return true;
-    }
     bool snapshot(WeatherSnapshot &out) const override
     {
         out = WeatherSnapshot{};
@@ -150,6 +145,11 @@ class WeatherFlowProvider final : public ForecastModelProviderBase
 public:
     WeatherProviderId id() const override { return WeatherProviderId::WeatherFlow; }
     const char *name() const override { return "weatherflow"; }
+    bool fetch() override
+    {
+        fetchWeatherFlowForecastData();
+        return true;
+    }
     WeatherProviderCapabilities capabilities() const override
     {
         WeatherProviderCapabilities caps;
@@ -166,6 +166,11 @@ class OpenMeteoProvider final : public ForecastModelProviderBase
 public:
     WeatherProviderId id() const override { return WeatherProviderId::OpenMeteo; }
     const char *name() const override { return "open-meteo"; }
+    bool fetch() override
+    {
+        fetchOpenMeteoForecastData();
+        return true;
+    }
     WeatherProviderCapabilities capabilities() const override
     {
         WeatherProviderCapabilities caps;
@@ -181,6 +186,27 @@ NoneProvider g_noneProvider;
 OwmProvider g_owmProvider;
 WeatherFlowProvider g_weatherFlowProvider;
 OpenMeteoProvider g_openMeteoProvider;
+
+bool runProviderFetch_(IWeatherProvider &provider)
+{
+    const auto caps = provider.capabilities();
+    const bool showedBusy = caps.usesCloudFetch && dma_display != nullptr && !isSplashActive();
+    if (showedBusy)
+    {
+        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
+    }
+
+    const bool ok = provider.fetch();
+    if (showedBusy)
+        refreshVisibleScreen();
+    return ok;
+}
+
+bool transitionNeedsSharedModelReset_(int previousSource, int nextSource)
+{
+    (void)previousSource;
+    return nextSource == DATA_SOURCE_NONE;
+}
 
 } // namespace
 
@@ -238,36 +264,16 @@ IWeatherProvider &activeProvider()
     return providerForDataSource(dataSource);
 }
 
-bool fetchActiveProviderData()
+void notifyProviderSourceChange(int previousSource, int nextSource)
 {
-    const auto caps = activeProvider().capabilities();
-    const bool showedBusy = caps.usesCloudFetch && dma_display != nullptr && !isSplashActive();
-    if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
-    {
-        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
-    }
-    const bool ok = activeProvider().fetch();
-    if (showedBusy)
-    {
-        refreshVisibleScreen();
-    }
-    return ok;
+    if (!transitionNeedsSharedModelReset_(previousSource, nextSource))
+        return;
+    resetForecastModelData();
 }
 
-bool fetchProviderData(int source)
+bool fetchActiveProviderData()
 {
-    const auto caps = providerForDataSource(source).capabilities();
-    const bool showedBusy = caps.usesCloudFetch && dma_display != nullptr && !isSplashActive();
-    if (caps.usesCloudFetch && dma_display != nullptr && !isSplashActive())
-    {
-        wxv::notify::showNotification(wxv::notify::NotifyId::Busy, myCYAN, myWHITE, "UPDATING");
-    }
-    const bool ok = providerForDataSource(source).fetch();
-    if (showedBusy)
-    {
-        refreshVisibleScreen();
-    }
-    return ok;
+    return runProviderFetch_(activeProvider());
 }
 
 bool readActiveProviderSnapshot(WeatherSnapshot &out)

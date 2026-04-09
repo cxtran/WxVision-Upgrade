@@ -17,12 +17,6 @@ enum AlarmRepeatMode : uint8_t {
     ALARM_REPEAT_WEEKEND = 4
 };
 
-// --- Date/Time/Timezone Settings ---
-extern int dstAuto; // 0 = off, 1 = auto
-extern int timeZoneOffsetMinutes; // Time Zone offset in minutes, e.g. 420 for UTC+7
-extern int dateFormat;            // 0 = YYYY-MM-DD, 1 = MM/DD/YYYY, 2 = DD/MM/YYYY
-extern int timeFormat24h;         // 1 = 24-hour, 0 = 12-hour
-
 enum DataSourceType : uint8_t {
     DATA_SOURCE_OWM = 0,
     DATA_SOURCE_WEATHERFLOW = 1,

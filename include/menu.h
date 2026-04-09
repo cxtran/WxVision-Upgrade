@@ -27,6 +27,7 @@ void showDateTimeModal();
 void showWiFiSignalTest();
 void showMainMenuModal();
 void showDeviceSettingsModal();
+void showDataSourceSelectionModal();
 void showDisplaySettingsModal();
 void showAlarmSettingsModal();
 void showMqttSettingsModal();
@@ -132,7 +133,6 @@ extern int lightGain;
 
 extern int owmCountryIndex;
 extern String owmCountryCustom;
-extern String owmCountryCode;
 
 // --- System/Modal Navigation ---
 extern void quickRestore();
@@ -145,6 +145,7 @@ extern InfoModal wifiInfoModal;
 extern InfoModal dateModal;
 extern InfoModal mainMenuModal;
 extern InfoModal deviceModal;
+extern InfoModal dataSourceModal;
 extern InfoModal displayModal;
 extern InfoModal weatherModal;
 extern InfoModal tempestModal;

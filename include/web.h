@@ -11,6 +11,7 @@ struct AppApiResponse
 void setupWebServer();      // Call this from setup()
 void webTick();             // Call from loop() for deferred web actions
 void broadcastAppSettingsUpdate(const char *section);
+bool webServerIsRunning();
 bool handleAppApiRequest(const String &method, const String &path, const String &requestBody, AppApiResponse &response);
 String buildAppHelloMessage();
 bool isLocalAppClientConnected();

@@ -129,6 +129,8 @@ void updateForecastFromJson(const String& jsonStr);
 
 // Pull and parse from API
 void fetchForecastData();
+void fetchWeatherFlowForecastData();
+void fetchOpenMeteoForecastData();
 void resetForecastModelData();
 
 // (kept for compatibility even if unused)
