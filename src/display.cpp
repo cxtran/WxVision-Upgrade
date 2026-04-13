@@ -3540,38 +3540,48 @@ static void drawSceneReadabilityOverlay(WeatherSceneKind kind)
     dma_display->drawFastHLine(0, SCENE_H - 1, SCENE_W, divider);
 }
 
-static String formatConditionLabel(const String &condition)
+String formatConditionLabel(const String &condition)
 {
-    String label = condition;
-    label.trim();
-    if (label.length() == 0)
+    const String key = getCanonicalWeatherIconKey(condition);
+    if (key.length() == 0)
         return String("No Data");
-
-    label.replace('_', ' ');
-    label.replace('-', ' ');
-    label.toLowerCase();
-
-    bool capitalizeNext = true;
-    for (int i = 0; i < label.length(); ++i)
-    {
-        char c = label.charAt(i);
-        unsigned char uc = static_cast<unsigned char>(c);
-        if (isalpha(uc))
-        {
-            if (capitalizeNext)
-                label.setCharAt(i, static_cast<char>(toupper(uc)));
-            capitalizeNext = false;
-        }
-        else if (isdigit(uc))
-        {
-            capitalizeNext = false;
-        }
-        else
-        {
-            capitalizeNext = true;
-        }
-    }
-    return label;
+    if (key == "clear")
+        return String("CLEAR");
+    if (key == "clear night")
+        return String("CLEAR NIGHT");
+    if (key == "partly cloudy")
+        return String("PARTLY CLOUDY");
+    if (key == "partly cloudy night")
+        return String("PARTLY CLOUDY NIGHT");
+    if (key == "cloudy")
+        return String("CLOUDY");
+    if (key == "cloudy night")
+        return String("CLOUDY NIGHT");
+    if (key == "overcast")
+        return String("OVERCAST");
+    if (key == "overcast night")
+        return String("OVERCAST NIGHT");
+    if (key == "fog")
+        return String("FOG");
+    if (key == "fog night")
+        return String("FOG NIGHT");
+    if (key == "rain")
+        return String("RAIN");
+    if (key == "rain night")
+        return String("RAIN");
+    if (key == "thunderstorm")
+        return String("THUNDERSTORM");
+    if (key == "thunderstorm night")
+        return String("THUNDERSTORM");
+    if (key == "snow")
+        return String("SNOW");
+    if (key == "snow night")
+        return String("SNOW");
+    if (key == "windy")
+        return String("WINDY");
+    if (key == "windy night")
+        return String("WINDY");
+    return String("CLEAR");
 }
 
 String formatOutdoorTemperature()
@@ -3677,6 +3687,7 @@ static void drawWeatherFlowIcon()
             key += " night";
     }
 
+    key = getCanonicalWeatherIconKey(key);
     const uint8_t *icon = getWeatherIconFromCondition(key);
     uint16_t color = getIconColorFromCondition(key);
     ui_theme::drawBitmapThemed(0, 0, icon, 16, 16, color);
@@ -4367,11 +4378,47 @@ WeatherIconVariant weatherIconVariantFromCodeKey(const String &key)
 {
     return weatherIconVariantFromGroup(key);
 }
+
+String canonicalWeatherIconKeyFromNormalized(const String &key)
+{
+    const bool night = isNightWeatherIconKey(key);
+
+    switch (classifyWeatherIconGroup(key))
+    {
+    case IconGroup::Thunder:
+        return night ? String("thunderstorm night") : String("thunderstorm");
+    case IconGroup::Snow:
+        return night ? String("snow night") : String("snow");
+    case IconGroup::Drizzle:
+    case IconGroup::Rain:
+        return night ? String("rain night") : String("rain");
+    case IconGroup::Fog:
+        return night ? String("fog night") : String("fog");
+    case IconGroup::Overcast:
+        return night ? String("overcast night") : String("overcast");
+    case IconGroup::PartlyCloudy:
+        return night ? String("partly cloudy night") : String("partly cloudy");
+    case IconGroup::Cloudy:
+        return night ? String("cloudy night") : String("cloudy");
+    case IconGroup::Windy:
+        return night ? String("windy night") : String("windy");
+    case IconGroup::Clear:
+        return night ? String("clear night") : String("clear");
+    case IconGroup::Unknown:
+    default:
+        return night ? String("clear night") : String("clear");
+    }
+}
 } // namespace
+
+String getCanonicalWeatherIconKey(String input)
+{
+    return canonicalWeatherIconKeyFromNormalized(normalizeWeatherIconKey(input));
+}
 
 const uint8_t *getWeatherIconFromCode(String code)
 {
-    const String key = normalizeWeatherIconKey(code);
+    const String key = getCanonicalWeatherIconKey(code);
     const WeatherIconVariant variant = weatherIconVariantFromCodeKey(key);
     if (variant.day != nullptr || variant.night != nullptr)
         return selectWeatherIconVariant(variant, isNightWeatherIconKey(key));
@@ -4380,13 +4427,13 @@ const uint8_t *getWeatherIconFromCode(String code)
 
 const uint8_t *getWeatherIconFromCondition(String condition)
 {
-    const String key = normalizeWeatherIconKey(condition);
+    const String key = getCanonicalWeatherIconKey(condition);
     return selectWeatherIconVariant(weatherIconVariantFromGroup(key), isNightWeatherIconKey(key));
 }
 
 const uint16_t getIconColorFromCondition(String condition)
 {
-    const String key = normalizeWeatherIconKey(condition);
+    const String key = getCanonicalWeatherIconKey(condition);
     const bool isNight = (key.indexOf("night") >= 0) || key.endsWith("n");
     const IconGroup group = classifyWeatherIconGroup(key);
 
@@ -4907,7 +4954,7 @@ void fetchWeatherFromOWM(bool showBusy)
     currentCond.uv = -1;
     currentCond.precipProb = -1;
     currentCond.cond = str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions;
-    currentCond.icon = str_Weather_Icon;
+    currentCond.icon = getCanonicalWeatherIconKey(str_Weather_Icon);
     currentCond.time = isnan(obsTime) ? 0U : static_cast<uint32_t>(obsTime);
 
     tempest.temperature = currentCond.temp;
@@ -5524,7 +5571,7 @@ void createScrollingText()
 
     if (isDataSourceForecastModel())
     {
-        weatherText = nonEmptyOrDash(currentCond.cond.length() ? currentCond.cond : currentCond.icon);
+        weatherText = nonEmptyOrDash(formatConditionLabel(currentCond.cond.length() ? currentCond.cond : currentCond.icon));
         feelsText = tempTextOrDash(currentCond.feelsLike);
         pressureText = pressTextOrDash(currentCond.pressure);
         windText = windTextOrDash(currentCond.windAvg);
@@ -5537,7 +5584,7 @@ void createScrollingText()
     else
     {
         cityText = nonEmptyOrDash(str_City);
-        weatherText = nonEmptyOrDash(str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions);
+        weatherText = nonEmptyOrDash(formatConditionLabel(str_Weather_Conditions_Des.length() ? str_Weather_Conditions_Des : str_Weather_Conditions));
         if (str_Feels_like.length() > 0 && str_Feels_like != "--")
             feelsText = fmtTemp(atof(str_Feels_like.c_str()), 0);
         if (str_Temp_max.length() > 0 && str_Temp_max != "--")

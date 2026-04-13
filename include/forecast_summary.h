@@ -32,4 +32,5 @@ void finishForecastSummaryDisplay();
 bool forecastSummaryDisplayExpired();
 bool forecastSummaryScreenActive();
 bool forecastSummaryShouldAutoPresent();
+void acknowledgeForecastSummaryAutoPresent();
 void resetForecastSummaryState();

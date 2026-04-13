@@ -102,6 +102,16 @@ void RollingUpScreen::setLineIcons(const std::vector<const uint8_t *> &icons, co
     _iconColors = iconColors;
 }
 
+void RollingUpScreen::setLineIconBgColors(const std::vector<uint16_t> &bgColors)
+{
+    _iconBgColors = bgColors;
+}
+
+void RollingUpScreen::setLineIconBorderColors(const std::vector<uint16_t> &borderColors)
+{
+    _iconBorderColors = borderColors;
+}
+
 void RollingUpScreen::setLineMarqueeFlags(const std::vector<uint8_t> &flags)
 {
     _lineMarqueeFlags = flags;
@@ -231,15 +241,42 @@ int RollingUpScreen::currentBlockIndex() const
     if (blockCount < 1)
         blockCount = 1;
 
-    int effectiveEntry = (_entryY >= 0) ? _entryY : (_defaultHeight > 0 ? _defaultHeight : totalHeight);
-    int effectiveExit = (_exitY >= 0) ? _exitY : 0;
-    int targetBase = abs(effectiveEntry - effectiveExit);
-    int rel = _offsetPx - targetBase;
-    if (rel < 0)
-        rel = 0;
-    int idx = (rel / blockPx) % blockCount;
+    int idx = (_offsetPx / blockPx) % blockCount;
     if (idx < 0)
         idx = 0;
+    return idx;
+}
+
+int RollingUpScreen::currentEnteringBlockIndex() const
+{
+    if (_lines.empty())
+        return 0;
+
+    int blockPx = (_blockSizePx > 0) ? _blockSizePx : _lineHeight;
+    if (blockPx < 1)
+        blockPx = 1;
+
+    int totalHeight = static_cast<int>(_lines.size()) * _lineHeight + maxExtraOffset(_lineYOffsets);
+    int blockCount = (totalHeight + blockPx - 1) / blockPx;
+    if (blockCount < 1)
+        blockCount = 1;
+
+    int gap = (_defaultHeight > 0) ? _defaultHeight : 0;
+    int cycle = totalHeight + gap;
+    if (cycle <= 0)
+        cycle = 1;
+
+    int phase = _offsetPx % cycle;
+    if (phase <= 0)
+        return 0;
+    if (phase >= totalHeight)
+        return blockCount - 1;
+
+    int idx = (phase - 1) / blockPx;
+    if (idx < 0)
+        idx = 0;
+    if (idx >= blockCount)
+        idx = blockCount - 1;
     return idx;
 }
 
@@ -608,9 +645,23 @@ void RollingUpScreen::draw(Adafruit_GFX &display, int x, int y, int height, uint
                 if (iconY + 16 > 0 && iconY < h) // simple visibility check
                 {
                     uint16_t iconColor = (idx < _iconColors.size() && _iconColors[idx] != 0) ? _iconColors[idx] : useColor;
+                    uint16_t iconBgColor = (idx < _iconBgColors.size()) ? _iconBgColors[idx] : 0;
+                    uint16_t iconBorderColor = (idx < _iconBorderColors.size() && _iconBorderColors[idx] != 0) ? _iconBorderColors[idx] : iconColor;
                     int drawX = iconX;
                     if (drawX < 0) drawX = 0;
                     if (drawX > _width - 16) drawX = _width - 16;
+                    if (iconBgColor != 0)
+                    {
+                        const int bgX = max(0, drawX - 1);
+                        const int bgY = iconY;
+                        const int bgW = min(18, _width - bgX);
+                        const int bgH = min(16, h - bgY);
+                        if (bgW > 0 && bgH > 0)
+                        {
+                            canvas.fillRoundRect(bgX, bgY, bgW, bgH, 3, iconBgColor);
+                            canvas.drawRoundRect(bgX, bgY, bgW, bgH, 3, iconBorderColor);
+                        }
+                    }
                     // Do not clamp Y: Adafruit_GFX will clip per-pixel, matching text roll behavior.
                     canvas.drawBitmap(drawX, iconY, _lineIcons[idx], 16, 16, iconColor);
                 }
@@ -730,12 +781,22 @@ void RollingUpScreen::draw(Adafruit_GFX &display, int x, int y, int height, uint
                 if (bigTempLine)
                 {
                     const int bigShiftX = 4;
+                    String tempToken = line;
+                    String suffixText;
+                    int splitPos = line.indexOf(' ');
+                    if (splitPos >= 0)
+                    {
+                        tempToken = line.substring(0, splitPos);
+                        suffixText = line.substring(splitPos + 1);
+                        suffixText.trim();
+                    }
+
                     char valueText[16] = {0};
                     char unitChar = '\0';
                     size_t vIdx = 0;
-                    for (int ci = 0; ci < line.length() && vIdx < sizeof(valueText) - 1; ++ci)
+                    for (int ci = 0; ci < tempToken.length() && vIdx < sizeof(valueText) - 1; ++ci)
                     {
-                        char c = line.charAt(ci);
+                        char c = tempToken.charAt(ci);
                         if ((c >= '0' && c <= '9') || c == '-' || c == '+')
                         {
                             valueText[vIdx++] = c;
@@ -769,23 +830,88 @@ void RollingUpScreen::draw(Adafruit_GFX &display, int x, int y, int height, uint
                     canvas.setFont(&verdanab8pt7b);
                     canvas.setTextSize(1);
                     int valueBaseY = localY + 5; // move temperature down 2px
-                    canvas.setTextColor(bigColor, 0);
-                    canvas.setCursor(textX + bigShiftX, valueBaseY);
-                    canvas.print(valueText);
+
+                    int16_t vX1 = 0;
+                    int16_t vY1 = 0;
+                    uint16_t vW = 0;
+                    uint16_t vH = 0;
+                    canvas.getTextBounds(valueText, 0, 0, &vX1, &vY1, &vW, &vH);
+
+                    int tempX = textX + bigShiftX;
 
                     if (unitChar == 'C' || unitChar == 'F')
                     {
-                        int16_t vX1 = 0;
-                        int16_t vY1 = 0;
-                        uint16_t vW = 0;
-                        uint16_t vH = 0;
-                        canvas.getTextBounds(valueText, 0, 0, &vX1, &vY1, &vW, &vH);
                         char unitText[4] = {'\xB0', unitChar, '\0'};
                         canvas.setFont(&Font5x7Uts);
                         canvas.setTextSize(1);
+                        int16_t uX1 = 0;
+                        int16_t uY1 = 0;
+                        uint16_t uW = 0;
+                        uint16_t uH = 0;
+                        canvas.getTextBounds(unitText, 0, 0, &uX1, &uY1, &uW, &uH);
+
+                        int unitX = tempX + static_cast<int>(vW) + 1;
+                        int suffixX = -1;
+
+                        if (suffixText.length() > 0)
+                        {
+                            int16_t sX1 = 0;
+                            int16_t sY1 = 0;
+                            uint16_t sW = 0;
+                            uint16_t sH = 0;
+                            canvas.getTextBounds(suffixText.c_str(), 0, 0, &sX1, &sY1, &sW, &sH);
+
+                            suffixX = unitX + static_cast<int>(uW) + 2;
+                            int groupRight = suffixX + static_cast<int>(sW);
+                            int overflow = groupRight - _width;
+                            if (overflow > 0)
+                            {
+                                tempX -= overflow;
+                                if (tempX < textX)
+                                    tempX = textX;
+                                unitX = tempX + static_cast<int>(vW) + 1;
+                                suffixX = unitX + static_cast<int>(uW) + 2;
+                            }
+
+                            canvas.setFont(&verdanab8pt7b);
+                            canvas.setTextSize(1);
+                            canvas.setTextColor(bigColor, 0);
+                            canvas.setCursor(tempX, valueBaseY);
+                            canvas.print(valueText);
+
+                            canvas.setFont(&Font5x7Uts);
+                            canvas.setTextSize(1);
+                            canvas.setTextColor(bigColor, 0);
+                            canvas.setCursor(unitX, localY - 6);
+                            canvas.print(unitText);
+
+                            canvas.setTextColor(useColor, 0);
+                            canvas.setCursor(suffixX, localY);
+                            canvas.print(suffixText);
+                            canvas.setFont(&Font5x7Uts);
+                            canvas.setTextSize(1);
+                            yy += _lineHeight;
+                            continue;
+                        }
+
                         canvas.setTextColor(bigColor, 0);
-                        canvas.setCursor(textX + bigShiftX + static_cast<int>(vW) + 3, localY - 6);
+                        canvas.setCursor(unitX, localY - 6);
                         canvas.print(unitText);
+                    }
+
+                    canvas.setFont(&verdanab8pt7b);
+                    canvas.setTextSize(1);
+                    canvas.setTextColor(bigColor, 0);
+                    canvas.setCursor(tempX, valueBaseY);
+                    canvas.print(valueText);
+
+                    if (suffixText.length() > 0)
+                    {
+                        canvas.setFont(&Font5x7Uts);
+                        canvas.setTextSize(1);
+                        canvas.setTextColor(useColor, 0);
+                        canvas.setCursor(textX + bigShiftX + static_cast<int>(vW) + 2, localY);
+                        canvas.print(suffixText);
                     }
 
                     canvas.setFont(&Font5x7Uts);

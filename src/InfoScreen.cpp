@@ -20,6 +20,58 @@ static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREE
 static std::vector<String> s_hourlyHeaders;
 static std::vector<String> s_dailyHeaders;
 
+namespace
+{
+bool hourlyLineNeedsMarquee(const String &text)
+{
+    if (text.length() == 0)
+        return false;
+    return text.length() > 10;
+}
+
+uint16_t hourlyAccentColor(const String &label, uint16_t fallback)
+{
+    String lower = label;
+    lower.toLowerCase();
+
+    if (lower.indexOf("rain") >= 0 || lower.indexOf("shower") >= 0 || lower.indexOf("storm") >= 0)
+        return (theme == 1) ? dma_display->color565(150, 190, 230) : dma_display->color565(105, 220, 255);
+    if (lower.indexOf("wind") >= 0 || lower.indexOf("gust") >= 0 || lower.indexOf("breez") >= 0)
+        return (theme == 1) ? dma_display->color565(220, 200, 130) : dma_display->color565(255, 210, 90);
+    if (lower.indexOf("hot") >= 0)
+        return (theme == 1) ? dma_display->color565(235, 175, 120) : dma_display->color565(255, 155, 90);
+    if (lower.indexOf("cold") >= 0 || lower.indexOf("cool") >= 0)
+        return (theme == 1) ? dma_display->color565(160, 205, 235) : dma_display->color565(120, 210, 255);
+    return fallback;
+}
+
+uint16_t softenIconPlate(uint16_t color)
+{
+    if (color == 0)
+        return 0;
+    uint8_t r = ((color >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((color >> 5) & 0x3F) * 255 / 63;
+    uint8_t b = (color & 0x1F) * 255 / 31;
+    r = static_cast<uint8_t>(max(8, r / 5));
+    g = static_cast<uint8_t>(max(8, g / 5));
+    b = static_cast<uint8_t>(max(8, b / 5));
+    return dma_display->color565(r, g, b);
+}
+
+uint16_t softenIconBorder(uint16_t color)
+{
+    if (color == 0)
+        return 0;
+    uint8_t r = ((color >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((color >> 5) & 0x3F) * 255 / 63;
+    uint8_t b = (color & 0x1F) * 255 / 31;
+    r = static_cast<uint8_t>(max(12, (r * 2) / 5));
+    g = static_cast<uint8_t>(max(12, (g * 2) / 5));
+    b = static_cast<uint8_t>(max(12, (b * 2) / 5));
+    return dma_display->color565(r, g, b);
+}
+} // namespace
+
 
 static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
 {
@@ -92,6 +144,8 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         std::vector<int> yOffsets;
         std::vector<const uint8_t *> icons;
         std::vector<uint16_t> iconColors;
+        std::vector<uint16_t> iconBgColors;
+        std::vector<uint16_t> iconBorderColors;
         std::vector<uint8_t> marqueeFlags;
         s_hourlyHeaders.clear();
         s_hourlyHeaders.reserve(_lineCount);
@@ -102,12 +156,14 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         yOffsets.reserve(rowCount);
         icons.reserve(rowCount);
         iconColors.reserve(rowCount);
+        iconBgColors.reserve(rowCount);
+        iconBorderColors.reserve(rowCount);
         marqueeFlags.reserve(rowCount);
         for (int i = 0; i < _lineCount; ++i) {
             // Split on '\n' to allow fixed block entries
             const bool monoTheme = (theme == 1);
             const uint16_t labelColor = monoTheme ? ui_theme::infoLabelMono() : ui_theme::infoLabelDay();
-            const uint16_t valueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
+            const uint16_t defaultValueColor = monoTheme ? ui_theme::infoValueMono() : ui_theme::infoValueDay();
             const bool iconEnabled = (forecastIconSize == 16);
             const int iconPad = iconEnabled ? 18 : 0;
             const int valueIndentPx = 4;
@@ -122,6 +178,8 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
             line1.trim();
             line2.trim();
             line3.trim();
+            const uint16_t valueColor = hourlyAccentColor(line3.length() ? line3 : line2, defaultValueColor);
+            const uint16_t detailColor = hourlyAccentColor(line3, defaultValueColor);
 
             const uint8_t *iconPtr = nullptr;
             uint16_t iconClr = 0;
@@ -152,6 +210,8 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
             yOffsets.push_back(blockYOffset);
             icons.push_back(iconEnabled ? iconPtr : nullptr);
             iconColors.push_back(iconEnabled ? iconClr : 0);
+            iconBgColors.push_back(iconEnabled && iconPtr != nullptr ? softenIconPlate(iconClr) : 0);
+            iconBorderColors.push_back(iconEnabled && iconPtr != nullptr ? softenIconBorder(iconClr) : 0);
             marqueeFlags.push_back(0);
 
             // Line 2: data line aligned to the right of icon
@@ -161,22 +221,28 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
             yOffsets.push_back(blockYOffset);
             icons.push_back(nullptr);
             iconColors.push_back(0);
+            iconBgColors.push_back(0);
+            iconBorderColors.push_back(0);
             marqueeFlags.push_back(0);
 
             // Line 3: condition line (optional) aligned to the right of icon; marquee-enabled like 10-day page.
             vec.push_back(line3.length() ? line3 : String(""));
-            colors.push_back(valueColor);
+            colors.push_back(detailColor);
             offsets.push_back(0);
             yOffsets.push_back(blockYOffset + 1); // move last line down 1px
             icons.push_back(nullptr);
             iconColors.push_back(0);
-            marqueeFlags.push_back(1);
+            iconBgColors.push_back(0);
+            iconBorderColors.push_back(0);
+            marqueeFlags.push_back(hourlyLineNeedsMarquee(line3) ? 1 : 0);
         }
         s_hourlyRoll.setLines(vec, resetPosition);
         s_hourlyRoll.setLineColors(colors);
         s_hourlyRoll.setLineOffsets(offsets);
         s_hourlyRoll.setLineYOffsets(yOffsets);
         s_hourlyRoll.setLineIcons(icons, iconColors);
+        s_hourlyRoll.setLineIconBgColors(iconBgColors);
+        s_hourlyRoll.setLineIconBorderColors(iconBorderColors);
         s_hourlyRoll.setLineMarqueeFlags(marqueeFlags);
         s_hourlyRoll.setScrollSpeed((verticalScrollSpeed > 0) ? (unsigned)verticalScrollSpeed : 60u);
         s_hourlyRoll.setEntryExit(InfoScreen::SCREEN_HEIGHT, InfoScreen::CHARH); // enter from bottom, exit just under title
@@ -612,7 +678,7 @@ void InfoScreen::draw() {
         String t = _title;
         if (_screenMode == SCREEN_HOURLY && !s_hourlyHeaders.empty())
         {
-            int hourIdx = s_hourlyRoll.currentBlockIndex();
+            int hourIdx = s_hourlyRoll.currentEnteringBlockIndex();
             if (hourIdx >= 0 && hourIdx < static_cast<int>(s_hourlyHeaders.size()))
                 t = s_hourlyHeaders[hourIdx];
         }

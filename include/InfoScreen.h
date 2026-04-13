@@ -4,7 +4,7 @@
 #include "ir_codes.h"
 #include "ui_theme.h"
 
-#define INFOSCREEN_MAX_LINES     20
+#define INFOSCREEN_MAX_LINES     32
 #define INFOSCREEN_VISIBLE_ROWS  3
 #define INFOSCREEN_HEADERFG ui_theme::infoScreenHeaderFg()
 #define INFOSCREEN_HEADERBG ui_theme::infoScreenHeaderBg()

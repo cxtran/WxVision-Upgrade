@@ -1100,40 +1100,6 @@ static void applyNightThemeSceneDimmer()
     // Scene colors are already routed through the shared night-theme mono transform.
 }
 
-String formatConditionLabel(const String &condition)
-{
-    String label = condition;
-    label.trim();
-    if (label.length() == 0)
-        return String("No Data");
-
-    label.replace('_', ' ');
-    label.replace('-', ' ');
-    label.toLowerCase();
-
-    bool capitalizeNext = true;
-    for (int i = 0; i < label.length(); ++i)
-    {
-        char c = label.charAt(i);
-        unsigned char uc = static_cast<unsigned char>(c);
-        if (isalpha(uc))
-        {
-            if (capitalizeNext)
-                label.setCharAt(i, static_cast<char>(toupper(uc)));
-            capitalizeNext = false;
-        }
-        else if (isdigit(uc))
-        {
-            capitalizeNext = false;
-        }
-        else
-        {
-            capitalizeNext = true;
-        }
-    }
-    return label;
-}
-
 void drawWeatherConditionScene(WeatherSceneKind kind)
 {
     for (const auto &renderer : WEATHER_SCENE_RENDERERS)

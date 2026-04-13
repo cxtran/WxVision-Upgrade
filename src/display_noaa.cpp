@@ -1379,7 +1379,34 @@ namespace
         const uint16_t line1Color = (theme == 1) ? ui_theme::monoHeaderFg() : ui_theme::rgb(232, 248, 255);
         const uint16_t line2Color = (theme == 1) ? ui_theme::monoBodyText() : ui_theme::rgb(150, 236, 255);
         const bool showCursor = ((nowMs / ALERT_CURSOR_BLINK_MS) % 2UL) == 0UL;
-        String lines[2] = {String(msg.line1), String(msg.line2)};
+        String lines[2];
+        String first = String(msg.line1);
+        first.trim();
+        String second = String(msg.line2);
+        second.trim();
+
+        if (first.length() > 0 && second.length() > 0 &&
+            noaaTextWidthPx(first) <= ALERT_BODY_WIDTH_PX &&
+            noaaTextWidthPx(second) <= ALERT_BODY_WIDTH_PX)
+        {
+            lines[0] = first;
+            lines[1] = second;
+        }
+        else
+        {
+            String combined = first;
+            if (second.length() > 0)
+            {
+                if (combined.length() > 0)
+                    combined += " ";
+                combined += second;
+            }
+            std::vector<String> wrapped = wrapTextToPixelWidth(normalizeAlertText(combined), ALERT_BODY_WIDTH_PX);
+            if (!wrapped.empty())
+                lines[0] = wrapped[0];
+            if (wrapped.size() > 1)
+                lines[1] = wrapped[1];
+        }
         unsigned long revealElapsedMs = nowMs - s_forecastRevealStartMs;
         bool cursorDrawn = false;
 

@@ -420,7 +420,8 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
     currentCond.uv           = (JSON.typeof_(cur["uv"]) == "number") ? (int)cur["uv"] : -1;
     currentCond.precipProb   = (JSON.typeof_(cur["precip_probability"]) == "number") ? (int)cur["precip_probability"] : -1;
     currentCond.cond         = (JSON.typeof_(cur["conditions"]) == "string") ? (const char*)cur["conditions"] : "";
-    currentCond.icon         = (JSON.typeof_(cur["icon"]) == "string") ? (const char*)cur["icon"] : "";
+    String rawIcon           = (JSON.typeof_(cur["icon"]) == "string") ? String((const char*)cur["icon"]) : String("");
+    currentCond.icon         = getCanonicalWeatherIconKey(rawIcon.length() ? rawIcon : currentCond.cond);
     currentCond.time         = (JSON.typeof_(cur["time"]) == "number") ? (uint32_t)(double)cur["time"] : 0;
 
     Serial.println("[FORECAST] Current conditions updated");
@@ -985,7 +986,7 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
         currentCond.time = static_cast<uint32_t>(toInt(current, "time", 0));
         int code = toInt(current, "weather_code", -1);
         currentCond.cond = openMeteoConditionFromCode(code);
-        currentCond.icon = currentCond.cond;
+        currentCond.icon = getCanonicalWeatherIconKey(currentCond.cond);
     }
 
     // --- Daily forecast (up to 10 days) ---
@@ -1407,7 +1408,7 @@ static String deltaTempText(double aC, double bC)
 
 static String compactCondition(const String &condition)
 {
-    String out = condition.length() ? condition : String("--");
+    String out = formatConditionLabel(condition.length() ? condition : String("--"));
     if (out.length() > 20)
         out = out.substring(0, 20);
     return out;
@@ -1563,7 +1564,7 @@ void showForecastScreen() {
     }
     for (int i = 0; i < num; ++i) {
         const ForecastDay& f = forecast.days[i];
-        String iconKey = f.conditions;
+        String iconKey = getCanonicalWeatherIconKey(f.conditions);
         String tempUnit = (units.temp == TempUnit::F) ? "F" : "C";
 
         String hiText = "--";
@@ -1584,7 +1585,7 @@ void showForecastScreen() {
             hiLine += " [icon=" + iconKey + "]";
         }
 
-        String detailLine = f.conditions.length() ? f.conditions : String("No details");
+        String detailLine = f.conditions.length() ? formatConditionLabel(f.conditions) : String("No details");
         if (f.rainChance >= 0)
         {
             detailLine += " " + String(f.rainChance) + "%";
@@ -1608,6 +1609,59 @@ void showForecastScreen() {
 void showHourlyForecastScreen() {
     // How many hours to show on the screen (compile-time constant)
     static constexpr uint8_t HOURLY_DISPLAY_COUNT = 24;
+    static constexpr uint8_t HOURLY_EXTRA_BLOCKS = 0;
+    auto trimAndLower = [](String text) {
+        text.trim();
+        text.toLowerCase();
+        return text;
+    };
+    auto briefConditionLabel = [&](const String &condition) -> String {
+        String key = trimAndLower(condition);
+        if (key.length() == 0)
+            return String("");
+        if (key.indexOf("thunder") >= 0 || key.indexOf("tstorm") >= 0 || key.indexOf("storm") >= 0)
+            return String("T-STORM");
+        if (key.indexOf("shower") >= 0)
+            return String("SHOWERS");
+        if (key.indexOf("drizzle") >= 0)
+            return String("DRIZZLE");
+        if (key.indexOf("rain") >= 0)
+            return String("RAIN");
+        if (key.indexOf("snow") >= 0 || key.indexOf("flurr") >= 0)
+            return String("SNOW");
+        if (key.indexOf("sleet") >= 0)
+            return String("SLEET");
+        if (key.indexOf("fog") >= 0 || key.indexOf("mist") >= 0 || key.indexOf("haze") >= 0)
+            return String("FOG");
+        if (key.indexOf("wind") >= 0 || key.indexOf("gust") >= 0 || key.indexOf("breez") >= 0)
+            return String("WINDY");
+        if (key.indexOf("partly") >= 0)
+            return String("PT CLDY");
+        if (key.indexOf("mostly clear") >= 0)
+            return String("MOSTLY CLR");
+        if (key.indexOf("clear") >= 0 || key.indexOf("sunny") >= 0 || key.indexOf("fair") >= 0)
+            return String("CLEAR");
+        if (key.indexOf("overcast") >= 0)
+            return String("OVERCAST");
+        if (key.indexOf("cloud") >= 0)
+            return String("CLOUDS");
+        return condition;
+    };
+    auto isRainLike = [&](const String &condition) -> bool {
+        String key = trimAndLower(condition);
+        return key.indexOf("rain") >= 0 || key.indexOf("shower") >= 0 || key.indexOf("drizzle") >= 0 ||
+               key.indexOf("storm") >= 0 || key.indexOf("thunder") >= 0;
+    };
+    auto isWindLike = [&](const String &condition) -> bool {
+        String key = trimAndLower(condition);
+        return key.indexOf("wind") >= 0 || key.indexOf("gust") >= 0 || key.indexOf("breez") >= 0;
+    };
+    auto feelsHot = [&](double tempC) -> bool {
+        return !isnan(tempC) && tempC >= 30.0;
+    };
+    auto feelsCold = [&](double tempC) -> bool {
+        return !isnan(tempC) && tempC <= 5.0;
+    };
     const bool reset = !hourlyScreen.isActive();
 
     // Case 1: No hourly data parsed at all
@@ -1637,7 +1691,7 @@ void showHourlyForecastScreen() {
     }
 
     // Build lines for the next up-to-HOURLY_DISPLAY_COUNT hours
-    String lines[HOURLY_DISPLAY_COUNT];
+    String lines[HOURLY_DISPLAY_COUNT + HOURLY_EXTRA_BLOCKS];
     for (int i = 0; i < count; ++i) {
         const ForecastHour& h = forecast.hours[start + i];
 
@@ -1649,10 +1703,16 @@ void showHourlyForecastScreen() {
         int hh = ti ? ti->tm_hour : 0;
         int mm = ti ? ti->tm_min  : 0;
 
-        char timeBuf[20];
-        if (units.clock24h)
+        String timeLabel;
+        if (i == 0)
         {
+            timeLabel = "NOW";
+        }
+        else if (units.clock24h)
+        {
+            char timeBuf[16];
             snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d", hh, mm);
+            timeLabel = String(timeBuf);
         }
         else
         {
@@ -1660,13 +1720,14 @@ void showHourlyForecastScreen() {
             if (hour12 == 0)
                 hour12 = 12;
             const char *suffix = (hh >= 12) ? "PM" : "AM";
-            snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d %s", hour12, mm, suffix);
+            char timeBuf[16];
+            snprintf(timeBuf, sizeof(timeBuf), "%d:%02d %s", hour12, mm, suffix);
+            timeLabel = String(timeBuf);
         }
-        String timeLabel(timeBuf);
 
         // Keep hourly entries to a predictable 3-line block.
         // Icon hint is consumed by the renderer and not shown in text.
-        String iconKey = h.conditions;
+        String iconKey = getCanonicalWeatherIconKey(h.conditions);
         auto isNightAt = [&](time_t epoch, const tm* tmi) -> bool {
             if (!tmi) return false;
             const int month = tmi->tm_mon + 1;
@@ -1684,16 +1745,55 @@ void showHourlyForecastScreen() {
         if (night && iconKey.length() && iconKey.indexOf("night") < 0) {
             iconKey += " night";
         }
+        iconKey = getCanonicalWeatherIconKey(iconKey);
         String labelLine = timeLabel;
         if (iconKey.length())
         {
             labelLine += " [icon=" + iconKey + "]";
         }
 
-        String dataLine;
-        dataLine += (isnan(h.temp) ? String("--") : fmtTemp(h.temp, 0));
-        dataLine += " ";
-        String condLine = h.conditions.length() ? h.conditions : String("");
+        String dataLine = isnan(h.temp) ? String("--") : fmtTemp(h.temp, 0);
+        String condLine = h.conditions.length() ? formatConditionLabel(h.conditions) : String("");
+        condLine.trim();
+
+        if (h.rainChance >= 40 || (!isnan(h.precipAmount) && h.precipAmount >= 0.25) || isRainLike(h.conditions))
+        {
+            if (h.rainChance >= 0)
+            {
+                condLine = "RAIN " + String(h.rainChance) + "%";
+            }
+            else
+            {
+                condLine = "RAIN";
+            }
+        }
+        else if ((!isnan(h.windGust) && h.windGust >= 8.9) || (!isnan(h.windSpeed) && h.windSpeed >= 6.7) || isWindLike(h.conditions))
+        {
+            const double windMetric = !isnan(h.windGust) ? h.windGust : h.windSpeed;
+            if (!isnan(windMetric))
+            {
+                condLine = "WIND " + fmtWind(windMetric, 0);
+            }
+            else
+            {
+                condLine = "WIND";
+            }
+        }
+        else if (feelsHot(h.temp))
+        {
+            condLine = "HOT";
+        }
+        else if (feelsCold(h.temp))
+        {
+            condLine = "COLD";
+        }
+
+        const int hourlyDetailLanePx = InfoScreen::SCREEN_WIDTH - ((forecastIconSize == 16) ? 18 : 0);
+        if (condLine.length() > 0 && getTextWidth(condLine.c_str()) > hourlyDetailLanePx)
+        {
+            condLine = briefConditionLabel(condLine);
+        }
+
         lines[i] = labelLine + "\n" + dataLine + "\n" + condLine;
     }
 

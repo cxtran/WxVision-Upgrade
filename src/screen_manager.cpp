@@ -72,6 +72,7 @@ bool isTemporaryAlertBlocked();
 void handleReturnToDefault(unsigned long now);
 ScreenMode configuredDefaultScreenInternal();
 ScreenMode nextAutoAllowedScreen(ScreenMode start, int direction);
+void queueForecastSummaryPopup();
 bool isAlertDuplicate(const char *text, uint32_t signature)
 {
     if (s_temporaryAlertActive)
@@ -92,6 +93,37 @@ bool isAlertDuplicate(const char *text, uint32_t signature)
             return true;
     }
     return false;
+}
+
+void queueForecastSummaryPopup()
+{
+    const ForecastSummaryMessage &msg = currentForecastSummaryMessage();
+    if (!msg.available)
+        return;
+
+    String title = msg.line1;
+    title.trim();
+    String subtitle = msg.line2;
+    subtitle.trim();
+
+    if (title.length() == 0)
+        title = "FORECAST";
+
+    const int maxHeadingWidth = PANEL_RES_X - 8;
+    if (subtitle.length() > 0 && getTextWidth(subtitle.c_str()) > maxHeadingWidth)
+    {
+        if (title.length() > 0)
+            title += " ";
+        title += subtitle;
+        subtitle = "";
+    }
+
+    const uint16_t popupMs = static_cast<uint16_t>(max<unsigned long>(10000UL, static_cast<unsigned long>(msg.displayDurationMs)));
+    queueTemporaryAlertHeading(title.c_str(),
+                               popupMs,
+                               msg.signature,
+                               subtitle.length() ? subtitle.c_str() : nullptr);
+    acknowledgeForecastSummaryAutoPresent();
 }
 
 void activateTemporaryAlert(const TemporaryHeadingAlert &alert, unsigned long now)
@@ -690,6 +722,13 @@ void handleAutoRotate(unsigned long now)
 {
     if (s_sectionHeadingActive || s_temporaryAlertActive)
         return;
+
+    if (forecastSummaryShouldAutoPresent())
+    {
+        if (!isScreenOff())
+            queueForecastSummaryPopup();
+        return;
+    }
 
     if (autoRotate == 0)
     {

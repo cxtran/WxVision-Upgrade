@@ -669,6 +669,11 @@ bool forecastSummaryShouldAutoPresent()
     return s_autoPresentationPending;
 }
 
+void acknowledgeForecastSummaryAutoPresent()
+{
+    s_autoPresentationPending = false;
+}
+
 void resetForecastSummaryState()
 {
     s_currentMessage = ForecastSummaryMessage{};

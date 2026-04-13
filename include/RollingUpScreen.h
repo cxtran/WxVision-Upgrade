@@ -22,6 +22,10 @@ public:
     void setLineYOffsets(const std::vector<int> &yOffsets);
     // Optional per-line icons and colors (16x16 bitmaps). Missing entries are ignored.
     void setLineIcons(const std::vector<const uint8_t *> &icons, const std::vector<uint16_t> &iconColors);
+    // Optional per-line icon background colors. Zero disables the background plate.
+    void setLineIconBgColors(const std::vector<uint16_t> &bgColors);
+    // Optional per-line icon border colors. Zero falls back to icon color.
+    void setLineIconBorderColors(const std::vector<uint16_t> &borderColors);
     // Optional per-line marquee flags. Non-zero enables horizontal marquee for that line when overflowed.
     void setLineMarqueeFlags(const std::vector<uint8_t> &flags);
     void setPaused(bool paused);
@@ -41,6 +45,7 @@ public:
     void setEntryExit(int entryY, int exitY);
     void reset();
     int currentBlockIndex() const;
+    int currentEnteringBlockIndex() const;
 
     void update();
     void draw(Adafruit_GFX &display, int x, int y, int height, uint16_t color);
@@ -61,6 +66,8 @@ private:
     std::vector<int> _lineYOffsets;
     std::vector<const uint8_t *> _lineIcons;
     std::vector<uint16_t> _iconColors;
+    std::vector<uint16_t> _iconBgColors;
+    std::vector<uint16_t> _iconBorderColors;
     std::vector<uint8_t> _lineMarqueeFlags;
     std::vector<int> _lineMarqueeOffsets;
     std::vector<unsigned long> _lineMarqueeLastTick;
