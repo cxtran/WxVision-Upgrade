@@ -1,17 +1,50 @@
-# Ignore PlatformIO build folder
+# ---------------------------
+# PlatformIO
+# ---------------------------
 .pio/
 
+# ---------------------------
+# ESP-IDF / CMake (auto-generated)
+# ---------------------------
+CMakeLists.txt
+src/CMakeLists.txt
+managed_components/
+build/
+dependencies.lock
+
+# SDK config (generated)
+sdkconfig
+sdkconfig.*
+
+# ---------------------------
+# IDE
+# ---------------------------
 .vscode/
-# Ignore backup, temp, or other generated files
+
+# ---------------------------
+# Build artifacts
+# ---------------------------
 *.elf
 *.bin
 *.map
 *.d
+*.o
 *.exe
+
+# ---------------------------
+# Logs / temp
+# ---------------------------
 *.log
+*.tmp
 *.pyc
+
+# ---------------------------
+# OS files
+# ---------------------------
 .DS_Store
 Thumbs.db
+
+# ---------------------------
+# Archives
+# ---------------------------
 *.zip
-*.o
-*.tmp

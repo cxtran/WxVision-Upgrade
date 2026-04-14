@@ -1,11 +1,12 @@
-#include <Arduino.h>    
+#include <Arduino.h>  
+#include <esp_sntp.h>  
 #include "pins.h"
 #include "buzzer.h"    
 #include "settings.h"
 #include "music.h"
 #include <math.h>
 // Use a dedicated LEDC channel unlikely to conflict with other peripherals
-static const int BUZZER_CHANNEL = 7;
+
 static bool buzzerReady = false;
 
 int midiNoteToFrequencyHz(int8_t midiNote)
@@ -41,7 +42,7 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, int maxDut
 
     int sustainDuty = (maxDuty * constrain(static_cast<int>(env.sustainPct), 0, 100)) / 100;
 
-    ledcWriteTone(BUZZER_CHANNEL, frequency);
+    ledcWriteTone(BUZZER_PIN, frequency);
 
     auto rampDuty = [&](int fromDuty, int toDuty, int ms) {
         if (ms <= 0) return;
@@ -52,7 +53,7 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, int maxDut
         {
             float t = static_cast<float>(i) / static_cast<float>(steps);
             int duty = fromDuty + static_cast<int>(lroundf((toDuty - fromDuty) * t));
-            ledcWrite(BUZZER_CHANNEL, duty);
+            ledcWrite(BUZZER_PIN, duty);
             delay(stepMs);
         }
         if (remaining > 0) delay(remaining);
@@ -63,13 +64,13 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, int maxDut
 
     if (sustainMs > 0)
     {
-        ledcWrite(BUZZER_CHANNEL, sustainDuty);
+        ledcWrite(BUZZER_PIN, sustainDuty);
         delay(sustainMs);
     }
 
     rampDuty(sustainDuty, 0, releaseMs);
-    ledcWrite(BUZZER_CHANNEL, 0);
-    ledcWriteTone(BUZZER_CHANNEL, 0);
+    ledcWrite(BUZZER_PIN, 0);
+    ledcWriteTone(BUZZER_PIN, 0);
 }
 
 void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env)
@@ -96,12 +97,13 @@ void playBuzzerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env)
 
 void setupBuzzer() {
     pinMode(BUZZER_PIN, OUTPUT);
-    digitalWrite(BUZZER_PIN, LOW); // Ensure buzzer is off initially
-    // Configure LEDC for tone generation
-    ledcSetup(BUZZER_CHANNEL, 2000, 10);       // base freq/resolution
-    ledcAttachPin(BUZZER_PIN, BUZZER_CHANNEL); // Attach once!
-    ledcWriteTone(BUZZER_CHANNEL, 0);          // Make sure off
-    ledcWrite(BUZZER_CHANNEL, 0);
+    digitalWrite(BUZZER_PIN, LOW);
+
+    // Arduino-ESP32 3.x LEDC API
+    ledcAttach(BUZZER_PIN, 2000, 10);   // pin, base frequency, resolution
+    ledcWriteTone(BUZZER_PIN, 0);
+    ledcWrite(BUZZER_PIN, 0);
+
     buzzerReady = true;
 }
 
@@ -150,20 +152,20 @@ void playBuzzerTone(int frequency, int duration) {
         return;
     }
 
-    ledcWriteTone(BUZZER_CHANNEL, freq);  // Set frequency
-    ledcWrite(BUZZER_CHANNEL, duty);           // Set duty (volume)
+    ledcWriteTone(BUZZER_PIN, freq);  // Set frequency
+    ledcWrite(BUZZER_PIN, duty);           // Set duty (volume)
     delay(dur);                                // Wait
     if (buzzerToneSet == 4) { // Pulse: brief gap then quick second pulse
-        ledcWrite(BUZZER_CHANNEL, 0);
+        ledcWrite(BUZZER_PIN, 0);
         delay(30);
-        ledcWrite(BUZZER_CHANNEL, duty);
+        ledcWrite(BUZZER_PIN, duty);
         delay(40);
     }
-    ledcWrite(BUZZER_CHANNEL, 0);              // Stop tone
-    ledcWriteTone(BUZZER_CHANNEL, 0);
+    ledcWrite(BUZZER_PIN, 0);              // Stop tone
+    ledcWriteTone(BUZZER_PIN, 0);
 }
 
 void stopBuzzer() {
-    ledcWriteTone(BUZZER_CHANNEL, 0);
-    ledcWrite(BUZZER_CHANNEL, 0);
+    ledcWriteTone(BUZZER_PIN, 0);
+    ledcWrite(BUZZER_PIN, 0);
 }

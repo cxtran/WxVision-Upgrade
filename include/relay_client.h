@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
-#include <esp_event.h>
+#include <WebSocketsClient.h>
 
 namespace wxv {
 namespace cloud {
@@ -23,15 +23,14 @@ public:
 
     bool begin(const String &url, RelayClientListener *listener);
     void stop();
+    void loop();
     bool isConnected() const;
     bool sendText(const String &payload);
     uint32_t lastReceiveMs() const { return lastReceiveMs_; }
     uint32_t lastConnectMs() const { return lastConnectMs_; }
 
 private:
-    static void handleEvent_(void *handlerArgs, esp_event_base_t base, int32_t eventId, void *eventData);
-    void handleEventInternal_(int32_t eventId, void *eventData);
-    void appendMessageChunk_(const uint8_t *data, size_t len, size_t payloadOffset, size_t payloadLen, int opcode);
+    void handleWebSocketEvent_(WStype_t type, uint8_t *payload, size_t length);
 
     void *client_ = nullptr;
     RelayClientListener *listener_ = nullptr;

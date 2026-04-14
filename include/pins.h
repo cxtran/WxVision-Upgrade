@@ -1,54 +1,90 @@
 #pragma once
 
-// RGB Matrix Panel Pin Mapping (P5)
-#define R1_PIN 19
-#define G1_PIN 13
-#define B1_PIN 18
-#define R2_PIN 5
-#define G2_PIN 12
-#define B2_PIN 17
-#define A_PIN 16
-#define B_PIN 14
-#define C_PIN 4
-#define D_PIN 27
-#define E_PIN -1
-#define LAT_PIN 26
-#define OE_PIN 15
-#define CLK_PIN 2
+// ======================================================
+// WxVision ESP32-S3 Pin Map
+// Joystick removed
+// DHT removed
+// 5-button switch layout added
+// I2C sensors used instead
+// ======================================================
+
+
+// ------------------------------
+// RGB Matrix Panel Pin Mapping
+// ------------------------------
+#define R1_PIN 10
+#define G1_PIN 11
+#define B1_PIN 12
+#define R2_PIN 13
+#define G2_PIN 14
+#define B2_PIN 15
 
 #define A_PIN 16
-#define B_PIN 14
-#define C_PIN 4
-#define D_PIN 27
-#define E_PIN -1  // -1 for panels that don't use E
+#define B_PIN 17
+#define C_PIN 18
+#define D_PIN 3
+#define E_PIN -1   // -1 for 64x32 panel
 
-#define LAT_PIN 26
-#define OE_PIN  15
-#define CLK_PIN 2
+#define LAT_PIN 42
+#define OE_PIN 41
+#define CLK_PIN 6
 
 // Panel dimensions and chaining
 #define PANEL_RES_X 64
 #define PANEL_RES_Y 32
 #define PANEL_CHAIN 1
 
-// Buttons
-#define BTN_UP 32
-#define BTN_DN 35
-#define BTN_LEFT 39
-#define BTN_RIGHT 23
-#define BTN_SEL 33
+
+// ------------------------------
+// 5-Way Switch Buttons
+// ------------------------------
+// These replace the joystick
+#define BTN_UP 1
+#define BTN_DN 2
+#define BTN_LEFT 7
+#define BTN_RIGHT 21
+#define BTN_SEL 44
 
 
-
+// ------------------------------
 // Infrared Receiver
-#define IR_RECEIVE_PIN 34 // GPIO 34    
+// ------------------------------
+#define IR_RECEIVE_PIN 40
 
-// DHT Sensor
-#define DHTPIN 23
-#define DHTTYPE DHT11
 
-// Brghtness Sensor
-#define BRIGHTNESS_PIN 36  // GPIO 36 (ADC1_CH0)
+// ------------------------------
+// I2C Bus
+// ------------------------------
+#define I2C_SDA 8
+#define I2C_SCL 9
 
-// Buzzer (drives NPN base; active-high)
-#define BUZZER_PIN 25   // Matches schematic BUZZER net via NPN driver
+
+// ------------------------------
+// Brightness Sensor
+// ------------------------------
+#define BRIGHTNESS_PIN 4
+
+
+// ------------------------------
+// Buzzer
+// ------------------------------
+#define BUZZER_PIN 5
+
+// ------------------------------
+// Optional / informational
+// ------------------------------
+#define MATRIX_BRIGHTNESS_DEFAULT 10
+
+
+// ------------------------------
+// Notes
+// ------------------------------
+// Removed:
+//   - Joystick X/Y/SW
+//   - DHTPIN / DHTTYPE
+//
+// Reserved / avoid on ESP32-S3 DevKitC-1:
+//   GPIO19 = USB D-
+//   GPIO20 = USB D+
+//   GPIO45 = strap / avoid
+//   GPIO46 = not exposed / avoid

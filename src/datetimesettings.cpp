@@ -843,7 +843,7 @@ static void onNtpTimeSync(struct timeval *tv)
 static void resetSntpSyncTracking()
 {
     s_ntpSyncPending = false;
-    if (sntp_enabled())
+    if (esp_sntp_enabled())
     {
         sntp_set_sync_status(SNTP_SYNC_STATUS_RESET);
     }
@@ -857,18 +857,18 @@ static void ensureSntpConfigured(bool restartClient)
     sntp_set_time_sync_notification_cb(onNtpTimeSync);
     sntp_set_sync_mode(SNTP_SYNC_MODE_IMMED);
     sntp_set_sync_interval(std::max<uint32_t>(15000UL, wxv::defaults::kDefaults.ntpSyncIntervalMs));
-    sntp_setservername(0, ntpServerHost);
-    sntp_setservername(1, "time.google.com");
-    sntp_setservername(2, "time.nist.gov");
+    esp_sntp_setservername(0, ntpServerHost);
+    esp_sntp_setservername(1, "time.google.com");
+    esp_sntp_setservername(2, "time.nist.gov");
 
-    if (sntp_enabled())
+    if (esp_sntp_enabled())
     {
         if (restartClient)
             sntp_restart();
         return;
     }
 
-    sntp_init();
+    esp_sntp_init();
 }
 
 static bool applySyncedTimeToRtc(bool emitLog)
@@ -923,7 +923,7 @@ static bool waitForNtpSync(uint32_t timeoutMs)
             return isValidNtpEpoch(time(nullptr));
         }
 
-        if (sntp_enabled())
+        if (esp_sntp_enabled())
         {
             sntp_sync_status_t syncStatus = sntp_get_sync_status();
             if (syncStatus == SNTP_SYNC_STATUS_COMPLETED)

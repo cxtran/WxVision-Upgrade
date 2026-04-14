@@ -1,7 +1,7 @@
 #include "relay_client.h"
 
-#include <esp_crt_bundle.h>
-#include <esp_websocket_client.h>
+#include <Arduino.h>
+#include <WebSocketsClient.h>
 
 namespace wxv {
 namespace cloud {
@@ -13,146 +13,171 @@ RelayClient::~RelayClient()
     stop();
 }
 
+static void parseWebSocketUrl(
+    const String &url,
+    bool &secure,
+    String &host,
+    uint16_t &port,
+    String &path)
+{
+    secure = false;
+    host = "";
+    port = 80;
+    path = "/";
+
+    String working = url;
+    if (working.startsWith("wss://")) {
+        secure = true;
+        working.remove(0, 6);
+        port = 443;
+    } else if (working.startsWith("ws://")) {
+        working.remove(0, 5);
+        port = 80;
+    }
+
+    int slashPos = working.indexOf('/');
+    String hostPort = slashPos >= 0 ? working.substring(0, slashPos) : working;
+    path = slashPos >= 0 ? working.substring(slashPos) : "/";
+
+    int colonPos = hostPort.indexOf(':');
+    if (colonPos >= 0) {
+        host = hostPort.substring(0, colonPos);
+        port = static_cast<uint16_t>(hostPort.substring(colonPos + 1).toInt());
+    } else {
+        host = hostPort;
+    }
+}
+
+void RelayClient::handleWebSocketEvent_(WStype_t type, uint8_t *payload, size_t length)
+{
+    switch (type)
+    {
+    case WStype_CONNECTED:
+        notifiedConnected_ = true;
+        lastConnectMs_ = millis();
+        lastReceiveMs_ = lastConnectMs_;
+        rxBuffer_.remove(0);
+        if (listener_ != nullptr) {
+            listener_->onRelayConnected();
+        }
+        break;
+
+    case WStype_DISCONNECTED:
+        rxBuffer_.remove(0);
+        if (listener_ != nullptr && notifiedConnected_) {
+            listener_->onRelayDisconnected();
+        }
+        notifiedConnected_ = false;
+        break;
+
+    case WStype_TEXT:
+        lastReceiveMs_ = millis();
+        rxBuffer_ = String(reinterpret_cast<const char *>(payload), length);
+        if (listener_ != nullptr) {
+            listener_->onRelayTextMessage(rxBuffer_);
+        }
+        rxBuffer_.remove(0);
+        break;
+
+    case WStype_BIN:
+    case WStype_ERROR:
+    case WStype_FRAGMENT_TEXT_START:
+    case WStype_FRAGMENT_BIN_START:
+    case WStype_FRAGMENT:
+    case WStype_FRAGMENT_FIN:
+    case WStype_PING:
+    case WStype_PONG:
+    default:
+        break;
+    }
+}
+
 bool RelayClient::begin(const String &url, RelayClientListener *listener)
 {
     stop();
 
     listener_ = listener;
-
-    esp_websocket_client_config_t cfg = {};
-    cfg.uri = url.c_str();
-    cfg.task_prio = 4;
-    cfg.task_stack = 6144;
-    // Larger relay payloads need more headroom than the ESP-IDF default.
-    cfg.buffer_size = 4096;
-    cfg.disable_auto_reconnect = true;
-    cfg.transport = url.startsWith("wss://")
-        ? WEBSOCKET_TRANSPORT_OVER_SSL
-        : WEBSOCKET_TRANSPORT_OVER_TCP;
-    cfg.pingpong_timeout_sec = 30;
-    cfg.disable_pingpong_discon = true;
-    cfg.keep_alive_enable = true;
-    cfg.keep_alive_idle = 15;
-    cfg.keep_alive_interval = 15;
-    cfg.keep_alive_count = 3;
-    cfg.ping_interval_sec = 20;
-
-    esp_websocket_client_handle_t client =
-        esp_websocket_client_init(&cfg);
-    if (client == nullptr)
-        return false;
-
-    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, &RelayClient::handleEvent_, this);
-    if (esp_websocket_client_start(client) != ESP_OK)
-    {
-        esp_websocket_client_destroy(client);
-        return false;
-    }
-
-    client_ = client;
     rxBuffer_.remove(0);
     notifiedConnected_ = false;
     lastReceiveMs_ = 0;
     lastConnectMs_ = 0;
+
+    bool secure = false;
+    String host;
+    uint16_t port = 0;
+    String path;
+    parseWebSocketUrl(url, secure, host, port, path);
+
+    if (host.isEmpty()) {
+        return false;
+    }
+
+    WebSocketsClient *ws = new WebSocketsClient();
+    if (ws == nullptr) {
+        return false;
+    }
+
+    ws->onEvent([this](WStype_t type, uint8_t *payload, size_t length) {
+        this->handleWebSocketEvent_(type, payload, length);
+    });
+
+    if (secure) {
+        ws->beginSSL(host.c_str(), port, path.c_str());
+    } else {
+        ws->begin(host.c_str(), port, path.c_str());
+    }
+
+    ws->setReconnectInterval(0);   // match your old disable_auto_reconnect = true
+    ws->enableHeartbeat(15000, 3000, 2);
+
+    client_ = ws;
     return true;
 }
 
 void RelayClient::stop()
 {
-    if (client_ == nullptr)
+    if (client_ == nullptr) {
         return;
+    }
 
-    esp_websocket_client_handle_t client = static_cast<esp_websocket_client_handle_t>(client_);
-    esp_websocket_client_stop(client);
-    esp_websocket_client_destroy(client);
+    WebSocketsClient *ws = static_cast<WebSocketsClient *>(client_);
+    ws->disconnect();
+    delete ws;
     client_ = nullptr;
+
     rxBuffer_.remove(0);
     notifiedConnected_ = false;
 }
 
 bool RelayClient::isConnected() const
 {
-    if (client_ == nullptr)
+    if (client_ == nullptr) {
         return false;
-    return esp_websocket_client_is_connected(static_cast<esp_websocket_client_handle_t>(client_));
+    }
+
+    WebSocketsClient *ws = static_cast<WebSocketsClient *>(client_);
+    return ws->isConnected();
 }
 
 bool RelayClient::sendText(const String &payload)
 {
-    if (!isConnected())
+    if (!isConnected()) {
         return false;
-    int sent = esp_websocket_client_send_text(
-        static_cast<esp_websocket_client_handle_t>(client_),
-        payload.c_str(),
-        payload.length(),
-        1000 / portTICK_PERIOD_MS);
-    return sent >= 0;
+    }
+
+    WebSocketsClient *ws = static_cast<WebSocketsClient *>(client_);
+    String copy = payload;
+    return ws->sendTXT(copy);
 }
 
-void RelayClient::handleEvent_(void *handlerArgs, esp_event_base_t, int32_t eventId, void *eventData)
+void RelayClient::loop()
 {
-    RelayClient *self = static_cast<RelayClient *>(handlerArgs);
-    if (self != nullptr)
-        self->handleEventInternal_(eventId, eventData);
-}
-
-void RelayClient::handleEventInternal_(int32_t eventId, void *eventData)
-{
-    if (eventId == WEBSOCKET_EVENT_CONNECTED)
-    {
-        notifiedConnected_ = true;
-        lastConnectMs_ = millis();
-        lastReceiveMs_ = lastConnectMs_;
-        if (listener_ != nullptr)
-            listener_->onRelayConnected();
+    if (client_ == nullptr) {
         return;
     }
 
-    if (eventId == WEBSOCKET_EVENT_DISCONNECTED ||
-        eventId == WEBSOCKET_EVENT_CLOSED ||
-        eventId == WEBSOCKET_EVENT_ERROR)
-    {
-        rxBuffer_.remove(0);
-        if (listener_ != nullptr && notifiedConnected_)
-            listener_->onRelayDisconnected();
-        notifiedConnected_ = false;
-        return;
-    }
-
-    if (eventId != WEBSOCKET_EVENT_DATA)
-        return;
-
-    auto *data = static_cast<esp_websocket_event_data_t *>(eventData);
-    if (data == nullptr)
-        return;
-
-    appendMessageChunk_(
-        reinterpret_cast<const uint8_t *>(data->data_ptr),
-        static_cast<size_t>(data->data_len),
-        static_cast<size_t>(data->payload_offset),
-        static_cast<size_t>(data->payload_len),
-        data->op_code);
-}
-
-void RelayClient::appendMessageChunk_(const uint8_t *data, size_t len, size_t payloadOffset, size_t payloadLen, int opcode)
-{
-    lastReceiveMs_ = millis();
-
-    if (opcode == 0x9 || opcode == 0xA)
-        return;
-    if (opcode != 0x1 || data == nullptr || len == 0)
-        return;
-
-    if (payloadOffset == 0)
-        rxBuffer_.remove(0);
-
-    rxBuffer_.concat(reinterpret_cast<const char *>(data), len);
-    if ((payloadOffset + len) < payloadLen)
-        return;
-
-    if (listener_ != nullptr)
-        listener_->onRelayTextMessage(rxBuffer_);
-    rxBuffer_.remove(0);
+    WebSocketsClient *ws = static_cast<WebSocketsClient *>(client_);
+    ws->loop();
 }
 
 } // namespace cloud
