@@ -115,6 +115,7 @@ int wifiMenuScroll = 0;
 const int wifiVisibleLines = 3;
 
 bool wifiSelecting = false;
+static bool s_suppressNextMenuOkTone = false;
 static bool wifiSelectReturnToSettings = false;
 std::vector<String> foundSSIDs;
 int selectedWifiIdx = 0;
@@ -490,7 +491,14 @@ void handleIRKey(IRCodes::WxKey key)
         break;
     case IRCodes::WxKey::Ok:
         handleSelect();
-        playBuzzerTone(2200, 100);
+        if (s_suppressNextMenuOkTone)
+        {
+            s_suppressNextMenuOkTone = false;
+        }
+        else
+        {
+            playBuzzerTone(2200, 100);
+        }
         break;
     default:
         Serial.printf("Unknown key: %s\n", IRCodes::keyName(key));
@@ -982,6 +990,11 @@ void exitToHomeScreen()
     dma_display->fillScreen(0);
     drawClockScreen();
     reset_Time_and_Date_Display = false;
+}
+
+void suppressNextMenuOkTone()
+{
+    s_suppressNextMenuOkTone = true;
 }
 
 

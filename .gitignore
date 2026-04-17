@@ -30,7 +30,7 @@ sdkconfig.*
 *.d
 *.o
 *.exe
-
+`9+`
 # ---------------------------
 # Logs / temp
 # ---------------------------
@@ -48,3 +48,6 @@ Thumbs.db
 # Archives
 # ---------------------------
 *.zip
+
+# PlatformIO local config (optional)
+platformio.ini.local

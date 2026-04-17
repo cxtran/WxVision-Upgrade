@@ -16,7 +16,7 @@
 #define G1_PIN 11
 #define B1_PIN 12
 #define R2_PIN 13
-#define G2_PIN 14
+#define G2_PIN 7// 14
 #define B2_PIN 15
 
 #define A_PIN 16
@@ -38,22 +38,30 @@
 // ------------------------------
 // 5-Way Switch Buttons
 // ------------------------------
-// These replace the joystick
 #define BTN_UP 1
 #define BTN_DN 2
-#define BTN_LEFT 7
-#define BTN_RIGHT 21
+#define BTN_LEFT 19
+#define BTN_RIGHT 20
 #define BTN_SEL 44
 
+
+
+
+
+#define SD_SCK_PIN   5
+#define SD_MOSI_PIN  21
+#define SD_MISO_PIN  14// 7
+#define SD_CS_PIN    40//0
 
 // ------------------------------
 // Infrared Receiver
 // ------------------------------
-#define IR_RECEIVE_PIN 40
+#define IR_RECEIVE_PIN 48 //40
 
 
 // ------------------------------
 // I2C Bus
+
 // ------------------------------
 #define I2C_SDA 8
 #define I2C_SCL 9
@@ -68,7 +76,18 @@
 // ------------------------------
 // Buzzer
 // ------------------------------
-#define BUZZER_PIN 5
+// #define BUZZER_PIN 5
+
+
+// ------------------------------
+// I2S Audio - MAX98357A
+// ------------------------------
+#define I2S_BCLK_PIN   47
+#define I2S_LRC_PIN    38
+#define I2S_DOUT_PIN   39
+
+
+
 
 // ------------------------------
 // Optional / informational

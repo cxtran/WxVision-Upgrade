@@ -50,6 +50,11 @@
 #include "display_sky_facts.h"
 #include "mqtt_client.h"
 #include "cloud_manager.h"
+#include "audio_out.h"
+#include "sd_card.h"
+unsigned long lastAudioTestBeep = 0;
+const unsigned long audioTestBeepInterval = 2000;
+static constexpr bool kRunStartupAudioDiag = false;
 
 // --- Screen rotation: add or remove as needed ---
 const ScreenMode InfoScreenModes[] = {
@@ -501,6 +506,12 @@ void setup()
     Serial.begin(115200);
     delay(100);
 
+    Serial.println("[SD] Deferred init at boot");
+
+
+
+
+
     Serial.printf("Flash size: %u bytes\n", ESP.getFlashChipSize());
     deviceHostname = buildDefaultHostname();
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
@@ -531,6 +542,26 @@ void setup()
 
     splashUpdate("Buzzer", 4, 6);
     setupBuzzer();
+
+    if (kRunStartupAudioDiag)
+    {
+        Serial.println("[AudioDiag] Startup direct I2S tone test");
+        AudioOut startupAudioDiag;
+        if (startupAudioDiag.begin())
+        {
+            startupAudioDiag.setSampleRate(22050);
+            startupAudioDiag.playTone(440, 500, 12000);
+            delay(150);
+            startupAudioDiag.playTone(880, 500, 12000);
+            delay(150);
+            startupAudioDiag.playTone(660, 900, 12000);
+            startupAudioDiag.stop();
+        }
+        else
+        {
+            Serial.println("[AudioDiag] I2S begin failed");
+        }
+    }
 
     splashUpdate("Data Log", 5, 6);
     initSensorLog();
@@ -636,15 +667,24 @@ void setup()
     lastReadAHT20_BMP280    = millis() - 1500;   // first at ~3.5s + 5s = 6.5s
     lastBrightnessRead      = millis() - 3000;   // first at ~2.0s + 5s = 7.0s
 
+
 }
 
 void loop()
 {
     unsigned long now = millis();
+    
     static unsigned long lastForecast = 0;
     static unsigned long lastBlink = 0;
     static bool clockSensorUpdatePending = false;
     const unsigned long blinkInterval = 500;
+
+//if (now - lastAudioTestBeep >= audioTestBeepInterval)
+//{
+//    lastAudioTestBeep = now;
+//    playBuzzerTone(1000, 300);
+//}
+
 
     webTick();
 
@@ -1046,6 +1086,36 @@ void loop()
     {
         setupPromptModal.tick();
         setupPromptModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
+        delay(5);
+        return;
+    }
+
+    if (isAudioTestToneActive())
+    {
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key == IRCodes::WxKey::Cancel ||
+            key == IRCodes::WxKey::Menu ||
+            key == IRCodes::WxKey::Left)
+        {
+            stopAudioTestTone(true);
+            delay(20);
+            return;
+        }
+
+        tickAudioTestTone();
+        delay(5);
+        return;
+    }
+
+    tickSdMp3Playback();
+
+    if (isSdMp3PlaybackActive())
+    {
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key != IRCodes::WxKey::Unknown)
+        {
+            handleSdMp3PlaybackIR(key);
+        }
         delay(5);
         return;
     }

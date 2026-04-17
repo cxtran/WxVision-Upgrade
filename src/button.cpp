@@ -20,11 +20,11 @@ extern InfoModal dateModal;
 void setupButtons() {
    
 // Serial.begin(115200);
-    pinMode(BTN_UP, INPUT_PULLUP);
-    pinMode(BTN_DN, INPUT_PULLUP);
-    pinMode(BTN_LEFT, INPUT_PULLUP);
-    pinMode(BTN_RIGHT, INPUT_PULLUP);
-    pinMode(BTN_SEL, INPUT_PULLUP);
+if (BTN_UP >= 0) pinMode(BTN_UP, INPUT_PULLUP);
+if (BTN_DN >= 0) pinMode(BTN_DN, INPUT_PULLUP);
+if (BTN_LEFT >= 0) pinMode(BTN_LEFT, INPUT_PULLUP);
+if (BTN_RIGHT >= 0) pinMode(BTN_RIGHT, INPUT_PULLUP);
+if (BTN_SEL >= 0) pinMode(BTN_SEL, INPUT_PULLUP);
 
     Serial.println("=== 5-Way Switch Test ===");
     Serial.println("Press UP, DOWN, LEFT, RIGHT, or SELECT...");

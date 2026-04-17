@@ -1,8 +1,12 @@
 #pragma once
 #include <Arduino.h>
+#include "audio_out.h"
 #include "pins.h"
 #include "music.h"
 void setupBuzzer();
+bool ensureSpeakerReady();
+AudioOut &speakerAudioOut();
+void releaseSpeaker();
 void playBuzzerTone(int frequency, int duration);
 void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env);
 void playBuzzerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env);
