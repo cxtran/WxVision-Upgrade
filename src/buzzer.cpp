@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "music.h"
 #include "audio_out.h"
+#include "mp3_player.h"
 
 static bool buzzerReady = false;
 static AudioOut speaker;
@@ -27,6 +28,9 @@ static uint16_t volumeToAmplitude_()
 
 void setupBuzzer()
 {
+    if (wxv::audio::isSdMp3Active())
+        return;
+
     if (buzzerReady)
         return;
 
@@ -43,6 +47,11 @@ void setupBuzzer()
 
 bool ensureSpeakerReady()
 {
+    if (wxv::audio::isSdMp3Active())
+    {
+        return false;
+    }
+
     if (!buzzerReady)
     {
         setupBuzzer();
@@ -116,6 +125,7 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, uint16_t p
 void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env)
 {
     if (frequency <= 0 || durationMs <= 0) return;
+    if (wxv::audio::isSdMp3Active()) return;
     if (!buzzerReady) setupBuzzer();
     if (!buzzerReady) return;
  //   if (buzzerVolume <= 0) return;
@@ -139,6 +149,7 @@ void playBuzzerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env)
 void playBuzzerTone(int frequency, int duration)
 {
     if (frequency <= 0 || duration <= 0) return;
+    if (wxv::audio::isSdMp3Active()) return;
     if (!buzzerReady) setupBuzzer();
     if (!buzzerReady) return;
 //    if (buzzerVolume <= 0) return;
@@ -207,6 +218,7 @@ void playBuzzerTone(int frequency, int duration)
 
 void stopBuzzer()
 {
+    if (wxv::audio::isSdMp3Active()) return;
     if (!buzzerReady) return;
     speaker.stop();
 }
