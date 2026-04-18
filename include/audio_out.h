@@ -12,6 +12,7 @@ public:
     bool setSampleRate(uint32_t sampleRate);
     void stop();
     void shutdown();
+    void holdQuietPins();
 
     void playTone(uint16_t frequency, uint16_t durationMs, uint16_t amplitude = 3000);
     void beep();

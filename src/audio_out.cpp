@@ -15,6 +15,21 @@ AudioOut::AudioOut()
 {
 }
 
+void AudioOut::holdQuietPins()
+{
+    if (initialized_ || channelEnabled_)
+    {
+        return;
+    }
+
+    pinMode(I2S_BCLK_PIN, OUTPUT);
+    pinMode(I2S_LRC_PIN, OUTPUT);
+    pinMode(I2S_DOUT_PIN, OUTPUT);
+    digitalWrite(I2S_BCLK_PIN, LOW);
+    digitalWrite(I2S_LRC_PIN, LOW);
+    digitalWrite(I2S_DOUT_PIN, LOW);
+}
+
 bool AudioOut::begin()
 {
     if (initialized_)
@@ -55,6 +70,21 @@ bool AudioOut::begin()
     if (err != ESP_OK)
     {
         Serial.printf("AudioOut: i2s_channel_init_std_mode failed: %d\n", err);
+        i2s_del_channel(txHandle_);
+        txHandle_ = nullptr;
+        return false;
+    }
+
+    int16_t preload[2] = {0, 0};
+    size_t bytesLoaded = 0;
+    do
+    {
+        err = i2s_channel_preload_data(txHandle_, preload, sizeof(preload), &bytesLoaded);
+    } while (err == ESP_OK && bytesLoaded > 0);
+
+    if (err != ESP_OK)
+    {
+        Serial.printf("AudioOut: i2s_channel_preload_data failed: %d\n", err);
         i2s_del_channel(txHandle_);
         txHandle_ = nullptr;
         return false;
@@ -151,6 +181,7 @@ void AudioOut::shutdown()
 {
     if (!initialized_ || txHandle_ == nullptr)
     {
+        holdQuietPins();
         return;
     }
 
@@ -162,6 +193,7 @@ void AudioOut::shutdown()
     i2s_del_channel(txHandle_);
     txHandle_ = nullptr;
     initialized_ = false;
+    holdQuietPins();
 }
 
 void AudioOut::writeSamples_(const int16_t *samples, size_t count)

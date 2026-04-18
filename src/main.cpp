@@ -503,6 +503,9 @@ void handleInitialSetupDecision(bool wantsWiFi)
 
 void setup()
 {
+    AudioOut startupAudioHold;
+    startupAudioHold.holdQuietPins();
+
     Serial.begin(115200);
     delay(100);
 

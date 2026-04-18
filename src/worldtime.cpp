@@ -32,6 +32,7 @@ static constexpr unsigned long kWorldWeatherConnectTimeoutMs = 1200UL;
 static constexpr unsigned long kWorldWeatherStartGapMs = 5000UL;
 static constexpr size_t kWorldWeatherMaxPayload = 2300;
 static constexpr size_t kWorldTimeCustomJsonBaseCapacity = 512;
+static constexpr size_t kWorldTimeCustomJsonPerCityReserve = 128;
 
 enum class WorldWeatherFetchState : uint8_t
 {
@@ -556,8 +557,6 @@ void loadWorldTimeSettings()
     customRaw.trim();
     if (!customRaw.isEmpty())
     {
-        const size_t docCapacity = std::max(kWorldTimeCustomJsonBaseCapacity,
-                                            customRaw.length() + static_cast<size_t>(256));
         JsonDocument doc(wxv::memory::psramJsonAllocator());
         DeserializationError err = deserializeJson(doc, customRaw);
         if (!err && doc.is<JsonArray>())
@@ -609,11 +608,9 @@ void saveWorldTimeSettings()
     }
 
     const size_t customCount = s_worldCustomCities.size();
-    const size_t customDocCapacity =
-        JSON_ARRAY_SIZE(customCount) +
-        (customCount * JSON_OBJECT_SIZE(5)) +
-        (customCount * static_cast<size_t>(96)) +
-        kWorldTimeCustomJsonBaseCapacity;
+    const size_t customJsonReserve =
+        kWorldTimeCustomJsonBaseCapacity +
+        (customCount * kWorldTimeCustomJsonPerCityReserve);
     JsonDocument customDoc(wxv::memory::psramJsonAllocator());
     JsonArray customArr = customDoc.to<JsonArray>();
     for (size_t i = 0; i < s_worldCustomCities.size(); ++i)
@@ -629,7 +626,7 @@ void saveWorldTimeSettings()
         obj["tzId"] = timezoneInfoAt(static_cast<size_t>(c.tzIndex)).id;
     }
     String customRaw;
-    customRaw.reserve(customDocCapacity);
+    customRaw.reserve(customJsonReserve);
     serializeJson(customDoc, customRaw);
 
     Preferences prefs;

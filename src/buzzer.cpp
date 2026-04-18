@@ -31,18 +31,7 @@ void setupBuzzer()
     if (wxv::audio::isSdMp3Active())
         return;
 
-    if (buzzerReady)
-        return;
-
-    buzzerReady = speaker.begin();
-    if (buzzerReady)
-    {
-        Serial.println("Speaker wrapper initialized");
-    }
-    else
-    {
-        Serial.println("Speaker wrapper init failed");
-    }
+    speaker.holdQuietPins();
 }
 
 bool ensureSpeakerReady()
@@ -54,7 +43,15 @@ bool ensureSpeakerReady()
 
     if (!buzzerReady)
     {
-        setupBuzzer();
+        buzzerReady = speaker.begin();
+        if (buzzerReady)
+        {
+            Serial.println("Speaker wrapper initialized");
+        }
+        else
+        {
+            Serial.println("Speaker wrapper init failed");
+        }
     }
 
     return buzzerReady;
@@ -126,8 +123,7 @@ void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env)
 {
     if (frequency <= 0 || durationMs <= 0) return;
     if (wxv::audio::isSdMp3Active()) return;
-    if (!buzzerReady) setupBuzzer();
-    if (!buzzerReady) return;
+    if (!ensureSpeakerReady()) return;
  //   if (buzzerVolume <= 0) return;
 
     uint16_t amp = volumeToAmplitude_();
@@ -150,8 +146,7 @@ void playBuzzerTone(int frequency, int duration)
 {
     if (frequency <= 0 || duration <= 0) return;
     if (wxv::audio::isSdMp3Active()) return;
-    if (!buzzerReady) setupBuzzer();
-    if (!buzzerReady) return;
+    if (!ensureSpeakerReady()) return;
 //    if (buzzerVolume <= 0) return;
 
     int freq = frequency;

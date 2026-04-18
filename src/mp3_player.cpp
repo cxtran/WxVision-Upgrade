@@ -24,7 +24,12 @@ namespace wxv::audio
         String g_lastMp3Path;
         unsigned int g_lastMp3FrameCount = 0;
         int g_volumePercent = 50;
-        constexpr size_t kMp3StreamBufferBytes = 16384;
+        constexpr size_t kMp3StreamBufferBytes = 32768;
+        constexpr size_t kMp3DecoderWorkspaceBytes = AudioGeneratorMP3::preAllocSize();
+        constexpr int kI2sDmaBufferCount = 12;
+        constexpr int kI2sDmaBufferBytes = 1024;
+        constexpr uint8_t kMp3LoopBurstCount = 6;
+        constexpr uint32_t kMp3LoopBurstBudgetUs = 4000;
 
         std::unique_ptr<AudioFileSourceSD> g_file;
         std::unique_ptr<AudioFileSourceBuffer> g_bufferedFile;
@@ -32,13 +37,15 @@ namespace wxv::audio
         std::unique_ptr<AudioOutputI2S> g_out;
         std::unique_ptr<AudioGeneratorMP3> g_mp3;
         std::unique_ptr<uint8_t, decltype(&heap_caps_free)> g_streamBuffer{nullptr, &heap_caps_free};
+        std::unique_ptr<uint8_t, decltype(&heap_caps_free)> g_decoderWorkspace{nullptr, &heap_caps_free};
         bool g_active = false;
 
         float volumePercentToGain(int volumePercent)
         {
             const int clamped = constrain(volumePercent, 0, 100);
             const float normalized = static_cast<float>(clamped) / 100.0f;
-            return 0.10f + (1.20f * normalized * normalized);
+            // Keep the loud end below unity gain to avoid clipping distortion.
+            return 0.02f + (0.98f * normalized * normalized);
         }
 
         void cleanupPlayback(bool reenableSpeaker)
@@ -70,6 +77,7 @@ namespace wxv::audio
         g_bufferedFile.reset();
         g_file.reset();
         g_streamBuffer.reset();
+        g_decoderWorkspace.reset();
             g_active = false;
 
             if (reenableSpeaker)
@@ -277,9 +285,8 @@ namespace wxv::audio
 
         g_file.reset(new (std::nothrow) AudioFileSourceSD(path.c_str()));
         g_out.reset(new (std::nothrow) AudioOutputI2S());
-        g_mp3.reset(new (std::nothrow) AudioGeneratorMP3());
 
-        if (!g_file || !g_out || !g_mp3 || !g_file->isOpen())
+        if (!g_file || !g_out || !g_file->isOpen())
         {
             g_lastMp3Status = "alloc/open failed";
             cleanupPlayback(true);
@@ -294,6 +301,16 @@ namespace wxv::audio
             g_lastMp3Status = "buffer alloc failed";
             cleanupPlayback(true);
             showSectionHeading("MP3 BUF ERR", nullptr, 1200);
+            return false;
+        }
+
+        bool usedPsramDecoder = false;
+        g_decoderWorkspace.reset(allocateStreamBuffer(kMp3DecoderWorkspaceBytes, usedPsramDecoder));
+        if (!g_decoderWorkspace)
+        {
+            g_lastMp3Status = "decoder alloc failed";
+            cleanupPlayback(true);
+            showSectionHeading("MP3 INIT ERR", nullptr, 1200);
             return false;
         }
 
@@ -315,8 +332,24 @@ namespace wxv::audio
             return false;
         }
 
+        g_mp3.reset(new (std::nothrow) AudioGeneratorMP3(g_decoderWorkspace.get(),
+                                                         static_cast<int>(kMp3DecoderWorkspaceBytes)));
+        if (!g_mp3)
+        {
+            g_lastMp3Status = "decoder alloc failed";
+            cleanupPlayback(true);
+            showSectionHeading("MP3 INIT ERR", nullptr, 1200);
+            return false;
+        }
+
         g_out->SetPinout(I2S_BCLK_PIN, I2S_LRC_PIN, I2S_DOUT_PIN);
-        g_out->SetOutputModeMono(false);
+        g_out->SetBuffers(kI2sDmaBufferCount, kI2sDmaBufferBytes);
+#if SOC_CLK_APLL_SUPPORTED
+        g_out->SetUseAPLL();
+#endif
+        // The MAX98357A path is a single-speaker output, so downmix stereo
+        // content instead of dropping one side or relying on board strapping.
+        g_out->SetOutputModeMono(true);
         g_out->SetGain(volumePercentToGain(g_volumePercent));
 
         if (!g_mp3->begin(g_id3.get(), g_out.get()))
@@ -327,7 +360,7 @@ namespace wxv::audio
             return false;
         }
 
-        g_lastMp3Status = usedPsram ? "playing psram" : "playing heap";
+        g_lastMp3Status = (usedPsram || usedPsramDecoder) ? "playing psram" : "playing heap";
         g_active = true;
         return true;
     }
@@ -346,14 +379,25 @@ namespace wxv::audio
             return;
         }
 
-        if (!g_mp3->loop())
+        const uint32_t burstStartUs = micros();
+        uint8_t iterations = 0;
+        while (g_active && g_mp3 && g_mp3->isRunning())
         {
-            g_lastMp3Status = (g_lastMp3FrameCount == 0) ? "decode err" : "done";
-            cleanupPlayback(true);
-            return;
-        }
+            if (!g_mp3->loop())
+            {
+                g_lastMp3Status = (g_lastMp3FrameCount == 0) ? "decode err" : "done";
+                cleanupPlayback(true);
+                return;
+            }
 
-        ++g_lastMp3FrameCount;
+            ++g_lastMp3FrameCount;
+            ++iterations;
+
+            if (iterations >= kMp3LoopBurstCount || (micros() - burstStartUs) >= kMp3LoopBurstBudgetUs)
+            {
+                break;
+            }
+        }
     }
 
     void stopSdMp3()
