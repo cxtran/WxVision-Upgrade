@@ -24,12 +24,15 @@ namespace wxv::audio
         String g_lastMp3Path;
         unsigned int g_lastMp3FrameCount = 0;
         int g_volumePercent = 50;
-        constexpr size_t kMp3StreamBufferBytes = 32768;
+        constexpr size_t kMp3StreamBufferBytes = 65536;
         constexpr size_t kMp3DecoderWorkspaceBytes = AudioGeneratorMP3::preAllocSize();
-        constexpr int kI2sDmaBufferCount = 12;
+        constexpr int kI2sDmaBufferCount = 20;
         constexpr int kI2sDmaBufferBytes = 1024;
-        constexpr uint8_t kMp3LoopBurstCount = 6;
-        constexpr uint32_t kMp3LoopBurstBudgetUs = 4000;
+        constexpr uint8_t kMp3LoopBurstCount = 10;
+        constexpr uint32_t kMp3LoopBurstBudgetUs = 6000;
+        constexpr uint8_t kMp3CatchupBurstCount = 24;
+        constexpr uint32_t kMp3CatchupBudgetUs = 14000;
+        constexpr uint32_t kMp3CatchupGapUs = 8000;
 
         std::unique_ptr<AudioFileSourceSD> g_file;
         std::unique_ptr<AudioFileSourceBuffer> g_bufferedFile;
@@ -39,6 +42,7 @@ namespace wxv::audio
         std::unique_ptr<uint8_t, decltype(&heap_caps_free)> g_streamBuffer{nullptr, &heap_caps_free};
         std::unique_ptr<uint8_t, decltype(&heap_caps_free)> g_decoderWorkspace{nullptr, &heap_caps_free};
         bool g_active = false;
+        uint32_t g_lastMp3ServiceUs = 0;
 
         float volumePercentToGain(int volumePercent)
         {
@@ -78,12 +82,13 @@ namespace wxv::audio
         g_file.reset();
         g_streamBuffer.reset();
         g_decoderWorkspace.reset();
-            g_active = false;
+        g_active = false;
+        g_lastMp3ServiceUs = 0;
 
-            if (reenableSpeaker)
-            {
-                setupBuzzer();
-            }
+        if (reenableSpeaker)
+        {
+            setupBuzzer();
+        }
         }
 
         uint8_t *allocateStreamBuffer(size_t bytes, bool &usedPsram)
@@ -362,6 +367,7 @@ namespace wxv::audio
 
         g_lastMp3Status = (usedPsram || usedPsramDecoder) ? "playing psram" : "playing heap";
         g_active = true;
+        g_lastMp3ServiceUs = micros();
         return true;
     }
 
@@ -380,6 +386,11 @@ namespace wxv::audio
         }
 
         const uint32_t burstStartUs = micros();
+        const uint32_t sinceLastServiceUs =
+            (g_lastMp3ServiceUs == 0) ? 0 : (burstStartUs - g_lastMp3ServiceUs);
+        const bool catchupMode = sinceLastServiceUs >= kMp3CatchupGapUs;
+        const uint8_t burstIterations = catchupMode ? kMp3CatchupBurstCount : kMp3LoopBurstCount;
+        const uint32_t burstBudgetUs = catchupMode ? kMp3CatchupBudgetUs : kMp3LoopBurstBudgetUs;
         uint8_t iterations = 0;
         while (g_active && g_mp3 && g_mp3->isRunning())
         {
@@ -393,11 +404,12 @@ namespace wxv::audio
             ++g_lastMp3FrameCount;
             ++iterations;
 
-            if (iterations >= kMp3LoopBurstCount || (micros() - burstStartUs) >= kMp3LoopBurstBudgetUs)
+            if (iterations >= burstIterations || (micros() - burstStartUs) >= burstBudgetUs)
             {
                 break;
             }
         }
+        g_lastMp3ServiceUs = micros();
     }
 
     void stopSdMp3()
