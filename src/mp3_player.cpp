@@ -2,6 +2,7 @@
 
 #include <FS.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
 #include <memory>
 #include <vector>
 
@@ -23,12 +24,14 @@ namespace wxv::audio
         String g_lastMp3Path;
         unsigned int g_lastMp3FrameCount = 0;
         int g_volumePercent = 50;
+        constexpr size_t kMp3StreamBufferBytes = 16384;
 
         std::unique_ptr<AudioFileSourceSD> g_file;
         std::unique_ptr<AudioFileSourceBuffer> g_bufferedFile;
         std::unique_ptr<AudioFileSourceID3> g_id3;
         std::unique_ptr<AudioOutputI2S> g_out;
         std::unique_ptr<AudioGeneratorMP3> g_mp3;
+        std::unique_ptr<uint8_t, decltype(&heap_caps_free)> g_streamBuffer{nullptr, &heap_caps_free};
         bool g_active = false;
 
         float volumePercentToGain(int volumePercent)
@@ -66,12 +69,30 @@ namespace wxv::audio
         g_id3.reset();
         g_bufferedFile.reset();
         g_file.reset();
+        g_streamBuffer.reset();
             g_active = false;
 
             if (reenableSpeaker)
             {
                 setupBuzzer();
             }
+        }
+
+        uint8_t *allocateStreamBuffer(size_t bytes, bool &usedPsram)
+        {
+            usedPsram = false;
+
+            if (psramFound())
+            {
+                uint8_t *ptr = static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+                if (ptr != nullptr)
+                {
+                    usedPsram = true;
+                    return ptr;
+                }
+            }
+
+            return static_cast<uint8_t *>(heap_caps_malloc(bytes, MALLOC_CAP_8BIT));
         }
 
         bool hasMp3Extension(const char *name)
@@ -85,7 +106,7 @@ namespace wxv::audio
             return ext != nullptr && strcasecmp(ext, ".mp3") == 0;
         }
 
-        bool collectMp3InDir(File &dir, std::vector<String> &paths, size_t maxCount, uint8_t depth)
+        bool collectMp3InDir(File &dir, Mp3PathList &paths, size_t maxCount, uint8_t depth)
         {
             if (!dir || !dir.isDirectory())
             {
@@ -131,7 +152,7 @@ namespace wxv::audio
         }
     } // namespace
 
-    size_t listSdMp3Files(std::vector<String> &paths, size_t maxCount)
+    size_t listSdMp3Files(Mp3PathList &paths, size_t maxCount)
     {
         paths.clear();
 
@@ -210,7 +231,7 @@ namespace wxv::audio
     bool findFirstSdMp3(String &path)
     {
         path = "";
-        std::vector<String> paths;
+        Mp3PathList paths;
         if (listSdMp3Files(paths, 1) == 0)
         {
             return false;
@@ -266,7 +287,17 @@ namespace wxv::audio
             return false;
         }
 
-        g_bufferedFile.reset(new (std::nothrow) AudioFileSourceBuffer(g_file.get(), 8192));
+        bool usedPsram = false;
+        g_streamBuffer.reset(allocateStreamBuffer(kMp3StreamBufferBytes, usedPsram));
+        if (!g_streamBuffer)
+        {
+            g_lastMp3Status = "buffer alloc failed";
+            cleanupPlayback(true);
+            showSectionHeading("MP3 BUF ERR", nullptr, 1200);
+            return false;
+        }
+
+        g_bufferedFile.reset(new (std::nothrow) AudioFileSourceBuffer(g_file.get(), g_streamBuffer.get(), kMp3StreamBufferBytes));
         if (!g_bufferedFile)
         {
             g_lastMp3Status = "buffer alloc failed";
@@ -296,7 +327,7 @@ namespace wxv::audio
             return false;
         }
 
-        g_lastMp3Status = "playing";
+        g_lastMp3Status = usedPsram ? "playing psram" : "playing heap";
         g_active = true;
         return true;
     }

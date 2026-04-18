@@ -9,7 +9,8 @@ extern int getTextWidth(const char *text);
 
 extern int theme;
 
-static int maxExtraOffset(const std::vector<int> &offsets)
+template <typename TIntVector>
+static int maxExtraOffset(const TIntVector &offsets)
 {
     int m = 0;
     for (int v : offsets)
@@ -55,61 +56,12 @@ static uint16_t rgb565(uint8_t r, uint8_t g, uint8_t b)
     return static_cast<uint16_t>(((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3));
 }
 
-void RollingUpScreen::setLines(const std::vector<String> &lines, bool resetPosition)
-{
-    _lines = lines;
-    _lineMarqueeOffsets.assign(_lines.size(), 0);
-    _lineMarqueeLastTick.assign(_lines.size(), millis());
-    _lineMarqueeDone.assign(_lines.size(), 0);
-    if (resetPosition)
-    {
-        reset();
-    }
-}
-
 void RollingUpScreen::setScrollSpeed(unsigned int ms)
 {
     _scrollSpeedMs = ms;
     if (!_slowdownActive && !_paused && _slowdownPresses == 0)
     {
         _dynamicScrollSpeedMs = ms;
-    }
-}
-
-void RollingUpScreen::setLineColors(const std::vector<uint16_t> &colors)
-{
-    _lineColors = colors;
-}
-
-void RollingUpScreen::setLineOffsets(const std::vector<int> &offsets)
-{
-    _lineOffsets = offsets;
-}
-
-void RollingUpScreen::setLineIconOffsets(const std::vector<int> &iconOffsets)
-{
-    _lineIconOffsets = iconOffsets;
-}
-
-void RollingUpScreen::setLineYOffsets(const std::vector<int> &yOffsets)
-{
-    _lineYOffsets = yOffsets;
-}
-
-void RollingUpScreen::setLineIcons(const std::vector<const uint8_t *> &icons, const std::vector<uint16_t> &iconColors)
-{
-    _lineIcons = icons;
-    _iconColors = iconColors;
-}
-
-void RollingUpScreen::setLineMarqueeFlags(const std::vector<uint8_t> &flags)
-{
-    _lineMarqueeFlags = flags;
-    if (_lineMarqueeOffsets.size() != _lines.size())
-    {
-        _lineMarqueeOffsets.assign(_lines.size(), 0);
-        _lineMarqueeLastTick.assign(_lines.size(), millis());
-        _lineMarqueeDone.assign(_lines.size(), 0);
     }
 }
 

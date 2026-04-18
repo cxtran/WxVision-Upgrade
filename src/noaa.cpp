@@ -13,6 +13,7 @@
 #include "InfoScreen.h"
 #include "screen_manager.h"
 #include "tempest.h"
+#include "psram_utils.h"
 
 #if WXV_ENABLE_NOAA_ALERTS
 
@@ -26,7 +27,9 @@ static bool s_prevEnabled = false;
 static bool s_prevWifiConnected = false;
 static bool s_unreadAlert = false;
 static bool s_manualFetchPending = false;
-static std::vector<NwsAlert> s_alerts;
+using NoaaAlertVector = std::vector<NwsAlert, wxv::memory::PsramAllocator<NwsAlert>>;
+
+static NoaaAlertVector s_alerts;
 static size_t s_alertCount = 0;
 static String s_lastCheckHHMM = "--:--";
 static String s_activeAlertId;
@@ -193,7 +196,7 @@ static void pruneExpiredCachedAlerts()
         return;
     }
 
-    std::vector<NwsAlert> activeAlerts;
+    NoaaAlertVector activeAlerts;
     activeAlerts.reserve(s_alerts.size());
     for (const NwsAlert &alert : s_alerts)
     {
@@ -543,7 +546,7 @@ static bool relayTopLevelBool(JsonDocument &doc, const char *fullKey, const char
 
 static bool parseRelayAlertsPayload(const String &payload)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     DeserializationError err = deserializeJson(doc, payload);
     if (err)
     {
@@ -576,7 +579,7 @@ static bool parseRelayAlertsPayload(const String &payload)
 
     DateTime nowUtc;
     const bool haveNowUtc = noaaCurrentUtc(nowUtc);
-    std::vector<NwsAlert> parsedAlerts;
+    NoaaAlertVector parsedAlerts;
     parsedAlerts.reserve(alerts.size());
     for (JsonObject alertObj : alerts)
     {

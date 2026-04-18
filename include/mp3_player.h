@@ -2,10 +2,13 @@
 
 #include <Arduino.h>
 #include <vector>
+#include "psram_utils.h"
+
+using Mp3PathList = std::vector<String, wxv::memory::PsramAllocator<String>>;
 
 namespace wxv::audio
 {
-    size_t listSdMp3Files(std::vector<String> &paths, size_t maxCount = 8);
+    size_t listSdMp3Files(Mp3PathList &paths, size_t maxCount = 8);
     bool testSdFileRead(const String &path, size_t &bytesRead, String &status, size_t probeBytes = 4096);
     bool findFirstSdMp3(String &path);
     bool startSdMp3(const String &path, int volumePercent = 50);

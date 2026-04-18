@@ -17,7 +17,7 @@ using wxv::ml::generated::kFeatureScale;
 using wxv::ml::generated::kHasModel;
 using wxv::ml::generated::kWeights;
 
-float getMostRecent(const std::vector<SensorSample> &log, float SensorSample::*field, bool positiveOnly = false)
+float getMostRecent(const SensorLogVector &log, float SensorSample::*field, bool positiveOnly = false)
 {
     for (int i = static_cast<int>(log.size()) - 1; i >= 0; --i)
     {
@@ -31,7 +31,7 @@ float getMostRecent(const std::vector<SensorSample> &log, float SensorSample::*f
     return NAN;
 }
 
-float getAtOrBefore(const std::vector<SensorSample> &log, uint32_t targetTs, float SensorSample::*field, bool positiveOnly = false)
+float getAtOrBefore(const SensorLogVector &log, uint32_t targetTs, float SensorSample::*field, bool positiveOnly = false)
 {
     for (int i = static_cast<int>(log.size()) - 1; i >= 0; --i)
     {
@@ -59,7 +59,7 @@ float dewPointC(float tempC, float humidityPct)
     return (b * gamma) / (a - gamma);
 }
 
-float rollingStdAtOrBefore(const std::vector<SensorSample> &log, uint32_t targetTs, uint32_t windowSec, float SensorSample::*field, bool positiveOnly = false)
+float rollingStdAtOrBefore(const SensorLogVector &log, uint32_t targetTs, uint32_t windowSec, float SensorSample::*field, bool positiveOnly = false)
 {
     if (log.empty())
         return 0.0f;
@@ -94,7 +94,7 @@ void setFeature(float out[kFeatureCount], int idx, float value)
         out[idx] = value;
 }
 
-bool buildFeatureVector(const std::vector<SensorSample> &log, float out[kFeatureCount])
+bool buildFeatureVector(const SensorLogVector &log, float out[kFeatureCount])
 {
     if (log.size() < 2)
         return false;
@@ -174,7 +174,7 @@ bool buildFeatureVector(const std::vector<SensorSample> &log, float out[kFeature
 
 namespace wxv::ml
 {
-OutlookPrediction predictOutlookFromLog(const std::vector<SensorSample> &log)
+OutlookPrediction predictOutlookFromLog(const SensorLogVector &log)
 {
     OutlookPrediction out;
     if (!kHasModel || kFeatureCount <= 0 || kClassCount <= 0)

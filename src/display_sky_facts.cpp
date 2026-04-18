@@ -7,6 +7,7 @@
 
 #include "astronomy.h"
 #include "display.h"
+#include "psram_utils.h"
 #include "render_scheduler.h"
 #include "settings.h"
 #include "ui_theme.h"
@@ -14,6 +15,8 @@
 #if WXV_ENABLE_ASTRONOMY || WXV_ENABLE_SKY_BRIEF
 namespace
 {
+using SkyStringVector = std::vector<String, wxv::memory::PsramAllocator<String>>;
+
 constexpr int kSummaryRepeatGapPx = 4;
 constexpr unsigned long kSummaryStartDelayMs = 2000UL;
 constexpr unsigned long kSkyBriefParagraphPageDwellMs = 2400UL;
@@ -53,26 +56,28 @@ struct SkyBriefSection
 struct SkyBriefSubpage
 {
     String title;
-    std::vector<String> lines;
+    SkyStringVector lines;
 };
 
-std::vector<String> s_skyBriefWrappedLines;
+using SkyBriefSubpageVector = std::vector<SkyBriefSubpage, wxv::memory::PsramAllocator<SkyBriefSubpage>>;
+
+SkyStringVector s_skyBriefWrappedLines;
 String s_skyBriefParagraphText;
 size_t s_skyBriefParagraphStartLine = 0;
 unsigned long s_skyBriefParagraphRevealStartMs = 0;
 unsigned long s_skyBriefParagraphLastAdvanceMs = 0;
 bool s_skyBriefParagraphCompleted = false;
-std::vector<SkyBriefSubpage> s_skyBriefSubpages;
+SkyBriefSubpageVector s_skyBriefSubpages;
 size_t s_skyBriefSubpageIndex = 0;
 size_t s_skyBriefVisibleChars = 0;
 unsigned long s_skyBriefNextCharMs = 0;
 
-std::vector<String> wrapSkyBriefText(const String &textRaw, int maxWidthPx);
-std::vector<SkyBriefTextPage> paginateSkyBriefLines(const std::vector<String> &wrappedLines, size_t linesPerPage);
+SkyStringVector wrapSkyBriefText(const String &textRaw, int maxWidthPx);
+std::vector<SkyBriefTextPage> paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage);
 
-std::vector<String> splitSummaryPhrases(const char *raw)
+SkyStringVector splitSummaryPhrases(const char *raw)
 {
-    std::vector<String> phrases;
+    SkyStringVector phrases;
     if (!raw || raw[0] == '\0')
         return phrases;
 
@@ -94,13 +99,13 @@ std::vector<String> splitSummaryPhrases(const char *raw)
     return phrases;
 }
 
-std::vector<String> splitSummaryPhrasesClean(const char *raw)
+SkyStringVector splitSummaryPhrasesClean(const char *raw)
 {
-    std::vector<String> phrases = splitSummaryPhrases(raw);
+    SkyStringVector phrases = splitSummaryPhrases(raw);
     if (!phrases.empty())
         return phrases;
 
-    std::vector<String> fallback;
+    SkyStringVector fallback;
     if (!raw || raw[0] == '\0')
         return fallback;
 
@@ -257,9 +262,9 @@ String expandSkyBriefTimeUnits(String text)
     return text;
 }
 
-std::vector<String> splitSummaryPhrasesRobust(const char *raw)
+SkyStringVector splitSummaryPhrasesRobust(const char *raw)
 {
-    std::vector<String> phrases;
+    SkyStringVector phrases;
     if (!raw || raw[0] == '\0')
         return phrases;
 
@@ -321,7 +326,7 @@ void buildSummaryLayout(const wxv::astronomy::SkyFactPage &page, String &line1, 
     if (line1.length() > 0 || line2.length() > 0)
         return;
 
-    std::vector<String> phrases = splitSummaryPhrasesRobust(marquee);
+    SkyStringVector phrases = splitSummaryPhrasesRobust(marquee);
     if (!phrases.empty())
         line1 = normalizeSummaryPhrase(phrases[0]);
     if (phrases.size() > 1)
@@ -338,7 +343,7 @@ void buildSummaryLayout(const wxv::astronomy::SkyFactPage &page, String &line1, 
 
 String buildSummaryParagraph(const wxv::astronomy::SkyFactPage &page)
 {
-    std::vector<String> phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
+    SkyStringVector phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
     String paragraph;
     for (size_t i = 0; i < phrases.size(); ++i)
     {
@@ -409,9 +414,9 @@ void appendSkyBriefSentence(String &text, const String &phraseRaw)
         text += ".";
 }
 
-std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFactPage &page)
+SkyBriefSubpageVector buildSkyBriefSubpages(const wxv::astronomy::SkyFactPage &page)
 {
-    std::vector<SkyBriefSubpage> subpages;
+    SkyBriefSubpageVector subpages;
     std::vector<SkyBriefSection> sections = {
         {"SEASON", ""},
         {"SUN", ""},
@@ -419,7 +424,7 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
         {"EVENTS", ""},
         {"CALENDAR", ""}};
 
-    std::vector<String> phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
+    SkyStringVector phrases = splitSummaryPhrasesRobust(summaryMarqueeText(page));
     for (size_t i = 0; i < phrases.size(); ++i)
     {
         const String normalized = expandSkyBriefTimeUnits(normalizeSummaryPhrase(phrases[i]));
@@ -438,7 +443,7 @@ std::vector<SkyBriefSubpage> buildSkyBriefSubpages(const wxv::astronomy::SkyFact
         if (sectionText.length() == 0)
             continue;
 
-        const std::vector<String> wrapped = wrapSkyBriefText(sectionText, kSkyBriefBodyWidthPx);
+        const SkyStringVector wrapped = wrapSkyBriefText(sectionText, kSkyBriefBodyWidthPx);
         const std::vector<SkyBriefTextPage> pages = paginateSkyBriefLines(wrapped, kSkyBriefVisibleLines);
         for (size_t pageIndex = 0; pageIndex < pages.size(); ++pageIndex)
         {
@@ -579,9 +584,9 @@ int preferredSkyBriefWrapSplit(const String &word, int maxWidthPx)
     return 1;
 }
 
-std::vector<String> wrapSkyBriefText(const String &textRaw, int maxWidthPx)
+SkyStringVector wrapSkyBriefText(const String &textRaw, int maxWidthPx)
 {
-    std::vector<String> lines;
+    SkyStringVector lines;
     String text = textRaw;
     text.trim();
     if (text.length() == 0)
@@ -660,7 +665,7 @@ std::vector<String> wrapSkyBriefText(const String &textRaw, int maxWidthPx)
     return lines;
 }
 
-std::vector<SkyBriefTextPage> paginateSkyBriefLines(const std::vector<String> &wrappedLines, size_t linesPerPage)
+std::vector<SkyBriefTextPage> paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage)
 {
     std::vector<SkyBriefTextPage> pages;
     if (wrappedLines.empty() || linesPerPage == 0)
@@ -837,7 +842,7 @@ void syncSkyBriefParagraphState(const wxv::astronomy::SkyFactPage &page, bool fo
         currentTitle = s_skyBriefSubpages[s_skyBriefSubpageIndex].title;
 
     const String nextParagraph = buildSummaryParagraph(page);
-    const std::vector<SkyBriefSubpage> nextSubpages = buildSkyBriefSubpages(page);
+    const SkyBriefSubpageVector nextSubpages = buildSkyBriefSubpages(page);
     snprintf(s_skyBriefLastMarquee, sizeof(s_skyBriefLastMarquee), "%s", marquee);
     s_skyBriefSubpages = nextSubpages;
     s_skyBriefParagraphText = nextParagraph;

@@ -41,6 +41,7 @@ extern bool alarmOneShotPending[3];
 extern bool noaaAlertsEnabled;
 extern float noaaLatitude;
 extern float noaaLongitude;
+extern bool debugMemoryLogs;
 
 extern bool setupComplete;       // true once onboarding finished
 extern bool initialSetupRequired; // true when device needs first-time setup
@@ -113,6 +114,7 @@ extern bool envAlertTempEnabled;
 extern bool envAlertHumidityEnabled;
 extern int buzzerVolume;   // 0-100
 extern int buzzerToneSet;  // 0 = Bright, 1 = Soft, 2 = Click, 3 = Chime, 4 = Pulse, 5 = Warm, 6 = Melody (ADSR)
+extern int mp3PlayMode;    // 0 = Play One, 1 = Continue Next, 2 = Repeat
 extern int alarmSoundMode; // 0 = Tone, 1 = Fur Elise, 2 = Swan Lake, 3 = Turkish March, 4 = Moonlight Sonata
 
 void loadSettings();

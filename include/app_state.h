@@ -52,6 +52,7 @@ struct AppState
     bool &noaaAlertsEnabled;
     float &noaaLatitude;
     float &noaaLongitude;
+    bool &debugMemoryLogs;
     int &forecastLinesPerDay;
     int &forecastPauseMs;
     int &forecastIconSize;

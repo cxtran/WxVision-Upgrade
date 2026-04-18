@@ -30,7 +30,7 @@
 //#include <esp_partition.h>
 #include <esp_ota_ops.h>
 
-std::vector<MenuLevel> menuStack;
+MenuStack menuStack;
 bool menuActive = false;
 
 void (*pendingModalFn)() = nullptr;
@@ -117,7 +117,7 @@ const int wifiVisibleLines = 3;
 bool wifiSelecting = false;
 static bool s_suppressNextMenuOkTone = false;
 static bool wifiSelectReturnToSettings = false;
-std::vector<String> foundSSIDs;
+StringList foundSSIDs;
 int selectedWifiIdx = 0;
 String scannedSSIDs[16];
 String scannedSSIDLabels[16];

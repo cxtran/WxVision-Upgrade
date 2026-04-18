@@ -507,11 +507,20 @@ void setup()
     delay(100);
 
     Serial.println("[SD] Deferred init at boot");
-
-
-
-
-
+    if (psramFound())
+    {
+        Serial.printf("PSRAM found: %u bytes total, %u bytes free\n", ESP.getPsramSize(), ESP.getFreePsram());
+        Serial.printf("PSRAM largest free block: %u bytes\n",
+                      heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    }
+    else
+    {
+        Serial.println("PSRAM not found");
+    }
+    Serial.printf("Heap free: %u bytes, min free: %u bytes, largest free block: %u bytes\n",
+                  ESP.getFreeHeap(),
+                  ESP.getMinFreeHeap(),
+                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
     Serial.printf("Flash size: %u bytes\n", ESP.getFlashChipSize());
     deviceHostname = buildDefaultHostname();
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
@@ -994,6 +1003,11 @@ void loop()
         themeRefreshPending = false;
     }
 
+    // Keep background audio fed before any overlay/modal path can short-circuit
+    // the loop, otherwise temporary alerts and section headings can starve MP3
+    // decoding long enough to produce audible stutter.
+    tickSdMp3Playback();
+
     handleAutoRotate(now);
     handleReturnToDefault(now);
     const bool temporaryAlertActive = isTemporaryAlertActive();
@@ -1106,8 +1120,6 @@ void loop()
         delay(5);
         return;
     }
-
-    tickSdMp3Playback();
 
     if (isSdMp3PlaybackActive())
     {

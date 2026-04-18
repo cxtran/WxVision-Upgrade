@@ -4,6 +4,7 @@
 #include "InfoModal.h"
 #include "sensors.h"
 #include "settings.h"
+#include "psram_utils.h"
 
 // --- Menu Core Functions ---
 void handleIRKey(IRCodes::WxKey key);
@@ -62,7 +63,7 @@ void exitToHomeScreen();
 void suppressNextMenuOkTone();
 
 // --- WiFi/Network Globals ---
-extern std::vector<String> foundSSIDs;
+extern std::vector<String, wxv::memory::PsramAllocator<String>> foundSSIDs;
 extern int selectedWifiIdx;
 extern bool wifiSelecting;
 extern int wifiScanCount;
@@ -95,7 +96,9 @@ enum MenuLevel {
     MENU_SYSLOCATION,
     MENU_WIFI_SELECT = 99
 };
-extern std::vector<MenuLevel> menuStack;
+using MenuStack = std::vector<MenuLevel, wxv::memory::PsramAllocator<MenuLevel>>;
+using StringList = std::vector<String, wxv::memory::PsramAllocator<String>>;
+extern MenuStack menuStack;
 void pushMenu(MenuLevel newMenu);
 // --- Menu State ---
 extern MenuLevel currentMenuLevel;

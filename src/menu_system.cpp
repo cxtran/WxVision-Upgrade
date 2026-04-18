@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <SPIFFS.h>
+#include <esp_heap_caps.h>
 #include <esp_ota_ops.h>
 #include <vector>
 
@@ -22,7 +23,7 @@ namespace
 bool g_audioTestToneActive = false;
 uint8_t g_audioTestPhase = 0;
 unsigned long g_audioTestNextAtMs = 0;
-std::vector<String> g_sdMp3Paths;
+Mp3PathList g_sdMp3Paths;
 String g_selectedSdMp3Path;
 size_t g_sdMp3Page = 0;
 size_t g_currentSdMp3Index = 0;
@@ -35,7 +36,6 @@ enum SdMp3Mode
     SdMp3ContinueNext = 1,
     SdMp3RepeatOne = 2,
 };
-int g_sdMp3Mode = SdMp3ContinueNext;
 
 AudioOut &audioTestOut()
 {
@@ -55,7 +55,7 @@ String mp3DisplayName(const String &path)
 
 const char *sdMp3ModeName()
 {
-    switch (g_sdMp3Mode)
+    switch (mp3PlayMode)
     {
     case SdMp3PlayOne:
         return "Play One";
@@ -79,6 +79,29 @@ void showAudioTestModal()
 
 void showSdMp3ListModal();
 void showSdMp3PlaybackModal();
+
+void beginSdMp3ListLoad()
+{
+    currentMenuLevel = MENU_SYSINFO;
+    menuActive = true;
+
+    sysInfoModal = InfoModal("MP3 Files");
+    String lines[] = {"Loading MP3 list...", "Scanning SD card"};
+    InfoFieldType types[] = {InfoLabel, InfoLabel};
+    sysInfoModal.setLines(lines, types, 2);
+    sysInfoModal.setKeepOpenOnSelect(true);
+    sysInfoModal.setCallback([](bool, int) {});
+    sysInfoModal.show();
+
+    delay(30);
+
+    if (g_sdMp3Paths.empty())
+    {
+        wxv::audio::listSdMp3Files(g_sdMp3Paths, 512);
+    }
+
+    showSdMp3ListModal();
+}
 
 void rebuildSdMp3PlaybackModal()
 {
@@ -139,12 +162,6 @@ void showSdMp3ListModal()
     }
     currentMenuLevel = MENU_SYSINFO;
     menuActive = true;
-
-    if (g_sdMp3Paths.empty())
-    {
-        wxv::audio::listSdMp3Files(g_sdMp3Paths, 512);
-    }
-
     sysInfoModal = InfoModal("MP3 Files");
     String lines[InfoModal::MAX_LINES];
     InfoFieldType types[InfoModal::MAX_LINES];
@@ -265,9 +282,17 @@ void rebuildSystemInfoModal()
     const uint32_t appPartition = running ? running->size : 0;
 
     const uint32_t heapFree = ESP.getFreeHeap();
+    const uint32_t heapMinFree = ESP.getMinFreeHeap();
+    const uint32_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
     const uint32_t heapTotal = 327680;
     const uint32_t heapUsed = heapTotal - heapFree;
     const float heapPct = 100.0f * heapUsed / heapTotal;
+    const bool hasPsram = psramFound();
+    const uint32_t psramTotal = hasPsram ? ESP.getPsramSize() : 0;
+    const uint32_t psramFree = hasPsram ? ESP.getFreePsram() : 0;
+    const uint32_t psramLargest = hasPsram ? heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : 0;
+    const uint32_t psramUsed = hasPsram ? (psramTotal - psramFree) : 0;
+    const float psramPct = (psramTotal > 0) ? (100.0f * psramUsed / psramTotal) : 0.0f;
     const float flashPct = (appPartition > 0) ? (100.0f * sketchSize / appPartition) : 0.0f;
 
     const uint32_t spiffsTotal = SPIFFS.totalBytes();
@@ -291,14 +316,19 @@ void rebuildSystemInfoModal()
         "Cloud: " + cloudState,
         "Relay: " + relayState,
         "RAM:   " + String(heapPct, 1) + "% (" + String(heapUsed) + "/" + String(heapTotal) + " B)",
+        "Heap Free: " + String(heapFree) + " B (min " + String(heapMinFree) + ")",
+        "Heap MaxBlk: " + String(heapLargest) + " B",
+        "PSRAM: " + String(hasPsram ? String(psramPct, 1) + "% (" + String(psramUsed) + "/" + String(psramTotal) + " B)" : String("not found")),
+        "PSRAM Free: " + String(hasPsram ? String(psramFree) + " B (blk " + String(psramLargest) + ")" : String("--")),
         "Flash: " + String(flashPct, 1) + "% (" + String(sketchSize) + "/" + String(appPartition) + " B)",
         "SPIFFS: " + String(spiffsPct, 1) + "% (" + String(spiffsUsed / 1024) + "/" + String(spiffsTotal / 1024) + " KB)"};
     InfoFieldType types[] = {
         InfoLabel, InfoLabel, InfoLabel, InfoLabel, InfoLabel,
         InfoLabel, InfoLabel, InfoLabel,
-        InfoLabel, InfoLabel, InfoLabel};
+        InfoLabel, InfoLabel, InfoLabel, InfoLabel,
+        InfoLabel, InfoLabel};
 
-    sysInfoModal.setLines(lines, types, 11);
+    sysInfoModal.setLines(lines, types, 14);
     sysInfoModal.setKeepOpenOnSelect(true);
     sysInfoModal.setCallback([](bool, int) {});
 }
@@ -308,7 +338,7 @@ void rebuildSdDiagnosticsModal()
     const bool mountOk = wxv::storage::begin();
     const char *mountState = mountOk ? "OK" : "FAIL";
     const char *cardType = wxv::storage::isMounted() ? wxv::storage::cardTypeName() : "NONE";
-    std::vector<String> mp3Paths;
+    Mp3PathList mp3Paths;
     const size_t mp3Count = wxv::audio::listSdMp3Files(mp3Paths, 4);
     size_t probeBytesRead = 0;
     String probeStatus = "no file";
@@ -327,6 +357,11 @@ void rebuildSdDiagnosticsModal()
     types[lineCount++] = InfoLabel;
     lines[lineCount] = "Mounted: " + String(wxv::storage::isMounted() ? "yes" : "no");
     types[lineCount++] = InfoLabel;
+    if (lineCount < InfoModal::MAX_LINES)
+    {
+        lines[lineCount] = "PSRAM: " + String(psramFound() ? "yes" : "no");
+        types[lineCount++] = InfoLabel;
+    }
     lines[lineCount] = "Type: " + String(cardType);
     types[lineCount++] = InfoLabel;
     lines[lineCount] = "Card Size: " + String(wxv::storage::cardSizeMB()) + " MB";
@@ -422,7 +457,7 @@ void showSystemModal()
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     int *numberRefs[] = {&buzzerVolume};
-    int *chooserRefs[] = {&buzzerToneSet, &g_sdMp3Mode};
+    int *chooserRefs[] = {&buzzerToneSet, &mp3PlayMode};
     static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse", "Warm", "Melody"};
     static const char *mp3ModeOpts[] = {"Play One", "Continue Next", "Repeat"};
     const char *const *chooserOpts[] = {toneOpts, mp3ModeOpts};
@@ -448,7 +483,7 @@ void showSystemModal()
         // Persist volume/profile regardless of which action chosen
         buzzerVolume = constrain(buzzerVolume, 0, 100);
         buzzerToneSet = constrain(buzzerToneSet, 0, 6);
-        g_sdMp3Mode = constrain(g_sdMp3Mode, 0, 2);
+        mp3PlayMode = constrain(mp3PlayMode, 0, 2);
         saveDeviceSettings();
 
         if (action >= 0)
@@ -495,7 +530,7 @@ void showSystemModal()
                 systemModal.hide();
                 g_sdMp3Paths.clear();
                 g_sdMp3Page = 0;
-                pendingModalFn = showSdMp3ListModal;
+                pendingModalFn = beginSdMp3ListLoad;
                 pendingModalTime = millis() + 10;
                 return;
             case 11:
@@ -757,12 +792,12 @@ void tickSdMp3Playback()
 
         if (naturalEnd && !g_sdMp3Paths.empty())
         {
-            if (g_sdMp3Mode == SdMp3RepeatOne)
+            if (mp3PlayMode == SdMp3RepeatOne)
             {
                 startPlaybackForCurrentSelection();
                 return;
             }
-            if (g_sdMp3Mode == SdMp3ContinueNext)
+            if (mp3PlayMode == SdMp3ContinueNext)
             {
                 g_currentSdMp3Index = (g_currentSdMp3Index + 1) % g_sdMp3Paths.size();
                 startPlaybackForCurrentSelection();

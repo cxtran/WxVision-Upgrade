@@ -7,6 +7,7 @@
 #include <time.h>
 #include <stdlib.h>
 #include <math.h>
+#include <cstring>
 #include <memory>
 #include <esp_system.h>
 #include "esp_ota_ops.h"
@@ -32,6 +33,7 @@
 #include "weather_provider.h"
 #include "screen_manager.h"
 #include "mqtt_client.h"
+#include "psram_utils.h"
 #include "generated_web_assets.h"
 #include "web.h"
 #include "cloud_manager.h"
@@ -76,6 +78,7 @@ bool otaInProgress = false;
 #define noaaAlertsEnabled app.noaaAlertsEnabled
 #define noaaLatitude app.noaaLatitude
 #define noaaLongitude app.noaaLongitude
+#define debugMemoryLogs app.debugMemoryLogs
 #define forecastLinesPerDay app.forecastLinesPerDay
 #define forecastPauseMs app.forecastPauseMs
 #define forecastIconSize app.forecastIconSize
@@ -157,6 +160,100 @@ volatile bool g_ntpSyncLastOk = false;
 bool g_wifiScanPrimed = false;
 bool g_wifiScanIncludeHidden = false;
 
+struct RequestBodyBuffer
+{
+  char *data = nullptr;
+  size_t length = 0;
+  size_t capacity = 0;
+
+  ~RequestBodyBuffer()
+  {
+    wxv::memory::freeCaps(data);
+  }
+
+  bool reserve(size_t bytes)
+  {
+    capacity = bytes + 1;
+    data = static_cast<char *>(wxv::memory::allocatePreferPsram(capacity));
+    if (!data)
+    {
+      capacity = 0;
+      return false;
+    }
+    data[0] = '\0';
+    return true;
+  }
+
+  bool append(const uint8_t *chunk, size_t chunkLen)
+  {
+    if (!data || length + chunkLen > capacity - 1)
+    {
+      return false;
+    }
+
+    memcpy(data + length, chunk, chunkLen);
+    length += chunkLen;
+    data[length] = '\0';
+    return true;
+  }
+};
+
+RequestBodyBuffer *createRequestBodyBuffer(AsyncWebServerRequest *req, size_t total, size_t maxBytes)
+{
+  if (total > maxBytes)
+  {
+    req->send(413, "text/plain", "Payload too large");
+    return nullptr;
+  }
+
+  RequestBodyBuffer *body = new (std::nothrow) RequestBodyBuffer();
+  if (!body)
+  {
+    req->send(500, "text/plain", "Body alloc failed");
+    return nullptr;
+  }
+
+  if (!body->reserve(total))
+  {
+    delete body;
+    req->send(500, "text/plain", "Body alloc failed");
+    return nullptr;
+  }
+
+  req->_tempObject = body;
+  return body;
+}
+
+RequestBodyBuffer *requestBodyBuffer(AsyncWebServerRequest *req)
+{
+  return static_cast<RequestBodyBuffer *>(req->_tempObject);
+}
+
+void destroyRequestBodyBuffer(AsyncWebServerRequest *req)
+{
+  delete requestBodyBuffer(req);
+  req->_tempObject = nullptr;
+}
+
+bool appendRequestBodyChunk(AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total, size_t maxBytes)
+{
+  RequestBodyBuffer *body = (index == 0) ? createRequestBodyBuffer(req, total, maxBytes)
+                                         : requestBodyBuffer(req);
+  if (!body)
+  {
+    return false;
+  }
+
+  if (!body->append(data, len))
+  {
+    destroyRequestBodyBuffer(req);
+    req->send(413, "text/plain", "Payload too large");
+    return false;
+  }
+
+  return true;
+}
+
 void rebootTask(void *param)
 {
   const uint32_t delayMs = static_cast<uint32_t>(reinterpret_cast<uintptr_t>(param));
@@ -198,7 +295,7 @@ const web_assets::EmbeddedAsset *findEmbeddedAsset(const char *path)
 
 void sendEmbeddedAsset(AsyncWebServerRequest *req, const web_assets::EmbeddedAsset &asset)
 {
-  AsyncWebServerResponse *res = req->beginResponse_P(200, asset.contentType, asset.data, asset.size);
+  AsyncWebServerResponse *res = req->beginResponse(200, asset.contentType, asset.data, asset.size);
   res->addHeader("Cache-Control", asset.cacheControl);
   req->send(res);
 }
@@ -895,9 +992,17 @@ static void serializeCompactFloat(JsonVariant dst, float value, uint8_t digits =
     dst.set(nullptr);
 }
 
+static String serializeJsonToReservedString(JsonDocument &doc)
+{
+  String payload;
+  payload.reserve(measureJson(doc) + 1);
+  serializeJson(doc, payload);
+  return payload;
+}
+
 static String buildAppStateJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   JsonObject device = doc["device"].to<JsonObject>();
   device["name"] = state.device.name;
   device["ip"] = state.device.ip;
@@ -977,14 +1082,94 @@ static String buildAppStateJson(const AppRuntimeState &state)
   serializeCompactFloat(lightning["lastDistanceMi"], state.lightning.lastDistanceMi);
   lightning["strikeCount"] = state.lightning.strikeCount;
 
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppStateJson(JsonDocument &doc, const AppRuntimeState &state)
+{
+  JsonObject device = doc["device"].to<JsonObject>();
+  device["name"] = state.device.name;
+  device["ip"] = state.device.ip;
+  device["online"] = state.device.online;
+  device["uptimeSec"] = state.device.uptimeSec;
+  device["currentScreen"] = state.device.currentScreen;
+
+  JsonObject wifi = doc["wifi"].to<JsonObject>();
+  wifi["ssid"] = state.wifi.ssid;
+  wifi["rssi"] = state.wifi.rssi;
+
+  JsonObject time = doc["time"].to<JsonObject>();
+  time["local"] = state.time.localIso;
+  time["timezone"] = state.time.timezone;
+  time["display"] = state.time.display;
+
+  JsonObject location = doc["location"].to<JsonObject>();
+  serializeCompactFloat(location["lat"], state.location.lat, 4);
+  serializeCompactFloat(location["lon"], state.location.lon, 4);
+
+  JsonObject weather = doc["weather"].to<JsonObject>();
+  weather["source"] = state.weather.source;
+  serializeCompactFloat(weather["tempF"], state.weather.tempF);
+  serializeCompactFloat(weather["pressureInHg"], state.weather.pressureInHg, 2);
+  if (state.weather.humidity >= 0)
+    weather["humidity"] = state.weather.humidity;
+  else
+    weather["humidity"] = nullptr;
+  weather["condition"] = state.weather.condition;
+  weather["updated"] = state.weather.updatedIso[0] ? state.weather.updatedIso : nullptr;
+
+  JsonObject indoor = doc["indoor"].to<JsonObject>();
+  serializeCompactFloat(indoor["tempF"], state.indoor.tempF);
+  if (state.indoor.humidity >= 0)
+    indoor["humidity"] = state.indoor.humidity;
+  else
+    indoor["humidity"] = nullptr;
+  serializeCompactFloat(indoor["ahtTempF"], state.indoor.ahtTempF);
+  if (state.indoor.ahtHumidity >= 0)
+    indoor["ahtHumidity"] = state.indoor.ahtHumidity;
+  else
+    indoor["ahtHumidity"] = nullptr;
+  if (state.indoor.co2ppm > 0)
+    indoor["co2ppm"] = state.indoor.co2ppm;
+  else
+    indoor["co2ppm"] = nullptr;
+  serializeCompactFloat(indoor["pressureInHg"], state.indoor.pressureInHg, 2);
+  serializeCompactFloat(indoor["lightLux"], state.indoor.lightLux, 1);
+  if (state.indoor.eqi >= 0)
+    indoor["eqi"] = state.indoor.eqi;
+  else
+    indoor["eqi"] = nullptr;
+  indoor["band"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+  indoor["freshness"] = state.indoor.freshness[0] ? state.indoor.freshness : nullptr;
+  indoor["summary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+  indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
+  indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
+  indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
+
+  JsonObject alerts = doc["alerts"].to<JsonObject>();
+  alerts["activeCount"] = state.alerts.activeCount;
+  alerts["highestSeverity"] = state.alerts.highestSeverity;
+  if (state.alerts.itemCount > 0)
+  {
+    alerts["headline"] = state.alerts.items[0].headline;
+    alerts["message"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
+  }
+  else
+  {
+    alerts["headline"] = nullptr;
+    alerts["message"] = nullptr;
+  }
+
+  JsonObject lightning = doc["lightning"].to<JsonObject>();
+  lightning["enabled"] = state.lightning.enabled;
+  serializeCompactFloat(lightning["lastDistanceMi"], state.lightning.lastDistanceMi);
+  lightning["strikeCount"] = state.lightning.strikeCount;
 }
 
 static String buildAppDashboardJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["time"] = state.time.display;
   serializeCompactFloat(doc["tempF"], state.weather.tempF);
   if (state.weather.humidity >= 0)
@@ -1010,14 +1195,41 @@ static String buildAppDashboardJson(const AppRuntimeState &state)
   doc["alertCount"] = state.alerts.activeCount;
   doc["currentScreen"] = state.device.currentScreen;
   doc["rssi"] = state.wifi.rssi;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppDashboardJson(JsonDocument &doc, const AppRuntimeState &state)
+{
+  doc["time"] = state.time.display;
+  serializeCompactFloat(doc["tempF"], state.weather.tempF);
+  if (state.weather.humidity >= 0)
+    doc["humidity"] = state.weather.humidity;
+  else
+    doc["humidity"] = nullptr;
+  doc["condition"] = state.weather.condition;
+  serializeCompactFloat(doc["indoorTempF"], state.indoor.tempF);
+  if (state.indoor.humidity >= 0)
+    doc["indoorHumidity"] = state.indoor.humidity;
+  else
+    doc["indoorHumidity"] = nullptr;
+  if (state.indoor.co2ppm > 0)
+    doc["co2ppm"] = state.indoor.co2ppm;
+  else
+    doc["co2ppm"] = nullptr;
+  if (state.indoor.eqi >= 0)
+    doc["indoorEqi"] = state.indoor.eqi;
+  else
+    doc["indoorEqi"] = nullptr;
+  doc["indoorBand"] = state.indoor.band[0] ? state.indoor.band : nullptr;
+  doc["indoorSummary"] = state.indoor.summary[0] ? state.indoor.summary : nullptr;
+  doc["alertCount"] = state.alerts.activeCount;
+  doc["currentScreen"] = state.device.currentScreen;
+  doc["rssi"] = state.wifi.rssi;
 }
 
 static String buildAppAlertsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["activeCount"] = state.alerts.activeCount;
   doc["highestSeverity"] = state.alerts.highestSeverity;
   if (state.alerts.itemCount > 0)
@@ -1043,27 +1255,61 @@ static String buildAppAlertsJson(const AppRuntimeState &state)
     item["fullMessage"] = (i == 0 && state.alerts.primaryFullMessage[0]) ? state.alerts.primaryFullMessage : nullptr;
     item["expires"] = state.alerts.items[i].expires[0] ? state.alerts.items[i].expires : nullptr;
   }
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppAlertsJson(JsonDocument &doc, const AppRuntimeState &state)
+{
+  doc["activeCount"] = state.alerts.activeCount;
+  doc["highestSeverity"] = state.alerts.highestSeverity;
+  if (state.alerts.itemCount > 0)
+  {
+    doc["headline"] = state.alerts.items[0].headline;
+    doc["message"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
+    doc["fullMessage"] = state.alerts.primaryFullMessage[0] ? state.alerts.primaryFullMessage : nullptr;
+  }
+  else
+  {
+    doc["headline"] = nullptr;
+    doc["message"] = nullptr;
+    doc["fullMessage"] = nullptr;
+  }
+  JsonArray items = doc["items"].to<JsonArray>();
+  for (size_t i = 0; i < state.alerts.itemCount; ++i)
+  {
+    JsonObject item = items.add<JsonObject>();
+    item["id"] = state.alerts.items[i].id;
+    item["source"] = state.alerts.items[i].source;
+    item["severity"] = state.alerts.items[i].severity;
+    item["headline"] = state.alerts.items[i].headline;
+    item["fullMessage"] = (i == 0 && state.alerts.primaryFullMessage[0]) ? state.alerts.primaryFullMessage : nullptr;
+    item["expires"] = state.alerts.items[i].expires[0] ? state.alerts.items[i].expires : nullptr;
+  }
 }
 
 static String buildAppLightningJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["enabled"] = state.lightning.enabled;
   serializeCompactFloat(doc["lastDistanceMi"], state.lightning.lastDistanceMi);
   doc["lastTimestamp"] = state.lightning.lastTimestamp[0] ? state.lightning.lastTimestamp : nullptr;
   doc["strikeCount"] = state.lightning.strikeCount;
   doc["level"] = state.lightning.level;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppLightningJson(JsonDocument &doc, const AppRuntimeState &state)
+{
+  doc["enabled"] = state.lightning.enabled;
+  serializeCompactFloat(doc["lastDistanceMi"], state.lightning.lastDistanceMi);
+  doc["lastTimestamp"] = state.lightning.lastTimestamp[0] ? state.lightning.lastTimestamp : nullptr;
+  doc["strikeCount"] = state.lightning.strikeCount;
+  doc["level"] = state.lightning.level;
 }
 
 static String buildAppDeviceJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
   doc["name"] = state.device.name;
   doc["ip"] = state.device.ip;
@@ -1085,14 +1331,37 @@ static String buildAppDeviceJson(const AppRuntimeState &state)
   doc["cloudHeartbeatFailures"] = cloud.heartbeatFailures;
   doc["cloudLastRegisterStatusCode"] = cloud.lastRegisterStatusCode;
   doc["cloudLastRegisterDetail"] = cloud.lastRegisterDetail;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppDeviceJson(JsonDocument &doc, const AppRuntimeState &state)
+{
+  const wxv::cloud::CloudRuntimeState &cloud = wxv::cloud::cloudState();
+  doc["name"] = state.device.name;
+  doc["ip"] = state.device.ip;
+  doc["mac"] = state.device.mac;
+  doc["ssid"] = state.wifi.ssid;
+  doc["rssi"] = state.wifi.rssi;
+  doc["uptimeSec"] = state.device.uptimeSec;
+  doc["currentScreen"] = state.device.currentScreen;
+  doc["dataSource"] = state.device.dataSourceName;
+  doc["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
+  doc["discoveredName"] = wxv::cloud::deviceIdentity().name;
+  doc["firmwareVersion"] = String(__DATE__) + " " + String(__TIME__);
+  doc["cloudEnabled"] = cloudEnabled;
+  doc["cloudRegistered"] = cloud.registered;
+  doc["relayConnected"] = cloud.relayConnected;
+  doc["relayAuthenticated"] = cloud.relayAuthenticated;
+  doc["cloudTimeReady"] = cloud.timeReady;
+  doc["cloudLastError"] = cloud.lastError;
+  doc["cloudHeartbeatFailures"] = cloud.heartbeatFailures;
+  doc["cloudLastRegisterStatusCode"] = cloud.lastRegisterStatusCode;
+  doc["cloudLastRegisterDetail"] = cloud.lastRegisterDetail;
 }
 
 static String buildWeatherWsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "weather_update";
   doc["ts"] = state.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
@@ -1103,14 +1372,12 @@ static String buildWeatherWsJson(const AppRuntimeState &state)
   else
     data["humidity"] = nullptr;
   data["condition"] = state.weather.condition;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 static String buildIndoorWsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "indoor_update";
   doc["ts"] = state.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
@@ -1141,28 +1408,24 @@ static String buildIndoorWsJson(const AppRuntimeState &state)
   data["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
   data["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
   data["sensorAgeSec"] = state.indoor.sensorAgeSec;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 static String buildDeviceWsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "device_update";
   doc["ts"] = state.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
   data["currentScreen"] = state.device.currentScreen;
   data["uptimeSec"] = state.device.uptimeSec;
   data["rssi"] = state.wifi.rssi;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 static String buildAlertWsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "alert_update";
   doc["ts"] = state.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
@@ -1180,22 +1443,18 @@ static String buildAlertWsJson(const AppRuntimeState &state)
     data["message"] = nullptr;
     data["fullMessage"] = nullptr;
   }
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 static String buildLightningWsJson(const AppRuntimeState &state)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "lightning_update";
   doc["ts"] = state.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
   serializeCompactFloat(data["lastDistanceMi"], state.lightning.lastDistanceMi);
   data["strikeCount"] = state.lightning.strikeCount;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 static void rebuildAppRuntimeJson(AppRuntimeState &state)
@@ -1427,10 +1686,18 @@ static void sendAppJson(AsyncWebServerRequest *req, const String &payload)
   req->send(res);
 }
 
+static void sendAppJsonDocument(AsyncWebServerRequest *req, JsonDocument &doc)
+{
+  AsyncResponseStream *res = req->beginResponseStream("application/json");
+  res->addHeader("Cache-Control", "no-store, max-age=0");
+  serializeJson(doc, *res);
+  req->send(res);
+}
+
 static String appHelloMessage()
 {
   refreshAppRuntimeState();
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "hello";
   doc["ts"] = g_appRuntime.time.localIso;
   JsonObject data = doc["data"].to<JsonObject>();
@@ -1439,9 +1706,7 @@ static String appHelloMessage()
   data["discoveredName"] = wxv::cloud::deviceIdentity().name;
   data["firmwareVersion"] = String(__DATE__) + " " + String(__TIME__);
   data["protocolVersion"] = 1;
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 String buildAppHelloMessage()
@@ -1927,6 +2192,7 @@ static void serializeAppDeviceSettings(JsonObject obj)
   obj["deviceUuid"] = wxv::cloud::deviceIdentity().uuid;
   obj["deviceName"] = wxv::cloud::deviceIdentity().name;
   obj["cloudEnabled"] = cloudEnabled;
+  obj["debugMemoryLogs"] = debugMemoryLogs;
 }
 
 static void serializeAppUnitsSettings(JsonObject obj)
@@ -2175,7 +2441,7 @@ static bool isKnownAppSettingsSection(const char *section)
 
 static String buildAppSettingsJson(const char *section)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   if (section && *section)
   {
     if (strcmp(section, "device") == 0)
@@ -2213,23 +2479,59 @@ static String buildAppSettingsJson(const char *section)
       serializeAppSettingsSection(doc.to<JsonObject>(), name);
   }
 
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
+}
+
+static void populateAppSettingsJson(JsonDocument &doc, const char *section)
+{
+  if (section && *section)
+  {
+    if (strcmp(section, "device") == 0)
+      serializeAppDeviceSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "units") == 0)
+      serializeAppUnitsSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "display") == 0)
+      serializeAppDisplaySettings(doc.to<JsonObject>());
+    else if (strcmp(section, "wf-tempest") == 0)
+      serializeAppWfTempestSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "forecast-ui") == 0)
+      serializeAppForecastUiSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "calibration") == 0)
+      serializeAppCalibrationSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "alarms") == 0)
+      serializeAppAlarmsSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "noaa") == 0)
+      serializeAppNoaaSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "location") == 0)
+      serializeAppLocationSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "datetime") == 0)
+      serializeAppDateTimeSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "world-time") == 0)
+      serializeAppWorldTimeSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "sound") == 0)
+      serializeAppSoundSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "mqtt") == 0)
+      serializeAppMqttSettings(doc.to<JsonObject>());
+    else if (strcmp(section, "cloud") == 0)
+      serializeAppCloudSettings(doc.to<JsonObject>());
+  }
+  else
+  {
+    for (const char *name : kAppSettingsSections)
+      serializeAppSettingsSection(doc.to<JsonObject>(), name);
+  }
 }
 
 static void sendAppValidationError(AsyncWebServerRequest *req, JsonObject fieldErrors)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["ok"] = false;
   doc["error"] = "validation_failed";
   JsonObject out = doc["fieldErrors"].to<JsonObject>();
   for (JsonPair pair : fieldErrors)
     out[pair.key().c_str()] = pair.value().as<const char *>();
 
-  String payload;
-  serializeJson(doc, payload);
-  req->send(400, "application/json", payload);
+  req->send(400, "application/json", serializeJsonToReservedString(doc));
 }
 
 void broadcastAppSettingsUpdate(const char *section)
@@ -2237,14 +2539,12 @@ void broadcastAppSettingsUpdate(const char *section)
   if (g_appWs.count() == 0)
     return;
 
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["type"] = "settings_update";
   doc["ts"] = formatCurrentIsoLocalTime();
   JsonObject data = doc["data"].to<JsonObject>();
   data["section"] = section;
-  String payload;
-  serializeJson(doc, payload);
-  g_appWs.textAll(payload);
+  g_appWs.textAll(serializeJsonToReservedString(doc));
 }
 
 static AppSettingsSnapshot captureAppSettingsSnapshot(const char *section)
@@ -2433,6 +2733,11 @@ static bool applyAppDeviceSettings(JsonObjectConst obj, JsonObject fieldErrors, 
       manualScreen = nextScreen;
       dirty.device = true;
     }
+  }
+  if (!obj["debugMemoryLogs"].isNull())
+  {
+    debugMemoryLogs = obj["debugMemoryLogs"].as<bool>();
+    dirty.device = true;
   }
 
   return fieldErrors.size() == 0;
@@ -3393,16 +3698,50 @@ static void setAppApiJsonBody(AppApiResponse &response, int statusCode, const St
 static String formatUptime(unsigned long seconds);
 static String formatEpochLocalTime(uint32_t epoch);
 
+static void logWebMemoryCheckpoint(const char *tag)
+{
+  if (!debugMemoryLogs)
+    return;
+
+  const size_t heapFree = ESP.getFreeHeap();
+  const size_t heapMin = ESP.getMinFreeHeap();
+  const size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  if (psramFound())
+  {
+    Serial.printf("[WEB][MEM] %s heap=%u min=%u maxblk=%u psram=%u psmax=%u\n",
+                  tag ? tag : "?",
+                  static_cast<unsigned>(heapFree),
+                  static_cast<unsigned>(heapMin),
+                  static_cast<unsigned>(heapLargest),
+                  static_cast<unsigned>(ESP.getFreePsram()),
+                  static_cast<unsigned>(heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT)));
+  }
+  else
+  {
+    Serial.printf("[WEB][MEM] %s heap=%u min=%u maxblk=%u psram=none\n",
+                  tag ? tag : "?",
+                  static_cast<unsigned>(heapFree),
+                  static_cast<unsigned>(heapMin),
+                  static_cast<unsigned>(heapLargest));
+  }
+}
+
 static String buildStatusJsonPayload()
 {
   size_t heapTotal = 327680; // align with System Info modal
   size_t heapFree = ESP.getFreeHeap();
+  size_t heapMinFree = ESP.getMinFreeHeap();
+  size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  const bool hasPsram = psramFound();
+  const size_t psramTotal = hasPsram ? ESP.getPsramSize() : 0;
+  const size_t psramFree = hasPsram ? ESP.getFreePsram() : 0;
+  const size_t psramLargest = hasPsram ? heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT) : 0;
   if (heapFree > heapTotal) {
     heapTotal = heapFree;
   }
   size_t heapUsed = (heapTotal > heapFree) ? (heapTotal - heapFree) : 0;
 
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   String dispTemp;
   String humidityValue;
   String conditionsValue = str_Weather_Conditions;
@@ -3459,8 +3798,15 @@ static String buildStatusJsonPayload()
   doc["freeHeap"] = heapFree;
   doc["heapTotal"] = heapTotal;
   doc["heapFree"] = heapFree;
+  doc["heapMinFree"] = heapMinFree;
+  doc["heapLargestBlock"] = heapLargest;
   doc["heapUsed"] = heapUsed;
   doc["heapUsedPercent"] = (heapTotal > 0) ? static_cast<uint8_t>((heapUsed * 100 + heapTotal / 2) / heapTotal) : 0;
+  doc["psramPresent"] = hasPsram;
+  doc["psramTotal"] = psramTotal;
+  doc["psramFree"] = psramFree;
+  doc["psramLargestBlock"] = psramLargest;
+  doc["debugMemoryLogs"] = debugMemoryLogs;
 
   size_t fsTotal = SPIFFS.totalBytes();
   size_t fsUsed = SPIFFS.usedBytes();
@@ -3579,16 +3925,14 @@ static String buildStatusJsonPayload()
 
 static String buildValidationErrorPayload(JsonObject fieldErrors)
 {
-  JsonDocument doc;
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
   doc["ok"] = false;
   doc["error"] = "validation_failed";
   JsonObject out = doc["fieldErrors"].to<JsonObject>();
   for (JsonPair pair : fieldErrors)
     out[pair.key().c_str()] = pair.value().as<const char *>();
 
-  String payload;
-  serializeJson(doc, payload);
-  return payload;
+  return serializeJsonToReservedString(doc);
 }
 
 bool handleAppApiRequest(const String &method, const String &path, const String &requestBody, AppApiResponse &response)
@@ -3773,13 +4117,11 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
       return true;
     }
 
-    JsonDocument resp;
-    resp["ok"] = true;
-    resp["button"] = button;
-    resp["queued"] = true;
-    String payload;
-    serializeJson(resp, payload);
-    setAppApiJsonBody(response, 200, payload);
+      JsonDocument resp(wxv::memory::psramJsonAllocator());
+      resp["ok"] = true;
+      resp["button"] = button;
+      resp["queued"] = true;
+      setAppApiJsonBody(response, 200, serializeJsonToReservedString(resp));
     return true;
   }
 
@@ -3836,15 +4178,13 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
       ok = true;
       queued = true;
     }
-    JsonDocument resp;
+    JsonDocument resp(wxv::memory::psramJsonAllocator());
     resp["ok"] = ok;
     resp["action"] = action;
     resp["queued"] = queued;
     if (!ok)
       resp["error"] = "unsupported action";
-    String payload;
-    serializeJson(resp, payload);
-    setAppApiJsonBody(response, ok ? 200 : 400, payload);
+    setAppApiJsonBody(response, ok ? 200 : 400, serializeJsonToReservedString(resp));
     if (ok && action == "save_settings" && buildAppSettingsJson(nullptr) != allSettingsSnapshot)
       broadcastAppSettingsUpdate("all");
     return true;
@@ -3896,7 +4236,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
 
     if (allErrors.size() != 0)
     {
-      JsonDocument resp;
+      JsonDocument resp(wxv::memory::psramJsonAllocator());
       resp["ok"] = false;
       resp["error"] = "validation_failed";
       JsonObject out = resp["fieldErrors"].to<JsonObject>();
@@ -3906,9 +4246,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
         for (JsonPairConst item : pair.value().as<JsonObjectConst>())
           sectionOut[item.key().c_str()] = item.value().as<const char *>();
       }
-      String payload;
-      serializeJson(resp, payload);
-      setAppApiJsonBody(response, 400, payload);
+      setAppApiJsonBody(response, 400, serializeJsonToReservedString(resp));
       return true;
     }
 
@@ -3932,7 +4270,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
       return true;
     }
 
-    JsonDocument errorDoc;
+    JsonDocument errorDoc(wxv::memory::psramJsonAllocator());
     JsonObject fieldErrors = errorDoc.to<JsonObject>();
     AppSettingsDirtyFlags dirty;
     AppSettingsSnapshot snapshot = captureAppSettingsSnapshot(section.c_str());
@@ -3947,14 +4285,12 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     refreshAppRuntimeState(true);
     broadcastChangedAppSettingsSections(&snapshot, 1, false);
 
-    JsonDocument resp;
+    JsonDocument resp(wxv::memory::psramJsonAllocator());
     resp["ok"] = true;
     resp["saved"] = true;
     resp["applied"] = true;
     resp["section"] = section;
-    String payload;
-    serializeJson(resp, payload);
-    setAppApiJsonBody(response, 200, payload);
+    setAppApiJsonBody(response, 200, serializeJsonToReservedString(resp));
     return true;
   }
 
@@ -4250,7 +4586,7 @@ void setupWebServer() {
 
     struct TrendChunkState
     {
-      const std::vector<SensorSample> *logPtr = nullptr;
+      const SensorLogVector *logPtr = nullptr;
       size_t total = 0;
       size_t stride = 1;
       size_t nextIndex = 0;
@@ -4824,23 +5160,17 @@ void setupWebServer() {
     nullptr,                              // onUpload
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
       if (index == 0) {
-        if (total > kMaxSettingsBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        ((String*)req->_tempObject)->reserve(total);
+        logWebMemoryCheckpoint("/settings begin");
       }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxSettingsBodyBytes)) {
         return;
       }
-      String* body = (String*)req->_tempObject;
-      body->concat((const char*)data, len);
 
       if (index + len == total) {
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, *body);
-        delete body; req->_tempObject = nullptr;
+        RequestBodyBuffer *body = requestBodyBuffer(req);
+        JsonDocument doc(wxv::memory::psramJsonAllocator());
+        DeserializationError err = deserializeJson(doc, body->data, body->length);
+        destroyRequestBodyBuffer(req);
 
         if (err) {
           Serial.printf("[/settings] JSON parse error: %s\n", err.c_str());
@@ -5266,6 +5596,7 @@ void setupWebServer() {
         refreshAppRuntimeState(true);
         Serial.println("[/settings] Saved OK");
         req->send(200, "application/json", "{\"ok\":true}");
+        logWebMemoryCheckpoint("/settings end");
         broadcastChangedAppSettingsSections(
           snapshots, sizeof(snapshots) / sizeof(snapshots[0]));
 
@@ -5338,28 +5669,22 @@ void setupWebServer() {
     [](AsyncWebServerRequest*){}, nullptr,
     [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total){
       if (index == 0) {
-        if (total > kMaxTimeBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        ((String*)req->_tempObject)->reserve(total);
+        logWebMemoryCheckpoint("/time begin");
       }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxTimeBodyBytes)) {
         return;
       }
-      String* body = (String*)req->_tempObject;
-      body->concat((const char*)data, len);
 
       if (index + len == total) {
         AppSettingsSnapshot snapshot = captureAppSettingsSnapshot("datetime");
-        JsonDocument doc;
-        if (deserializeJson(doc, *body)) {
-          delete body; req->_tempObject = nullptr;
+        RequestBodyBuffer *body = requestBodyBuffer(req);
+        JsonDocument doc(wxv::memory::psramJsonAllocator());
+        if (deserializeJson(doc, body->data, body->length)) {
+          destroyRequestBodyBuffer(req);
           req->send(400, "text/plain", "bad json");
           return;
         }
-        delete body; req->_tempObject = nullptr;
+        destroyRequestBodyBuffer(req);
 
         bool timezoneUpdated = false;
         if (!doc["tzName"].isNull()) {
@@ -5446,6 +5771,7 @@ void setupWebServer() {
         saveDateTimeSettings();
         refreshAppRuntimeState(true);
         req->send(200, "application/json", "{\"ok\":true}");
+        logWebMemoryCheckpoint("/time end");
         broadcastChangedAppSettingsSections(&snapshot, 1, false);
       }
     }
@@ -5495,28 +5821,22 @@ void setupWebServer() {
     [](AsyncWebServerRequest*){}, nullptr,
     [](AsyncWebServerRequest* req, uint8_t* data, size_t len, size_t index, size_t total){
       if (index == 0) {
-        if (total > kMaxWorldTimeBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        ((String*)req->_tempObject)->reserve(total);
+        logWebMemoryCheckpoint("/worldtime begin");
       }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxWorldTimeBodyBytes)) {
         return;
       }
-      String* body = (String*)req->_tempObject;
-      body->concat((const char*)data, len);
 
       if (index + len == total) {
         AppSettingsSnapshot snapshot = captureAppSettingsSnapshot("world-time");
-        JsonDocument doc;
-        if (deserializeJson(doc, *body)) {
-          delete body; req->_tempObject = nullptr;
+        RequestBodyBuffer *body = requestBodyBuffer(req);
+        JsonDocument doc(wxv::memory::psramJsonAllocator());
+        if (deserializeJson(doc, body->data, body->length)) {
+          destroyRequestBodyBuffer(req);
           req->send(400, "text/plain", "bad json");
           return;
         }
-        delete body; req->_tempObject = nullptr;
+        destroyRequestBodyBuffer(req);
 
         worldTimeClearSelections();
         worldTimeClearCustomCities();
@@ -5578,6 +5898,7 @@ void setupWebServer() {
         saveWorldTimeSettings();
         refreshAppRuntimeState(true);
         req->send(200, "application/json", "{\"ok\":true}");
+        logWebMemoryCheckpoint("/worldtime end");
         broadcastChangedAppSettingsSections(&snapshot, 1, false);
       }
     }
@@ -5611,32 +5932,44 @@ void setupWebServer() {
 
   server.on("/api/app/state", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, buildAppStateJson(g_appRuntime));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppStateJson(doc, g_appRuntime);
+    sendAppJsonDocument(req, doc);
   });
 
   server.on("/api/app/dashboard", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, buildAppDashboardJson(g_appRuntime));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppDashboardJson(doc, g_appRuntime);
+    sendAppJsonDocument(req, doc);
   });
 
   server.on("/api/app/alerts", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, buildAppAlertsJson(g_appRuntime));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppAlertsJson(doc, g_appRuntime);
+    sendAppJsonDocument(req, doc);
   });
 
   server.on("/api/app/lightning", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, buildAppLightningJson(g_appRuntime));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppLightningJson(doc, g_appRuntime);
+    sendAppJsonDocument(req, doc);
   });
 
   server.on("/api/app/device", HTTP_GET, [](AsyncWebServerRequest *req) {
     refreshAppRuntimeState();
-    sendAppJson(req, buildAppDeviceJson(g_appRuntime));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppDeviceJson(doc, g_appRuntime);
+    sendAppJsonDocument(req, doc);
   });
 
   auto registerAppSettingsGet = [&](const char *path, const char *section) {
     server.on(path, HTTP_GET, [section](AsyncWebServerRequest *req) {
-      sendAppJson(req, buildAppSettingsJson(section));
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
+      populateAppSettingsJson(doc, section);
+      sendAppJsonDocument(req, doc);
     });
   };
 
@@ -5644,34 +5977,27 @@ void setupWebServer() {
     server.on(path, HTTP_POST,
       [](AsyncWebServerRequest *req) {},
       nullptr,
-      [section](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
+      [section, path](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
         if (index == 0) {
-          if (total > kMaxSettingsBodyBytes) {
-            req->send(413, "text/plain", "Payload too large");
-            return;
-          }
-          req->_tempObject = new String();
-          static_cast<String *>(req->_tempObject)->reserve(total);
+          logWebMemoryCheckpoint(path);
         }
-        if (!req->_tempObject) {
+        if (!appendRequestBodyChunk(req, data, len, index, total, kMaxSettingsBodyBytes)) {
           return;
         }
-        String *body = static_cast<String *>(req->_tempObject);
-        body->concat(reinterpret_cast<const char *>(data), len);
         if (index + len != total) {
           return;
         }
 
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, *body);
-        delete body;
-        req->_tempObject = nullptr;
+        RequestBodyBuffer *body = requestBodyBuffer(req);
+        JsonDocument doc(wxv::memory::psramJsonAllocator());
+        DeserializationError err = deserializeJson(doc, body->data, body->length);
+        destroyRequestBodyBuffer(req);
         if (err || !doc.is<JsonObject>()) {
           req->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
           return;
         }
 
-        JsonDocument errorDoc;
+        JsonDocument errorDoc(wxv::memory::psramJsonAllocator());
         JsonObject fieldErrors = errorDoc.to<JsonObject>();
         AppSettingsDirtyFlags dirty;
         AppSettingsSnapshot snapshot = captureAppSettingsSnapshot(section);
@@ -5685,7 +6011,7 @@ void setupWebServer() {
         refreshAppRuntimeState(true);
         broadcastChangedAppSettingsSections(&snapshot, 1, false);
 
-        JsonDocument resp;
+        JsonDocument resp(wxv::memory::psramJsonAllocator());
         resp["ok"] = true;
         resp["saved"] = true;
         resp["applied"] = true;
@@ -5693,6 +6019,7 @@ void setupWebServer() {
         String payload;
         serializeJson(resp, payload);
         req->send(200, "application/json", payload);
+        logWebMemoryCheckpoint("settings section end");
       }
     );
   };
@@ -5713,7 +6040,9 @@ void setupWebServer() {
   registerAppSettingsGet("/api/app/settings/cloud", "cloud");
 
   server.on("/api/app/settings", HTTP_GET, [](AsyncWebServerRequest *req) {
-    sendAppJson(req, buildAppSettingsJson(nullptr));
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    populateAppSettingsJson(doc, nullptr);
+    sendAppJsonDocument(req, doc);
   });
 
   registerAppSettingsPost("/api/app/settings/device", "device");
@@ -5735,27 +6064,17 @@ void setupWebServer() {
     [](AsyncWebServerRequest *req) {},
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
-      if (index == 0) {
-        if (total > kMaxAppBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        static_cast<String *>(req->_tempObject)->reserve(total);
-      }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxAppBodyBytes)) {
         return;
       }
-      String *body = static_cast<String *>(req->_tempObject);
-      body->concat(reinterpret_cast<const char *>(data), len);
       if (index + len != total) {
         return;
       }
 
-      JsonDocument doc;
-      DeserializationError err = deserializeJson(doc, *body);
-      delete body;
-      req->_tempObject = nullptr;
+      RequestBodyBuffer *body = requestBodyBuffer(req);
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
+      DeserializationError err = deserializeJson(doc, body->data, body->length);
+      destroyRequestBodyBuffer(req);
       if (err) {
         req->send(400, "text/plain", "Invalid JSON");
         return;
@@ -5772,7 +6091,7 @@ void setupWebServer() {
         return;
       }
 
-      JsonDocument resp;
+      JsonDocument resp(wxv::memory::psramJsonAllocator());
       resp["ok"] = true;
       resp["button"] = button;
       resp["queued"] = true;
@@ -5787,32 +6106,25 @@ void setupWebServer() {
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
       if (index == 0) {
-        if (total > kMaxSettingsBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        static_cast<String *>(req->_tempObject)->reserve(total);
+        logWebMemoryCheckpoint("/api/app/settings begin");
       }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxSettingsBodyBytes)) {
         return;
       }
-      String *body = static_cast<String *>(req->_tempObject);
-      body->concat(reinterpret_cast<const char *>(data), len);
       if (index + len != total) {
         return;
       }
 
-      JsonDocument doc;
-      DeserializationError err = deserializeJson(doc, *body);
-      delete body;
-      req->_tempObject = nullptr;
+      RequestBodyBuffer *body = requestBodyBuffer(req);
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
+      DeserializationError err = deserializeJson(doc, body->data, body->length);
+      destroyRequestBodyBuffer(req);
       if (err || !doc.is<JsonObject>()) {
         req->send(400, "application/json", "{\"ok\":false,\"error\":\"invalid_json\"}");
         return;
       }
 
-      JsonDocument errorsDoc;
+      JsonDocument errorsDoc(wxv::memory::psramJsonAllocator());
       JsonObject allErrors = errorsDoc.to<JsonObject>();
       AppSettingsDirtyFlags dirty;
       JsonObjectConst root = doc.as<JsonObjectConst>();
@@ -5833,7 +6145,7 @@ void setupWebServer() {
         if (!alreadyCaptured && snapshotCount < kAppSettingsSectionCount)
           snapshots[snapshotCount++] = captureAppSettingsSnapshot(section);
 
-        JsonDocument sectionErrorsDoc;
+        JsonDocument sectionErrorsDoc(wxv::memory::psramJsonAllocator());
         JsonObject sectionErrors = sectionErrorsDoc.to<JsonObject>();
         applyAppSettingsSection(section, pair.value(), sectionErrors, dirty);
         if (sectionErrors.size() != 0) {
@@ -5844,7 +6156,7 @@ void setupWebServer() {
       }
 
       if (allErrors.size() != 0) {
-        JsonDocument resp;
+        JsonDocument resp(wxv::memory::psramJsonAllocator());
         resp["ok"] = false;
         resp["error"] = "validation_failed";
         JsonObject out = resp["fieldErrors"].to<JsonObject>();
@@ -5863,6 +6175,7 @@ void setupWebServer() {
       refreshAppRuntimeState(true);
       broadcastChangedAppSettingsSections(snapshots, snapshotCount, true);
       req->send(200, "application/json", "{\"ok\":true,\"saved\":true,\"applied\":true}");
+      logWebMemoryCheckpoint("/api/app/settings end");
     }
   );
 
@@ -5871,26 +6184,19 @@ void setupWebServer() {
     nullptr,
     [](AsyncWebServerRequest *req, uint8_t *data, size_t len, size_t index, size_t total) {
       if (index == 0) {
-        if (total > kMaxAppBodyBytes) {
-          req->send(413, "text/plain", "Payload too large");
-          return;
-        }
-        req->_tempObject = new String();
-        static_cast<String *>(req->_tempObject)->reserve(total);
+        logWebMemoryCheckpoint("/api/app/action begin");
       }
-      if (!req->_tempObject) {
+      if (!appendRequestBodyChunk(req, data, len, index, total, kMaxAppBodyBytes)) {
         return;
       }
-      String *body = static_cast<String *>(req->_tempObject);
-      body->concat(reinterpret_cast<const char *>(data), len);
       if (index + len != total) {
         return;
       }
 
-      JsonDocument doc;
-      DeserializationError err = deserializeJson(doc, *body);
-      delete body;
-      req->_tempObject = nullptr;
+      RequestBodyBuffer *body = requestBodyBuffer(req);
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
+      DeserializationError err = deserializeJson(doc, body->data, body->length);
+      destroyRequestBodyBuffer(req);
       if (err) {
         req->send(400, "text/plain", "Invalid JSON");
         return;
@@ -5930,7 +6236,7 @@ void setupWebServer() {
         queued = true;
       }
 
-      JsonDocument resp;
+      JsonDocument resp(wxv::memory::psramJsonAllocator());
       resp["ok"] = ok;
       resp["action"] = action;
       resp["queued"] = queued;
@@ -5942,6 +6248,7 @@ void setupWebServer() {
       req->send(ok ? 200 : 400, "application/json", payload);
       if (ok && action == "save_settings" && buildAppSettingsJson(nullptr) != allSettingsSnapshot)
         broadcastAppSettingsUpdate("all");
+      logWebMemoryCheckpoint("/api/app/action end");
     }
   );
 
@@ -5949,7 +6256,9 @@ void setupWebServer() {
 #if WEB_UI_MODE == WEB_UI_FULL
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *req) {
     String tempDisp = fmtTemp(atof(str_Temp.c_str()), 0);
-    String status = "<html><body><h2>Status</h2>";
+    String status;
+    status.reserve(192 + WiFi.SSID().length() + str_Weather_Conditions.length() + tempDisp.length() + str_Humd.length());
+    status = "<html><body><h2>Status</h2>";
     status += "<p>WiFi: " + String(WiFi.SSID()) + "</p>";
     status += "<p>Weather: " + str_Weather_Conditions + " " + tempDisp + "</p>";
     status += "<p>Humidity: " + str_Humd + "%</p>";

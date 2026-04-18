@@ -6,20 +6,25 @@
 #include "datetimesettings.h"
 #include "settings.h"
 #include "ui_theme.h"
+#include "psram_utils.h"
 
 #if WXV_ENABLE_NOAA_ALERTS
 
 namespace
 {
+    using NoaaStringVector = std::vector<String, wxv::memory::PsramAllocator<String>>;
+
     struct AlertPage
     {
         String title;
-        std::vector<String> wrappedLines;
+        NoaaStringVector wrappedLines;
         uint16_t titleColor = 0;
         uint16_t lineColor = 0;
         uint16_t firstLineColor = 0;
         bool loop = true;
     };
+
+    using AlertPageVector = std::vector<AlertPage, wxv::memory::PsramAllocator<AlertPage>>;
 
     static constexpr unsigned long PAGE_DWELL_MS = 2400UL;
     static constexpr unsigned long PAGE_CONTINUE_DWELL_MS = 1200UL;
@@ -40,7 +45,7 @@ namespace
     static unsigned long s_alertLastPageAdvanceMs = 0;
     static unsigned long s_alertPageRevealStartMs = 0;
     static bool s_alertCompleted = false;
-    static std::vector<AlertPage> s_alertPages;
+    static AlertPageVector s_alertPages;
 
     static uint32_t hashAppend(uint32_t h, const String &s)
     {
@@ -335,10 +340,10 @@ namespace
         return "--/-- --:--";
     }
 
-    static std::vector<String> splitSentences(const String &textRaw)
+    static NoaaStringVector splitSentences(const String &textRaw)
     {
         String text = normalizeAlertText(textRaw);
-        std::vector<String> out;
+        NoaaStringVector out;
         String cur;
         cur.reserve(64);
         for (int i = 0; i < text.length(); ++i)
@@ -361,7 +366,7 @@ namespace
 
     static String firstSentence(const String &description)
     {
-        std::vector<String> s = splitSentences(description);
+        NoaaStringVector s = splitSentences(description);
         if (!s.empty())
         {
             String one = s[0];
@@ -378,7 +383,7 @@ namespace
 
     static String extractHazardImpact(const String &description)
     {
-        std::vector<String> s = splitSentences(description);
+        NoaaStringVector s = splitSentences(description);
         String haz;
         String imp;
         for (size_t i = 0; i < s.size(); ++i)
@@ -611,9 +616,9 @@ namespace
         return 1;
     }
 
-    static std::vector<String> wrapTextToPixelWidth(const String &textRaw, int maxWidthPx)
+    static NoaaStringVector wrapTextToPixelWidth(const String &textRaw, int maxWidthPx)
     {
-        std::vector<String> lines;
+        NoaaStringVector lines;
         String text = collapseWhitespace(textRaw);
         if (text.length() == 0)
         {
@@ -678,7 +683,7 @@ namespace
         size_t lineCount = 0;
     };
 
-    static size_t pageCountForWrappedLines(const std::vector<String> &wrappedLines)
+    static size_t pageCountForWrappedLines(const NoaaStringVector &wrappedLines)
     {
         if (ALERT_VISIBLE_LINES <= 0)
             return 1u;
@@ -942,7 +947,7 @@ namespace
         return summary;
     }
 
-    static void buildAlertPages(const NwsAlert &a, size_t alertIndex, size_t totalAlerts, std::vector<AlertPage> &outPages)
+    static void buildAlertPages(const NwsAlert &a, size_t alertIndex, size_t totalAlerts, AlertPageVector &outPages)
     {
         outPages.clear();
         String whatSection = extractBulletSection(a.description, "WHAT");
@@ -1085,7 +1090,7 @@ namespace
             if (!noaaGetAlert(alertIndex, a))
                 continue;
 
-            std::vector<AlertPage> pages;
+            AlertPageVector pages;
             buildAlertPages(a, alertIndex, count, pages);
             for (const AlertPage &page : pages)
                 s_alertPages.push_back(page);

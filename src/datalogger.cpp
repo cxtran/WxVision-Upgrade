@@ -7,7 +7,7 @@
 namespace {
 constexpr size_t kRamMaxSamples = 288;     // 24h @ 5-minute sampling; full history stays on flash
 constexpr const char *kLogPath = "/sensor_log.bin";
-std::vector<SensorSample> s_log;
+SensorLogVector s_log;
 bool s_spiffsReady = false;
 
 struct LegacySampleV1 {
@@ -143,6 +143,6 @@ void sensorLogToJsonDownsample(JsonDocument &doc, size_t maxSamples) {
     }
 }
 
-const std::vector<SensorSample>& getSensorLog() {
+const SensorLogVector& getSensorLog() {
     return s_log;
 }

@@ -24,7 +24,7 @@ extern void handleAlarmSlotChangedInModal();
 extern bool autoBrightness;
 extern int scrollLevel;
 extern void saveDisplaySettings();
-extern std::vector<MenuLevel> menuStack;
+extern MenuStack menuStack;
 extern int theme;
 extern bool rtcReady;
 extern RTC_DS3231 rtc;

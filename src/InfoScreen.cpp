@@ -4,6 +4,7 @@
 #include "utils.h"
 #include "RollingUpScreen.h"
 #include "noaa.h"
+#include "psram_utils.h"
 #include "settings.h"
 #include "ui_theme.h"
 #include "screen_manager.h"
@@ -12,13 +13,16 @@ extern int scrollSpeed;
 extern int verticalScrollSpeed;
 extern int theme;
 
+template <typename T>
+using PsramVector = std::vector<T, wxv::memory::PsramAllocator<T>>;
+
 static RollingUpScreen s_hourlyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_dailyRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_liveRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_lightningRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
 static RollingUpScreen s_currentRoll(InfoScreen::SCREEN_WIDTH, InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH, InfoScreen::CHARH);
-static std::vector<String> s_hourlyHeaders;
-static std::vector<String> s_dailyHeaders;
+static PsramVector<String> s_hourlyHeaders;
+static PsramVector<String> s_dailyHeaders;
 
 
 static uint16_t brightenColor(uint16_t color, uint8_t boost = 50)
@@ -86,13 +90,13 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
 
     // For the WeatherFlow hourly screen, also feed the vertical scroller with wrapped lines
     if (_screenMode == SCREEN_HOURLY) {
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        std::vector<int> yOffsets;
-        std::vector<const uint8_t *> icons;
-        std::vector<uint16_t> iconColors;
-        std::vector<uint8_t> marqueeFlags;
+        PsramVector<String> vec;
+        PsramVector<uint16_t> colors;
+        PsramVector<int> offsets;
+        PsramVector<int> yOffsets;
+        PsramVector<const uint8_t *> icons;
+        PsramVector<uint16_t> iconColors;
+        PsramVector<uint8_t> marqueeFlags;
         s_hourlyHeaders.clear();
         s_hourlyHeaders.reserve(_lineCount);
         const size_t rowCount = static_cast<size_t>(_lineCount) * 3u;
@@ -185,14 +189,14 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         s_hourlyRoll.setBlockSizePx(InfoScreen::SCREEN_HEIGHT - InfoScreen::CHARH); // one full hourly page per body
     }
     else if (_screenMode == SCREEN_UDP_FORECAST) {
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        std::vector<int> iconOffsets;
-        std::vector<int> yOffsets;
-        std::vector<const uint8_t *> icons;
-        std::vector<uint16_t> iconColors;
-        std::vector<uint8_t> marqueeFlags;
+        PsramVector<String> vec;
+        PsramVector<uint16_t> colors;
+        PsramVector<int> offsets;
+        PsramVector<int> iconOffsets;
+        PsramVector<int> yOffsets;
+        PsramVector<const uint8_t *> icons;
+        PsramVector<uint16_t> iconColors;
+        PsramVector<uint8_t> marqueeFlags;
         const size_t rowCount = static_cast<size_t>(_lineCount) * 3u;
         vec.reserve(rowCount);
         colors.reserve(rowCount);
@@ -349,10 +353,10 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
     }
     else if (_screenMode == SCREEN_UDP_DATA) {
         // Tempest outdoor conditions: match Current WX behavior
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        std::vector<uint8_t> marqueeFlags;
+        PsramVector<String> vec;
+        PsramVector<uint16_t> colors;
+        PsramVector<int> offsets;
+        PsramVector<uint8_t> marqueeFlags;
         const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
         vec.reserve(rowCount);
         colors.reserve(rowCount);
@@ -396,10 +400,10 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
         s_liveRoll.setBlockSizePx(InfoScreen::CHARH * 2);
     }
     else if (_screenMode == SCREEN_LIGHTNING) {
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        std::vector<uint8_t> marqueeFlags;
+        PsramVector<String> vec;
+        PsramVector<uint16_t> colors;
+        PsramVector<int> offsets;
+        PsramVector<uint8_t> marqueeFlags;
         const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
         vec.reserve(rowCount);
         colors.reserve(rowCount);
@@ -444,10 +448,10 @@ void InfoScreen::setLines(const String lines[], int n, bool resetPosition, const
     }
     else if (_screenMode == SCREEN_CURRENT) {
         // Current conditions as vertical scroll-up
-        std::vector<String> vec;
-        std::vector<uint16_t> colors;
-        std::vector<int> offsets;
-        std::vector<uint8_t> marqueeFlags;
+        PsramVector<String> vec;
+        PsramVector<uint16_t> colors;
+        PsramVector<int> offsets;
+        PsramVector<uint8_t> marqueeFlags;
         const size_t rowCount = static_cast<size_t>(_lineCount) * 2u;
         vec.reserve(rowCount);
         colors.reserve(rowCount);

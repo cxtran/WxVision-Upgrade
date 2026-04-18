@@ -72,19 +72,22 @@ void showDeviceSettingsModal()
 
     String dataSourceLabel = "Data Source: ";
     dataSourceLabel += dataSourceMenuLabel(dataSource);
+    static int debugMemoryLogsChoice = 0;
+    debugMemoryLogsChoice = debugMemoryLogs ? 1 : 0;
 
-    String labels[] = {dataSourceLabel, "Manual Screen"};
-    InfoFieldType types[] = {InfoButton, InfoChooser};
+    String labels[] = {dataSourceLabel, "Manual Screen", "Debug Memory Logs"};
+    InfoFieldType types[] = {InfoButton, InfoChooser, InfoChooser};
 
-    int *chooserRefs[] = {&manualScreen};
+    int *chooserRefs[] = {&manualScreen, &debugMemoryLogsChoice};
     static const char *manualOpt[] = {"Off", "On"};
-    const char *const *chooserOpts[] = {manualOpt};
-    int chooserCounts[] = {2};
+    static const char *toggleOpts[] = {"Off", "On"};
+    const char *const *chooserOpts[] = {manualOpt, toggleOpts};
+    int chooserCounts[] = {2, 2};
 
-    deviceModal.setLines(labels, types, 2);
+    deviceModal.setLines(labels, types, 3);
     deviceModal.setValueRefs(
         nullptr, 0,
-        chooserRefs, 1,
+        chooserRefs, 2,
         chooserOpts, chooserCounts,
         nullptr, 0, nullptr);
 
@@ -107,6 +110,7 @@ void showDeviceSettingsModal()
             return;
         }
 
+        debugMemoryLogs = (debugMemoryLogsChoice > 0);
         saveDeviceSettings();
     });
 

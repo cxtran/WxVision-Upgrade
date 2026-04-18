@@ -11,6 +11,7 @@
 #include "settings.h"
 #include "ScrollLine.h"
 #include "fonts/verdanab8pt7b.h"
+#include "psram_utils.h"
 #include "ui_theme.h"
 #include "ml_predictor.h"
 
@@ -18,6 +19,9 @@ extern int theme;
 
 namespace
 {
+template <typename T>
+using PsramVector = std::vector<T, wxv::memory::PsramAllocator<T>>;
+
 struct Point
 {
     int x;
@@ -34,16 +38,16 @@ struct TimedValue
 Point mapSampleToPoint(uint32_t ts, uint32_t dayStart, float value, float minVal, float maxVal,
                        int graphLeft, int graphWidth, int graphTop, int graphHeight);
 
-static std::vector<Point> buildUniquePoints(const std::vector<TimedValue> &vals,
+static PsramVector<Point> buildUniquePoints(const PsramVector<TimedValue> &vals,
                                             uint32_t dayStart,
                                             float minVal, float maxVal,
                                             int graphLeft, int graphWidth, int graphTop, int graphHeight)
 {
-    std::vector<Point> points;
+    PsramVector<Point> points;
     if (graphWidth <= 0) return points;
 
-    std::vector<float> sum(graphWidth, 0.0f);
-    std::vector<int> count(graphWidth, 0);
+    PsramVector<float> sum(graphWidth, 0.0f);
+    PsramVector<int> count(graphWidth, 0);
 
     for (const auto &tv : vals)
     {
@@ -851,7 +855,7 @@ void drawTemperatureHistoryScreen()
 
     const auto &log = getSensorLog();
     uint32_t dayStart = 0;
-    std::vector<TimedValue> tempsC;
+    PsramVector<TimedValue> tempsC;
     tempsC.reserve(log.size());
     for (const auto &s : log)
     {
@@ -863,7 +867,7 @@ void drawTemperatureHistoryScreen()
     if (!tempsC.empty())
     {
         dayStart = windowStartForLast24h(tempsC.back().ts);
-        std::vector<TimedValue> filtered;
+        PsramVector<TimedValue> filtered;
         filtered.reserve(tempsC.size());
         for (const auto &tv : tempsC)
         {
@@ -1007,7 +1011,7 @@ void drawHumidityHistoryScreen()
 
     const auto &log = getSensorLog();
     uint32_t dayStart = 0;
-    std::vector<TimedValue> hums;
+    PsramVector<TimedValue> hums;
     hums.reserve(log.size());
     for (const auto &s : log)
     {
@@ -1019,7 +1023,7 @@ void drawHumidityHistoryScreen()
     if (!hums.empty())
     {
         dayStart = windowStartForLast24h(hums.back().ts);
-        std::vector<TimedValue> filtered;
+        PsramVector<TimedValue> filtered;
         filtered.reserve(hums.size());
         for (const auto &tv : hums)
         {
@@ -1158,7 +1162,7 @@ void drawBaroHistoryScreen()
 
     const auto &log = getSensorLog();
     uint32_t dayStart = 0;
-    std::vector<TimedValue> pressVals;
+    PsramVector<TimedValue> pressVals;
     pressVals.reserve(log.size());
     for (const auto &s : log)
     {
@@ -1170,7 +1174,7 @@ void drawBaroHistoryScreen()
     if (!pressVals.empty())
     {
         dayStart = windowStartForLast24h(pressVals.back().ts);
-        std::vector<TimedValue> filtered;
+        PsramVector<TimedValue> filtered;
         filtered.reserve(pressVals.size());
         for (const auto &tv : pressVals)
         {
@@ -1308,7 +1312,7 @@ void drawCo2HistoryScreen()
 
     const auto &log = getSensorLog();
     uint32_t dayStart = 0;
-    std::vector<TimedValue> co2Vals;
+    PsramVector<TimedValue> co2Vals;
     co2Vals.reserve(log.size());
     for (const auto &s : log)
     {
@@ -1320,7 +1324,7 @@ void drawCo2HistoryScreen()
     if (!co2Vals.empty())
     {
         dayStart = windowStartForLast24h(co2Vals.back().ts);
-        std::vector<TimedValue> filtered;
+        PsramVector<TimedValue> filtered;
         filtered.reserve(co2Vals.size());
         for (const auto &tv : co2Vals)
         {

@@ -7,12 +7,17 @@
 #include <WiFiClient.h>
 #include <ArduinoJson.h>
 #include "datetimesettings.h"
+#include "psram_utils.h"
 #include "units.h"
+
+using WorldWeatherVector = std::vector<WorldWeather, wxv::memory::PsramAllocator<WorldWeather>>;
+using WorldRetryVector = std::vector<unsigned long, wxv::memory::PsramAllocator<unsigned long>>;
+using WorldCustomCityVector = std::vector<WorldTimeCustomCity, wxv::memory::PsramAllocator<WorldTimeCustomCity>>;
 
 static std::vector<int> s_worldTimeZoneIndices;
 static int s_worldTimeViewIndex = -1; // -1 => system clock view, >=0 => index into s_worldTimeZoneIndices
 static bool s_worldTimeAutoCycle = true;
-static std::vector<WorldTimeCustomCity> s_worldCustomCities;
+static WorldCustomCityVector s_worldCustomCities;
 
 static constexpr const char *kPrefsNs = "visionwx";
 static constexpr const char *kPrefsKeyIds = "wt_ids";
@@ -47,10 +52,10 @@ struct WorldWeatherRequest
     String response;
 };
 
-static std::vector<WorldWeather> s_worldWeatherByTz;
-static std::vector<unsigned long> s_worldWeatherRetryAfter;
-static std::vector<WorldWeather> s_worldCustomWeather;
-static std::vector<unsigned long> s_worldCustomRetryAfter;
+static WorldWeatherVector s_worldWeatherByTz;
+static WorldRetryVector s_worldWeatherRetryAfter;
+static WorldWeatherVector s_worldCustomWeather;
+static WorldRetryVector s_worldCustomRetryAfter;
 static WorldWeatherRequest s_worldWeatherReq;
 static int s_worldWeatherRoundRobin = 0;
 static unsigned long s_worldWeatherNextStartMs = 0;
@@ -418,7 +423,7 @@ static bool parseOpenMeteoPayload(const String &raw, String &outCondition, float
     if (body.length() == 0)
         return false;
 
-    DynamicJsonDocument doc(1400);
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     DeserializationError err = deserializeJson(doc, body);
     if (err)
         return false;
@@ -553,7 +558,7 @@ void loadWorldTimeSettings()
     {
         const size_t docCapacity = std::max(kWorldTimeCustomJsonBaseCapacity,
                                             customRaw.length() + static_cast<size_t>(256));
-        DynamicJsonDocument doc(docCapacity);
+        JsonDocument doc(wxv::memory::psramJsonAllocator());
         DeserializationError err = deserializeJson(doc, customRaw);
         if (!err && doc.is<JsonArray>())
         {
@@ -609,7 +614,7 @@ void saveWorldTimeSettings()
         (customCount * JSON_OBJECT_SIZE(5)) +
         (customCount * static_cast<size_t>(96)) +
         kWorldTimeCustomJsonBaseCapacity;
-    DynamicJsonDocument customDoc(customDocCapacity);
+    JsonDocument customDoc(wxv::memory::psramJsonAllocator());
     JsonArray customArr = customDoc.to<JsonArray>();
     for (size_t i = 0; i < s_worldCustomCities.size(); ++i)
     {
