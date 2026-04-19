@@ -3719,7 +3719,7 @@ static void logWebMemoryCheckpoint(const char *tag)
 
   const size_t heapFree = ESP.getFreeHeap();
   const size_t heapMin = ESP.getMinFreeHeap();
-  const size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  const size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   if (psramFound())
   {
     Serial.printf("[WEB][MEM] %s heap=%u min=%u maxblk=%u psram=%u psmax=%u\n",
@@ -3745,7 +3745,7 @@ static String buildStatusJsonPayload()
   size_t heapTotal = 327680; // align with System Info modal
   size_t heapFree = ESP.getFreeHeap();
   size_t heapMinFree = ESP.getMinFreeHeap();
-  size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  size_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
   const bool hasPsram = psramFound();
   const size_t psramTotal = hasPsram ? ESP.getPsramSize() : 0;
   const size_t psramFree = hasPsram ? ESP.getFreePsram() : 0;

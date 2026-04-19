@@ -696,6 +696,24 @@ void updateDailyForecastFromJson(const String& jsonStr) {
 
     parseDailyArrayFromSource(jsonStr, dailyIdx);
     if (parsedDays <= 0) {
+        String dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
+        parseDailyArrayString(dailyArrayStr);
+    }
+    if (parsedDays <= 0) {
+        String dailyObjStr = extractJsonObject(jsonStr, "\"daily\"");
+        dailyObjStr.trim();
+        _sanitizeBools(dailyObjStr);
+        if (dailyObjStr.startsWith("{") && dailyObjStr.endsWith("}")) {
+            JSONVar dailyObj = JSON.parse(dailyObjStr);
+            if (JSON.typeof_(dailyObj) == "object") {
+                parseDailyIndexedObject(dailyObj);
+                if (parsedDays <= 0) {
+                    parseDailyFieldObject(dailyObj);
+                }
+            }
+        }
+    }
+    if (parsedDays <= 0) {
         Serial.println("[ERROR] Parsed daily forecast block invalid - keeping previous daily data");
         return;
     }

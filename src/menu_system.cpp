@@ -283,7 +283,7 @@ void rebuildSystemInfoModal()
 
     const uint32_t heapFree = ESP.getFreeHeap();
     const uint32_t heapMinFree = ESP.getMinFreeHeap();
-    const uint32_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+    const uint32_t heapLargest = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     const uint32_t heapTotal = 327680;
     const uint32_t heapUsed = heapTotal - heapFree;
     const float heapPct = 100.0f * heapUsed / heapTotal;

@@ -3581,6 +3581,8 @@ String formatOutdoorTemperature()
 
     if (isDataSourceForecastModel())
     {
+        if (!isnan(currentCond.temp))
+            return fmtTemp(currentCond.temp, 0);
         if (!isnan(tempest.temperature))
             return fmtTemp(tempest.temperature, 0);
     }
@@ -3592,6 +3594,8 @@ String formatOutdoorTemperature()
 
     if (!isnan(tempest.temperature))
         return fmtTemp(tempest.temperature, 0);
+    if (!isnan(currentCond.temp))
+        return fmtTemp(currentCond.temp, 0);
     if (str_Temp.length() > 0)
         return fmtTemp(atof(str_Temp.c_str()), 0);
     return String("--");
@@ -3603,6 +3607,8 @@ static String formatOutdoorHumidity()
 
     if (isDataSourceForecastModel())
     {
+        if (currentCond.humidity >= 0)
+            return String(currentCond.humidity);
         if (!isnan(tempest.humidity))
             return String((int)(tempest.humidity + 0.5f));
     }
@@ -3612,6 +3618,8 @@ static String formatOutdoorHumidity()
 
     if (!isnan(tempest.humidity))
         return String((int)(tempest.humidity + 0.5f));
+    if (currentCond.humidity >= 0)
+        return String(currentCond.humidity);
 
     return String("--");
 }

@@ -523,7 +523,7 @@ void setup()
     Serial.printf("Heap free: %u bytes, min free: %u bytes, largest free block: %u bytes\n",
                   ESP.getFreeHeap(),
                   ESP.getMinFreeHeap(),
-                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT));
+                  heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     Serial.printf("Flash size: %u bytes\n", ESP.getFlashChipSize());
     deviceHostname = buildDefaultHostname();
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
