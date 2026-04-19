@@ -4,6 +4,7 @@
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/semphr.h>
 #include <time.h>
@@ -28,6 +29,7 @@ static bool s_prevWifiConnected = false;
 static bool s_unreadAlert = false;
 static bool s_manualFetchPending = false;
 using NoaaAlertVector = std::vector<NwsAlert, wxv::memory::PsramAllocator<NwsAlert>>;
+using NoaaPayloadBuffer = std::vector<char, wxv::memory::PsramAllocator<char>>;
 
 static NoaaAlertVector s_alerts;
 static size_t s_alertCount = 0;
@@ -47,9 +49,11 @@ static constexpr unsigned long NOAA_RETRY_BACKOFF_MS = 30000UL;
 static constexpr unsigned long NOAA_CONNECT_FAIL_BACKOFF_MS = 300000UL;
 static constexpr unsigned long NOAA_WIFI_STABLE_MS = 5000UL;
 static constexpr unsigned long NOAA_WIFI_RECONNECT_QUIET_MS = 5000UL;
-static constexpr const char *NOAA_BASE_URL = "http://noaa.photokia.com";
-static constexpr const char *NOAA_ALERTS_ACTIVE_PATH = "/api/alerts/active";
+static constexpr const char *NOAA_RELAY_BASE_URL = "http://noaa.photokia.com";
+static constexpr const char *NOAA_RELAY_ALERTS_ACTIVE_PATH = "/api/alerts/active";
+static constexpr const char *NOAA_DIRECT_ALERTS_URL = "https://api.weather.gov/alerts/active";
 static constexpr uint16_t NOAA_HTTP_TIMEOUT_MS = 12000U;
+static constexpr size_t NOAA_MAX_BODY_BYTES = 32768U;
 static constexpr uint16_t NOAA_ALERT_HEADING_MS = 4000U;
 static constexpr uint16_t NOAA_MANUAL_RESULT_HEADING_MS = 1800U;
 
@@ -502,6 +506,18 @@ static uint32_t noaaExpiryEpoch(const NwsAlert &alert)
     return 0xFFFFFFFFUL;
 }
 
+static const char *noaaFetchSourceName(NoaaFetchSource source)
+{
+    switch (source)
+    {
+    case NOAA_FETCH_SOURCE_DIRECT:
+        return "direct";
+    case NOAA_FETCH_SOURCE_RELAY:
+    default:
+        return "relay";
+    }
+}
+
 static bool noaaAlertPriorityLess(const NwsAlert &lhs, const NwsAlert &rhs)
 {
     const int lhsSeverity = noaaSeverityRank(lhs.severity);
@@ -544,27 +560,19 @@ static bool relayTopLevelBool(JsonDocument &doc, const char *fullKey, const char
     return defaultValue;
 }
 
-static bool parseRelayAlertsPayload(const String &payload)
+static String directField(JsonObject obj, const char *key)
 {
-    JsonDocument doc(wxv::memory::psramJsonAllocator());
-    DeserializationError err = deserializeJson(doc, payload);
-    if (err)
-    {
-        Serial.printf("[NOAA] Relay JSON parse failed: %s\n", err.c_str());
-        return false;
-    }
+    const char *value = obj[key] | "";
+    return String(value ? value : "");
+}
 
-    JsonArray alerts = doc["alerts"].as<JsonArray>();
-    if (alerts.isNull())
-        return false;
-
-    if (alerts.size() == 0)
+static bool applyParsedAlerts(NoaaAlertVector &parsedAlerts, bool suppressClearHeading, const char *sourceTag, bool staleFlag)
+{
+    if (parsedAlerts.empty())
     {
         bool hadAlert = false;
-        bool suppressClearHeading = false;
         lockNoaaState();
         hadAlert = s_hasAlert;
-        suppressClearHeading = s_suppressClearHeading;
         unlockNoaaState();
         clearAlertState();
         lockNoaaState();
@@ -573,52 +581,7 @@ static bool parseRelayAlertsPayload(const String &payload)
         unlockNoaaState();
         if (hadAlert && !suppressClearHeading)
             queueTemporaryAlertHeading("ALL ALERTS CLEARED", NOAA_MANUAL_RESULT_HEADING_MS);
-        Serial.println("[NOAA] Parsed 0 alert(s)");
-        return true;
-    }
-
-    DateTime nowUtc;
-    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
-    NoaaAlertVector parsedAlerts;
-    parsedAlerts.reserve(alerts.size());
-    for (JsonObject alertObj : alerts)
-    {
-        NwsAlert candidate;
-        candidate.id = relayField(alertObj, "id", "i");
-        candidate.url = candidate.id;
-        candidate.event = relayField(alertObj, "event", "e");
-        candidate.severity = relayField(alertObj, "severity", "s");
-        candidate.certainty = relayField(alertObj, "certainty", "y");
-        candidate.headline = relayField(alertObj, "headline", "h");
-        candidate.description = relayField(alertObj, "description", "d");
-        candidate.instruction = relayField(alertObj, "instruction", "n");
-        candidate.urgency = relayField(alertObj, "urgency", "g");
-        candidate.response = relayField(alertObj, "response", "r");
-        candidate.areaDesc = relayField(alertObj, "area", "a");
-        candidate.onset = relayField(alertObj, "onset", "o");
-        candidate.expires = relayField(alertObj, "expires", "x");
-        candidate.ends = relayField(alertObj, "ends", "z");
-        if (candidate.description.length() == 0)
-            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
-        if (candidate.headline.length() == 0 && candidate.description.length() > 0)
-            candidate.headline = candidate.description;
-
-        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
-            continue;
-        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
-            continue;
-
-        parsedAlerts.push_back(candidate);
-    }
-
-    if (parsedAlerts.empty())
-    {
-        clearAlertState();
-        lockNoaaState();
-        s_unreadAlert = false;
-        s_screenDirty = true;
-        unlockNoaaState();
-        Serial.println("[NOAA] Parsed 0 alert(s)");
+        Serial.printf("[NOAA] Parsed 0 alert(s) from %s\n", sourceTag);
         return true;
     }
 
@@ -632,7 +595,6 @@ static bool parseRelayAlertsPayload(const String &payload)
     size_t alertCount = 0;
     size_t previousCount = 0;
     bool screenActive = noaaAlertScreen.isActive();
-    bool suppressClearHeading = false;
     bool showSingleAlert = false;
     bool showAlertCount = false;
 
@@ -640,7 +602,6 @@ static bool parseRelayAlertsPayload(const String &payload)
     previousAlertId = s_activeAlertId;
     previousCount = s_alertCount;
     lastReadAlertId = s_lastReadAlertId;
-    suppressClearHeading = s_suppressClearHeading;
     s_alerts = parsedAlerts;
     s_alertCount = s_alerts.size();
     s_hasAlert = true;
@@ -681,13 +642,355 @@ static bool parseRelayAlertsPayload(const String &payload)
                                    noaaAlertSignature(activeAlertId),
                                    activeEvent.length() ? activeEvent.c_str() : "NOAA ALERT");
 
-    Serial.printf("[NOAA] Parsed relay alert event=%s severity=%s expires=%s count=%u stale=%d\n",
+    Serial.printf("[NOAA] Parsed %u %s alert(s) event=%s severity=%s expires=%s stale=%d\n",
+                  static_cast<unsigned>(alertCount),
+                  sourceTag,
                   activeEvent.c_str(),
                   activeSeverity.c_str(),
                   activeExpires.c_str(),
-                  static_cast<unsigned>(alertCount),
-                  static_cast<int>(relayTopLevelBool(doc, "stale", "s", false)));
+                  static_cast<int>(staleFlag));
     return true;
+}
+
+static bool parseRelayAlertsPayload(const String &payload)
+{
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err)
+    {
+        Serial.printf("[NOAA] Relay JSON parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray alerts = doc["alerts"].as<JsonArray>();
+    if (alerts.isNull())
+        return false;
+
+    DateTime nowUtc;
+    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
+    NoaaAlertVector parsedAlerts;
+    parsedAlerts.reserve(alerts.size());
+    for (JsonObject alertObj : alerts)
+    {
+        NwsAlert candidate;
+        candidate.id = relayField(alertObj, "id", "i");
+        candidate.url = candidate.id;
+        candidate.event = relayField(alertObj, "event", "e");
+        candidate.severity = relayField(alertObj, "severity", "s");
+        candidate.certainty = relayField(alertObj, "certainty", "y");
+        candidate.headline = relayField(alertObj, "headline", "h");
+        candidate.description = relayField(alertObj, "description", "d");
+        candidate.instruction = relayField(alertObj, "instruction", "n");
+        candidate.urgency = relayField(alertObj, "urgency", "g");
+        candidate.response = relayField(alertObj, "response", "r");
+        candidate.areaDesc = relayField(alertObj, "area", "a");
+        candidate.onset = relayField(alertObj, "onset", "o");
+        candidate.expires = relayField(alertObj, "expires", "x");
+        candidate.ends = relayField(alertObj, "ends", "z");
+        if (candidate.description.length() == 0)
+            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
+        if (candidate.headline.length() == 0 && candidate.description.length() > 0)
+            candidate.headline = candidate.description;
+
+        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
+            continue;
+        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
+            continue;
+
+        parsedAlerts.push_back(candidate);
+    }
+
+    bool suppressClearHeading = false;
+
+    lockNoaaState();
+    suppressClearHeading = s_suppressClearHeading;
+    unlockNoaaState();
+    return applyParsedAlerts(parsedAlerts,
+                             suppressClearHeading,
+                             "relay",
+                             relayTopLevelBool(doc, "stale", "s", false));
+}
+
+static bool parseDirectAlertsPayload(const String &payload)
+{
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err)
+    {
+        Serial.printf("[NOAA] Direct JSON parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray features = doc["features"].as<JsonArray>();
+    if (features.isNull())
+        return false;
+
+    DateTime nowUtc;
+    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
+    NoaaAlertVector parsedAlerts;
+    parsedAlerts.reserve(features.size());
+    for (JsonObject featureObj : features)
+    {
+        JsonObject props = featureObj["properties"].as<JsonObject>();
+        if (props.isNull())
+            continue;
+
+        NwsAlert candidate;
+        candidate.url = directField(props, "@id");
+        if (candidate.url.length() == 0)
+            candidate.url = directField(featureObj, "id");
+        candidate.id = directField(props, "id");
+        if (candidate.id.length() == 0)
+            candidate.id = candidate.url;
+        candidate.sent = directField(props, "sent");
+        candidate.effective = directField(props, "effective");
+        candidate.onset = directField(props, "onset");
+        candidate.event = directField(props, "event");
+        candidate.status = directField(props, "status");
+        candidate.messageType = directField(props, "messageType");
+        candidate.category = directField(props, "category");
+        candidate.severity = directField(props, "severity");
+        candidate.certainty = directField(props, "certainty");
+        candidate.urgency = directField(props, "urgency");
+        candidate.areaDesc = directField(props, "areaDesc");
+        candidate.sender = directField(props, "sender");
+        candidate.senderName = directField(props, "senderName");
+        candidate.headline = directField(props, "headline");
+        candidate.description = directField(props, "description");
+        candidate.instruction = directField(props, "instruction");
+        candidate.response = directField(props, "response");
+        candidate.note = directField(props, "note");
+        candidate.expires = directField(props, "expires");
+        candidate.ends = directField(props, "ends");
+        candidate.scope = directField(props, "scope");
+        candidate.language = directField(props, "language");
+        candidate.web = directField(props, "web");
+        if (candidate.description.length() == 0)
+            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
+        if (candidate.headline.length() == 0)
+            candidate.headline = candidate.event.length() ? candidate.event : candidate.description;
+
+        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
+            continue;
+        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
+            continue;
+
+        parsedAlerts.push_back(candidate);
+    }
+
+    bool suppressClearHeading = false;
+    lockNoaaState();
+    suppressClearHeading = s_suppressClearHeading;
+    unlockNoaaState();
+    return applyParsedAlerts(parsedAlerts, suppressClearHeading, "direct", false);
+}
+
+static bool parseRelayAlertsPayload(const char *payload, size_t length)
+{
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    DeserializationError err = deserializeJson(doc, payload, length);
+    if (err)
+    {
+        Serial.printf("[NOAA] Relay JSON parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray alerts = doc["alerts"].as<JsonArray>();
+    if (alerts.isNull())
+        return false;
+
+    DateTime nowUtc;
+    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
+    NoaaAlertVector parsedAlerts;
+    parsedAlerts.reserve(alerts.size());
+    for (JsonObject alertObj : alerts)
+    {
+        NwsAlert candidate;
+        candidate.id = relayField(alertObj, "id", "i");
+        candidate.url = candidate.id;
+        candidate.event = relayField(alertObj, "event", "e");
+        candidate.severity = relayField(alertObj, "severity", "s");
+        candidate.certainty = relayField(alertObj, "certainty", "y");
+        candidate.headline = relayField(alertObj, "headline", "h");
+        candidate.description = relayField(alertObj, "description", "d");
+        candidate.instruction = relayField(alertObj, "instruction", "n");
+        candidate.urgency = relayField(alertObj, "urgency", "g");
+        candidate.response = relayField(alertObj, "response", "r");
+        candidate.areaDesc = relayField(alertObj, "area", "a");
+        candidate.onset = relayField(alertObj, "onset", "o");
+        candidate.expires = relayField(alertObj, "expires", "x");
+        candidate.ends = relayField(alertObj, "ends", "z");
+        if (candidate.description.length() == 0)
+            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
+        if (candidate.headline.length() == 0 && candidate.description.length() > 0)
+            candidate.headline = candidate.description;
+
+        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
+            continue;
+        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
+            continue;
+
+        parsedAlerts.push_back(candidate);
+    }
+
+    bool suppressClearHeading = false;
+
+    lockNoaaState();
+    suppressClearHeading = s_suppressClearHeading;
+    unlockNoaaState();
+    return applyParsedAlerts(parsedAlerts,
+                             suppressClearHeading,
+                             "relay",
+                             relayTopLevelBool(doc, "stale", "s", false));
+}
+
+static bool parseDirectAlertsPayload(const char *payload, size_t length)
+{
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    DeserializationError err = deserializeJson(doc, payload, length);
+    if (err)
+    {
+        Serial.printf("[NOAA] Direct JSON parse failed: %s\n", err.c_str());
+        return false;
+    }
+
+    JsonArray features = doc["features"].as<JsonArray>();
+    if (features.isNull())
+        return false;
+
+    DateTime nowUtc;
+    const bool haveNowUtc = noaaCurrentUtc(nowUtc);
+    NoaaAlertVector parsedAlerts;
+    parsedAlerts.reserve(features.size());
+    for (JsonObject featureObj : features)
+    {
+        JsonObject props = featureObj["properties"].as<JsonObject>();
+        if (props.isNull())
+            continue;
+
+        NwsAlert candidate;
+        candidate.url = directField(props, "@id");
+        if (candidate.url.length() == 0)
+            candidate.url = directField(featureObj, "id");
+        candidate.id = directField(props, "id");
+        if (candidate.id.length() == 0)
+            candidate.id = candidate.url;
+        candidate.sent = directField(props, "sent");
+        candidate.effective = directField(props, "effective");
+        candidate.onset = directField(props, "onset");
+        candidate.event = directField(props, "event");
+        candidate.status = directField(props, "status");
+        candidate.messageType = directField(props, "messageType");
+        candidate.category = directField(props, "category");
+        candidate.severity = directField(props, "severity");
+        candidate.certainty = directField(props, "certainty");
+        candidate.urgency = directField(props, "urgency");
+        candidate.areaDesc = directField(props, "areaDesc");
+        candidate.sender = directField(props, "sender");
+        candidate.senderName = directField(props, "senderName");
+        candidate.headline = directField(props, "headline");
+        candidate.description = directField(props, "description");
+        candidate.instruction = directField(props, "instruction");
+        candidate.response = directField(props, "response");
+        candidate.note = directField(props, "note");
+        candidate.expires = directField(props, "expires");
+        candidate.ends = directField(props, "ends");
+        candidate.scope = directField(props, "scope");
+        candidate.language = directField(props, "language");
+        candidate.web = directField(props, "web");
+        if (candidate.description.length() == 0)
+            candidate.description = candidate.headline.length() ? candidate.headline : "Active alert.";
+        if (candidate.headline.length() == 0)
+            candidate.headline = candidate.event.length() ? candidate.event : candidate.description;
+
+        if (candidate.id.length() == 0 && candidate.headline.length() == 0 && candidate.event.length() == 0)
+            continue;
+        if (haveNowUtc && !noaaAlertIsActiveNow(candidate, nowUtc))
+            continue;
+
+        parsedAlerts.push_back(candidate);
+    }
+
+    bool suppressClearHeading = false;
+    lockNoaaState();
+    suppressClearHeading = s_suppressClearHeading;
+    unlockNoaaState();
+    return applyParsedAlerts(parsedAlerts, suppressClearHeading, "direct", false);
+}
+
+static bool readHttpPayloadToPsram(HTTPClient &http, NoaaPayloadBuffer &payloadOut)
+{
+    WiFiClient *stream = http.getStreamPtr();
+    if (stream == nullptr)
+    {
+        Serial.println("[NOAA] Stream pointer unavailable");
+        return false;
+    }
+
+    const int contentLength = http.getSize();
+    payloadOut.clear();
+    if (contentLength > 0)
+    {
+        if (contentLength > static_cast<int>(NOAA_MAX_BODY_BYTES))
+        {
+            Serial.printf("[NOAA] Payload too large: %d bytes\n", contentLength);
+            return false;
+        }
+        payloadOut.reserve(static_cast<size_t>(contentLength) + 1u);
+    }
+    else
+        payloadOut.reserve(4097u);
+
+    char chunk[512];
+    unsigned long lastDataMs = millis();
+    const unsigned long startMs = lastDataMs;
+    unsigned long lastYieldMs = startMs;
+    while (http.connected() || stream->available() > 0)
+    {
+        const size_t available = static_cast<size_t>(stream->available());
+        if (available == 0)
+        {
+            const unsigned long nowMs = millis();
+            if ((nowMs - lastDataMs) >= NOAA_HTTP_TIMEOUT_MS)
+            {
+                Serial.printf("[NOAA] Body read timeout after %lu ms (connected=%d)\n",
+                              nowMs - startMs,
+                              http.connected() ? 1 : 0);
+                break;
+            }
+            delay(0);
+            continue;
+        }
+
+        const size_t toRead = (available > 0) ? min(available, sizeof(chunk)) : sizeof(chunk);
+        const int bytesRead = stream->readBytes(chunk, toRead);
+        if (bytesRead <= 0)
+        {
+            delay(0);
+            continue;
+        }
+        if ((payloadOut.size() + static_cast<size_t>(bytesRead)) > NOAA_MAX_BODY_BYTES)
+        {
+            Serial.printf("[NOAA] Body exceeded %u bytes; aborting\n", static_cast<unsigned>(NOAA_MAX_BODY_BYTES));
+            return false;
+        }
+        payloadOut.insert(payloadOut.end(), chunk, chunk + bytesRead);
+        lastDataMs = millis();
+        if ((lastDataMs - lastYieldMs) >= 25UL)
+        {
+            delay(0);
+            lastYieldMs = lastDataMs;
+        }
+    }
+
+    if (payloadOut.empty())
+    {
+        Serial.println("[NOAA] Empty response body");
+        return false;
+    }
+
+    payloadOut.push_back('\0');
+    return !payloadOut.empty();
 }
 
 static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectFailedOut = nullptr)
@@ -695,18 +998,43 @@ static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectF
     if (connectFailedOut)
         *connectFailedOut = false;
 
+    const NoaaFetchSource source = noaaFetchSource;
+    const bool useTls = (source == NOAA_FETCH_SOURCE_DIRECT);
+    String url;
+    if (source == NOAA_FETCH_SOURCE_DIRECT)
+    {
+        url = String(NOAA_DIRECT_ALERTS_URL) +
+              "?point=" + String(lat, 4) + "," + String(lon, 4);
+    }
+    else
+    {
+        url = String(NOAA_RELAY_BASE_URL) + NOAA_RELAY_ALERTS_ACTIVE_PATH +
+              "?lat=" + String(lat, 4) +
+              "&lon=" + String(lon, 4) +
+              "&compact=true";
+    }
+
     HTTPClient http;
+    http.useHTTP10(true);
     http.setConnectTimeout(NOAA_HTTP_TIMEOUT_MS);
     http.setTimeout(NOAA_HTTP_TIMEOUT_MS);
     http.setReuse(false);
 
-    String url = String(NOAA_BASE_URL) + NOAA_ALERTS_ACTIVE_PATH +
-                 "?lat=" + String(lat, 4) +
-                 "&lon=" + String(lon, 4) +
-                 "&compact=true";
+    bool began = false;
+    WiFiClient plainClient;
+    WiFiClientSecure secureClient;
+    if (useTls)
+    {
+        secureClient.setInsecure();
+        began = http.begin(secureClient, url);
+    }
+    else
+    {
+        began = http.begin(plainClient, url);
+    }
 
-    Serial.printf("[NOAA] Request URL: %s\n", url.c_str());
-    if (!http.begin(url))
+    Serial.printf("[NOAA] Request URL (%s): %s\n", noaaFetchSourceName(source), url.c_str());
+    if (!began)
     {
         Serial.println("[NOAA] HTTP begin failed");
         if (connectFailedOut)
@@ -714,11 +1042,13 @@ static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectF
         return false;
     }
 
-    http.addHeader("Accept", "application/json");
+    http.addHeader("Accept", (source == NOAA_FETCH_SOURCE_DIRECT) ? "application/geo+json" : "application/json");
     http.addHeader("User-Agent", "VisionWX/1.0 (weather display firmware)");
+    http.addHeader("Accept-Encoding", "identity");
+    http.addHeader("Connection", "close");
 
     const int status = http.GET();
-    Serial.printf("[NOAA] HTTP status: %d\n", status);
+    Serial.printf("[NOAA] HTTP status (%s): %d\n", noaaFetchSourceName(source), status);
     if (status <= 0)
     {
         if (connectFailedOut)
@@ -732,14 +1062,22 @@ static bool fetchAndParseNoaaSummaryPayload(float lat, float lon, bool *connectF
         return false;
     }
 
-    String payload = http.getString();
+    NoaaPayloadBuffer payload;
+    if (!readHttpPayloadToPsram(http, payload))
+    {
+        http.end();
+        return false;
+    }
     http.end();
 
     Serial.printf("[NOAA] Fetched %u bytes for %.4f,%.4f\n",
-                  static_cast<unsigned>(payload.length()),
+                  static_cast<unsigned>(payload.size() > 0 ? payload.size() - 1u : 0u),
                   static_cast<double>(lat),
                   static_cast<double>(lon));
-    return parseRelayAlertsPayload(payload);
+    const size_t payloadLength = (payload.size() > 0) ? (payload.size() - 1u) : 0u;
+    return (source == NOAA_FETCH_SOURCE_DIRECT)
+               ? parseDirectAlertsPayload(payload.data(), payloadLength)
+               : parseRelayAlertsPayload(payload.data(), payloadLength);
 }
 
 static void fetchNoaaAlertSummarySync(bool preserveSchedule)

@@ -2,6 +2,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include "noaa.h"
 
 namespace wxv {
 namespace defaults {
@@ -136,6 +137,7 @@ struct DefaultConfig {
   bool noaaAlertsEnabled;
   float noaaLatitude;
   float noaaLongitude;
+  NoaaFetchSource noaaFetchSource;
   int themeIndex;             // 0 day, 1 night
   int autoThemeModeStorage;   // 0 off, 1 schedule, 2 ambient
   bool autoThemeScheduleLegacy;
@@ -262,6 +264,7 @@ static const DefaultConfig kDefaults = {
     false,      // noaaAlertsEnabled
     0.0f,       // noaaLatitude
     0.0f,       // noaaLongitude
+    NOAA_FETCH_SOURCE_RELAY, // noaaFetchSource
     0,          // themeIndex
     0,          // autoThemeModeStorage
     false,      // autoThemeScheduleLegacy

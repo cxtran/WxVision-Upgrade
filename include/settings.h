@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include <RTClib.h>
 #include "datetimesettings.h"
+#include "noaa.h"
 #include "units.h"   // <-- include here so others can use UnitPrefs & formatters
 
 extern RTC_DS3231 rtc;
@@ -41,6 +42,7 @@ extern bool alarmOneShotPending[3];
 extern bool noaaAlertsEnabled;
 extern float noaaLatitude;
 extern float noaaLongitude;
+extern NoaaFetchSource noaaFetchSource;
 extern bool debugMemoryLogs;
 
 extern bool setupComplete;       // true once onboarding finished

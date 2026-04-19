@@ -35,6 +35,12 @@ struct NwsAlert
     String web;
 };
 
+enum NoaaFetchSource : uint8_t
+{
+    NOAA_FETCH_SOURCE_RELAY = 0,
+    NOAA_FETCH_SOURCE_DIRECT = 1
+};
+
 enum NoaaManualFetchResult
 {
     NOAA_MANUAL_FETCH_STARTED = 0,

@@ -52,6 +52,7 @@ AppState &appState()
         noaaAlertsEnabled,
         noaaLatitude,
         noaaLongitude,
+        noaaFetchSource,
         debugMemoryLogs,
         forecastLinesPerDay,
         forecastPauseMs,

@@ -30,6 +30,7 @@ bool alarmOneShotPending[3] = {false, false, false};
 bool noaaAlertsEnabled = wxv::defaults::kDefaults.noaaAlertsEnabled;
 float noaaLatitude = wxv::defaults::kDefaults.noaaLatitude;
 float noaaLongitude = wxv::defaults::kDefaults.noaaLongitude;
+NoaaFetchSource noaaFetchSource = wxv::defaults::kDefaults.noaaFetchSource;
 bool debugMemoryLogs = false;
 
 bool setupComplete = false;
@@ -175,6 +176,9 @@ void loadSettings() {
     noaaAlertsEnabled = prefs.getBool("noaaEnabled", wxv::defaults::kDefaults.noaaAlertsEnabled);
     noaaLatitude = prefs.getFloat("noaaLat", wxv::defaults::kDefaults.noaaLatitude);
     noaaLongitude = prefs.getFloat("noaaLon", wxv::defaults::kDefaults.noaaLongitude);
+    noaaFetchSource = static_cast<NoaaFetchSource>(prefs.getUChar("noaaSource", static_cast<uint8_t>(wxv::defaults::kDefaults.noaaFetchSource)));
+    if (noaaFetchSource != NOAA_FETCH_SOURCE_RELAY && noaaFetchSource != NOAA_FETCH_SOURCE_DIRECT)
+        noaaFetchSource = wxv::defaults::kDefaults.noaaFetchSource;
     debugMemoryLogs = prefs.getBool("memDbg", false);
     applyNoaaBuildDefaults();
     for (int i = 0; i < 3; ++i)
@@ -417,6 +421,7 @@ void saveNoaaSettings() {
     prefs.putBool("noaaEnabled", noaaAlertsEnabled);
     prefs.putFloat("noaaLat", noaaLatitude);
     prefs.putFloat("noaaLon", noaaLongitude);
+    prefs.putUChar("noaaSource", static_cast<uint8_t>(noaaFetchSource));
     prefs.end();
 }
 

@@ -36,6 +36,7 @@ void showNoaaSettingsModal()
     menuActive = true;
 
     static int noaaEnabledTemp = 0;
+    static int noaaSourceTemp = 0;
     static int co2EnabledTemp = 0;
     static int tempEnabledTemp = 0;
     static int humidityEnabledTemp = 0;
@@ -43,6 +44,7 @@ void showNoaaSettingsModal()
 
     if (!s_preserveNoaaEnabledTemp)
         noaaEnabledTemp = noaaAlertsEnabled ? 1 : 0;
+    noaaSourceTemp = static_cast<int>(noaaFetchSource);
     if (!s_preserveIndoorAlertTemps)
     {
         co2EnabledTemp = envAlertCo2Enabled ? 1 : 0;
@@ -68,6 +70,8 @@ void showNoaaSettingsModal()
     int getAlertLineIdx = -1;
     if (noaaEnabledTemp > 0)
     {
+        labels[lineCount] = "Alert Source";
+        types[lineCount++] = InfoChooser;
         getAlertLineIdx = lineCount;
         labels[lineCount] = "Get Alert";
         types[lineCount++] = InfoButton;
@@ -111,10 +115,18 @@ void showNoaaSettingsModal()
     }
 
     static const char *alertsOpts[] = {"Off", "On"};
+    static const char *noaaSourceOpts[] = {"Relay", "Direct"};
     chooserRefs[chooserCount] = &noaaEnabledTemp;
     chooserOpts[chooserCount] = alertsOpts;
     chooserCounts[chooserCount] = 2;
     ++chooserCount;
+    if (noaaEnabledTemp > 0)
+    {
+        chooserRefs[chooserCount] = &noaaSourceTemp;
+        chooserOpts[chooserCount] = noaaSourceOpts;
+        chooserCounts[chooserCount] = 2;
+        ++chooserCount;
+    }
     chooserRefs[chooserCount] = &co2EnabledTemp;
     chooserOpts[chooserCount] = alertsOpts;
     chooserCounts[chooserCount] = 2;
@@ -165,17 +177,23 @@ void showNoaaSettingsModal()
 
     noaaModal.setCallback([noaaLineIdx, co2LineIdx, tempLineIdx, humidityLineIdx, getAlertLineIdx](bool accepted, int btnIdx) {
         const bool prevEnabled = noaaAlertsEnabled;
+        const NoaaFetchSource prevSource = noaaFetchSource;
         noaaAlertsEnabled = (noaaEnabledTemp > 0);
+        noaaFetchSource = (noaaSourceTemp == static_cast<int>(NOAA_FETCH_SOURCE_DIRECT))
+                              ? NOAA_FETCH_SOURCE_DIRECT
+                              : NOAA_FETCH_SOURCE_RELAY;
         envAlertCo2Enabled = (co2EnabledTemp > 0);
         envAlertTempEnabled = (tempEnabledTemp > 0);
         envAlertHumidityEnabled = (humidityEnabledTemp > 0);
         const int selectedLine = noaaModal.getSelIndex();
 
-        if (noaaAlertsEnabled != prevEnabled)
+        if (noaaAlertsEnabled != prevEnabled || noaaFetchSource != prevSource)
         {
             saveNoaaSettings();
             notifyNoaaSettingsChanged();
-            Serial.printf("[NOAA] enabled=%d\n", noaaAlertsEnabled);
+            Serial.printf("[NOAA] enabled=%d source=%s\n",
+                          noaaAlertsEnabled,
+                          (noaaFetchSource == NOAA_FETCH_SOURCE_DIRECT) ? "direct" : "relay");
         }
         saveCalibrationSettings();
 

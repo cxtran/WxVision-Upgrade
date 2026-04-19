@@ -78,6 +78,7 @@ bool otaInProgress = false;
 #define noaaAlertsEnabled app.noaaAlertsEnabled
 #define noaaLatitude app.noaaLatitude
 #define noaaLongitude app.noaaLongitude
+#define noaaFetchSource app.noaaFetchSource
 #define debugMemoryLogs app.debugMemoryLogs
 #define forecastLinesPerDay app.forecastLinesPerDay
 #define forecastPauseMs app.forecastPauseMs
@@ -2289,6 +2290,7 @@ static void serializeAppNoaaSettings(JsonObject obj)
 {
   obj["enabled"] = noaaAlertsEnabled;
   obj["lightningEnabled"] = g_appLightningEnabled;
+  obj["source"] = static_cast<uint8_t>(noaaFetchSource);
   obj["latitude"] = serialized(String(noaaLatitude, 4));
   obj["longitude"] = serialized(String(noaaLongitude, 4));
 }
@@ -3253,6 +3255,18 @@ static bool applyAppNoaaSettings(JsonObjectConst obj, JsonObject fieldErrors, Ap
   {
     g_appLightningEnabled = obj["lightningEnabled"].as<bool>();
     dirty.noaa = true;
+  }
+  if (!obj["source"].isNull())
+  {
+    int value = obj["source"].as<int>();
+    if (value != static_cast<int>(NOAA_FETCH_SOURCE_RELAY) &&
+        value != static_cast<int>(NOAA_FETCH_SOURCE_DIRECT))
+      setFieldError(fieldErrors, "source", "must be 0 (relay) or 1 (direct)");
+    else
+    {
+      noaaFetchSource = static_cast<NoaaFetchSource>(value);
+      dirty.noaa = true;
+    }
   }
   if (!obj["latitude"].isNull())
   {
@@ -5147,6 +5161,7 @@ void setupWebServer() {
     }
     JsonObject noaa = doc.createNestedObject("noaa");
     noaa["enabled"] = noaaAlertsEnabled;
+    noaa["source"] = static_cast<uint8_t>(noaaFetchSource);
     noaa["lat"] = noaaLatitude;
     noaa["lon"] = noaaLongitude;
     AsyncResponseStream *res = req->beginResponseStream("application/json");
@@ -5563,6 +5578,13 @@ void setupWebServer() {
         {
           JsonObject noaa = doc["noaa"].as<JsonObject>();
           if (!noaa["enabled"].isNull()) noaaAlertsEnabled = noaa["enabled"].as<bool>();
+          if (!noaa["source"].isNull())
+          {
+            int source = noaa["source"].as<int>();
+            noaaFetchSource = (source == static_cast<int>(NOAA_FETCH_SOURCE_DIRECT))
+                                ? NOAA_FETCH_SOURCE_DIRECT
+                                : NOAA_FETCH_SOURCE_RELAY;
+          }
           if (!noaa["lat"].isNull()) noaaLatitude = noaa["lat"].as<float>();
           if (!noaa["lon"].isNull()) noaaLongitude = noaa["lon"].as<float>();
           dirtyNoaa = true;

@@ -1249,6 +1249,8 @@ function loadAll(background){
     if (s.noaa) {
       var nEn = document.getElementById('noaaEnabled');
       if (nEn) nEn.value = s.noaa.enabled ? '1' : '0';
+      var nSource = document.getElementById('noaaSource');
+      if (nSource) nSource.value = (typeof s.noaa.source === 'number') ? String(s.noaa.source) : '0';
       var nLat = document.getElementById('deviceLat');
       if (nLat) nLat.value = (typeof s.noaa.lat === 'number') ? s.noaa.lat : 0;
       var nLon = document.getElementById('deviceLon');
@@ -1533,6 +1535,7 @@ function readSettingsForm() {
     }),
       noaa: {
         enabled: +(byId('noaaEnabled')?.value ?? 0) === 1,
+        source: +(byId('noaaSource')?.value ?? 0),
         lat: parseFloat(byId('deviceLat')?.value ?? 0) || 0,
         lon: parseFloat(byId('deviceLon')?.value ?? 0) || 0
       },
