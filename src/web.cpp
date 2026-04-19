@@ -62,6 +62,7 @@ bool otaInProgress = false;
 #define humOffset app.humOffset
 #define lightGain app.lightGain
 #define buzzerVolume app.buzzerVolume
+#define mp3Volume app.mp3Volume
 #define buzzerToneSet app.buzzerToneSet
 #define alarmSoundMode app.alarmSoundMode
 #define alarmEnabled app.alarmEnabled
@@ -2030,8 +2031,10 @@ static void serializeAppSoundSettings(JsonObject obj)
 {
   obj["enabled"] = buzzerVolume > 0;
   obj["volume"] = buzzerVolume;
+  obj["mp3Volume"] = mp3Volume;
   obj["toneSet"] = buzzerToneSet;
   obj["alarmSound"] = alarmSoundMode;
+  obj["mp3Mode"] = mp3PlayMode;
 }
 
 static void serializeAppMqttSettings(JsonObject obj)
@@ -3060,6 +3063,17 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       dirty.device = true;
     }
   }
+  if (!obj["mp3Volume"].isNull())
+  {
+    int value = obj["mp3Volume"].as<int>();
+    if (value < 0 || value > 100)
+      setFieldError(fieldErrors, "mp3Volume", "must be between 0 and 100");
+    else
+    {
+      mp3Volume = value;
+      dirty.device = true;
+    }
+  }
   if (!obj["toneSet"].isNull())
   {
     int value = obj["toneSet"].as<int>();
@@ -3081,6 +3095,17 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       alarmSoundMode = value;
       dirty.device = true;
       dirty.alarms = true;
+    }
+  }
+  if (!obj["mp3Mode"].isNull())
+  {
+    int value = obj["mp3Mode"].as<int>();
+    if (value < 0 || value > 2)
+      setFieldError(fieldErrors, "mp3Mode", "must be between 0 and 2");
+    else
+    {
+      mp3PlayMode = value;
+      dirty.device = true;
     }
   }
 
@@ -4150,7 +4175,9 @@ void setupWebServer() {
       forecastUi["iconSize"] = forecastIconSize;
       doc["customMsg"]        = customMsg;
     doc["buzzerVolume"]     = buzzerVolume;
+    doc["mp3Volume"]        = mp3Volume;
   doc["buzzerTone"]       = buzzerToneSet;
+  doc["mp3Mode"]          = mp3PlayMode;
     doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
     float luxNow = getLastRawLux();
@@ -4381,8 +4408,16 @@ void setupWebServer() {
             buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
             dirtyDevice = true;
           }
+          if (!doc["mp3Volume"].isNull()) {
+            mp3Volume = constrain(doc["mp3Volume"].as<int>(), 0, 100);
+            dirtyDevice = true;
+          }
         if (!doc["buzzerTone"].isNull()) {
           buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
+          dirtyDevice = true;
+        }
+        if (!doc["mp3Mode"].isNull()) {
+          mp3PlayMode = constrain(doc["mp3Mode"].as<int>(), 0, 2);
           dirtyDevice = true;
         }
         if (!doc["alarmSound"].isNull()) {

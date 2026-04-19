@@ -14,6 +14,10 @@
 #include "display_runtime.h"
 #include "default_values.h"
 
+#ifndef sntp_enabled
+#define sntp_enabled esp_sntp_enabled
+#endif
+
 
 int tzOffset = 0;      // Effective offset (minutes)
 int tzStandardOffset = 0; // Base offset without DST (minutes)

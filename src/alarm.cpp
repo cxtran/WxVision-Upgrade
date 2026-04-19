@@ -11,12 +11,12 @@ static uint32_t s_lastTriggerMinuteKey = 0;
 static uint32_t s_silencedMinuteKey = 0;
 static int s_activeSlot = -1;
 static int s_melodyIndex = 0;
+static uint8_t s_alarmToneStep = 0;
 static unsigned long s_melodyNoteEndMs = 0;
 
 static constexpr unsigned long kAlarmFlashIntervalMs = 400;
-static constexpr unsigned long kAlarmBeepIntervalMs = 1000;
-static constexpr int kAlarmBeepFreq = 3000;
-static constexpr int kAlarmBeepMs = 120;
+static constexpr unsigned long kAlarmBeepIntervalMs = 720;
+static constexpr int kAlarmBeepMs = 220;
 
 struct MelodyNote
 {
@@ -134,6 +134,7 @@ static void resetRuntimeAlarm()
     s_lastTriggerMinuteKey = 0;
     s_silencedMinuteKey = 0;
     s_melodyIndex = 0;
+    s_alarmToneStep = 0;
     s_melodyNoteEndMs = 0;
     stopAlarmBuzzer();
 }
@@ -161,6 +162,7 @@ void tickAlarmState(const DateTime &now)
         s_lastFlashToggleMs = millis();
         s_lastBeepMs = millis();
         s_melodyIndex = 0;
+        s_alarmToneStep = 0;
         s_melodyNoteEndMs = 0;
         stopAlarmBuzzer();
         return;
@@ -202,6 +204,7 @@ void tickAlarmState(const DateTime &now)
         s_activeSlot = triggeredSlot;
         s_alarmFlashVisible = false;
         s_lastFlashToggleMs = millis();
+        s_alarmToneStep = 0;
 
         if (triggeredSlot >= 0 && alarmRepeatMode[triggeredSlot] == ALARM_REPEAT_NONE)
         {
@@ -230,7 +233,10 @@ void tickAlarmState(const DateTime &now)
         {
             if (nowMs - s_lastBeepMs >= kAlarmBeepIntervalMs)
             {
-                playBuzzerTone(kAlarmBeepFreq, kAlarmBeepMs);
+                const int toneHz = (s_alarmToneStep % 2 == 0) ? 1568 : 2093;
+                const ADSR env{8, 36, 48, 70};
+                playBuzzerToneADSR(toneHz, kAlarmBeepMs, env);
+                s_alarmToneStep = static_cast<uint8_t>((s_alarmToneStep + 1) % 2);
                 s_lastBeepMs = nowMs;
             }
         }
@@ -297,6 +303,7 @@ void cancelActiveAlarm()
     s_alarmFlashVisible = true;
     s_lastFlashToggleMs = millis();
     s_melodyIndex = 0;
+    s_alarmToneStep = 0;
     s_melodyNoteEndMs = 0;
     stopAlarmBuzzer();
 }

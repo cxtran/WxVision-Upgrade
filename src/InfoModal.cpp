@@ -1319,7 +1319,7 @@ void InfoModal::handleIR(uint32_t code)
                 {
                     *ptr = normalizeThemeScheduleMinutes(*ptr);
                 }
-                else if (label.startsWith("Sound Volume"))
+                else if (label.startsWith("Sound Volume") || label.startsWith("System Volume"))
                 {
                     *ptr = constrain(*ptr, 0, 100);
                     buzzerVolume = *ptr;

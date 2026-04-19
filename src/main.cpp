@@ -50,6 +50,7 @@
 #include "display_sky_facts.h"
 #include "forecast_summary.h"
 #include "mqtt_client.h"
+#include "audio_out.h"
 
 #ifndef WXV_TARGET_FLASH_MB
 #define WXV_TARGET_FLASH_MB 16
@@ -463,6 +464,9 @@ void handleInitialSetupDecision(bool wantsWiFi)
 
 void setup()
 {
+    AudioOut startupAudioHold;
+    startupAudioHold.holdQuietPins();
+
     Serial.begin(115200);
     delay(100);
 
@@ -886,6 +890,9 @@ void loop()
         themeRefreshPending = false;
     }
 
+    // Service MP3 decode continuously so overlays and modals do not starve I2S audio.
+    tickSdMp3Playback();
+
     handleAutoRotate(now);
     handleReturnToDefault(now);
     const bool temporaryAlertActive = isTemporaryAlertActive();
@@ -978,6 +985,34 @@ void loop()
     {
         setupPromptModal.tick();
         setupPromptModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
+        delay(5);
+        return;
+    }
+
+    if (isAudioTestToneActive())
+    {
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key == IRCodes::WxKey::Cancel ||
+            key == IRCodes::WxKey::Menu ||
+            key == IRCodes::WxKey::Left)
+        {
+            stopAudioTestTone(true);
+            delay(20);
+            return;
+        }
+
+        tickAudioTestTone();
+        delay(5);
+        return;
+    }
+
+    if (isSdMp3PlaybackActive())
+    {
+        IRCodes::WxKey key = getIRCodeNonBlocking();
+        if (key != IRCodes::WxKey::Unknown)
+        {
+            handleSdMp3PlaybackIR(key);
+        }
         delay(5);
         return;
     }

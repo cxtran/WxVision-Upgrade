@@ -23,6 +23,15 @@ void handleRight();
 
 // --- Feature handlers for new System Menu items ---
 void showSystemInfoScreen();
+void showSdDiagnosticsScreen();
+void playAudioTestTone();
+bool isAudioTestToneActive();
+void tickAudioTestTone();
+void stopAudioTestTone(bool reopenSystemMenu = true);
+bool isSdMp3PlaybackActive();
+bool isSdMp3PlaybackRunning();
+void tickSdMp3Playback();
+void handleSdMp3PlaybackIR(IRCodes::WxKey key);
 void showDateTimeModal();
 void showWiFiSignalTest();
 void showMainMenuModal();

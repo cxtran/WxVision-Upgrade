@@ -14,8 +14,6 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 
-// Brightness Sensor
-#define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
 #define FIXED_RESISTOR 10000 // 10kΩ resistor (Ohms)
 
 // Light sensor gain (percentage)
