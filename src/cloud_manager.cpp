@@ -140,6 +140,10 @@ void CloudManager::loop()
     if (!wifiReady_() || !state_.identityReady)
         return;
 
+    // WebSocketsClient requires a frequent loop pump to complete connects,
+    // process auth/heartbeat frames, and detect disconnects.
+    relayClient_.loop();
+
     const uint32_t now = millis();
 
     if (!state_.registered && !jobRunning_ && static_cast<int32_t>(now - state_.nextRegisterAttemptMs) >= 0)
