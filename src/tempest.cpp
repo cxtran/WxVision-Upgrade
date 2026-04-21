@@ -9,6 +9,7 @@
 #include <math.h>
 #include <time.h>
 #include "ScrollLine.h"
+#include "psram_utils.h"
 #include "screen_manager.h"
 #include "units.h"
 #include "settings.h"
@@ -44,7 +45,7 @@ static constexpr unsigned long kLightningRetriggerCooldownMs = 2UL * 60UL * 1000
 static constexpr uint16_t kLightningAlertDisplayMs = 2800;
 static constexpr double kLightningNearbyThresholdKm = 16.0;
 static constexpr size_t kOpenMeteoMaxBodyBytes = 24576;
-static constexpr size_t kWeatherFlowForecastMaxBodyBytes = 49152;
+static constexpr size_t kWeatherFlowForecastMaxBodyBytes = 131072;
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -75,6 +76,7 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
     bodyOut = "";
 
     const int contentLength = http.getSize();
+    size_t capacity = 0;
     if (contentLength > 0)
     {
         if (contentLength > static_cast<int>(maxBytes))
@@ -82,12 +84,23 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
             Serial.printf("[HTTP] Payload too large: %d bytes\n", contentLength);
             return false;
         }
-        bodyOut.reserve(static_cast<unsigned>(contentLength + 1));
+        capacity = static_cast<size_t>(contentLength) + 1U;
     }
     else
     {
-        bodyOut.reserve(static_cast<unsigned>(min<size_t>(4096, maxBytes)));
+        capacity = min<size_t>(4096, maxBytes) + 1U;
     }
+
+    using PsramBufferPtr = std::unique_ptr<char, void(*)(void *)>;
+    PsramBufferPtr psramBody(static_cast<char *>(wxv::memory::allocatePreferPsram(capacity)),
+                             wxv::memory::freeCaps);
+    if (!psramBody)
+    {
+        Serial.printf("[HTTP] Failed to allocate %u-byte body buffer\n", static_cast<unsigned>(capacity));
+        return false;
+    }
+    psramBody.get()[0] = '\0';
+    size_t used = 0;
 
     WiFiClient *stream = http.getStreamPtr();
     if (!stream)
@@ -129,14 +142,42 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
         receivedAnyBytes = true;
         buffer[n] = '\0';
 
-        if ((bodyOut.length() + static_cast<unsigned>(n)) > maxBytes)
+        if ((used + static_cast<size_t>(n)) > maxBytes)
         {
             Serial.printf("[HTTP] Body exceeded %u bytes\n", static_cast<unsigned>(maxBytes));
             return false;
         }
 
-        bodyOut += buffer;
-        if (contentLength > 0 && bodyOut.length() >= static_cast<unsigned>(contentLength))
+        const size_t needed = used + static_cast<size_t>(n) + 1U;
+        if (needed > capacity)
+        {
+            size_t newCapacity = capacity;
+            while (newCapacity < needed)
+            {
+                newCapacity = min(maxBytes + 1U, newCapacity * 2U);
+                if (newCapacity < needed)
+                {
+                    continue;
+                }
+                break;
+            }
+
+            void *resized = wxv::memory::reallocatePreferPsram(psramBody.release(), newCapacity);
+            if (resized == nullptr)
+            {
+                Serial.printf("[HTTP] Failed to grow body buffer to %u bytes\n",
+                              static_cast<unsigned>(newCapacity));
+                return false;
+            }
+            psramBody.reset(static_cast<char *>(resized));
+            capacity = newCapacity;
+        }
+
+        memcpy(psramBody.get() + used, buffer, static_cast<size_t>(n));
+        used += static_cast<size_t>(n);
+        psramBody.get()[used] = '\0';
+
+        if (contentLength > 0 && used >= static_cast<size_t>(contentLength))
             break;
 
         if ((millis() - lastYieldMs) >= 8UL)
@@ -153,6 +194,13 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
                       http.connected() ? 1 : 0);
     }
 
+    if (used == 0)
+    {
+        return false;
+    }
+
+    bodyOut.reserve(static_cast<unsigned>(used + 1U));
+    bodyOut = psramBody.get();
     return bodyOut.length() > 0;
 }
 
