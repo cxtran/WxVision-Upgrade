@@ -626,13 +626,9 @@ static IndoorDerivedState buildIndoorDerivedState()
 
   if (!isnan(SCD40_temp))
     state.tempC = SCD40_temp + tempOffset;
-  else if (!isnan(aht20_temp))
-    state.tempC = aht20_temp + tempOffset;
 
   if (!isnan(SCD40_hum))
     state.humidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
-  else if (!isnan(aht20_hum))
-    state.humidity = constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
 
   if (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f)
     state.pressureHpa = bmp280_pressure;
@@ -1296,14 +1292,8 @@ static void refreshAppRuntimeState(bool force = false)
 
   if (!isnan(SCD40_temp))
     next.indoor.tempF = celsiusToFahrenheitValue(SCD40_temp + tempOffset);
-  else if (!isnan(aht20_temp))
-    next.indoor.tempF = celsiusToFahrenheitValue(aht20_temp + tempOffset);
   if (!isnan(SCD40_hum))
     next.indoor.humidity = static_cast<int>(roundf(constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
-  if (!isnan(aht20_temp))
-    next.indoor.ahtTempF = celsiusToFahrenheitValue(aht20_temp + tempOffset);
-  if (!isnan(aht20_hum))
-    next.indoor.ahtHumidity = static_cast<int>(roundf(constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
   next.indoor.co2ppm = (SCD40_co2 > 0) ? static_cast<int>(SCD40_co2) : 0;
   if (!isnan(bmp280_pressure))
     next.indoor.pressureInHg = hpaToInHgValue(bmp280_pressure);
@@ -3822,23 +3812,9 @@ void setupWebServer() {
         doc["co2"] = SCD40_co2;
       }
 
-      if (!isnan(aht20_temp)) {
-        float ahtCal = aht20_temp + tempOffset;
-        doc["ahtTemp"] = fmtTemp(ahtCal, 1);
-        doc["ahtTempRaw"] = ahtCal;
-        doc["ahtTempSensor"] = aht20_temp;
-      }
-      if (!isnan(aht20_hum)) {
-        float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
-        if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
-        if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
-        doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
-        doc["ahtHumidityRaw"] = ahtHumCal;
-        doc["ahtHumiditySensor"] = aht20_hum;
-      }
-      if (!isnan(bmp280_pressure)) {
-        doc["pressure"] = fmtPress(bmp280_pressure, 1);
-        doc["pressureRaw"] = bmp280_pressure;
+  if (!isnan(bmp280_pressure)) {
+    doc["pressure"] = fmtPress(bmp280_pressure, 1);
+    doc["pressureRaw"] = bmp280_pressure;
       }
 
       const IndoorDerivedState indoorDerived = buildIndoorDerivedState();

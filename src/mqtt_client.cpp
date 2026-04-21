@@ -245,8 +245,6 @@ float currentTemperatureC()
 {
     if (!isnan(SCD40_temp))
         return SCD40_temp + tempOffset;
-    if (!isnan(aht20_temp))
-        return aht20_temp + tempOffset;
     return NAN;
 }
 
@@ -254,8 +252,6 @@ float currentHumidityPercent()
 {
     if (!isnan(SCD40_hum))
         return constrain(SCD40_hum + humOffset, 0.0f, 100.0f);
-    if (!isnan(aht20_hum))
-        return constrain(aht20_hum + humOffset, 0.0f, 100.0f);
     return NAN;
 }
 

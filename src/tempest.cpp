@@ -9,6 +9,7 @@
 #include <math.h>
 #include <time.h>
 #include "ScrollLine.h"
+#include "psram_utils.h"
 #include "screen_manager.h"
 #include "units.h"
 #include "settings.h"
@@ -44,7 +45,7 @@ static constexpr unsigned long kLightningRetriggerCooldownMs = 2UL * 60UL * 1000
 static constexpr uint16_t kLightningAlertDisplayMs = 2800;
 static constexpr double kLightningNearbyThresholdKm = 16.0;
 static constexpr size_t kOpenMeteoMaxBodyBytes = 24576;
-static constexpr size_t kWeatherFlowForecastMaxBodyBytes = 49152;
+static constexpr size_t kWeatherFlowForecastMaxBodyBytes = 131072;
 
 // Support Functions
 String formatEpochTime(uint32_t epoch) {
@@ -75,24 +76,36 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
     bodyOut = "";
 
     const int contentLength = http.getSize();
+    size_t capacity = 0;
     if (contentLength > 0)
     {
         if (contentLength > static_cast<int>(maxBytes))
         {
-            Serial.printf("[HTTP] Payload too large: %d bytes\n", contentLength);
+            Serial0.printf("[HTTP] Payload too large: %d bytes\n", contentLength);
             return false;
         }
-        bodyOut.reserve(static_cast<unsigned>(contentLength + 1));
+        capacity = static_cast<size_t>(contentLength) + 1U;
     }
     else
     {
-        bodyOut.reserve(static_cast<unsigned>(min<size_t>(4096, maxBytes)));
+        capacity = min<size_t>(4096, maxBytes) + 1U;
     }
+
+    using PsramBufferPtr = std::unique_ptr<char, void(*)(void *)>;
+    PsramBufferPtr psramBody(static_cast<char *>(wxv::memory::allocatePreferPsram(capacity)),
+                             wxv::memory::freeCaps);
+    if (!psramBody)
+    {
+        Serial0.printf("[HTTP] Failed to allocate %u-byte body buffer\n", static_cast<unsigned>(capacity));
+        return false;
+    }
+    psramBody.get()[0] = '\0';
+    size_t used = 0;
 
     WiFiClient *stream = http.getStreamPtr();
     if (!stream)
     {
-        Serial.println("[HTTP] Stream pointer unavailable");
+        Serial0.println("[HTTP] Stream pointer unavailable");
         return false;
     }
 
@@ -107,9 +120,9 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
         {
             if ((millis() - lastDataMs) >= timeoutMs)
             {
-                Serial.printf("[HTTP] Body read timeout after %lu ms (connected=%d)\n",
-                              millis() - startMs,
-                              http.connected() ? 1 : 0);
+                Serial0.printf("[HTTP] Body read timeout after %lu ms (connected=%d)\n",
+                               millis() - startMs,
+                               http.connected() ? 1 : 0);
                 break;
             }
             delay(1);
@@ -128,24 +141,59 @@ static bool readHttpBody(HTTPClient &http, String &bodyOut, size_t maxBytes, uns
         receivedAnyBytes = true;
         buffer[n] = '\0';
 
-        if ((bodyOut.length() + static_cast<unsigned>(n)) > maxBytes)
+        if ((used + static_cast<size_t>(n)) > maxBytes)
         {
-            Serial.printf("[HTTP] Body exceeded %u bytes\n", static_cast<unsigned>(maxBytes));
+            Serial0.printf("[HTTP] Body exceeded %u bytes\n", static_cast<unsigned>(maxBytes));
             return false;
         }
 
-        bodyOut += buffer;
-        if (contentLength > 0 && bodyOut.length() >= static_cast<unsigned>(contentLength))
+        const size_t needed = used + static_cast<size_t>(n) + 1U;
+        if (needed > capacity)
+        {
+            size_t newCapacity = capacity;
+            while (newCapacity < needed)
+            {
+                newCapacity = min(maxBytes + 1U, newCapacity * 2U);
+                if (newCapacity < needed)
+                {
+                    continue;
+                }
+                break;
+            }
+
+            void *resized = wxv::memory::reallocatePreferPsram(psramBody.release(), newCapacity);
+            if (resized == nullptr)
+            {
+                Serial0.printf("[HTTP] Failed to grow body buffer to %u bytes\n",
+                               static_cast<unsigned>(newCapacity));
+                return false;
+            }
+            psramBody.reset(static_cast<char *>(resized));
+            capacity = newCapacity;
+        }
+
+        memcpy(psramBody.get() + used, buffer, static_cast<size_t>(n));
+        used += static_cast<size_t>(n);
+        psramBody.get()[used] = '\0';
+
+        if (contentLength > 0 && used >= static_cast<size_t>(contentLength))
             break;
     }
 
     if (!receivedAnyBytes)
     {
-        Serial.printf("[HTTP] No body bytes received (contentLength=%d connected=%d)\n",
-                      contentLength,
-                      http.connected() ? 1 : 0);
+        Serial0.printf("[HTTP] No body bytes received (contentLength=%d connected=%d)\n",
+                       contentLength,
+                       http.connected() ? 1 : 0);
     }
 
+    if (used == 0)
+    {
+        return false;
+    }
+
+    bodyOut.reserve(static_cast<unsigned>(used + 1U));
+    bodyOut = psramBody.get();
     return bodyOut.length() > 0;
 }
 
@@ -219,7 +267,7 @@ void updateTempestFromUDP(const char* jsonStr) {
 
             updateWindInfoScroll(false);
         } else {
-            Serial.println("rapid_wind: ob array not length 3!");
+            Serial0.println("rapid_wind: ob array not length 3!");
         }
     }
 }
@@ -377,6 +425,12 @@ static inline void _sanitizeBools(String& s) {
     s.replace(":false", ":0");
 }
 
+static JSONVar parseWeatherFlowRootJson(const String& jsonStr) {
+    String sanitized = jsonStr;
+    _sanitizeBools(sanitized);
+    return JSON.parse(sanitized);
+}
+
 void updateCurrentConditionsFromJson(const String& jsonStr) {
     String currentStr = extractJsonObject(jsonStr, "\"current_conditions\"");
     currentStr.trim();
@@ -399,13 +453,25 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
         if (cur != nullptr && JSON.typeof_(cur) == "array" && cur.length() > 0) cur = cur[0];
         else cur = nullptr;
     }
+    if (cur == nullptr || JSON.typeof_(cur) != "object") {
+        JSONVar root = parseWeatherFlowRootJson(jsonStr);
+        if (JSON.typeof_(root) == "object") {
+            JSONVar nested = root["current_conditions"];
+            if (JSON.typeof_(nested) == "object") {
+                cur = nested;
+            } else if (JSON.typeof_(nested) == "array" && nested.length() > 0 &&
+                       JSON.typeof_(nested[0]) == "object") {
+                cur = nested[0];
+            }
+        }
+    }
 
     if (cur == nullptr || JSON.typeof_(cur) != "object") {
         currentCond = CurrentConditions{};
         currentCond.humidity = -1;
         currentCond.uv = -1;
         currentCond.precipProb = -1;
-        Serial.println("[FORECAST] No valid current_conditions object");
+        Serial0.println("[FORECAST] No valid current_conditions object");
         return;
     }
 
@@ -424,7 +490,7 @@ void updateCurrentConditionsFromJson(const String& jsonStr) {
     currentCond.icon         = getCanonicalWeatherIconKey(rawIcon.length() ? rawIcon : currentCond.cond);
     currentCond.time         = (JSON.typeof_(cur["time"]) == "number") ? (uint32_t)(double)cur["time"] : 0;
 
-    Serial.println("[FORECAST] Current conditions updated");
+    Serial0.println("[FORECAST] Current conditions updated");
 }
 
 void updateDailyForecastFromJson(const String& jsonStr) {
@@ -691,24 +757,42 @@ void updateDailyForecastFromJson(const String& jsonStr) {
 
     int forecastIdx = jsonStr.indexOf("\"forecast\"");
     if (forecastIdx < 0) {
-        Serial.println("[ERROR] No 'forecast' found (daily) - keeping previous daily data");
+        Serial0.println("[ERROR] No 'forecast' found (daily) - keeping previous daily data");
         return;
     }
 
     int dailyIdx = jsonStr.indexOf("\"daily\"", forecastIdx);
     if (dailyIdx < 0) {
-        Serial.println("[ERROR] No 'daily' in forecast - keeping previous daily data");
+        Serial0.println("[ERROR] No 'daily' in forecast - keeping previous daily data");
         return;
     }
 
     parseDailyArrayFromSource(jsonStr, dailyIdx);
     if (parsedDays <= 0) {
-        Serial.println("[ERROR] Parsed daily forecast block invalid - keeping previous daily data");
+        String dailyArrayStr = extractJsonArray(jsonStr, "\"daily\"");
+        parseDailyArrayString(dailyArrayStr);
+    }
+    if (parsedDays <= 0) {
+        String dailyObjStr = extractJsonObject(jsonStr, "\"daily\"");
+        dailyObjStr.trim();
+        _sanitizeBools(dailyObjStr);
+        if (dailyObjStr.startsWith("{") && dailyObjStr.endsWith("}")) {
+            JSONVar dailyObj = JSON.parse(dailyObjStr);
+            if (JSON.typeof_(dailyObj) == "object") {
+                parseDailyIndexedObject(dailyObj);
+                if (parsedDays <= 0) {
+                    parseDailyFieldObject(dailyObj);
+                }
+            }
+        }
+    }
+    if (parsedDays <= 0) {
+        Serial0.println("[ERROR] Parsed daily forecast block invalid - keeping previous daily data");
         return;
     }
 
     if (parsedDays <= 0) {
-        Serial.println("[FORECAST] Parsed 0 daily entries - keeping previous daily data");
+        Serial0.println("[FORECAST] Parsed 0 daily entries - keeping previous daily data");
         return;
     }
 
@@ -716,9 +800,9 @@ void updateDailyForecastFromJson(const String& jsonStr) {
     for (int i = 0; i < parsedDays; ++i) {
         forecast.days[i] = parsed[i];
     }
-    Serial.print("[FORECAST] Parsed ");
-    Serial.print(forecast.numDays);
-    Serial.println(" daily entries");
+    Serial0.print("[FORECAST] Parsed ");
+    Serial0.print(forecast.numDays);
+    Serial0.println(" daily entries");
 }
 
 // Parse hourly array by extracting individual objects (memory-safe on ESP32)
@@ -728,19 +812,19 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
     int parsedCount = 0;
 
     if (!forecast.hourlyKeyPresent) {
-        Serial.println("[FORECAST] 'hourly' key NOT found in payload");
+        Serial0.println("[FORECAST] 'hourly' key NOT found in payload");
         return;
     }
 
     // Find the start of the hourly array: "hourly" : [
     int keyIdx = jsonStr.indexOf("\"hourly\"");
     if (keyIdx < 0) {
-        Serial.println("[FORECAST] 'hourly' key vanished?!");
+        Serial0.println("[FORECAST] 'hourly' key vanished?!");
         return;
     }
     int arrStart = jsonStr.indexOf('[', keyIdx);
     if (arrStart < 0) {
-        Serial.println("[FORECAST] Could not find '[' after 'hourly'");
+        Serial0.println("[FORECAST] Could not find '[' after 'hourly'");
         return;
     }
 
@@ -805,7 +889,7 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
         }
 
         if (depth != 0) {
-            Serial.println("[FORECAST] Hourly object brace mismatch");
+            Serial0.println("[FORECAST] Hourly object brace mismatch");
             break;
         }
 
@@ -814,7 +898,7 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
 
         JSONVar h = JSON.parse(objStr);
         if (JSON.typeof_(h) != "object") {
-            Serial.println("[FORECAST] Skipping non-object hourly entry");
+            Serial0.println("[FORECAST] Skipping non-object hourly entry");
             continue;
         }
 
@@ -834,19 +918,19 @@ void updateHourlyForecastFromJson(const String& jsonStr) {
     }
 
     if (count == 0) {
-        Serial.println("[FORECAST] Parsed 0 hourly entries - keeping previous hourly data");
+        Serial0.println("[FORECAST] Parsed 0 hourly entries - keeping previous hourly data");
         return;
     } else {
         // was: Serial.printf(...)
-        Serial.print("[FORECAST] Parsed ");
-        Serial.print(count);
-        Serial.print(" hourly entries (max ");
-        Serial.print(MAX_FORECAST_HOURS);
-        Serial.println(")");
-        Serial.print("  first=");
-        Serial.print(parsed[0].time);
-        Serial.print(" last=");
-        Serial.println(parsed[count-1].time);
+        Serial0.print("[FORECAST] Parsed ");
+        Serial0.print(count);
+        Serial0.print(" hourly entries (max ");
+        Serial0.print(MAX_FORECAST_HOURS);
+        Serial0.println(")");
+        Serial0.print("  first=");
+        Serial0.print(parsed[0].time);
+        Serial0.print(" last=");
+        Serial0.println(parsed[count-1].time);
     }
 
     forecast.numHours = count;
@@ -940,7 +1024,7 @@ static bool resolveOpenMeteoCoordinates(double &lat, double &lon) {
 static bool parseOpenMeteoForecastPayload(const String &payload) {
     JSONVar doc = JSON.parse(payload);
     if (JSON.typeof_(doc) != "object") {
-        Serial.println("[Open-Meteo] JSON parse failed");
+        Serial0.println("[Open-Meteo] JSON parse failed");
         return false;
     }
 
@@ -1080,14 +1164,14 @@ static bool parseOpenMeteoForecastPayload(const String &payload) {
 
 static void fetchOpenMeteoForecastData() {
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[Open-Meteo] Forecast fetch skipped (WiFi offline)");
+        Serial0.println("[Open-Meteo] Forecast fetch skipped (WiFi offline)");
         return;
     }
 
     double lat = NAN;
     double lon = NAN;
     if (!resolveOpenMeteoCoordinates(lat, lon)) {
-        Serial.println("[Open-Meteo] Missing coordinates (set timezone or NOAA lat/lon)");
+        Serial0.println("[Open-Meteo] Missing coordinates (set timezone or NOAA lat/lon)");
         return;
     }
 
@@ -1119,7 +1203,7 @@ static void fetchOpenMeteoForecastData() {
         }
 
         if (!began) {
-            Serial.println("[Open-Meteo] HTTP begin failed");
+            Serial0.println("[Open-Meteo] HTTP begin failed");
             return false;
         }
 
@@ -1127,8 +1211,8 @@ static void fetchOpenMeteoForecastData() {
         http.addHeader("Connection", "close");
 
         int httpCode = http.GET();
-        Serial.print("[Open-Meteo] Forecast status: ");
-        Serial.println(httpCode);
+        Serial0.print("[Open-Meteo] Forecast status: ");
+        Serial0.println(httpCode);
         if (httpCode != HTTP_CODE_OK) {
             http.end();
             return false;
@@ -1145,32 +1229,32 @@ static void fetchOpenMeteoForecastData() {
     String payload;
     bool gotPayload = requestPayload(httpPrimary, false, payload);
     if (!gotPayload) {
-        Serial.println("[Open-Meteo] HTTP primary failed, retrying HTTP fallback URL.");
+        Serial0.println("[Open-Meteo] HTTP primary failed, retrying HTTP fallback URL.");
         gotPayload = requestPayload(httpFallback, false, payload);
     }
     if (!gotPayload) {
-        Serial.println("[Open-Meteo] HTTP failed, retrying HTTPS primary URL.");
+        Serial0.println("[Open-Meteo] HTTP failed, retrying HTTPS primary URL.");
         gotPayload = requestPayload(httpsPrimary, true, payload);
     }
     if (!gotPayload) {
-        Serial.println("[Open-Meteo] HTTPS primary failed, retrying HTTPS fallback URL.");
+        Serial0.println("[Open-Meteo] HTTPS primary failed, retrying HTTPS fallback URL.");
         gotPayload = requestPayload(httpsFallback, true, payload);
     }
     if (!gotPayload) {
-        Serial.println("[Open-Meteo] Forecast fetch failed");
+        Serial0.println("[Open-Meteo] Forecast fetch failed");
         return;
     }
 
     if (!parseOpenMeteoForecastPayload(payload)) {
-        Serial.println("[Open-Meteo] Forecast parse failed");
+        Serial0.println("[Open-Meteo] Forecast parse failed");
         return;
     }
 
-    Serial.print("[Open-Meteo] Updated current/daily/hourly: ");
-    Serial.print(forecast.numDays);
-    Serial.print(" days, ");
-    Serial.print(forecast.numHours);
-    Serial.println(" hours");
+    Serial0.print("[Open-Meteo] Updated current/daily/hourly: ");
+    Serial0.print(forecast.numDays);
+    Serial0.print(" days, ");
+    Serial0.print(forecast.numHours);
+    Serial0.println(" hours");
 }
 
 // --------- WeatherFlow Forecast Fetch ----------
@@ -1187,12 +1271,12 @@ void fetchForecastData() {
     token.trim();
 
     if (stationId.isEmpty() || token.isEmpty()) {
-        Serial.println("[Tempest] Missing WeatherFlow credentials");
+        Serial0.println("[Tempest] Missing WeatherFlow credentials");
         return;
     }
 
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[Tempest] Forecast fetch skipped (WiFi offline)");
+        Serial0.println("[Tempest] Forecast fetch skipped (WiFi offline)");
         return;
     }
 
@@ -1207,18 +1291,18 @@ void fetchForecastData() {
     http.setReuse(false);
 
     if (!http.begin(client, url)) {
-        Serial.println("[HTTP] begin() failed");
+        Serial0.println("[HTTP] begin() failed");
         return;
     }
 
-    Serial.print("[HTTP] Forecast URL: ");
-    Serial.println(url);
+    Serial0.print("[HTTP] Forecast URL: ");
+    Serial0.println(url);
     int httpCode = http.GET();
-    Serial.print("[HTTP] Forecast status: ");
-    Serial.println(httpCode);
+    Serial0.print("[HTTP] Forecast status: ");
+    Serial0.println(httpCode);
     if (httpCode != HTTP_CODE_OK) {
-        Serial.print("[HTTP] Forecast error: ");
-        Serial.println(httpCode);
+        Serial0.print("[HTTP] Forecast error: ");
+        Serial0.println(httpCode);
         http.end();
         return;
     }
@@ -1551,9 +1635,9 @@ void showForecastScreen() {
     };
 
     int num = min(forecast.numDays, 10); // show up to 10 days
-    Serial.print("Showing ");
-    Serial.print(num);
-    Serial.println(" forecast days");
+    Serial0.print("Showing ");
+    Serial0.print(num);
+    Serial0.println(" forecast days");
 
     String lines[MAX_FORECAST_DAYS];
     if (num == 0) {

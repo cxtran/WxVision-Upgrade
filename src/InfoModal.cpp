@@ -1418,7 +1418,7 @@ void InfoModal::handleIR(uint32_t code)
                     setDisplayBrightnessFromLux(lux);
 
                     // Hint the climate screen to refresh next tick
-                    newAHT20_BMP280Data = true;
+                    newAirQualityData = true;
 
                     Serial.printf("[Alert/Calibration autosave] temp=%.1f hum=%d gain=%d co2=%d tempAlert=%.1f humLow=%d humHigh=%d\n",
                                 tempOffset, humOffset, lightGain,

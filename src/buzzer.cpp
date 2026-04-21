@@ -15,7 +15,7 @@ namespace
 {
 constexpr uint32_t kUiSampleRate = 32000;
 constexpr uint32_t kAlarmSampleRate = 32000;
-constexpr size_t kSynthBufferSamples = 160;
+constexpr size_t kSynthBufferSamples = 192;
 
 enum class VoiceProfile : uint8_t
 {
@@ -40,6 +40,11 @@ float clampUnit_(float v)
         return 1.0f;
     }
     return v;
+}
+
+float softLimit_(float v, float drive = 1.0f)
+{
+    return tanhf(v * drive);
 }
 
 float applyEnvelope_(float tMs, float durationMs, const ADSR &env)
@@ -78,49 +83,110 @@ float synthVoiceSample_(VoiceProfile voice, float phase, float phase2, float pha
     const float s2 = sinf(phase2);
     const float s3 = sinf(phase3);
     const float s4 = sinf(phase * 4.0f);
+    const float s5 = sinf(phase * 5.0f);
     const float slowDecay = 0.75f + 0.25f * expf(-3.8f * tSec);
     const float fastDecay = expf(-8.0f * tSec);
+    const float sparkleDecay = expf(-12.0f * tSec);
 
     float sample = 0.0f;
     switch (voice)
     {
     case VoiceProfile::Soft:
-        sample = (0.86f * s1) + (0.10f * s2 * 0.7f) + (0.04f * s3 * 0.5f);
+        sample = (0.90f * s1) + (0.11f * s2 * 0.55f) + (0.03f * s3 * 0.35f);
+        sample = softLimit_(sample, 0.92f);
         break;
     case VoiceProfile::Click:
-        sample = ((0.70f * s3) + (0.45f * s4) + (0.18f * s2)) * fastDecay;
-        sample += 0.12f * s1 * slowDecay;
+        sample = ((0.54f * s3) + (0.24f * s4) + (0.12f * s5)) * fastDecay;
+        sample += (0.18f * s2 + 0.16f * s1) * expf(-6.0f * tSec);
+        sample = softLimit_(sample, 1.08f);
         break;
     case VoiceProfile::Chime:
-        sample = ((0.66f * s1) + (0.28f * s2 * fastDecay) + (0.22f * sinf(phase * 2.71f) * fastDecay));
-        sample += 0.12f * sinf(phase * 4.08f) * expf(-5.2f * tSec);
+        sample = (0.60f * s1);
+        sample += 0.22f * sinf(phase * 2.01f) * expf(-4.4f * tSec);
+        sample += 0.15f * sinf(phase * 2.73f) * expf(-5.8f * tSec);
+        sample += 0.08f * sinf(phase * 4.11f) * sparkleDecay;
+        sample = softLimit_(sample, 1.02f);
         break;
     case VoiceProfile::Pulse:
-        sample = (0.72f * s1) + (0.20f * s2) + (0.08f * s3);
-        sample *= (0.76f + 0.24f * sinf(2.0f * PI * 7.0f * tSec));
+        sample = (0.76f * s1) + (0.17f * s2) + (0.06f * s3);
+        sample *= (0.72f + 0.28f * sinf(2.0f * PI * 6.5f * tSec));
+        sample = softLimit_(sample, 0.98f);
         break;
     case VoiceProfile::Warm:
-        sample = (0.92f * s1) + (0.18f * s2 * 0.55f) + (0.08f * s3 * 0.35f);
-        sample = tanhf(sample * 0.9f);
+        sample = (0.88f * s1) + (0.20f * s2 * 0.52f) + (0.10f * s3 * 0.28f);
+        sample += 0.04f * sinf(phase * 0.5f + phase2);
+        sample = softLimit_(sample, 0.90f);
         break;
     case VoiceProfile::Piano:
-        sample = (0.86f * s1 * slowDecay) +
-                 (0.32f * sinf(phase * 2.01f) * expf(-5.8f * tSec)) +
-                 (0.16f * sinf(phase * 3.08f) * expf(-8.5f * tSec)) +
-                 (0.08f * sinf(phase * 4.21f) * expf(-11.0f * tSec));
-        sample += 0.04f * s2 * env;
+        sample = (0.82f * s1 * slowDecay) +
+                 (0.28f * sinf(phase * 2.01f) * expf(-5.2f * tSec)) +
+                 (0.14f * sinf(phase * 3.08f) * expf(-7.6f * tSec)) +
+                 (0.06f * sinf(phase * 4.21f) * expf(-10.5f * tSec));
+        sample += 0.03f * s2 * env;
+        sample = softLimit_(sample, 0.96f);
         break;
     case VoiceProfile::Alarm:
         sample = (0.78f * s1) + (0.24f * s2) + (0.12f * s3);
         sample += 0.06f * sinf(phase * 0.5f + phase2);
+        sample = softLimit_(sample, 0.98f);
         break;
     case VoiceProfile::Bright:
     default:
-        sample = (0.82f * s1) + (0.24f * s2) + (0.14f * s3) + (0.06f * s4 * fastDecay);
+        sample = (0.78f * s1) + (0.20f * s2) + (0.10f * s3);
+        sample += 0.05f * s4 * fastDecay + 0.03f * s5 * sparkleDecay;
+        sample = softLimit_(sample, 1.00f);
         break;
     }
 
     return clampUnit_(sample * env);
+}
+
+float smoothingForVoice_(VoiceProfile voice)
+{
+    switch (voice)
+    {
+    case VoiceProfile::Click:
+        return 0.24f;
+    case VoiceProfile::Chime:
+        return 0.16f;
+    case VoiceProfile::Bright:
+        return 0.12f;
+    case VoiceProfile::Pulse:
+        return 0.10f;
+    case VoiceProfile::Warm:
+        return 0.08f;
+    case VoiceProfile::Piano:
+        return 0.09f;
+    case VoiceProfile::Soft:
+        return 0.06f;
+    case VoiceProfile::Alarm:
+    default:
+        return 0.04f;
+    }
+}
+
+float outputGainForVoice_(VoiceProfile voice)
+{
+    switch (voice)
+    {
+    case VoiceProfile::Click:
+        return 0.72f;
+    case VoiceProfile::Bright:
+        return 0.88f;
+    case VoiceProfile::Chime:
+        return 0.84f;
+    case VoiceProfile::Pulse:
+        return 0.86f;
+    case VoiceProfile::Warm:
+        return 0.90f;
+    case VoiceProfile::Piano:
+        return 0.92f;
+    case VoiceProfile::Soft:
+        return 0.94f;
+    case VoiceProfile::Alarm:
+    default:
+        return 0.96f;
+    }
 }
 
 void renderVoiceTone_(int frequency, int durationMs, uint16_t peakAmp, const ADSR &env, VoiceProfile voice, uint32_t sampleRate)
@@ -134,6 +200,9 @@ void renderVoiceTone_(int frequency, int durationMs, uint16_t peakAmp, const ADS
     const uint32_t totalSamples = (sampleRate * static_cast<uint32_t>(durationMs)) / 1000U;
     int16_t buffer[kSynthBufferSamples];
     uint32_t generated = 0;
+    float smoothed = 0.0f;
+    const float smoothing = smoothingForVoice_(voice);
+    const float voiceGain = outputGainForVoice_(voice);
 
     while (generated < totalSamples)
     {
@@ -163,7 +232,9 @@ void renderVoiceTone_(int frequency, int durationMs, uint16_t peakAmp, const ADS
             const float phase = 2.0f * PI * baseFreq * tSec;
             const float phase2 = 2.0f * PI * baseFreq * 2.0f * tSec;
             const float phase3 = 2.0f * PI * baseFreq * 3.0f * tSec;
-            const float sample = synthVoiceSample_(voice, phase, phase2, phase3, tSec, envGain);
+            float sample = synthVoiceSample_(voice, phase, phase2, phase3, tSec, envGain);
+            smoothed += (sample - smoothed) * (1.0f - smoothing);
+            sample = softLimit_(smoothed * voiceGain, 1.0f);
             buffer[i] = static_cast<int16_t>(sample * static_cast<float>(peakAmp));
         }
 
@@ -209,7 +280,7 @@ int midiNoteToFrequencyHz(int8_t midiNote)
 
 static uint16_t volumeToAmplitude_()
 {
-    return static_cast<uint16_t>(map(constrain(buzzerVolume, 0, 100), 0, 100, 600, 5200));
+    return static_cast<uint16_t>(map(constrain(buzzerVolume, 0, 100), 0, 100, 520, 4600));
 }
 
 void setupBuzzer()
@@ -307,38 +378,38 @@ void playBuzzerTone(int frequency, int duration)
     case 1:
         freq = max(200, (frequency * 70) / 100);
         dur = duration + 12;
-        amp = static_cast<uint16_t>(max(180, static_cast<int>(amp * 0.52f)));
-        env = ADSR{12, 28, 58, 55};
+        amp = static_cast<uint16_t>(max(180, static_cast<int>(amp * 0.50f)));
+        env = ADSR{14, 30, 60, 58};
         break;
     case 2:
         freq = min(5200, max(2800, frequency * 2));
-        dur = min(duration, 45);
-        amp = static_cast<uint16_t>(max(220, static_cast<int>(amp * 0.38f)));
-        env = ADSR{2, 8, 12, 16};
+        dur = min(duration, 42);
+        amp = static_cast<uint16_t>(max(210, static_cast<int>(amp * 0.34f)));
+        env = ADSR{2, 7, 10, 14};
         break;
     case 3:
         freq = 1200 + (frequency / 3);
         dur = duration + 40;
-        amp = static_cast<uint16_t>(max(240, static_cast<int>(amp * 0.62f)));
-        env = ADSR{5, 40, 36, 85};
+        amp = static_cast<uint16_t>(max(220, static_cast<int>(amp * 0.58f)));
+        env = ADSR{6, 46, 34, 92};
         break;
     case 4:
-        amp = static_cast<uint16_t>(max(200, static_cast<int>(amp * 0.56f)));
-        env = ADSR{6, 18, 72, 36};
+        amp = static_cast<uint16_t>(max(190, static_cast<int>(amp * 0.50f)));
+        env = ADSR{7, 18, 74, 34};
         break;
     case 5:
         freq = max(180, (frequency * 85) / 100);
         dur = duration + 32;
-        amp = static_cast<uint16_t>(max(180, static_cast<int>(amp * 0.54f)));
-        env = ADSR{14, 34, 60, 62};
+        amp = static_cast<uint16_t>(max(170, static_cast<int>(amp * 0.50f)));
+        env = ADSR{16, 34, 62, 64};
         break;
     case 6:
-        amp = static_cast<uint16_t>(max(260, static_cast<int>(amp * 0.68f)));
-        env = ADSR{6, 36, 42, 90};
+        amp = static_cast<uint16_t>(max(240, static_cast<int>(amp * 0.64f)));
+        env = ADSR{7, 40, 40, 96};
         break;
     default:
-        amp = static_cast<uint16_t>(max(220, static_cast<int>(amp * 0.66f)));
-        env = ADSR{6, 20, 60, 32};
+        amp = static_cast<uint16_t>(max(210, static_cast<int>(amp * 0.60f)));
+        env = ADSR{7, 22, 58, 34};
         break;
     }
 
