@@ -60,6 +60,7 @@ int returnToDefaultSec = wxv::defaults::kDefaults.returnToDefaultSec;
 int splashDurationSec = wxv::defaults::kDefaults.splashDurationSec;
 bool themeRefreshPending = false;
 int buzzerVolume = wxv::defaults::kDefaults.buzzerVolume;
+int mp3Volume = wxv::defaults::kDefaults.mp3Volume;
 int buzzerToneSet = wxv::defaults::kDefaults.buzzerToneSet; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse,5=Warm,6=Melody
 int mp3PlayMode = 1;
 int alarmSoundMode = wxv::defaults::kDefaults.alarmSoundMode; // 0=Tone,1=FurElise,2=SwanLake,3=TurkeyMarch,4=Moonlight
@@ -225,6 +226,7 @@ void loadSettings() {
       splashDurationSec = prefs.getInt("splashDur", wxv::defaults::kDefaults.splashDurationSec);
       splashDurationSec = constrain(splashDurationSec, 1, 10);
       buzzerVolume = constrain(prefs.getInt("buzzVol", wxv::defaults::kDefaults.buzzerVolume), 0, 100);
+      mp3Volume = constrain(prefs.getInt("mp3Vol", wxv::defaults::kDefaults.mp3Volume), 0, 100);
       buzzerToneSet = constrain(prefs.getInt("buzzTone", wxv::defaults::kDefaults.buzzerToneSet), 0, 6);
       mp3PlayMode = constrain(prefs.getInt("mp3Mode", 1), 0, 2);
       alarmSoundMode = constrain(prefs.getInt("alarmSound", wxv::defaults::kDefaults.alarmSoundMode), 0, 4);
@@ -322,6 +324,7 @@ void saveDeviceSettings() {
     prefs.putInt("manualScreen", manualScreen);
     prefs.putBool("memDbg", debugMemoryLogs);
     prefs.putInt("buzzVol", constrain(buzzerVolume, 0, 100));
+    prefs.putInt("mp3Vol", constrain(mp3Volume, 0, 100));
     prefs.putInt("buzzTone", constrain(buzzerToneSet, 0, 6));
     prefs.putInt("mp3Mode", constrain(mp3PlayMode, 0, 2));
     prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 4));

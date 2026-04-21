@@ -39,6 +39,7 @@ AppState &appState()
         humOffset,
         lightGain,
         buzzerVolume,
+        mp3Volume,
         buzzerToneSet,
         alarmSoundMode,
 

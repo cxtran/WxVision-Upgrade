@@ -150,6 +150,7 @@ struct DefaultConfig {
   int returnToDefaultSec;    // 0 disables auto-return, otherwise timeout in seconds
   int splashDurationSec;      // 1..10
   int buzzerVolume;           // 0..100
+  int mp3Volume;              // 0..100
   int buzzerToneSet;          // 0..6
   int alarmSoundMode;         // 0..4
   int forecastLinesPerDay;    // 2..3
@@ -277,6 +278,7 @@ static const DefaultConfig kDefaults = {
     0,          // returnToDefaultSec
     3,          // splashDurationSec
     kSoundVolumeDefault,        // buzzerVolume
+    50,         // mp3Volume
     static_cast<int>(kSoundProfileDefault),          // buzzerToneSet
     0,          // alarmSoundMode
     3,          // forecastLinesPerDay

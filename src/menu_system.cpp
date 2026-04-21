@@ -108,7 +108,7 @@ void rebuildSdMp3PlaybackModal()
     sysInfoModal = InfoModal("Now Playing");
     String lines[] = {
         mp3DisplayName(g_selectedSdMp3Path),
-        "Volume: " + String(buzzerVolume),
+        "Volume: " + String(mp3Volume),
         "Mode: " + String(sdMp3ModeName()),
         "Up/Dn Vol  OK Stop",
         "Left Prev  Right Next"};
@@ -135,7 +135,7 @@ bool startPlaybackForCurrentSelection()
     }
 
     g_selectedSdMp3Path = g_sdMp3Paths[g_currentSdMp3Index];
-    if (!wxv::audio::startSdMp3(g_selectedSdMp3Path, buzzerVolume))
+    if (!wxv::audio::startSdMp3(g_selectedSdMp3Path, mp3Volume))
     {
         showSectionHeading("MP3 START ERR", nullptr, 1200);
         return false;
@@ -433,7 +433,8 @@ void showSystemModal()
     menuActive = true;
 
     String labels[] = {
-        "Sound Volume (0-100)",
+        "System Volume (0-100)",
+        "MP3 Volume (0-100)",
         "Sound Profile",
         "MP3 Mode",
         "Date & Time",
@@ -453,18 +454,18 @@ void showSystemModal()
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoNumber, InfoChooser, InfoChooser, InfoButton, InfoButton, InfoButton,
+        InfoNumber, InfoNumber, InfoChooser, InfoChooser, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
-    int *numberRefs[] = {&buzzerVolume};
+    int *numberRefs[] = {&buzzerVolume, &mp3Volume};
     int *chooserRefs[] = {&buzzerToneSet, &mp3PlayMode};
     static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse", "Warm", "Melody"};
     static const char *mp3ModeOpts[] = {"Play One", "Continue Next", "Repeat"};
     const char *const *chooserOpts[] = {toneOpts, mp3ModeOpts};
     int chooserCounts[] = {7, 3};
 
-    systemModal.setLines(labels, types, 18);
-    systemModal.setValueRefs(numberRefs, 1, chooserRefs, 2, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    systemModal.setLines(labels, types, 19);
+    systemModal.setValueRefs(numberRefs, 2, chooserRefs, 2, chooserOpts, chooserCounts, nullptr, 0, nullptr);
     systemModal.setShowNumberArrows(true);
     systemModal.setShowChooserArrows(true);
     systemModal.setShowForwardArrow(true);
@@ -482,6 +483,7 @@ void showSystemModal()
 
         // Persist volume/profile regardless of which action chosen
         buzzerVolume = constrain(buzzerVolume, 0, 100);
+        mp3Volume = constrain(mp3Volume, 0, 100);
         buzzerToneSet = constrain(buzzerToneSet, 0, 6);
         mp3PlayMode = constrain(mp3PlayMode, 0, 2);
         saveDeviceSettings();
@@ -490,50 +492,49 @@ void showSystemModal()
         {
             switch (action)
             {
-            case 0: // volume row -> no navigation
-                break;
-            case 1: // tone profile row
-                break;
+            case 0:
+            case 1:
             case 2:
-                break;
             case 3:
+                break;
+            case 4:
                 systemModal.hide();
                 showDateTimeModal();
                 return;
-            case 4:
+            case 5:
                 systemModal.hide();
                 pendingModalFn = showUnitSettingsModal;
                 pendingModalTime = millis();
                 return;
-            case 5:
+            case 6:
                 systemModal.hide();
                 showDeviceLocationModal();
                 return;
-            case 6:
+            case 7:
                 systemModal.hide();
                 showSystemInfoScreen();
                 return;
-            case 7:
+            case 8:
                 systemModal.hide();
                 showWiFiSignalTest();
                 return;
-            case 8:
+            case 9:
                 systemModal.hide();
                 showSdDiagnosticsScreen();
                 return;
-            case 9:
+            case 10:
                 systemModal.hide();
                 pendingModalFn = playAudioTestTone;
                 pendingModalTime = millis() + 10;
                 return;
-            case 10:
+            case 11:
                 systemModal.hide();
                 g_sdMp3Paths.clear();
                 g_sdMp3Page = 0;
                 pendingModalFn = beginSdMp3ListLoad;
                 pendingModalTime = millis() + 10;
                 return;
-            case 11:
+            case 12:
                 systemModal.hide();
                 if (wxv::audio::isSdMp3Active())
                 {
@@ -547,27 +548,27 @@ void showSystemModal()
                     pendingModalTime = millis() + 1100;
                 }
                 return;
-            case 12:
+            case 13:
                 systemModal.hide();
                 showScenePreviewModal();
                 return;
-            case 13:
+            case 14:
                 systemModal.hide();
                 startUniversalRemoteLearning();
                 return;
-            case 14:
+            case 15:
                 systemModal.hide();
                 clearUniversalRemoteLearning();
                 break;
-            case 15:
+            case 16:
                 systemModal.hide();
                 quickRestore();
                 break;
-            case 16:
+            case 17:
                 systemModal.hide();
                 factoryReset();
                 break;
-            case 17:
+            case 18:
                 systemModal.hide();
                 ESP.restart();
                 return;
@@ -834,15 +835,15 @@ void handleSdMp3PlaybackIR(IRCodes::WxKey key)
     switch (key)
     {
     case IRCodes::WxKey::Up:
-        buzzerVolume = constrain(buzzerVolume + 5, 0, 100);
-        wxv::audio::setSdMp3VolumePercent(buzzerVolume);
+        mp3Volume = constrain(mp3Volume + 5, 0, 100);
+        wxv::audio::setSdMp3VolumePercent(mp3Volume);
         g_sdMp3VolumeDirty = true;
         rebuildSdMp3PlaybackModal();
         sysInfoModal.show();
         break;
     case IRCodes::WxKey::Down:
-        buzzerVolume = constrain(buzzerVolume - 5, 0, 100);
-        wxv::audio::setSdMp3VolumePercent(buzzerVolume);
+        mp3Volume = constrain(mp3Volume - 5, 0, 100);
+        wxv::audio::setSdMp3VolumePercent(mp3Volume);
         g_sdMp3VolumeDirty = true;
         rebuildSdMp3PlaybackModal();
         sysInfoModal.show();

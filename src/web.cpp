@@ -68,6 +68,7 @@ bool otaInProgress = false;
 #define humOffset app.humOffset
 #define lightGain app.lightGain
 #define buzzerVolume app.buzzerVolume
+#define mp3Volume app.mp3Volume
 #define buzzerToneSet app.buzzerToneSet
 #define alarmSoundMode app.alarmSoundMode
 #define alarmEnabled app.alarmEnabled
@@ -728,13 +729,9 @@ static IndoorDerivedState buildIndoorDerivedState()
 
   if (!isnan(SCD40_temp))
     state.tempC = SCD40_temp + tempOffset;
-  else if (!isnan(aht20_temp))
-    state.tempC = aht20_temp + tempOffset;
 
   if (!isnan(SCD40_hum))
     state.humidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
-  else if (!isnan(aht20_hum))
-    state.humidity = constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
 
   if (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f)
     state.pressureHpa = bmp280_pressure;
@@ -1580,14 +1577,8 @@ static void refreshAppRuntimeState(bool force = false)
 
   if (!isnan(SCD40_temp))
     next.indoor.tempF = celsiusToFahrenheitValue(SCD40_temp + tempOffset);
-  else if (!isnan(aht20_temp))
-    next.indoor.tempF = celsiusToFahrenheitValue(aht20_temp + tempOffset);
   if (!isnan(SCD40_hum))
     next.indoor.humidity = static_cast<int>(roundf(constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
-  if (!isnan(aht20_temp))
-    next.indoor.ahtTempF = celsiusToFahrenheitValue(aht20_temp + tempOffset);
-  if (!isnan(aht20_hum))
-    next.indoor.ahtHumidity = static_cast<int>(roundf(constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
   next.indoor.co2ppm = (SCD40_co2 > 0) ? static_cast<int>(SCD40_co2) : 0;
   if (!isnan(bmp280_pressure))
     next.indoor.pressureInHg = hpaToInHgValue(bmp280_pressure);
@@ -2350,8 +2341,10 @@ static void serializeAppSoundSettings(JsonObject obj)
 {
   obj["enabled"] = buzzerVolume > 0;
   obj["volume"] = buzzerVolume;
+  obj["mp3Volume"] = mp3Volume;
   obj["toneSet"] = buzzerToneSet;
   obj["alarmSound"] = alarmSoundMode;
+  obj["mp3Mode"] = mp3PlayMode;
 }
 
 static void serializeAppMqttSettings(JsonObject obj)
@@ -3502,6 +3495,17 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       dirty.device = true;
     }
   }
+  if (!obj["mp3Volume"].isNull())
+  {
+    int value = obj["mp3Volume"].as<int>();
+    if (value < 0 || value > 100)
+      setFieldError(fieldErrors, "mp3Volume", "must be between 0 and 100");
+    else
+    {
+      mp3Volume = value;
+      dirty.device = true;
+    }
+  }
   if (!obj["toneSet"].isNull())
   {
     int value = obj["toneSet"].as<int>();
@@ -3523,6 +3527,17 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       alarmSoundMode = value;
       dirty.device = true;
       dirty.alarms = true;
+    }
+  }
+  if (!obj["mp3Mode"].isNull())
+  {
+    int value = obj["mp3Mode"].as<int>();
+    if (value < 0 || value > 2)
+      setFieldError(fieldErrors, "mp3Mode", "must be between 0 and 2");
+    else
+    {
+      mp3PlayMode = value;
+      dirty.device = true;
     }
   }
 
@@ -3894,20 +3909,6 @@ static String buildStatusJsonPayload()
     doc["co2"] = SCD40_co2;
   }
 
-  if (!isnan(aht20_temp)) {
-    float ahtCal = aht20_temp + tempOffset;
-    doc["ahtTemp"] = fmtTemp(ahtCal, 1);
-    doc["ahtTempRaw"] = ahtCal;
-    doc["ahtTempSensor"] = aht20_temp;
-  }
-  if (!isnan(aht20_hum)) {
-    float ahtHumCal = aht20_hum + static_cast<float>(humOffset);
-    if (ahtHumCal < 0.0f) ahtHumCal = 0.0f;
-    if (ahtHumCal > 100.0f) ahtHumCal = 100.0f;
-    doc["ahtHumidity"] = String(static_cast<int>(ahtHumCal + 0.5f)) + "%";
-    doc["ahtHumidityRaw"] = ahtHumCal;
-    doc["ahtHumiditySensor"] = aht20_hum;
-  }
   if (!isnan(bmp280_pressure)) {
     doc["pressure"] = fmtPress(bmp280_pressure, 1);
     doc["pressureRaw"] = bmp280_pressure;
@@ -5121,9 +5122,11 @@ void setupWebServer() {
       forecastUi["pauseMs"] = forecastPauseMs;
       forecastUi["iconSize"] = forecastIconSize;
       doc["customMsg"]        = customMsg;
-    doc["buzzerVolume"]     = buzzerVolume;
-  doc["buzzerTone"]       = buzzerToneSet;
-    doc["alarmSound"]       = alarmSoundMode;
+      doc["buzzerVolume"]     = buzzerVolume;
+      doc["mp3Volume"]        = mp3Volume;
+      doc["buzzerTone"]       = buzzerToneSet;
+      doc["mp3Mode"]          = mp3PlayMode;
+      doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
     float luxNow = getLastRawLux();
     if (!isfinite(luxNow)) {
@@ -5346,12 +5349,20 @@ void setupWebServer() {
             }
             dirtyDisplay = true;
           }
-          if (!doc["buzzerVolume"].isNull()) {
-            buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
-            dirtyDevice = true;
-          }
+        if (!doc["buzzerVolume"].isNull()) {
+          buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
+          dirtyDevice = true;
+        }
+        if (!doc["mp3Volume"].isNull()) {
+          mp3Volume = constrain(doc["mp3Volume"].as<int>(), 0, 100);
+          dirtyDevice = true;
+        }
         if (!doc["buzzerTone"].isNull()) {
           buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
+          dirtyDevice = true;
+        }
+        if (!doc["mp3Mode"].isNull()) {
+          mp3PlayMode = constrain(doc["mp3Mode"].as<int>(), 0, 2);
           dirtyDevice = true;
         }
         if (!doc["alarmSound"].isNull()) {

@@ -1245,6 +1245,8 @@ function loadAll(background){
     }
     var alarmSoundEl = document.getElementById('alarmSoundMode');
     if (alarmSoundEl) alarmSoundEl.value = (typeof s.alarmSound !== 'undefined') ? s.alarmSound : 0;
+    var mp3VolumeEl = document.getElementById('mp3Volume');
+    if (mp3VolumeEl) mp3VolumeEl.value = (typeof s.mp3Volume !== 'undefined') ? s.mp3Volume : 50;
     // NOAA
     if (s.noaa) {
       var nEn = document.getElementById('noaaEnabled');
@@ -1521,6 +1523,7 @@ function readSettingsForm() {
       return v;
     })(),
     buzzerVolume: +(byId('buzzerVolume')?.value ?? 100),
+    mp3Volume: +(byId('mp3Volume')?.value ?? 50),
     buzzerTone:  +(byId('buzzerToneSet')?.value ?? 0),
     alarmSound:  +(byId('alarmSoundMode')?.value ?? 0),
     alarms: [0,1,2].map(function(i){
@@ -1678,7 +1681,7 @@ async function saveAlarmSettingsWeb(event){
   if (event && typeof event.preventDefault === 'function') {
     event.preventDefault();
   }
-  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','buzzerTone']);
+  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','mp3Volume','buzzerTone']);
   await submitSettings(payload, 'saveAlarmsMsg');
 }
 

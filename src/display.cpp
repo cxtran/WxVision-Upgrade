@@ -3627,8 +3627,6 @@ static String formatOutdoorHumidity()
 static String formatIndoorHumidity()
 {
     float humiditySource = SCD40_hum;
-    if (isnan(humiditySource))
-        humiditySource = aht20_hum;
 
     if (!isnan(humiditySource))
     {

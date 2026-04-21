@@ -1091,9 +1091,7 @@ void showEnvironmentalQualityScreen()
     float tempC = NAN;
     if (!isnan(SCD40_temp))
         tempC = SCD40_temp + tempOffset;
-    else if (!isnan(aht20_temp))
-        tempC = aht20_temp + tempOffset;
-    float humidity = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
+    float humidity = SCD40_hum;
     if (!isnan(humidity))
     {
         humidity += static_cast<float>(humOffset);
@@ -1256,10 +1254,8 @@ void serviceEnvironmentalAlerts()
     float tempC = NAN;
     if (!isnan(SCD40_temp))
         tempC = SCD40_temp + tempOffset;
-    else if (!isnan(aht20_temp))
-        tempC = aht20_temp + tempOffset;
 
-    float humidity = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
+    float humidity = SCD40_hum;
     if (!isnan(humidity))
     {
         humidity += static_cast<float>(humOffset);
@@ -1286,7 +1282,7 @@ void serviceEnvironmentalAlerts()
                                 (humidity > static_cast<float>(envAlertHumidityHighThreshold))) &&
                                (humBand == EnvBand::Poor || humBand == EnvBand::Critical);
     const bool scd40Fault = !scd40Ready || (!scd40IsWarmingUp() && !scd40DataIsFresh(180000UL));
-    const bool sensorFailure = scd40Fault || !aht20Ready || !bmp280Ready;
+    const bool sensorFailure = scd40Fault || !bmp280Ready;
     const bool tempHigh = !co2High && tempHighRaw;
     const bool humidityWarn = !co2High && !tempHigh && humidityWarnRaw;
 

@@ -39,6 +39,7 @@ struct AppState
     int &humOffset;
     int &lightGain;
     int &buzzerVolume;
+    int &mp3Volume;
     int &buzzerToneSet;
     int &alarmSoundMode;
 

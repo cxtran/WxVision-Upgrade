@@ -29,10 +29,8 @@ unsigned long scd40LastSuccessMs = 0;
 int16_t scd40LastError = 0;
 uint32_t scd40ReadFailures = 0;
 
-// aht20 and bmp280
-float aht20_temp = NAN, aht20_hum = NAN;
+// bmp280
 float bmp280_temp = NAN, bmp280_pressure = NAN;
-bool aht20Ready = false;
 bool bmp280Ready = false;
 
 // Infrared Receiver
@@ -42,7 +40,6 @@ IRrecv irrecv(kRecvPin);
 decode_results results;
 
 SensirionI2cScd4x scd4x;
-Adafruit_AHTX0 aht20;
 Adafruit_BMP280 bmp280;
 static float s_lastCalibratedLux = NAN;
 static float s_lastRawLux = NAN;
@@ -439,18 +436,6 @@ void setupSensors()
   scd4x.begin(Wire, 0x62);
   startScd40PeriodicMeasurement();
 
-  // --- AHT20 ---
-  if (aht20.begin())
-  {
-    aht20Ready = true;
-    Serial.println(F("AHT20 found"));
-  }
-  else
-  {
-    aht20Ready = false;
-    Serial.println(F("Could not find AHT20!"));
-  }
-
   // --- BMP280 (try both addresses) ---
   if (bmp280.begin(0x76))
   {
@@ -504,14 +489,6 @@ void readSCD40()
       startScd40PeriodicMeasurement();
     }
   }
-}
-
-void readAHT20()
-{
-  sensors_event_t humidity, temp;
-  aht20.getEvent(&humidity, &temp);
-  aht20_temp = temp.temperature;
-  aht20_hum = humidity.relative_humidity;
 }
 
 void readBMP280()

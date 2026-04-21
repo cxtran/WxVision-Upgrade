@@ -17,8 +17,6 @@
 static String formatIndoorHumidity()
 {
     float humiditySource = SCD40_hum;
-    if (isnan(humiditySource))
-        humiditySource = aht20_hum;
 
     if (!isnan(humiditySource))
     {
@@ -392,8 +390,6 @@ void drawClockScreen()
     float indoorTempC = NAN;
     if (!isnan(SCD40_temp))
         indoorTempC = SCD40_temp + tempOffset;
-    else if (!isnan(aht20_temp))
-        indoorTempC = aht20_temp + tempOffset;
     String localTempStr = fmtTemp(indoorTempC, 0);
 
     if (worldView)
@@ -466,7 +462,7 @@ void drawClockScreen()
     dma_display->fillRect(co2DotX - dotRadius - 1, clearTop, dotDiameter + 2, clearHeight, myBLACK);
 
     float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
-    float humiditySource = !isnan(SCD40_hum) ? SCD40_hum : aht20_hum;
+    float humiditySource = SCD40_hum;
     if (!isnan(humiditySource))
     {
         humiditySource += static_cast<float>(humOffset);

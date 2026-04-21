@@ -676,7 +676,7 @@ void setup()
 
     // Seed timers to stagger 5s jobs (spread ~1.5s apart)
     lastReadSCD40           = millis() - 0;      // first at ~5.0s
-    lastReadAHT20_BMP280    = millis() - 1500;   // first at ~3.5s + 5s = 6.5s
+    lastReadAHT20_BMP280    = millis() - 1500;   // first pressure read ~6.5s after boot
     lastBrightnessRead      = millis() - 3000;   // first at ~2.0s + 5s = 7.0s
 
 
@@ -895,9 +895,7 @@ void loop()
         lastLogMs = now;
         float temp = NAN, hum = NAN, press = NAN, co2 = NAN;
         if (!isnan(SCD40_temp)) temp = SCD40_temp;
-        else if (!isnan(aht20_temp)) temp = aht20_temp;
         if (!isnan(SCD40_hum)) hum = SCD40_hum;
-        else if (!isnan(aht20_hum)) hum = aht20_hum;
         if (!isnan(bmp280_pressure)) press = bmp280_pressure;
         if (SCD40_co2 > 0) co2 = static_cast<float>(SCD40_co2);
         float lux = readBrightnessSensor();
@@ -942,13 +940,12 @@ void loop()
         clockSensorUpdatePending = true;
     }
 
-    // --- Read AHT20 and BMP280 Sensor ---
+    // --- Read BMP280 Sensor ---
     if (now - lastReadAHT20_BMP280 > AHT20_BMP280ReadInterval)
     {
         lastReadAHT20_BMP280 = now;
         newAHT20_BMP280Data = true;
         readBMP280();
-        readAHT20();
         clockSensorUpdatePending = true;
     }
 
