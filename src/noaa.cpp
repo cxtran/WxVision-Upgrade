@@ -163,6 +163,40 @@ static const char *noaaAlertEventText(const NwsAlert &alert)
     return "NOAA ALERT";
 }
 
+static String noaaPopupTitle(const String &eventRaw)
+{
+    String title = eventRaw;
+    title.trim();
+    if (!title.length())
+        return "NOAA ALERT";
+
+    title.toUpperCase();
+
+    title.replace("THUNDERSTORM", "T-STORM");
+    title.replace("SEVERE T-STORM WARNING", "SEVERE T-STORM");
+    title.replace("SEVERE T-STORM WATCH", "SEVERE T-STORM");
+    title.replace("SPECIAL WEATHER STATEMENT", "WX STATEMENT");
+    title.replace("SMALL CRAFT ADVISORY", "SMALL CRAFT");
+    title.replace("DENSE FOG ADVISORY", "DENSE FOG");
+    title.replace("FLASH FLOOD WARNING", "FLASH FLOOD");
+    title.replace("EXTREME HEAT WARNING", "EXTREME HEAT");
+    title.replace("HEAT ADVISORY", "HEAT ADVISORY");
+    title.replace("WIND ADVISORY", "WIND ADVISORY");
+    title.replace("RED FLAG WARNING", "RED FLAG");
+
+    if (title.length() <= 20)
+        return title;
+
+    title.replace(" WARNING", "");
+    title.replace(" ADVISORY", "");
+    title.replace(" WATCH", "");
+
+    if (title.length() <= 20)
+        return title;
+
+    return title.substring(0, 20);
+}
+
 static bool noaaAlertExpiryUtc(const NwsAlert &alert, DateTime &expiryUtcOut)
 {
     if (alert.ends.length() > 0 && parseNoaaIsoUtc(alert.ends, expiryUtcOut))
@@ -637,10 +671,10 @@ static bool applyParsedAlerts(NoaaAlertVector &parsedAlerts, bool suppressClearH
                                    noaaAlertSignature(activeAlertId),
                                    (String(alertCount) + " ACTIVE").c_str());
     else if (showSingleAlert)
-        queueTemporaryAlertHeading("WEATHER ALERT",
+        queueTemporaryAlertHeading(noaaPopupTitle(activeEvent).c_str(),
                                    NOAA_ALERT_HEADING_MS,
                                    noaaAlertSignature(activeAlertId),
-                                   activeEvent.length() ? activeEvent.c_str() : "NOAA ALERT");
+                                   activeSeverity.length() ? activeSeverity.c_str() : "NOAA ALERT");
 
     Serial.printf("[NOAA] Parsed %u %s alert(s) event=%s severity=%s expires=%s stale=%d\n",
                   static_cast<unsigned>(alertCount),
@@ -1160,10 +1194,10 @@ static void fetchNoaaAlertSummarySync(bool preserveSchedule)
                                            noaaAlertSignature(activeAlertId),
                                            (String(alertCount) + " TOTAL").c_str());
             else
-                queueTemporaryAlertHeading("WEATHER ALERT",
+                queueTemporaryAlertHeading(noaaPopupTitle(activeEvent).c_str(),
                                            NOAA_MANUAL_RESULT_HEADING_MS,
                                            noaaAlertSignature(activeAlertId),
-                                           activeEvent.length() ? activeEvent.c_str() : "NOAA ALERT");
+                                           "NOAA ALERT");
         }
     }
     else

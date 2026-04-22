@@ -67,6 +67,7 @@ enum ScreenMode {
     SCREEN_ASTRONOMY,
     SCREEN_SKY_BRIEF,
     SCREEN_LUNAR_LUCK,
+    SCREEN_FORECAST_SUMMARY,
     SCREEN_NOAA_ALERT,
     SCREEN_COUNT
 };
@@ -146,6 +147,8 @@ ScreenMode homeScreenForDataSource();
 void drawConditionSceneScreen();
 void tickAstronomyScreen();
 void tickSkyBriefScreen();
+void drawForecastSummaryScreen();
+void tickForecastSummaryScreen();
 void drawNoaaAlertsScreen();
 void tickNoaaAlertsScreen();
 void stepNoaaAlertsScreen(int direction);

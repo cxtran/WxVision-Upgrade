@@ -48,6 +48,7 @@
 #include "weather_provider.h"
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
+#include "forecast_summary.h"
 #include "mqtt_client.h"
 #include "cloud_manager.h"
 #include "audio_out.h"
@@ -67,6 +68,7 @@ const ScreenMode InfoScreenModes[] = {
 #if WXV_ENABLE_SKY_BRIEF
     SCREEN_SKY_BRIEF,
 #endif
+    SCREEN_FORECAST_SUMMARY,
     SCREEN_CONDITION_SCENE,
     SCREEN_UDP_DATA,
     SCREEN_LIGHTNING,
@@ -507,6 +509,7 @@ void setup()
     startupAudioHold.holdQuietPins();
 
     Serial.begin(115200);
+    Serial0.begin(115200);
     delay(100);
 
     Serial.println("[SD] Deferred init at boot");
@@ -813,6 +816,7 @@ void loop()
     }
 
     applyDataSourcePolicies(wifiConnected);
+    forecastSummaryTick();
 
     // Keep startup splash visually exclusive until it has fully ended.
     // This prevents the clock from rendering first and then being briefly
@@ -1598,6 +1602,8 @@ void loop()
         break;
     case SCREEN_NOAA_ALERT:
         break;
+    case SCREEN_FORECAST_SUMMARY:
+        break;
     case SCREEN_CURRENT:
         if (!currentCondScreen.isActive())
             showCurrentConditionsScreen();
@@ -1822,6 +1828,68 @@ void loop()
             noteFrameDraw(now);
         }
         delay(5);
+    }
+
+    if (currentScreen == SCREEN_FORECAST_SUMMARY)
+    {
+        if (!screenIsAllowed(currentScreen))
+        {
+            finishForecastSummaryDisplay();
+            ScreenMode fallback = enforceAllowedScreen(currentScreen);
+            if (fallback != currentScreen)
+            {
+                currentScreen = fallback;
+                needsClear = true;
+            }
+            return;
+        }
+
+        if (!anyModalOrInfoScreenActive &&
+            (needsClear || renderDue(RenderSlot::ForecastSummaryMain, now, kRenderChartMs)))
+        {
+            drawForecastSummaryScreen();
+            markRendered(RenderSlot::ForecastSummaryMain, now);
+            noteFrameDraw(now);
+            needsClear = false;
+        }
+        if (!needsClear && !anyModalOrInfoScreenActive &&
+            renderDue(RenderSlot::ForecastSummaryTick, now, kRenderMarqueeMs))
+        {
+            tickForecastSummaryScreen();
+            markRendered(RenderSlot::ForecastSummaryTick, now);
+            noteFrameDraw(now);
+        }
+
+        for (int i = 0; i < 4; ++i)
+        {
+            IRCodes::WxKey key = getIRCodeNonBlocking();
+            if (key == IRCodes::WxKey::Unknown)
+                break;
+            if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
+            {
+                finishForecastSummaryDisplay();
+                showMainMenuModal();
+                playBuzzerTone(3000, 100);
+                return;
+            }
+            if (key == IRCodes::WxKey::Left)
+            {
+                ScreenMode next = nextAllowedScreen(currentScreen, -1);
+                finishForecastSummaryDisplay();
+                transitionToScreen(next);
+                return;
+            }
+            if (key == IRCodes::WxKey::Right)
+            {
+                ScreenMode next = nextAllowedScreen(currentScreen, +1);
+                finishForecastSummaryDisplay();
+                transitionToScreen(next);
+                return;
+            }
+        }
+
+        delay(5);
+        return;
     }
 
     if (envQualityScreen.isActive())

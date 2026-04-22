@@ -4389,6 +4389,10 @@ static const char *screenModeLabel(ScreenMode mode)
     return "Current Conditions";
   case SCREEN_HOURLY:
     return "Hourly Forecast";
+  case SCREEN_FORECAST_SUMMARY:
+    return "Forecast Summary";
+  case SCREEN_NOAA_ALERT:
+    return "NOAA Alerts";
   default:
     return "Info Screen";
   }

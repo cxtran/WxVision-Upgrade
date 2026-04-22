@@ -63,6 +63,56 @@ namespace
 {
   constexpr uint32_t kScd40RestartThreshold = 3;
 
+  bool i2cDeviceResponds(uint8_t address)
+  {
+    Wire.beginTransmission(address);
+    return Wire.endTransmission() == 0;
+  }
+
+  int readI2cRegister8(uint8_t address, uint8_t reg)
+  {
+    Wire.beginTransmission(address);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0)
+      return -1;
+    if (Wire.requestFrom(static_cast<int>(address), 1) != 1)
+      return -1;
+    return Wire.read();
+  }
+
+  void logI2cDiagnostics()
+  {
+    Serial0.printf("I2C pins SDA=%d SCL=%d\n", I2C_SDA, I2C_SCL);
+
+    bool anyFound = false;
+    for (uint8_t address = 1; address < 0x7F; ++address)
+    {
+      if (!i2cDeviceResponds(address))
+        continue;
+      anyFound = true;
+      Serial0.printf("I2C device found at 0x%02X\n", address);
+    }
+
+    if (!anyFound)
+      Serial0.println(F("I2C scan: no devices found"));
+
+    const uint8_t probeAddresses[] = {0x76, 0x77};
+    for (uint8_t address : probeAddresses)
+    {
+      if (!i2cDeviceResponds(address))
+      {
+        Serial0.printf("Probe 0x%02X: no ACK\n", address);
+        continue;
+      }
+
+      const int chipId = readI2cRegister8(address, 0xD0);
+      if (chipId < 0)
+        Serial0.printf("Probe 0x%02X: ACK but chip ID read failed\n", address);
+      else
+        Serial0.printf("Probe 0x%02X: chip ID 0x%02X\n", address, chipId & 0xFF);
+    }
+  }
+
   bool startScd40PeriodicMeasurement()
   {
     scd40InitMs = millis();
@@ -71,12 +121,12 @@ namespace
     {
       scd40Ready = true;
       scd40ReadFailures = 0;
-      Serial.println(F("SCD40 initialized"));
+      Serial0.println(F("SCD40 initialized"));
       return true;
     }
 
     scd40Ready = false;
-    Serial.printf("SCD40 startPeriodicMeasurement failed: %d\n", scd40LastError);
+    Serial0.printf("SCD40 startPeriodicMeasurement failed: %d\n", scd40LastError);
     return false;
   }
 
@@ -84,12 +134,12 @@ namespace
   {
     scd40LastError = error;
     ++scd40ReadFailures;
-    Serial.printf("SCD40 %s failed: %d\n", step, error);
+    Serial0.printf("SCD40 %s failed: %d\n", step, error);
 
     if (scd40ReadFailures < kScd40RestartThreshold)
       return;
 
-    Serial.println(F("SCD40 restarting periodic measurement"));
+    Serial0.println(F("SCD40 restarting periodic measurement"));
     scd4x.stopPeriodicMeasurement();
     delay(20);
     scd4x.reinit();
@@ -124,7 +174,7 @@ namespace
 void setupIRSensor()
 {
   irrecv.enableIRIn(); // Start the receiver
-  Serial.println(F("VS1838B IR receiver test. Press buttons on your remote..."));
+  Serial0.println(F("VS1838B IR receiver test. Press buttons on your remote..."));
 }
 
 // Forward declaration for use in readIRSensor
@@ -161,7 +211,7 @@ void readIRSensor()
 void setupBrightnessSensor()
 {
   analogReadResolution(12); // ESP32 default is 12 bits (0-4095)
-  Serial.println(F("GL5528 Brightness Sensor Test"));
+  Serial0.println(F("GL5528 Brightness Sensor Test"));
 }
 
 float readBrightnessSensor()
@@ -264,7 +314,7 @@ IRCodes::WxKey getIRCodeNonBlocking()
       }
       return IRCodes::WxKey::Unknown;
     }
-    Serial.printf("Virtual IR Key: %s\n", IRCodes::keyName(queuedKey));
+    Serial0.printf("Virtual IR Key: %s\n", IRCodes::keyName(queuedKey));
     if (!menuActive && isNavKey(queuedKey))
     {
       playBuzzerTone(1200, 80);
@@ -429,7 +479,8 @@ bool enqueueVirtualIRCode(uint32_t code)
 
 void setupSensors()
 {
-  Wire.begin();
+  Wire.begin(I2C_SDA, I2C_SCL, 100000U);
+  logI2cDiagnostics();
   IRCodes::loadLearnedProfile();
 
   // --- SCD40 ---
@@ -440,17 +491,17 @@ void setupSensors()
   if (bmp280.begin(0x76))
   {
     bmp280Ready = true;
-    Serial.println(F("BMP280 found at 0x76"));
+    Serial0.println(F("BMP280 found at 0x76"));
   }
   else if (bmp280.begin(0x77))
   {
     bmp280Ready = true;
-    Serial.println(F("BMP280 found at 0x77"));
+    Serial0.println(F("BMP280 found at 0x77"));
   }
   else
   {
     bmp280Ready = false;
-    Serial.println(F("Could not find BMP280!"));
+    Serial0.println(F("Could not find BMP280!"));
   }
 }
 
@@ -481,7 +532,7 @@ void readSCD40()
   {
     if (scd40LastSuccessMs != 0 && (millis() - scd40LastSuccessMs) > 180000UL)
     {
-      Serial.println(F("SCD40 stale, restarting measurement"));
+      Serial0.println(F("SCD40 stale, restarting measurement"));
       scd4x.stopPeriodicMeasurement();
       delay(20);
       scd4x.reinit();
