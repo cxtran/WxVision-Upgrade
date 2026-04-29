@@ -27,9 +27,6 @@ static constexpr float kCoolTonightC = 10.0f;
 static constexpr float kColdTonightC = 4.4f;
 static constexpr float kHotTodayC = 29.0f;
 static constexpr float kHotTomorrowC = 30.0f;
-static constexpr unsigned long kHighCooldownMs = 15UL * 60UL * 1000UL;
-static constexpr unsigned long kMediumCooldownMs = 22UL * 60UL * 1000UL;
-static constexpr unsigned long kLowCooldownMs = 30UL * 60UL * 1000UL;
 static constexpr unsigned long kEvalIntervalMs = 60UL * 1000UL;
 static constexpr int kMorningSummaryStartHour = 5;
 static constexpr int kMorningSummaryEndHour = 11;
@@ -621,20 +618,6 @@ ForecastSummaryMessage buildForecastSummaryMessage(const NormalizedForecast &for
     return msg;
 }
 
-unsigned long cooldownFor(ForecastSummaryImportance importance)
-{
-    switch (importance)
-    {
-    case ForecastSummaryImportance::High:
-        return kHighCooldownMs;
-    case ForecastSummaryImportance::Medium:
-        return kMediumCooldownMs;
-    case ForecastSummaryImportance::Low:
-    default:
-        return kLowCooldownMs;
-    }
-}
-
 void logSummarySelection(const ForecastSummaryMessage &msg, const char *sourceName)
 {
     if (msg.available)
@@ -695,11 +678,6 @@ void forecastSummaryTick()
     evaluateForecastSummary(force);
 }
 
-bool forecastSummaryHasMessage()
-{
-    return s_currentMessage.available;
-}
-
 bool forecastSummaryScreenAllowed()
 {
     if (!s_currentMessage.available)
@@ -737,11 +715,6 @@ void finishForecastSummaryDisplay()
 {
     s_screenActive = false;
     s_lastDisplayAudioSignature = 0;
-}
-
-bool forecastSummaryDisplayExpired()
-{
-    return false;
 }
 
 bool forecastSummaryScreenActive()

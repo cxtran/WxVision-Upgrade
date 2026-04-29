@@ -258,11 +258,6 @@ namespace wxv::announce
             return out;
         }
 
-        bool isCuckooKey(const String &key)
-        {
-            return normalizeKey(key) == "cucook";
-        }
-
         String normalizeUiSoundKey(const String &uiKey)
         {
             const String key = normalizeKey(uiKey);

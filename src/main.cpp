@@ -1178,23 +1178,6 @@ void loop()
         return;
     }
 
-    if (isAudioTestToneActive())
-    {
-        IRCodes::WxKey key = getIRCodeNonBlocking();
-        if (key == IRCodes::WxKey::Cancel ||
-            key == IRCodes::WxKey::Menu ||
-            key == IRCodes::WxKey::Left)
-        {
-            stopAudioTestTone(true);
-            delay(20);
-            return;
-        }
-
-        tickAudioTestTone();
-        delay(5);
-        return;
-    }
-
     if (isSdMp3PlaybackActive())
     {
         IRCodes::WxKey key = getIRCodeNonBlocking();

@@ -13,17 +13,11 @@
 #include "cloud_manager.h"
 #include "device_identity.h"
 #include "audio_announcer.h"
-#include "buzzer.h"
 #include "mp3_player.h"
-#include "audio_out.h"
-#include "pins.h"
 #include "sd_card.h"
 
 namespace
 {
-bool g_audioTestToneActive = false;
-uint8_t g_audioTestPhase = 0;
-unsigned long g_audioTestNextAtMs = 0;
 Mp3PathList g_sdMp3Paths;
 String g_selectedSdMp3Path;
 size_t g_sdMp3Page = 0;
@@ -37,11 +31,6 @@ enum SdMp3Mode
     SdMp3ContinueNext = 1,
     SdMp3RepeatOne = 2,
 };
-
-AudioOut &audioTestOut()
-{
-    return speakerAudioOut();
-}
 
 String mp3DisplayName(const String &path)
 {
@@ -65,17 +54,6 @@ const char *sdMp3ModeName()
     default:
         return "Continue Next";
     }
-}
-
-void showAudioTestModal()
-{
-    sysInfoModal = InfoModal("Audio Test");
-    String lines[] = {"Playing I2S", "Back to stop"};
-    InfoFieldType types[] = {InfoLabel, InfoLabel};
-    sysInfoModal.setLines(lines, types, 2);
-    sysInfoModal.setKeepOpenOnSelect(true);
-    sysInfoModal.setCallback([](bool, int) {});
-    sysInfoModal.show();
 }
 
 void showSdMp3ListModal();
@@ -254,23 +232,6 @@ void showSdMp3ListModal()
         pendingModalTime = millis() + 10;
     });
     sysInfoModal.show();
-}
-
-void startAudioTestTone()
-{
-    if (!ensureSpeakerReady())
-    {
-        showSectionHeading("AUDIO INIT ERR", nullptr, 1200);
-        return;
-    }
-
-    suppressNextMenuOkTone();
-    audioTestOut().setSampleRate(22050);
-    audioTestOut().stop();
-    g_audioTestToneActive = true;
-    g_audioTestPhase = 0;
-    g_audioTestNextAtMs = 0;
-    showAudioTestModal();
 }
 
 void rebuildSystemInfoModal()
@@ -761,70 +722,6 @@ void showSdDiagnosticsScreen()
     sysInfoModal = InfoModal("SD Diag");
     rebuildSdDiagnosticsModal();
     sysInfoModal.show();
-}
-
-void playAudioTestTone()
-{
-    startAudioTestTone();
-}
-
-bool isAudioTestToneActive()
-{
-    return g_audioTestToneActive;
-}
-
-void tickAudioTestTone()
-{
-    if (!g_audioTestToneActive)
-    {
-        return;
-    }
-
-    const unsigned long now = millis();
-    if (now < g_audioTestNextAtMs)
-    {
-        return;
-    }
-
-    switch (g_audioTestPhase)
-    {
-    case 0:
-        audioTestOut().playTone(330, 300, 9000);
-        g_audioTestNextAtMs = millis() + 180;
-        break;
-    case 1:
-        audioTestOut().playTone(660, 300, 9000);
-        g_audioTestNextAtMs = millis() + 180;
-        break;
-    default:
-        audioTestOut().playTone(990, 500, 9000);
-        g_audioTestNextAtMs = millis() + 600;
-        break;
-    }
-
-    g_audioTestPhase = static_cast<uint8_t>((g_audioTestPhase + 1) % 3);
-}
-
-void stopAudioTestTone(bool reopenSystemMenu)
-{
-    if (!g_audioTestToneActive)
-    {
-        return;
-    }
-
-    g_audioTestToneActive = false;
-    audioTestOut().stop();
-    if (sysInfoModal.isActive())
-    {
-        sysInfoModal.hide();
-    }
-    showSectionHeading("AUDIO TEST OFF", nullptr, 700);
-
-    if (reopenSystemMenu)
-    {
-        pendingModalFn = showSystemModal;
-        pendingModalTime = millis() + 10;
-    }
 }
 
 bool isSdMp3PlaybackActive()

@@ -24,13 +24,11 @@ struct ForecastSummaryMessage
 };
 
 void forecastSummaryTick();
-bool forecastSummaryHasMessage();
 bool forecastSummaryScreenAllowed();
 const ForecastSummaryMessage &currentForecastSummaryMessage();
 void beginForecastSummaryDisplay();
 void maybePlayForecastSummaryAudioForSignature(uint32_t signature);
 void finishForecastSummaryDisplay();
-bool forecastSummaryDisplayExpired();
 bool forecastSummaryScreenActive();
 bool forecastSummaryShouldAutoPresent();
 void acknowledgeForecastSummaryAutoPresent();
