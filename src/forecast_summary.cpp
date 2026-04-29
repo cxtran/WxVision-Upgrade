@@ -6,6 +6,8 @@
 #include <time.h>
 
 #include "alarm.h"
+#include "audio_announcer.h"
+#include "mp3_player.h"
 #include "noaa.h"
 #include "settings.h"
 #include "units.h"
@@ -79,6 +81,92 @@ uint32_t s_lastDataSignature = 0;
 unsigned long s_lastEvalMs = 0;
 bool s_screenActive = false;
 bool s_autoPresentationPending = false;
+uint32_t s_lastDisplayAudioSignature = 0;
+
+String normalizedSummaryKey(const char *line1, const char *line2)
+{
+    String key;
+    if (line1 != nullptr)
+        key += line1;
+    if (line2 != nullptr && line2[0] != '\0')
+    {
+        if (key.length() > 0)
+            key += "_";
+        key += line2;
+    }
+
+    key.toLowerCase();
+    key.replace(' ', '_');
+    return key;
+}
+
+bool playForecastSummaryAudio(const ForecastSummaryMessage &msg)
+{
+    if (!msg.available || wxv::announce::isActive() || wxv::audio::isSdMp3Active())
+        return false;
+
+    constexpr const char *kForecastDir = "/audio/forecast/";
+    const String key = normalizedSummaryKey(msg.line1, msg.line2);
+
+    if (key == "rain_soon")
+        return wxv::announce::playClip((String(kForecastDir) + "rain_soon.wav").c_str());
+    if (key == "rain_in_1_hour")
+        return wxv::announce::playClipSequence((String(kForecastDir) + "rain_in.wav").c_str(),
+                                               (String(kForecastDir) + "1_hour.wav").c_str());
+    if (key == "rain_in_2_hours")
+        return wxv::announce::playClipSequence((String(kForecastDir) + "rain_in.wav").c_str(),
+                                               (String(kForecastDir) + "2_hours.wav").c_str());
+    if (key == "rain_in_3_hours")
+        return wxv::announce::playClipSequence((String(kForecastDir) + "rain_in.wav").c_str(),
+                                               (String(kForecastDir) + "3_hours.wav").c_str());
+    if (key == "showers_later")
+        return wxv::announce::playClip((String(kForecastDir) + "showers_later.wav").c_str());
+    if (key == "rain_today")
+        return wxv::announce::playClip((String(kForecastDir) + "rain_today.wav").c_str());
+    if (key == "rain_tomorrow")
+        return wxv::announce::playClip((String(kForecastDir) + "rain_tomorrow.wav").c_str());
+    if (key == "windy_pm")
+        return wxv::announce::playClip((String(kForecastDir) + "windy_pm.wav").c_str());
+    if (key == "gusty_later")
+        return wxv::announce::playClip((String(kForecastDir) + "gusty_later.wav").c_str());
+    if (key == "windy_today")
+        return wxv::announce::playClip((String(kForecastDir) + "windy_today.wav").c_str());
+    if (key == "windy_tomorrow")
+        return wxv::announce::playClip((String(kForecastDir) + "windy_tomorrow.wav").c_str());
+    if (key == "hot_today")
+        return wxv::announce::playClip((String(kForecastDir) + "hot_today.wav").c_str());
+    if (key == "cold_tonight")
+        return wxv::announce::playClip((String(kForecastDir) + "cold_tonight.wav").c_str());
+    if (key == "cool_tonight")
+        return wxv::announce::playClip((String(kForecastDir) + "cool_tonight.wav").c_str());
+    if (key == "hot_tomorrow")
+        return wxv::announce::playClip((String(kForecastDir) + "hot_tomorrow.wav").c_str());
+    if (key == "clear_today")
+        return wxv::announce::playClip((String(kForecastDir) + "clear_today.wav").c_str());
+    if (key == "nice_today")
+        return wxv::announce::playClip((String(kForecastDir) + "nice_today.wav").c_str());
+    if (key == "clear_tonight")
+        return wxv::announce::playClip((String(kForecastDir) + "clear_tonight.wav").c_str());
+    if (key == "clear_tomorrow")
+        return wxv::announce::playClip((String(kForecastDir) + "clear_tomorrow.wav").c_str());
+    if (key == "nice_tomorrow")
+        return wxv::announce::playClip((String(kForecastDir) + "nice_tomorrow.wav").c_str());
+
+    return false;
+}
+
+void maybePlayForecastSummaryAudioInternal(const ForecastSummaryMessage &msg)
+{
+    if (!msg.available)
+        return;
+    if (s_lastDisplayAudioSignature == msg.signature)
+        return;
+
+    if (playForecastSummaryAudio(msg))
+    {
+        s_lastDisplayAudioSignature = msg.signature;
+    }
+}
 
 uint32_t fnv1aAppend(uint32_t hash, const void *data, size_t size)
 {
@@ -632,11 +720,23 @@ void beginForecastSummaryDisplay()
         return;
     s_screenActive = true;
     s_autoPresentationPending = false;
+    maybePlayForecastSummaryAudioInternal(s_currentMessage);
+}
+
+void maybePlayForecastSummaryAudioForSignature(uint32_t signature)
+{
+    if (!s_currentMessage.available)
+        return;
+    if (signature != 0 && signature != s_currentMessage.signature)
+        return;
+
+    maybePlayForecastSummaryAudioInternal(s_currentMessage);
 }
 
 void finishForecastSummaryDisplay()
 {
     s_screenActive = false;
+    s_lastDisplayAudioSignature = 0;
 }
 
 bool forecastSummaryDisplayExpired()
@@ -670,4 +770,5 @@ void resetForecastSummaryState()
     s_lastEvalMs = 0;
     s_screenActive = false;
     s_autoPresentationPending = false;
+    s_lastDisplayAudioSignature = 0;
 }

@@ -147,6 +147,7 @@ void activateTemporaryAlert(const TemporaryHeadingAlert &alert, unsigned long no
         s_temporaryAlertRendered = true;
     }
 
+    maybePlayForecastSummaryAudioForSignature(alert.signature);
     wxv::announce::playUiSound("select");
 }
 

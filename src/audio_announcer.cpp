@@ -1197,6 +1197,28 @@ namespace wxv::announce
         return playAudioPath(path);
     }
 
+    bool playClipSequence(const char *firstPath, const char *secondPath)
+    {
+        const unsigned long now = millis();
+        if ((now - g_lastRequestMs) < kRequestDebounceMs)
+        {
+            return false;
+        }
+        g_lastRequestMs = now;
+
+        clearQueue();
+        const bool haveFirst = enqueueClipInternal(firstPath == nullptr ? String() : String(firstPath));
+        const bool haveSecond = (secondPath == nullptr) || enqueueClipInternal(String(secondPath));
+        if (!haveFirst || !haveSecond || g_clipCount == 0)
+        {
+            g_lastStatus = "clip missing";
+            clearQueue();
+            return false;
+        }
+
+        return beginSequence();
+    }
+
     bool playChime(const String &chimeKey)
     {
         const String path = String(kChimeDir) + normalizeKey(chimeKey) + ".wav";

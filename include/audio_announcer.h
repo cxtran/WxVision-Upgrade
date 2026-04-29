@@ -6,6 +6,7 @@ namespace wxv::announce
 {
     bool playAudioPath(const char *path);
     bool playClip(const char *path);
+    bool playClipSequence(const char *firstPath, const char *secondPath = nullptr);
     bool speakNumber(int value);
     bool speakTime12(int hour24, int minute);
     bool speakTemperature(int value, bool fahrenheit);
