@@ -235,16 +235,13 @@ static String buildDefaultHostname()
 
     base.replace(" ", "-");
 
-    // Append last 4 hex characters of the MAC address as a suffix
-    String mac = WiFi.macAddress(); // e.g. "AA:BB:CC:DD:EE:FF"
-    mac.replace(":", "");
-    if (mac.length() >= 4)
-    {
-        String suffix = mac.substring(mac.length() - 4);
-        suffix.toLowerCase();
-        base += "-";
-        base += suffix;
-    }
+    // Use the hardware eFuse MAC so the hostname suffix is stable even
+    // before Wi-Fi is connected or initialized.
+    uint64_t mac = ESP.getEfuseMac();
+    char suffix[5];
+    snprintf(suffix, sizeof(suffix), "%04llx", mac & 0xFFFFULL);
+    base += "-";
+    base += suffix;
     return base;
 }
 

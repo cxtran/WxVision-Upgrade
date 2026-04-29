@@ -936,6 +936,7 @@ async function uploadStorageFiles(event){
   }
   var input = document.getElementById('storageUploadFiles');
   var btn = document.getElementById('storageUploadBtn');
+  var uploadSucceeded = false;
   if (!input || !input.files || input.files.length === 0) {
     storageSetMsg('Choose one or more files first.', false);
     return;
@@ -950,12 +951,16 @@ async function uploadStorageFiles(event){
     storageSetProgress(100, 'Upload complete');
     storageSetMsg('Upload complete.', true);
     input.value = '';
+    updateStorageSelectionSummary();
+    uploadSucceeded = true;
     loadStorageDirectory(storageCurrentPath);
   } catch (err) {
     storageSetMsg((err && err.message) ? err.message : 'Upload failed.', false);
   } finally {
     if (btn) btn.disabled = false;
-    setTimeout(storageResetProgress, 800);
+    if (!uploadSucceeded) {
+      setTimeout(storageResetProgress, 800);
+    }
   }
 }
 
