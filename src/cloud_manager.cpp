@@ -8,6 +8,7 @@
 
 #include "datetimesettings.h"
 #include "device_identity.h"
+#include "psram_utils.h"
 #include "settings.h"
 #include "web.h"
 
@@ -79,7 +80,7 @@ String abbreviatedBody_(const String &body, size_t maxLen = 240)
 
 String jsonQuoted_(const String &value)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc.set(value);
     String out;
     serializeJson(doc, out);
@@ -218,7 +219,7 @@ void CloudManager::loop()
         state_.relayAuthenticated &&
         static_cast<uint32_t>(now - state_.lastRelayHeartbeatMs) >= cloudHeartbeatIntervalMs)
     {
-      JsonDocument payload;
+      JsonDocument payload(wxv::memory::psramJsonAllocator());
       payload["ts"] = now;
       payload["uptime_sec"] = now / 1000UL;
       sendRelayEnvelope_("heartbeat", "", payload.as<JsonVariantConst>());
@@ -261,7 +262,7 @@ void CloudManager::noteLocalAppConnectionState(bool connected)
 void CloudManager::onRelayTextMessage(const String &message)
 {
     state_.lastRelayReceiveMs = millis();
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     if (deserializeJson(doc, message) != DeserializationError::Ok || !doc.is<JsonObject>())
         return;
     handleRelayEnvelope_(doc);
@@ -352,7 +353,7 @@ void CloudManager::runJob_(JobType job)
 
 bool CloudManager::performRegister_()
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     const DeviceIdentity &id = deviceIdentity();
     doc["device_uuid"] = id.uuid;
     doc["discovered_name"] = id.name;
@@ -403,7 +404,7 @@ bool CloudManager::performRegister_()
 
 bool CloudManager::performHeartbeat_()
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     const DeviceIdentity &id = deviceIdentity();
     doc["device_uuid"] = id.uuid;
     doc["local_ip"] = WiFi.localIP().toString();
@@ -540,7 +541,7 @@ bool CloudManager::httpPostJson_(const String &path, const String &body, int &st
 
 void CloudManager::sendRelayEnvelope_(const char *type, const String &requestId, JsonVariantConst payload)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc["type"] = type;
     if (!requestId.isEmpty())
         doc["requestId"] = requestId;
@@ -602,7 +603,7 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
 
     if (type == "ping")
     {
-        JsonDocument payload;
+        JsonDocument payload(wxv::memory::psramJsonAllocator());
         payload["ts"] = millis();
         sendRelayEnvelope_("pong", requestId, payload.as<JsonVariantConst>());
         return;
@@ -610,7 +611,7 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
 
     if (type == "heartbeat")
     {
-        JsonDocument payload;
+        JsonDocument payload(wxv::memory::psramJsonAllocator());
         payload["ts"] = millis();
         sendRelayEnvelope_("heartbeat_ack", requestId, payload.as<JsonVariantConst>());
         return;
@@ -645,7 +646,7 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
     AppApiResponse apiResponse;
     if (!handleAppApiRequest(method, path, body, apiResponse))
     {
-        JsonDocument resp;
+        JsonDocument resp(wxv::memory::psramJsonAllocator());
         resp["status"] = 404;
         resp["contentType"] = "application/json";
         resp["body"]["ok"] = false;
@@ -659,7 +660,7 @@ void CloudManager::handleRelayEnvelope_(JsonDocument &doc)
 
 void CloudManager::sendRelayAuth_()
 {
-    JsonDocument payload;
+    JsonDocument payload(wxv::memory::psramJsonAllocator());
     payload["device_uuid"] = deviceIdentity().uuid;
     payload["device_secret"] = deviceIdentity().secret;
     payload["firmware_version"] = firmwareVersion_();

@@ -4,6 +4,7 @@
 #include <SD.h>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 #include "AudioFileSourceBuffer.h"
 #include "AudioFileSourceSD.h"
@@ -15,6 +16,7 @@
 #include "keyboard.h"
 #include "menu.h"
 #include "noaa.h"
+#include "psram_utils.h"
 #include "sd_card.h"
 #include "screen_manager.h"
 #include "sensors.h"
@@ -42,8 +44,9 @@ namespace wxv::announce
         constexpr const char *kChimeDir = "/audio/chimes/";
         constexpr const char *kAlarmDir = "/audio/alarm/";
 
-        String g_clipQueue[kMaxQueuedClips];
-        size_t g_clipCount = 0;
+        using ClipQueueVector = std::vector<String, wxv::memory::PsramAllocator<String>>;
+
+        ClipQueueVector g_clipQueue;
         size_t g_clipIndex = 0;
         String g_lastStatus = "idle";
         unsigned long g_lastRequestMs = 0;
@@ -55,7 +58,7 @@ namespace wxv::announce
         std::unique_ptr<AudioFileSourceBuffer> g_bufferedFile;
         std::unique_ptr<PhraseWavGenerator> g_wav;
         std::unique_ptr<AudioOutputI2S> g_out;
-        std::unique_ptr<uint8_t[]> g_streamBuffer;
+        std::unique_ptr<uint8_t, decltype(&wxv::memory::freeCaps)> g_streamBuffer{nullptr, &wxv::memory::freeCaps};
 
         void cleanupPlayback(bool clearAll);
 
@@ -301,11 +304,11 @@ namespace wxv::announce
 
         void clearQueue()
         {
-            g_clipCount = 0;
             g_clipIndex = 0;
-            for (String &clip : g_clipQueue)
+            g_clipQueue.clear();
+            if (g_clipQueue.capacity() < kMaxQueuedClips)
             {
-                clip = "";
+                g_clipQueue.reserve(kMaxQueuedClips);
             }
         }
 
@@ -339,7 +342,7 @@ namespace wxv::announce
 
             closeCurrentClip();
             ++g_clipIndex;
-            if (g_clipIndex >= g_clipCount)
+            if (g_clipIndex >= g_clipQueue.size())
             {
                 g_lastStatus = "done";
                 cleanupPlayback(true);
@@ -385,7 +388,7 @@ namespace wxv::announce
 
         bool enqueueClipInternal(const String &path)
         {
-            if (path.isEmpty() || g_clipCount >= kMaxQueuedClips)
+            if (path.isEmpty() || g_clipQueue.size() >= kMaxQueuedClips)
             {
                 return false;
             }
@@ -395,31 +398,31 @@ namespace wxv::announce
                 return false;
             }
 
-            g_clipQueue[g_clipCount++] = path;
+            g_clipQueue.push_back(path);
             return true;
         }
 
         bool enqueueOptionalClip(const String &path)
         {
-            if (path.isEmpty() || g_clipCount >= kMaxQueuedClips || !clipExists(path))
+            if (path.isEmpty() || g_clipQueue.size() >= kMaxQueuedClips || !clipExists(path))
             {
                 return false;
             }
 
-            g_clipQueue[g_clipCount++] = path;
+            g_clipQueue.push_back(path);
             return true;
         }
 
         bool enqueueFirstExisting(const String &primary, const String &fallback = String())
         {
-            if (!primary.isEmpty() && clipExists(primary) && g_clipCount < kMaxQueuedClips)
+            if (!primary.isEmpty() && clipExists(primary) && g_clipQueue.size() < kMaxQueuedClips)
             {
-                g_clipQueue[g_clipCount++] = primary;
+                g_clipQueue.push_back(primary);
                 return true;
             }
-            if (!fallback.isEmpty() && clipExists(fallback) && g_clipCount < kMaxQueuedClips)
+            if (!fallback.isEmpty() && clipExists(fallback) && g_clipQueue.size() < kMaxQueuedClips)
             {
-                g_clipQueue[g_clipCount++] = fallback;
+                g_clipQueue.push_back(fallback);
                 return true;
             }
             return false;
@@ -928,7 +931,7 @@ namespace wxv::announce
                 return false;
             }
 
-            for (size_t i = 0; i < count && g_clipCount + 2 <= kMaxQueuedClips; ++i)
+            for (size_t i = 0; i < count && g_clipQueue.size() + 2 <= kMaxQueuedClips; ++i)
             {
                 NwsAlert alert;
                 if (!noaaGetAlert(i, alert))
@@ -1073,7 +1076,7 @@ namespace wxv::announce
         bool startCurrentClip()
         {
             const bool createdOutput = (g_out == nullptr);
-            if (g_clipIndex >= g_clipCount)
+            if (g_clipIndex >= g_clipQueue.size())
             {
                 g_lastStatus = "done";
                 cleanupPlayback(true);
@@ -1096,7 +1099,7 @@ namespace wxv::announce
             }
 
             g_file.reset(new (std::nothrow) AudioFileSourceSD(path.c_str()));
-            g_streamBuffer.reset(new (std::nothrow) uint8_t[kWavBufferBytes]);
+            g_streamBuffer.reset(static_cast<uint8_t *>(wxv::memory::allocatePreferPsram(kWavBufferBytes)));
             g_bufferedFile.reset(new (std::nothrow) AudioFileSourceBuffer(g_file.get(), g_streamBuffer.get(), kWavBufferBytes));
             g_wav.reset(new (std::nothrow) PhraseWavGenerator());
 
@@ -1152,7 +1155,7 @@ namespace wxv::announce
                 wxv::audio::stopSdMp3();
             }
 
-            if (g_clipCount == 0)
+            if (g_clipQueue.empty())
             {
                 g_lastStatus = "no audio data";
                 return false;
@@ -1204,7 +1207,7 @@ namespace wxv::announce
         clearQueue();
         const bool haveFirst = enqueueClipInternal(firstPath == nullptr ? String() : String(firstPath));
         const bool haveSecond = (secondPath == nullptr) || enqueueClipInternal(String(secondPath));
-        if (!haveFirst || !haveSecond || g_clipCount == 0)
+        if (!haveFirst || !haveSecond || g_clipQueue.empty())
         {
             g_lastStatus = "clip missing";
             clearQueue();
@@ -1508,7 +1511,7 @@ namespace wxv::announce
             queuedAny = queueInternalAlertsPhrase(false) || queuedAny;
         }
 
-        if (!queuedAny || g_clipCount == 0)
+        if (!queuedAny || g_clipQueue.empty())
         {
             clearQueue();
             return false;
@@ -1594,7 +1597,7 @@ namespace wxv::announce
         }
 
         String activePath;
-        if (g_clipIndex < g_clipCount)
+        if (g_clipIndex < g_clipQueue.size())
         {
             activePath = g_clipQueue[g_clipIndex];
         }

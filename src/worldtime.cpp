@@ -13,8 +13,9 @@
 using WorldWeatherVector = std::vector<WorldWeather, wxv::memory::PsramAllocator<WorldWeather>>;
 using WorldRetryVector = std::vector<unsigned long, wxv::memory::PsramAllocator<unsigned long>>;
 using WorldCustomCityVector = std::vector<WorldTimeCustomCity, wxv::memory::PsramAllocator<WorldTimeCustomCity>>;
+using WorldIndexVector = std::vector<int, wxv::memory::PsramAllocator<int>>;
 
-static std::vector<int> s_worldTimeZoneIndices;
+static WorldIndexVector s_worldTimeZoneIndices;
 static int s_worldTimeViewIndex = -1; // -1 => system clock view, >=0 => index into s_worldTimeZoneIndices
 static bool s_worldTimeAutoCycle = true;
 static WorldCustomCityVector s_worldCustomCities;

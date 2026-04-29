@@ -1,5 +1,7 @@
 #include "phrase_wav_generator.h"
 
+#include "psram_utils.h"
+
 PhraseWavGenerator::PhraseWavGenerator()
     : channels_(0),
       sampleRate_(0),
@@ -17,7 +19,7 @@ PhraseWavGenerator::PhraseWavGenerator()
 
 PhraseWavGenerator::~PhraseWavGenerator()
 {
-    free(buff_);
+    wxv::memory::freeCaps(buff_);
     buff_ = nullptr;
 }
 
@@ -240,8 +242,8 @@ bool PhraseWavGenerator::begin(AudioFileSource *source, AudioOutput *out)
         return false;
     }
 
-    free(buff_);
-    buff_ = reinterpret_cast<uint8_t *>(malloc(buffSize_));
+    wxv::memory::freeCaps(buff_);
+    buff_ = static_cast<uint8_t *>(wxv::memory::allocatePreferPsram(buffSize_));
     if (!buff_)
     {
         return false;
@@ -254,7 +256,7 @@ bool PhraseWavGenerator::begin(AudioFileSource *source, AudioOutput *out)
 
     if (!readWavInfo())
     {
-        free(buff_);
+        wxv::memory::freeCaps(buff_);
         buff_ = nullptr;
         file = nullptr;
         output = nullptr;

@@ -3405,8 +3405,8 @@ static bool applyAppWorldTimeSettings(JsonObjectConst obj, JsonObject fieldError
 
   bool hasItems = obj["items"].is<JsonArrayConst>();
   bool hasCustom = obj["customCities"].is<JsonArrayConst>();
-  std::vector<int> selections;
-  std::vector<WorldTimeCustomCity> customCities;
+  std::vector<int, wxv::memory::PsramAllocator<int>> selections;
+  std::vector<WorldTimeCustomCity, wxv::memory::PsramAllocator<WorldTimeCustomCity>> customCities;
 
   if (hasItems)
   {
@@ -3968,7 +3968,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     }
     if (normalizedPath == "/timezones.json")
     {
-      JsonDocument doc;
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
       JsonArray arr = doc.to<JsonArray>();
       const size_t count = timezoneCount();
       for (size_t i = 0; i < count; ++i)
@@ -3989,7 +3989,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     }
     if (normalizedPath == "/time.json")
     {
-      JsonDocument doc;
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
       doc["epoch"] = (long)currentEpoch();
       doc["tzOffset"] = tzOffset;
       doc["tzStdOffset"] = tzStandardOffset;
@@ -4017,7 +4017,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     }
     if (normalizedPath == "/worldtime.json")
     {
-      JsonDocument doc;
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
       JsonArray ids = doc["ids"].to<JsonArray>();
       JsonArray selections = doc["selections"].to<JsonArray>();
       const size_t count = worldTimeSelectionCount();
@@ -4110,7 +4110,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
 
   if (normalizedPath == "/api/app/remote")
   {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     if (deserializeJson(doc, requestBody) != DeserializationError::Ok)
     {
       setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
@@ -4140,7 +4140,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
 
   if (normalizedPath == "/api/app/action")
   {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     if (deserializeJson(doc, requestBody) != DeserializationError::Ok)
     {
       setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
@@ -4205,14 +4205,14 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
 
   if (normalizedPath == "/api/app/settings")
   {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     if (deserializeJson(doc, requestBody) != DeserializationError::Ok || !doc.is<JsonObject>())
     {
       setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
       return true;
     }
 
-    JsonDocument errorsDoc;
+    JsonDocument errorsDoc(wxv::memory::psramJsonAllocator());
     JsonObject allErrors = errorsDoc.to<JsonObject>();
     AppSettingsDirtyFlags dirty;
     JsonObjectConst root = doc.as<JsonObjectConst>();
@@ -4236,7 +4236,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
       if (!alreadyCaptured && snapshotCount < kAppSettingsSectionCount)
         snapshots[snapshotCount++] = captureAppSettingsSnapshot(section);
 
-      JsonDocument sectionErrorsDoc;
+      JsonDocument sectionErrorsDoc(wxv::memory::psramJsonAllocator());
       JsonObject sectionErrors = sectionErrorsDoc.to<JsonObject>();
       applyAppSettingsSection(section, pair.value(), sectionErrors, dirty);
       if (sectionErrors.size() != 0)
@@ -4276,7 +4276,7 @@ bool handleAppApiRequest(const String &method, const String &path, const String 
     if (!isKnownAppSettingsSection(section.c_str()))
       return false;
 
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     if (deserializeJson(doc, requestBody) != DeserializationError::Ok || !doc.is<JsonObject>())
     {
       setAppApiJsonBody(response, 400, "{\"ok\":false,\"error\":\"invalid_json\"}");
@@ -4827,7 +4827,7 @@ void setupWebServer() {
     uint32_t now = millis();
     bool refreshCache = cachedPayload.isEmpty() || static_cast<uint32_t>(now - cacheBuiltAt) >= 5000u;
     if (refreshCache) {
-      JsonDocument doc;
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
       uint32_t weatherUpdatedEpoch = 0;
 
       String dispTemp;
@@ -4917,7 +4917,7 @@ void setupWebServer() {
     if (found < 0)
       found = 0;
 
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonArray arr = doc["networks"].to<JsonArray>();
     const int MAX_NETWORKS = 25;
     int emitted = 0;
@@ -5034,7 +5034,7 @@ void setupWebServer() {
 
     bool after = isScreenOff();
 
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc["screenOff"] = after;
     doc["state"] = after ? "off" : "on";
     doc["changed"] = (before != after);
@@ -5095,7 +5095,7 @@ void setupWebServer() {
 
 #if WEB_UI_MODE == WEB_UI_FULL
   server.on("/settings.json", HTTP_GET, [](AsyncWebServerRequest *req) {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc["wifiSSID"]         = wifiSSID;
     doc["wifiPass"]         = wifiPass;
     unitsToJson(doc.createNestedObject("units"));
@@ -5648,7 +5648,7 @@ void setupWebServer() {
   server.on("/timezones.json", HTTP_GET, [](AsyncWebServerRequest* req){
     static String cachedPayload;
     if (cachedPayload.isEmpty()) {
-      JsonDocument doc;
+      JsonDocument doc(wxv::memory::psramJsonAllocator());
       JsonArray arr = doc.to<JsonArray>();
       size_t count = timezoneCount();
       for (size_t i = 0; i < count; ++i) {
@@ -5669,7 +5669,7 @@ void setupWebServer() {
   });
 
   server.on("/time.json", HTTP_GET, [](AsyncWebServerRequest* req){
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc["epoch"]     = (long)currentEpoch();  // <- RTC
     doc["tzOffset"]  = tzOffset;
     doc["tzStdOffset"] = tzStandardOffset;
@@ -5808,7 +5808,7 @@ void setupWebServer() {
   );
 
   server.on("/worldtime.json", HTTP_GET, [](AsyncWebServerRequest* req){
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonArray ids = doc["ids"].to<JsonArray>();
     JsonArray selections = doc["selections"].to<JsonArray>();
     size_t count = worldTimeSelectionCount();

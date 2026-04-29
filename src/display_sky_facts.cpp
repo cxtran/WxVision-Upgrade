@@ -60,6 +60,8 @@ struct SkyBriefSubpage
 };
 
 using SkyBriefSubpageVector = std::vector<SkyBriefSubpage, wxv::memory::PsramAllocator<SkyBriefSubpage>>;
+using SkyBriefPageVector = std::vector<SkyBriefTextPage, wxv::memory::PsramAllocator<SkyBriefTextPage>>;
+using SkyBriefSectionVector = std::vector<SkyBriefSection, wxv::memory::PsramAllocator<SkyBriefSection>>;
 
 SkyStringVector s_skyBriefWrappedLines;
 String s_skyBriefParagraphText;
@@ -73,7 +75,7 @@ size_t s_skyBriefVisibleChars = 0;
 unsigned long s_skyBriefNextCharMs = 0;
 
 SkyStringVector wrapSkyBriefText(const String &textRaw, int maxWidthPx);
-std::vector<SkyBriefTextPage> paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage);
+SkyBriefPageVector paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage);
 
 SkyStringVector splitSummaryPhrases(const char *raw)
 {
@@ -417,7 +419,7 @@ void appendSkyBriefSentence(String &text, const String &phraseRaw)
 SkyBriefSubpageVector buildSkyBriefSubpages(const wxv::astronomy::SkyFactPage &page)
 {
     SkyBriefSubpageVector subpages;
-    std::vector<SkyBriefSection> sections = {
+    SkyBriefSectionVector sections = {
         {"SEASON", ""},
         {"SUN", ""},
         {"MOON", ""},
@@ -444,7 +446,7 @@ SkyBriefSubpageVector buildSkyBriefSubpages(const wxv::astronomy::SkyFactPage &p
             continue;
 
         const SkyStringVector wrapped = wrapSkyBriefText(sectionText, kSkyBriefBodyWidthPx);
-        const std::vector<SkyBriefTextPage> pages = paginateSkyBriefLines(wrapped, kSkyBriefVisibleLines);
+        const SkyBriefPageVector pages = paginateSkyBriefLines(wrapped, kSkyBriefVisibleLines);
         for (size_t pageIndex = 0; pageIndex < pages.size(); ++pageIndex)
         {
             SkyBriefSubpage subpage;
@@ -665,9 +667,9 @@ SkyStringVector wrapSkyBriefText(const String &textRaw, int maxWidthPx)
     return lines;
 }
 
-std::vector<SkyBriefTextPage> paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage)
+SkyBriefPageVector paginateSkyBriefLines(const SkyStringVector &wrappedLines, size_t linesPerPage)
 {
-    std::vector<SkyBriefTextPage> pages;
+    SkyBriefPageVector pages;
     if (wrappedLines.empty() || linesPerPage == 0)
         return pages;
 
@@ -683,7 +685,7 @@ std::vector<SkyBriefTextPage> paginateSkyBriefLines(const SkyStringVector &wrapp
 
 SkyBriefTextPage currentSkyBriefTextPage(size_t pageStartLine)
 {
-    const std::vector<SkyBriefTextPage> pages = paginateSkyBriefLines(s_skyBriefWrappedLines, kSkyBriefVisibleLines);
+    const SkyBriefPageVector pages = paginateSkyBriefLines(s_skyBriefWrappedLines, kSkyBriefVisibleLines);
     SkyBriefTextPage currentPage;
     if (pages.empty())
         return currentPage;
@@ -701,7 +703,7 @@ SkyBriefTextPage currentSkyBriefTextPage(size_t pageStartLine)
 
 size_t lastSkyBriefPageStartLine()
 {
-    const std::vector<SkyBriefTextPage> pages = paginateSkyBriefLines(s_skyBriefWrappedLines, kSkyBriefVisibleLines);
+    const SkyBriefPageVector pages = paginateSkyBriefLines(s_skyBriefWrappedLines, kSkyBriefVisibleLines);
     if (pages.empty())
         return 0;
     return pages.back().startLine;

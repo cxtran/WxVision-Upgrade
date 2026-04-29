@@ -11,6 +11,7 @@
 #include "keyboard.h"
 #include "menu.h"
 #include "noaa.h"
+#include "psram_utils.h"
 #include "screen_manager.h"
 #include "sensors.h"
 #include "settings.h"
@@ -125,7 +126,7 @@ bool publishSensorDiscovery(const char *topic,
                             const char *entityCategory = nullptr,
                             const char *icon = nullptr)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
@@ -155,7 +156,7 @@ bool publishBinarySensorDiscovery(const char *topic,
                                   const char *entityCategory = nullptr,
                                   const char *icon = nullptr)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
@@ -180,7 +181,7 @@ bool publishSwitchDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
@@ -204,7 +205,7 @@ bool publishNumberDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
@@ -227,7 +228,7 @@ bool publishButtonDiscovery(const char *topic,
                             const char *commandTopic,
                             const char *icon)
 {
-    JsonDocument doc;
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
     JsonObject root = doc.to<JsonObject>();
     root["name"] = name;
     root["unique_id"] = uniqueId;
