@@ -9,6 +9,7 @@
 #include <math.h>
 #include <time.h>
 #include "ScrollLine.h"
+#include "audio_announcer.h"
 #include "psram_utils.h"
 #include "screen_manager.h"
 #include "units.h"
@@ -1404,6 +1405,7 @@ static String lightningAgeShort(unsigned long nowMs, unsigned long updateMs)
 static void handleLightningAlertForEvent(uint32_t epoch, double distanceKm, uint32_t energy)
 {
     (void)energy;
+    constexpr const char *kLightningDetectedClip = "/audio/common/lightning_detect.wav";
     const unsigned long nowMs = millis();
     const bool sameEvent = (epoch != 0 && epoch == s_lastLightningAlertEpoch);
     const bool withinCooldown = (s_lastLightningAlertMs > 0 && (nowMs - s_lastLightningAlertMs) < kLightningRetriggerCooldownMs);
@@ -1414,6 +1416,8 @@ static void handleLightningAlertForEvent(uint32_t epoch, double distanceKm, uint
     queueTemporaryAlertHeading(nearby ? "Lightning Nearby..." : "Lightning Detected",
                                kLightningAlertDisplayMs,
                                (epoch != 0) ? epoch : static_cast<uint32_t>(nowMs));
+    if (!nearby)
+        wxv::announce::playClip(kLightningDetectedClip);
     s_lastLightningAlertEpoch = epoch;
     s_lastLightningAlertMs = nowMs;
 }

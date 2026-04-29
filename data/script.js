@@ -515,6 +515,503 @@ function initWifiScanUI(){
   btn.addEventListener('click', startWifiScan);
 }
 
+var storageCurrentPath = '/';
+var storageEntriesCache = [];
+var storagePlayingPath = '';
+
+function storageSetMsg(text, ok){
+  var el = document.getElementById('storageMsg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.classList.remove('ok','err');
+  if (!text) return;
+  el.classList.add(ok ? 'ok' : 'err');
+}
+
+function storageSetProgress(pct, label){
+  var wrap = document.getElementById('storageProgressWrap');
+  var bar = document.getElementById('storageProgressBar');
+  var textEl = document.getElementById('storageProgressText');
+  var safe = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  if (wrap) wrap.style.display = '';
+  if (bar) bar.style.width = safe + '%';
+  if (textEl) textEl.textContent = label || (safe + '%');
+}
+
+function storageResetProgress(){
+  var wrap = document.getElementById('storageProgressWrap');
+  var bar = document.getElementById('storageProgressBar');
+  var textEl = document.getElementById('storageProgressText');
+  if (wrap) wrap.style.display = 'none';
+  if (bar) bar.style.width = '0%';
+  if (textEl) textEl.textContent = '';
+}
+
+function storageParentPath(path){
+  if (!path || path === '/') return '/';
+  var idx = path.lastIndexOf('/');
+  return idx <= 0 ? '/' : path.slice(0, idx);
+}
+
+function formatPercent(value){
+  var num = Number(value);
+  if (!isFinite(num)) return '--';
+  return Math.round(num) + '%';
+}
+
+function storageTypeLabel(entry){
+  if (!entry) return '--';
+  if (entry.isDir) return 'Folder';
+  var name = String(entry.name || '');
+  var dot = name.lastIndexOf('.');
+  if (dot < 0 || dot === name.length - 1) return 'File';
+  return name.substring(dot + 1).toUpperCase();
+}
+
+function isPlayableAudioEntry(entry){
+  if (!entry || entry.isDir) return false;
+  var name = String(entry.name || '').toLowerCase();
+  return name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.ogg') || name.endsWith('.m4a') || name.endsWith('.aac');
+}
+
+function storageFileUrl(path){
+  return '/api/app/storage/file?path=' + encodeURIComponent(path || '');
+}
+
+function updateStoragePlayButtons(){
+  var buttons = document.querySelectorAll('[data-storage-play-path]');
+  Array.prototype.forEach.call(buttons, function(btn){
+    var path = btn.getAttribute('data-storage-play-path') || '';
+    var active = !!storagePlayingPath && path === storagePlayingPath;
+    btn.classList.toggle('storage-action-active', active);
+    btn.textContent = active ? 'Playing' : 'Play';
+  });
+}
+
+function stopStoragePlayback(){
+  var player = document.getElementById('storageAudioPlayer');
+  if (!player) return;
+  player.pause();
+  player.removeAttribute('src');
+  player.load();
+  storagePlayingPath = '';
+  updateStoragePlayButtons();
+}
+
+function playStorageEntry(entry){
+  if (!entry || !entry.path || !isPlayableAudioEntry(entry)) return;
+  var playerCard = document.getElementById('storagePlayerCard');
+  var player = document.getElementById('storageAudioPlayer');
+  var fileLabel = document.getElementById('storagePlayerFile');
+  if (!player || !playerCard || !fileLabel) return;
+
+  var nextPath = String(entry.path || '');
+  if (storagePlayingPath === nextPath) {
+    if (!player.paused) {
+      player.pause();
+      updateStoragePlayButtons();
+      return;
+    }
+    player.play().then(function(){
+      updateStoragePlayButtons();
+    }).catch(function(){
+      storageSetMsg('Playback failed.', false);
+    });
+    return;
+  }
+
+  storagePlayingPath = nextPath;
+  playerCard.style.display = '';
+  player.src = storageFileUrl(nextPath);
+  fileLabel.textContent = entry.name || nextPath;
+  player.play().then(function(){
+    updateStoragePlayButtons();
+  }).catch(function(){
+    storageSetMsg('Playback failed.', false);
+    stopStoragePlayback();
+  });
+  updateStoragePlayButtons();
+}
+
+function updateStorageSelectionSummary(){
+  var input = document.getElementById('storageUploadFiles');
+  var label = document.getElementById('storageSelectedFiles');
+  if (!label || !input || !input.files) return;
+  if (input.files.length === 0) {
+    label.textContent = 'No files selected.';
+    return;
+  }
+  if (input.files.length === 1) {
+    label.textContent = input.files[0].name;
+    return;
+  }
+  label.textContent = input.files.length + ' files selected';
+}
+
+function renderStorageBreadcrumbs(path){
+  var wrap = document.getElementById('storageBreadcrumbs');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  var rootBtn = document.createElement('button');
+  rootBtn.type = 'button';
+  rootBtn.className = 'storage-breadcrumb' + (path === '/' ? ' current' : '');
+  rootBtn.textContent = 'Root';
+  rootBtn.addEventListener('click', function(){
+    loadStorageDirectory('/');
+  });
+  wrap.appendChild(rootBtn);
+
+  if (!path || path === '/') return;
+  var parts = path.split('/').filter(Boolean);
+  var built = '';
+  parts.forEach(function(part, idx){
+    built += '/' + part;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'storage-breadcrumb' + (idx === parts.length - 1 ? ' current' : '');
+    btn.textContent = part;
+    btn.addEventListener('click', function(){
+      loadStorageDirectory(built);
+    });
+    wrap.appendChild(btn);
+  });
+}
+
+function updateStorageCapacity(totalBytes, usedBytes){
+  var total = Number(totalBytes);
+  var used = Number(usedBytes);
+  var fill = document.getElementById('storageCapacityFill');
+  var textEl = document.getElementById('storageCapacityText');
+  var freeEl = document.getElementById('storageFreeSpace');
+  if (!isFinite(total) || total <= 0 || !isFinite(used) || used < 0) {
+    if (fill) fill.style.width = '0%';
+    if (textEl) textEl.textContent = '--';
+    if (freeEl) freeEl.textContent = '--';
+    return;
+  }
+  var free = Math.max(0, total - used);
+  var pct = Math.max(0, Math.min(100, (used / total) * 100));
+  if (fill) fill.style.width = pct + '%';
+  if (textEl) textEl.textContent = formatBytes(used) + ' used of ' + formatBytes(total) + ' (' + formatPercent(pct) + ')';
+  if (freeEl) freeEl.textContent = formatBytes(free);
+}
+
+function updateStorageListSummary(entries, filterValue){
+  var el = document.getElementById('storageListSummary');
+  if (!el) return;
+  var total = Array.isArray(storageEntriesCache) ? storageEntriesCache.length : 0;
+  var visible = Array.isArray(entries) ? entries.length : 0;
+  var folders = 0;
+  var files = 0;
+  (entries || []).forEach(function(entry){
+    if (entry && entry.isDir) folders++;
+    else files++;
+  });
+  var summary = visible + ' item' + (visible === 1 ? '' : 's') + ' shown';
+  if (total !== visible) summary += ' of ' + total;
+  summary += ' | ' + folders + ' folder' + (folders === 1 ? '' : 's');
+  summary += ' | ' + files + ' file' + (files === 1 ? '' : 's');
+  if (filterValue) summary += ' | filter: ' + filterValue;
+  el.textContent = summary;
+}
+
+function applyStorageFilter(){
+  var input = document.getElementById('storageFilterInput');
+  var filterValue = input ? String(input.value || '').trim().toLowerCase() : '';
+  var entries = storageEntriesCache.slice();
+  if (filterValue) {
+    entries = entries.filter(function(entry){
+      var name = String((entry && entry.name) || '').toLowerCase();
+      var path = String((entry && entry.path) || '').toLowerCase();
+      return name.indexOf(filterValue) >= 0 || path.indexOf(filterValue) >= 0;
+    });
+  }
+  renderStorageEntries(entries);
+  updateStorageListSummary(entries, filterValue);
+}
+
+function escapeHtml(value){
+  return String(value).replace(/[&<>"]/g, function(ch){
+    return ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' })[ch];
+  });
+}
+
+function renderStorageEntries(entries){
+  var list = document.getElementById('storageEntries');
+  if (!list) return;
+  list.innerHTML = '';
+  entries = Array.isArray(entries) ? entries.slice() : [];
+  entries.sort(function(a, b){
+    if (!!(a && a.isDir) !== !!(b && b.isDir)) return a.isDir ? -1 : 1;
+    return String((a && a.name) || '').localeCompare(String((b && b.name) || ''));
+  });
+
+  if (entries.length === 0) {
+    var empty = document.createElement('li');
+    empty.className = 'wifi-scan-empty';
+    empty.textContent = 'Directory is empty.';
+    list.appendChild(empty);
+    return;
+  }
+
+  entries.forEach(function(entry){
+    var li = document.createElement('li');
+    li.className = 'storage-item';
+
+    var info = document.createElement('div');
+    info.className = 'storage-info';
+    var openHref = entry.isDir ? '#' : '/api/app/storage/file?path=' + encodeURIComponent(entry.path || '') + '&download=1';
+    info.innerHTML = '<a class="storage-open-link" href="' + openHref + '"><strong>' + escapeHtml(entry.name || '--') + '</strong>' +
+      '<div class="meta"><span>' + escapeHtml(entry.path || '--') + '</span></div></a>';
+    if (entry.isDir) {
+      info.querySelector('a').addEventListener('click', function(ev){
+        ev.preventDefault();
+        loadStorageDirectory(entry.path);
+      });
+    }
+
+    var type = document.createElement('div');
+    type.className = 'storage-type';
+    type.textContent = storageTypeLabel(entry);
+
+    var size = document.createElement('div');
+    size.className = 'storage-size';
+    size.textContent = entry.isDir ? '--' : (formatBytes(entry.size) || '--');
+
+    var actions = document.createElement('div');
+    actions.className = 'storage-actions';
+
+    if (entry.isDir) {
+      var openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'btn small';
+      openBtn.textContent = 'Open';
+      openBtn.addEventListener('click', function(){
+        loadStorageDirectory(entry.path);
+      });
+      actions.appendChild(openBtn);
+    } else {
+      var down = document.createElement('a');
+      down.className = 'btn small';
+      down.href = storageFileUrl(entry.path) + '&download=1';
+      down.textContent = 'Download';
+      actions.appendChild(down);
+      if (isPlayableAudioEntry(entry)) {
+        var playBtn = document.createElement('button');
+        playBtn.type = 'button';
+        playBtn.className = 'btn small';
+        playBtn.setAttribute('data-storage-play-path', entry.path || '');
+        playBtn.textContent = 'Play';
+        playBtn.addEventListener('click', function(){
+          playStorageEntry(entry);
+        });
+        actions.appendChild(playBtn);
+      }
+    }
+
+    var del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'btn small warn';
+    del.textContent = 'Delete';
+    del.addEventListener('click', function(){
+      deleteStorageEntry(entry);
+    });
+    actions.appendChild(del);
+
+    li.appendChild(info);
+    li.appendChild(type);
+    li.appendChild(size);
+    li.appendChild(actions);
+    list.appendChild(li);
+  });
+  updateStoragePlayButtons();
+}
+
+async function loadStorageDirectory(path){
+  var target = path || storageCurrentPath || '/';
+  try {
+    const res = await fetch('/api/app/storage/list?path=' + encodeURIComponent(target), { cache: 'no-store' });
+    const data = await res.json().catch(function(){ return {}; });
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || 'Unable to load storage.');
+    }
+
+    storageCurrentPath = data.path || '/';
+    setText('storageCurrentPath', storageCurrentPath);
+    renderStorageBreadcrumbs(storageCurrentPath);
+    setText('storageCardType', data.cardType || '--');
+    setText('storageTotalSpace', formatBytes(data.totalBytes) || '--');
+    setText('storageUsedSpace', formatBytes(data.usedBytes) || '--');
+    updateStorageCapacity(data.totalBytes, data.usedBytes);
+    storageEntriesCache = Array.isArray(data.entries) ? data.entries.slice() : [];
+    applyStorageFilter();
+    storageSetMsg('', true);
+  } catch (err) {
+    storageEntriesCache = [];
+    renderStorageBreadcrumbs('/');
+    updateStorageCapacity(NaN, NaN);
+    renderStorageEntries([]);
+    updateStorageListSummary([], '');
+    storageSetMsg((err && err.message) ? err.message : 'Unable to load storage.', false);
+  }
+}
+
+async function deleteStorageEntry(entry){
+  if (!entry || !entry.path) return;
+  var kind = entry.isDir ? 'folder' : 'file';
+  if (!window.confirm('Delete ' + kind + ' ' + entry.path + '?')) return;
+
+  try {
+    const res = await fetch('/api/app/storage/delete?path=' + encodeURIComponent(entry.path) + '&recursive=1', {
+      method: 'POST'
+    });
+    const data = await res.json().catch(function(){ return {}; });
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || 'Delete failed.');
+    }
+    storageSetMsg(data.message || 'Deleted.', true);
+    loadStorageDirectory(storageCurrentPath);
+  } catch (err) {
+    storageSetMsg((err && err.message) ? err.message : 'Delete failed.', false);
+  }
+}
+
+async function createStorageFolder(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  var input = document.getElementById('storageFolderName');
+  var name = input ? String(input.value || '').trim() : '';
+  if (!name) {
+    storageSetMsg('Folder name required.', false);
+    return;
+  }
+
+  var fullPath = storageCurrentPath === '/' ? ('/' + name) : (storageCurrentPath + '/' + name);
+  try {
+    const res = await fetch('/api/app/storage/mkdir?path=' + encodeURIComponent(fullPath), { method: 'POST' });
+    const data = await res.json().catch(function(){ return {}; });
+    if (!res.ok || data.ok === false) {
+      throw new Error(data.error || 'Create folder failed.');
+    }
+    if (input) input.value = '';
+    storageSetMsg(data.message || 'Folder created.', true);
+    loadStorageDirectory(storageCurrentPath);
+  } catch (err) {
+    storageSetMsg((err && err.message) ? err.message : 'Create folder failed.', false);
+  }
+}
+
+function uploadStorageFile(file, index, total){
+  return new Promise(function(resolve, reject){
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/app/storage/upload?dir=' + encodeURIComponent(storageCurrentPath), true);
+    xhr.upload.onprogress = function(ev){
+      if (!ev.lengthComputable) return;
+      var prefix = file && file.name ? file.name : 'Uploading';
+      storageSetProgress((ev.loaded / ev.total) * 100, prefix + ' (' + index + '/' + total + ')');
+    };
+    xhr.onload = function(){
+      var data = {};
+      try { data = JSON.parse(xhr.responseText || '{}'); } catch (e) {}
+      if (xhr.status >= 200 && xhr.status < 300 && data.ok !== false) {
+        resolve(data);
+      } else {
+        reject(new Error(data.error || xhr.responseText || ('HTTP ' + xhr.status)));
+      }
+    };
+    xhr.onerror = function(){
+      reject(new Error('Upload failed.'));
+    };
+    var form = new FormData();
+    form.append('file', file, file.name);
+    xhr.send(form);
+  });
+}
+
+async function uploadStorageFiles(event){
+  if (event && typeof event.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  var input = document.getElementById('storageUploadFiles');
+  var btn = document.getElementById('storageUploadBtn');
+  if (!input || !input.files || input.files.length === 0) {
+    storageSetMsg('Choose one or more files first.', false);
+    return;
+  }
+
+  if (btn) btn.disabled = true;
+  storageResetProgress();
+  try {
+    for (var i = 0; i < input.files.length; i++) {
+      await uploadStorageFile(input.files[i], i + 1, input.files.length);
+    }
+    storageSetProgress(100, 'Upload complete');
+    storageSetMsg('Upload complete.', true);
+    input.value = '';
+    loadStorageDirectory(storageCurrentPath);
+  } catch (err) {
+    storageSetMsg((err && err.message) ? err.message : 'Upload failed.', false);
+  } finally {
+    if (btn) btn.disabled = false;
+    setTimeout(storageResetProgress, 800);
+  }
+}
+
+function initStorageManager(){
+  if (!document.getElementById('storage-manager')) return;
+  var player = document.getElementById('storageAudioPlayer');
+  if (player) {
+    player.addEventListener('ended', function(){
+      storagePlayingPath = '';
+      updateStoragePlayButtons();
+    });
+    player.addEventListener('pause', function(){
+      updateStoragePlayButtons();
+    });
+    player.addEventListener('play', function(){
+      updateStoragePlayButtons();
+    });
+  }
+  var upBtn = document.getElementById('storageUpBtn');
+  if (upBtn) {
+    upBtn.addEventListener('click', function(){
+      loadStorageDirectory(storageParentPath(storageCurrentPath));
+    });
+  }
+  var refreshBtn = document.getElementById('storageRefreshBtn');
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', function(){
+      loadStorageDirectory(storageCurrentPath);
+    });
+  }
+  var createBtn = document.getElementById('storageCreateFolderBtn');
+  if (createBtn) {
+    createBtn.addEventListener('click', createStorageFolder);
+  }
+  var folderInput = document.getElementById('storageFolderName');
+  if (folderInput) {
+    folderInput.addEventListener('keydown', function(ev){
+      if (ev.key === 'Enter') createStorageFolder(ev);
+    });
+  }
+  var uploadBtn = document.getElementById('storageUploadBtn');
+  if (uploadBtn) {
+    uploadBtn.addEventListener('click', uploadStorageFiles);
+  }
+  var uploadInput = document.getElementById('storageUploadFiles');
+  if (uploadInput) {
+    uploadInput.addEventListener('change', updateStorageSelectionSummary);
+  }
+  var filterInput = document.getElementById('storageFilterInput');
+  if (filterInput) {
+    filterInput.addEventListener('input', applyStorageFilter);
+  }
+  updateStorageSelectionSummary();
+  loadStorageDirectory('/');
+}
+
 var fullStatusPending = false;
 
 function formatUptimeLocal(sec){
@@ -2155,4 +2652,8 @@ window.addEventListener('load', function(){
   var full = document.getElementById('full-status');
   if (!full) return;
   loadFullStatus();
+});
+
+window.addEventListener('load', function(){
+  initStorageManager();
 });

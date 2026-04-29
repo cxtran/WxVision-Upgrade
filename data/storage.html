@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WxVision Storage</title>
+  <link rel="stylesheet" href="style.css">
+  <script defer src="script.js"></script>
+</head>
+<body>
+<header>
+  <h1>WxVision</h1>
+  <nav>
+    <a class="btn-link" href="/">Home</a>
+    <a class="btn-link" href="/config.html">Settings</a>
+    <a class="btn-link" href="/status.html">Full Status</a>
+    <a class="btn-link" href="/storage" aria-current="page">Storage</a>
+    <a class="btn-link" href="/ota">OTA Update</a>
+    <a class="btn-link warn" href="/reboot">Reboot</a>
+  </nav>
+</header>
+
+<main class="container" id="storage-manager">
+  <section class="card">
+    <div class="storage-hero">
+      <div>
+        <h2>microSD Storage</h2>
+        <p class="tiny">Manage files directly on the card without removing it from the device.</p>
+      </div>
+    </div>
+    <div class="storage-stats-grid">
+      <div class="storage-stat">
+        <span class="storage-stat-label">Card Type</span>
+        <strong id="storageCardType">--</strong>
+      </div>
+      <div class="storage-stat">
+        <span class="storage-stat-label">Total Space</span>
+        <strong id="storageTotalSpace">--</strong>
+      </div>
+      <div class="storage-stat">
+        <span class="storage-stat-label">Used Space</span>
+        <strong id="storageUsedSpace">--</strong>
+      </div>
+      <div class="storage-stat">
+        <span class="storage-stat-label">Free Space</span>
+        <strong id="storageFreeSpace">--</strong>
+      </div>
+    </div>
+
+    <div class="storage-capacity">
+      <div class="storage-capacity-bar">
+        <div class="storage-capacity-fill" id="storageCapacityFill" style="width:0%;"></div>
+      </div>
+      <div class="tiny" id="storageCapacityText">--</div>
+    </div>
+
+    <div class="storage-status-row">
+      <span class="msg" id="storageMsg"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="storage-list-head">
+      <div>
+        <h2>Directory Listing</h2>
+        <p class="tiny" id="storageListSummary">Loading...</p>
+      </div>
+      <div class="storage-list-tools">
+        <input id="storageFilterInput" type="text" placeholder="Filter files and folders">
+      </div>
+    </div>
+
+    <div class="storage-path-panel">
+      <div class="storage-path-topbar">
+        <div>
+          <div class="storage-path-label">Current Path</div>
+          <div class="storage-breadcrumbs" id="storageBreadcrumbs"></div>
+        </div>
+        <div class="storage-toolbar">
+          <button class="btn" id="storageUpBtn" type="button">Up</button>
+          <button class="btn" id="storageRefreshBtn" type="button">Refresh</button>
+        </div>
+      </div>
+      <div class="storage-path-value" id="storageCurrentPath">/</div>
+    </div>
+
+    <div class="storage-layout">
+      <div class="storage-panel">
+        <div class="storage-panel-head">
+          <h3>New Folder</h3>
+          <span class="tiny">Create inside the current path.</span>
+        </div>
+        <div class="storage-inline">
+          <input id="storageFolderName" type="text" placeholder="folder name">
+          <button class="btn" id="storageCreateFolderBtn" type="button">Create</button>
+        </div>
+      </div>
+
+      <div class="storage-panel">
+        <div class="storage-panel-head">
+          <h3>Upload Files</h3>
+          <span class="tiny" id="storageSelectedFiles">No files selected.</span>
+        </div>
+        <div class="storage-upload-stack">
+          <input id="storageUploadFiles" type="file" multiple>
+          <div class="actions">
+            <button class="btn primary" id="storageUploadBtn" type="button">Upload Selected</button>
+          </div>
+          <div class="progress" id="storageProgressWrap" style="display:none;">
+            <div class="progress-bar" id="storageProgressBar" style="width:0%;"></div>
+          </div>
+          <div class="tiny" id="storageProgressText"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="storage-table-wrap">
+      <div class="storage-table storage-table-header" aria-hidden="true">
+        <div>Name</div>
+        <div>Type</div>
+        <div>Size</div>
+        <div>Actions</div>
+      </div>
+      <ul class="storage-list" id="storageEntries">
+        <li class="wifi-scan-empty">Loading...</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="card" id="storagePlayerCard" style="display:none;">
+    <div class="storage-list-head">
+      <div>
+        <h2>Audio Player</h2>
+        <p class="tiny" id="storagePlayerFile">No file selected.</p>
+      </div>
+    </div>
+    <audio id="storageAudioPlayer" controls preload="none" style="width:100%;"></audio>
+  </section>
+</main>
+</body>
+</html>

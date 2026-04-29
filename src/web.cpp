@@ -30,6 +30,7 @@
 #include "menu.h"
 #include "mp3_player.h"
 #include "noaa.h"
+#include "sd_card.h"
 #include "worldtime.h"
 #include "app_state.h"
 #include "weather_provider.h"
@@ -110,6 +111,7 @@ static constexpr size_t kMaxSettingsBodyBytes = 8192;
 static constexpr size_t kMaxTimeBodyBytes = 2048;
 static constexpr size_t kMaxWorldTimeBodyBytes = 8192;
 static constexpr size_t kMaxAppBodyBytes = 1024;
+static constexpr size_t kMaxSdEntriesPerResponse = 256;
 static constexpr uint32_t kAppWeatherBroadcastMinMs = 5000u;
 static constexpr uint32_t kAppIndoorBroadcastMinMs = 5000u;
 static constexpr uint32_t kAppDeviceBroadcastMinMs = 10000u;
@@ -314,6 +316,199 @@ void sendEmbeddedAssetByPath(AsyncWebServerRequest *req, const char *path)
   }
   sendEmbeddedAsset(req, *asset);
 }
+
+bool ensureStorageMounted()
+{
+  return wxv::storage::isMounted() || wxv::storage::begin();
+}
+
+void sendJsonMessage(AsyncWebServerRequest *req, int status, bool ok, const String &message)
+{
+  JsonDocument doc(wxv::memory::psramJsonAllocator());
+  doc["ok"] = ok;
+  if (ok)
+    doc["message"] = message;
+  else
+    doc["error"] = message;
+
+  String payload;
+  serializeJson(doc, payload);
+  req->send(status, "application/json", payload);
+}
+
+bool normalizeStoragePath(const String &rawPath, String &outPath)
+{
+  String working = rawPath;
+  working.trim();
+  working.replace('\\', '/');
+  while (working.indexOf("//") >= 0)
+    working.replace("//", "/");
+
+  if (working.isEmpty())
+  {
+    outPath = "/";
+    return true;
+  }
+
+  if (!working.startsWith("/"))
+    working = "/" + working;
+
+  String normalized = "/";
+  int start = 1;
+  while (start <= working.length())
+  {
+    int slash = working.indexOf('/', start);
+    String segment = (slash >= 0) ? working.substring(start, slash) : working.substring(start);
+    if (!segment.isEmpty())
+    {
+      if (segment == "." || segment == "..")
+        return false;
+      if (normalized.length() > 1)
+        normalized += "/";
+      normalized += segment;
+    }
+    if (slash < 0)
+      break;
+    start = slash + 1;
+  }
+
+  outPath = normalized;
+  return true;
+}
+
+bool normalizeStorageName(const String &rawName, String &outName)
+{
+  String name = rawName;
+  name.trim();
+  if (name.isEmpty() || name == "." || name == "..")
+    return false;
+
+  for (size_t i = 0; i < name.length(); ++i)
+  {
+    const char ch = name.charAt(i);
+    if (ch == '/' || ch == '\\' || static_cast<unsigned char>(ch) < 32)
+      return false;
+  }
+
+  outName = name;
+  return true;
+}
+
+String storageParentPath(const String &path)
+{
+  if (path.length() <= 1)
+    return "/";
+  const int slash = path.lastIndexOf('/');
+  if (slash <= 0)
+    return "/";
+  return path.substring(0, slash);
+}
+
+bool joinStoragePath(const String &dir, const String &name, String &outPath)
+{
+  String normalizedDir;
+  String normalizedName;
+  if (!normalizeStoragePath(dir, normalizedDir) || !normalizeStorageName(name, normalizedName))
+    return false;
+
+  outPath = (normalizedDir == "/") ? ("/" + normalizedName) : (normalizedDir + "/" + normalizedName);
+  return true;
+}
+
+bool storagePathIsDirectory(const String &path)
+{
+  File node = SD.open(path.c_str(), FILE_READ);
+  if (!node)
+    return false;
+  const bool isDir = node.isDirectory();
+  node.close();
+  return isDir;
+}
+
+bool deleteStorageRecursive(const String &path)
+{
+  if (path.isEmpty() || path == "/")
+    return false;
+
+  File node = SD.open(path.c_str(), FILE_READ);
+  if (!node)
+    return false;
+
+  const bool isDir = node.isDirectory();
+  node.close();
+
+  if (!isDir)
+    return wxv::storage::remove(path.c_str());
+
+  File dir = SD.open(path.c_str(), FILE_READ);
+  if (!dir || !dir.isDirectory())
+  {
+    if (dir)
+      dir.close();
+    return false;
+  }
+
+  File child = dir.openNextFile();
+  while (child)
+  {
+    const String childPath = child.path();
+    child.close();
+    if (!deleteStorageRecursive(childPath))
+    {
+      dir.close();
+      return false;
+    }
+    child = dir.openNextFile();
+  }
+  dir.close();
+
+  return wxv::storage::rmdir(path.c_str());
+}
+
+const char *storageContentType(const String &path)
+{
+  String lower = path;
+  lower.toLowerCase();
+  if (lower.endsWith(".txt") || lower.endsWith(".log") || lower.endsWith(".csv"))
+    return "text/plain";
+  if (lower.endsWith(".json"))
+    return "application/json";
+  if (lower.endsWith(".html"))
+    return "text/html";
+  if (lower.endsWith(".css"))
+    return "text/css";
+  if (lower.endsWith(".js"))
+    return "application/javascript";
+  if (lower.endsWith(".wav"))
+    return "audio/wav";
+  if (lower.endsWith(".mp3"))
+    return "audio/mpeg";
+  if (lower.endsWith(".png"))
+    return "image/png";
+  if (lower.endsWith(".jpg") || lower.endsWith(".jpeg"))
+    return "image/jpeg";
+  if (lower.endsWith(".gif"))
+    return "image/gif";
+  if (lower.endsWith(".svg"))
+    return "image/svg+xml";
+  if (lower.endsWith(".bin"))
+    return "application/octet-stream";
+  return "application/octet-stream";
+}
+
+struct SdUploadState
+{
+  File file;
+  String path;
+  String error;
+  size_t written = 0;
+
+  ~SdUploadState()
+  {
+    if (file)
+      file.close();
+  }
+};
 } // namespace
 
 static bool queueNtpSyncTask();
@@ -1801,7 +1996,7 @@ static const char kMinimalHomePage[] PROGMEM = R"rawliteral(
 R"rawliteral()rawliteral";
 
 static const char kMinimalHomePage2[] PROGMEM = R"rawliteral(
-</head><body><header><h1>WxVision Recovery</h1><p>Minimal admin interface. The app runtime API remains the primary interface.</p><nav><a class="btn primary" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Device</b><span id="deviceName">--</span></div><div class="kv"><b>IP</b><span id="ip">--</span></div><div class="kv"><b>Wi-Fi SSID</b><span id="ssid">--</span></div><div class="kv"><b>RSSI</b><span id="rssi">--</span></div><div class="kv"><b>Uptime</b><span id="uptime">--</span></div><div class="kv"><b>Screen</b><span id="screen">--</span></div></div><div class="actions"><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a><button class="btn warn" id="rebootBtn" type="button">Reboot</button><button class="btn" id="restoreBtn" type="button">Restore Defaults</button><button class="btn danger" id="factoryBtn" type="button">Factory Reset</button></div><p class="msg" id="msg"></p></section><section class="card"><div class="grid"><div class="kv"><b>App API</b><span id="appApi">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceApi">Checking...</span></div><div class="kv"><b>WebSocket</b><span>/ws/app</span></div><div class="kv"><b>Diagnostics</b><span><a href="/status.json">status.json</a> | <a href="/trend.json?limit=60">trend.json</a></span></div></div></section></main><script>
+</head><body><header><h1>WxVision Recovery</h1><p>Minimal admin interface. The app runtime API remains the primary interface.</p><nav><a class="btn primary" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/storage">Storage</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Device</b><span id="deviceName">--</span></div><div class="kv"><b>IP</b><span id="ip">--</span></div><div class="kv"><b>Wi-Fi SSID</b><span id="ssid">--</span></div><div class="kv"><b>RSSI</b><span id="rssi">--</span></div><div class="kv"><b>Uptime</b><span id="uptime">--</span></div><div class="kv"><b>Screen</b><span id="screen">--</span></div></div><div class="actions"><a class="btn" href="/network">Network</a><a class="btn" href="/storage">Storage</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a><button class="btn warn" id="rebootBtn" type="button">Reboot</button><button class="btn" id="restoreBtn" type="button">Restore Defaults</button><button class="btn danger" id="factoryBtn" type="button">Factory Reset</button></div><p class="msg" id="msg"></p></section><section class="card"><div class="grid"><div class="kv"><b>App API</b><span id="appApi">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceApi">Checking...</span></div><div class="kv"><b>WebSocket</b><span>/ws/app</span></div><div class="kv"><b>Diagnostics</b><span><a href="/status.json">status.json</a> | <a href="/trend.json?limit=60">trend.json</a></span></div></div></section></main><script>
 function setText(id,v){var el=document.getElementById(id);if(el)el.textContent=(v===undefined||v===null||v==='')?'--':String(v);}
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
 async function postAction(path,confirmText){if(confirmText&&!window.confirm(confirmText))return;setMsg('Working...',true);try{const res=await fetch(path,{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok)throw new Error(data.error||data.message||'Request failed');setMsg(data.message||'Queued.',true);}catch(err){setMsg(err.message||'Request failed',false);}}
@@ -1819,7 +2014,7 @@ static const char kMinimalNetworkPage[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 static const char kMinimalNetworkPage2[] PROGMEM = R"rawliteral(
-</head><body><header><h1>Network Recovery</h1><p>Reconnect the device without the full legacy web UI.</p><nav><a class="btn" href="/">Home</a><a class="btn primary" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Current SSID</b><span id="currentSsid">--</span></div><div class="kv"><b>Current IP</b><span id="currentIp">--</span></div><div class="kv"><b>AP Recovery</b><span id="apInfo">--</span></div></div><div class="row"><label for="ssid">Wi-Fi SSID</label><input id="ssid" autocomplete="username" spellcheck="false"></div><div class="row"><label for="password">Wi-Fi Password</label><input id="password" type="password" autocomplete="current-password"></div><div class="actions"><button class="btn primary" id="saveBtn" type="button">Save and Reconnect</button><button class="btn" id="scanBtn" type="button">Scan Networks</button><button class="btn" id="reconnectBtn" type="button">Reconnect Only</button></div><p class="msg" id="msg"></p></section><section class="card"><h2>Nearby Networks</h2><ul id="scanList"><li class="net"><span>No scan yet.</span></li></ul></section></main><script>
+</head><body><header><h1>Network Recovery</h1><p>Reconnect the device without the full legacy web UI.</p><nav><a class="btn" href="/">Home</a><a class="btn primary" href="/network">Network</a><a class="btn" href="/storage">Storage</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Current SSID</b><span id="currentSsid">--</span></div><div class="kv"><b>Current IP</b><span id="currentIp">--</span></div><div class="kv"><b>AP Recovery</b><span id="apInfo">--</span></div></div><div class="row"><label for="ssid">Wi-Fi SSID</label><input id="ssid" autocomplete="username" spellcheck="false"></div><div class="row"><label for="password">Wi-Fi Password</label><input id="password" type="password" autocomplete="current-password"></div><div class="actions"><button class="btn primary" id="saveBtn" type="button">Save and Reconnect</button><button class="btn" id="scanBtn" type="button">Scan Networks</button><button class="btn" id="reconnectBtn" type="button">Reconnect Only</button></div><p class="msg" id="msg"></p></section><section class="card"><h2>Nearby Networks</h2><ul id="scanList"><li class="net"><span>No scan yet.</span></li></ul></section></main><script>
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
 function text(v,fallback){return(v===undefined||v===null||v==='')?(fallback||'--'):String(v);}
 function pickNetwork(ssid){document.getElementById('ssid').value=ssid||'';document.getElementById('password').focus();}
@@ -1836,7 +2031,7 @@ static const char kMinimalDiagnosticsPage[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 static const char kMinimalDiagnosticsPage2[] PROGMEM = R"rawliteral(
-</head><body><header><h1>Diagnostics</h1><p>Lightweight device info and app API health.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/ota">OTA Update</a><a class="btn primary" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Status JSON</b><span id="statusCheck">Checking...</span></div><div class="kv"><b>App State API</b><span id="stateCheck">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceCheck">Checking...</span></div><div class="kv"><b>Trend Log</b><span><a href="/trend.json?limit=60">Open trend.json</a></span></div></div></section><section class="card"><h2>Device Snapshot</h2><pre id="statusDump">Loading...</pre></section><section class="card"><h2>App Snapshot</h2><pre id="appDump">Loading...</pre></section></main><script>
+</head><body><header><h1>Diagnostics</h1><p>Lightweight device info and app API health.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/storage">Storage</a><a class="btn" href="/ota">OTA Update</a><a class="btn primary" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Status JSON</b><span id="statusCheck">Checking...</span></div><div class="kv"><b>App State API</b><span id="stateCheck">Checking...</span></div><div class="kv"><b>App Device API</b><span id="deviceCheck">Checking...</span></div><div class="kv"><b>Trend Log</b><span><a href="/trend.json?limit=60">Open trend.json</a></span></div></div></section><section class="card"><h2>Device Snapshot</h2><pre id="statusDump">Loading...</pre></section><section class="card"><h2>App Snapshot</h2><pre id="appDump">Loading...</pre></section></main><script>
 async function loadJson(path,target,statusId){try{const res=await fetch(path,{cache:'no-store'});document.getElementById(statusId).textContent=res.ok?'OK':'HTTP '+res.status;const data=await res.json().catch(()=>({error:'invalid json'}));document.getElementById(target).textContent=JSON.stringify(data,null,2);}catch(err){document.getElementById(statusId).textContent='Unavailable';document.getElementById(target).textContent=String(err&&err.message||err);}}
 loadJson('/status.json','statusDump','statusCheck');loadJson('/api/app/state','appDump','stateCheck');fetch('/api/app/device',{cache:'no-store'}).then(function(res){document.getElementById('deviceCheck').textContent=res.ok?'OK':'HTTP '+res.status;}).catch(function(){document.getElementById('deviceCheck').textContent='Unavailable';});
 </script></body></html>
@@ -1847,12 +2042,52 @@ static const char kMinimalOtaPage[] PROGMEM = R"rawliteral(
 )rawliteral";
 
 static const char kMinimalOtaPage2[] PROGMEM = R"rawliteral(
-</head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><div class="row"><div id="progressWrap" style="display:none;width:100%;margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="margin:0">Upload Progress</label><span id="progressText">0%</span></div><div style="width:100%;height:12px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151"><div id="progressBar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4)"></div></div></div></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
+</head><body><header><h1>OTA Update</h1><p>Upload a firmware <code>.bin</code>. The device will reboot after a successful update.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn" href="/storage">Storage</a><a class="btn primary" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="row"><label for="firmware">Firmware File</label><input id="firmware" type="file" accept=".bin,application/octet-stream"></div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Update</button></div><div class="row"><div id="progressWrap" style="display:none;width:100%;margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="margin:0">Upload Progress</label><span id="progressText">0%</span></div><div style="width:100%;height:12px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151"><div id="progressBar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4)"></div></div></div></div><p class="msg" id="msg"></p><div class="tiny">Expected file: <code>.pio/build/esp32dev/firmware.bin</code></div></section></main><script>
 function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
 function setProgress(pct){var wrap=document.getElementById('progressWrap');var bar=document.getElementById('progressBar');var text=document.getElementById('progressText');if(!wrap||!bar||!text)return;var safe=Math.max(0,Math.min(100,Math.round(pct||0)));wrap.style.display='block';bar.style.width=safe+'%';text.textContent=safe+'%';}
 function resetProgress(){var wrap=document.getElementById('progressWrap');if(wrap)wrap.style.display='none';setProgress(0);}
 function pollForReturn(attempt){if(attempt>40){setMsg('Device did not come back. Power-cycle if needed.',false);document.getElementById('uploadBtn').disabled=false;return;}setTimeout(function(){fetch('/status.json',{cache:'no-store'}).then(function(res){if(!res.ok)throw new Error('offline');return res.json();}).then(function(){setMsg('Upgrade complete. New firmware is running.',true);}).catch(function(){pollForReturn(attempt+1);});},1000);}
 document.getElementById('uploadBtn').addEventListener('click',function(){var input=document.getElementById('firmware');if(!input.files||!input.files.length){setMsg('Choose a firmware .bin file first.',false);return;}var file=input.files[0];var btn=this;var uploaded=false;btn.disabled=true;resetProgress();setProgress(0);setMsg('Uploading firmware...',true);var xhr=new XMLHttpRequest();xhr.open('POST','/update',true);xhr.upload.onprogress=function(event){if(!event.lengthComputable)return;setProgress((event.loaded/event.total)*100);};xhr.upload.onload=function(){uploaded=true;setProgress(100);setMsg('Upload sent. Waiting for device...',true);};xhr.onreadystatechange=function(){if(xhr.readyState!==4)return;if(xhr.status>=200&&xhr.status<300){setProgress(100);setMsg('Upload complete. Device will reboot shortly...',true);pollForReturn(0);}else if(uploaded&&xhr.status===0){setMsg('Upload sent. Device is rebooting...',true);setProgress(100);pollForReturn(0);}else{setMsg('OTA failed: '+(xhr.responseText||xhr.statusText||xhr.status),false);btn.disabled=false;}};xhr.onerror=function(){if(uploaded){setMsg('Upload sent. Device is rebooting...',true);setProgress(100);pollForReturn(0);}else{setMsg('OTA failed: network error',false);btn.disabled=false;}};var form=new FormData();form.append('firmware',file,file.name);xhr.send(form);});
+</script></body></html>
+)rawliteral";
+
+static const char kMinimalStoragePage[] PROGMEM = R"rawliteral(
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>WxVision Storage</title>
+)rawliteral";
+
+static const char kMinimalStoragePage2[] PROGMEM = R"rawliteral(
+</head><body><header><h1>microSD Storage</h1><p>Browse, upload, create folders, download, play, and delete files on the device SD card.</p><nav><a class="btn" href="/">Home</a><a class="btn" href="/network">Network</a><a class="btn primary" href="/storage">Storage</a><a class="btn" href="/ota">OTA Update</a><a class="btn" href="/diagnostics">Diagnostics</a></nav></header><main><section class="card"><div class="grid"><div class="kv"><b>Card</b><span id="cardInfo">--</span></div><div class="kv"><b>Space</b><span id="spaceInfo">--</span></div><div class="kv"><b>Status</b><span id="mountInfo">--</span></div></div><p class="msg" id="msg"></p></section><section class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0 0 6px">Directory Listing</h2><div class="tiny" id="listSummary">Loading...</div></div><div class="actions" style="margin-top:0"><button class="btn" id="upBtn" type="button">Up</button><button class="btn" id="refreshBtn" type="button">Refresh</button></div></div><div class="row"><label>Current Path</label><div><div id="crumbs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px"></div><div id="currentPath">/</div></div></div><div class="row"><label for="folderName">New Folder</label><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><input id="folderName" type="text" placeholder="folder name" style="flex:1 1 220px"><button class="btn" id="mkdirBtn" type="button">Create</button></div></div><div class="row"><label for="uploadFiles">Upload Files</label><div><input id="uploadFiles" type="file" multiple><div class="tiny" id="selectedFiles" style="margin-top:6px">No files selected.</div><div class="actions"><button class="btn primary" id="uploadBtn" type="button">Upload Selected</button></div><div id="progressWrap" style="display:none;width:100%;margin-top:12px"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><label style="margin:0">Upload Progress</label><span id="progressText">0%</span></div><div style="width:100%;height:12px;background:#1f2937;border-radius:999px;overflow:hidden;border:1px solid #374151"><div id="progressBar" style="width:0%;height:100%;background:linear-gradient(90deg,#22c55e,#06b6d4)"></div></div></div></div></div></div><ul id="entryList"><li class="net"><span>Loading...</span></li></ul></section><section class="card" id="playerCard" style="display:none;"><h2>Audio Player</h2><div class="tiny" id="playerFile">No file selected.</div><div class="row"><audio id="audioPlayer" controls preload="none" style="width:100%;"></audio></div></section></main><script>
+var currentPath='/';
+var playingPath='';
+function setMsg(t,ok){var el=document.getElementById('msg');if(!el)return;el.textContent=t||'';el.className='msg'+(t?(' '+(ok?'ok':'err')):'');}
+function text(v){return(v===undefined||v===null||v==='')?'--':String(v);}
+function formatBytes(v){var n=Number(v);if(!isFinite(n)||n<0)return'--';var u=['B','KB','MB','GB'];var i=0;while(n>=1024&&i<u.length-1){n/=1024;i++;}var p=(i===0||n>=100)?0:(n>=10?1:2);return n.toFixed(p)+' '+u[i];}
+function setProgress(pct){var wrap=document.getElementById('progressWrap');var bar=document.getElementById('progressBar');var textEl=document.getElementById('progressText');if(!wrap||!bar||!textEl)return;var safe=Math.max(0,Math.min(100,Math.round(pct||0)));wrap.style.display='block';bar.style.width=safe+'%';textEl.textContent=safe+'%';}
+function resetProgress(){var wrap=document.getElementById('progressWrap');if(wrap)wrap.style.display='none';setProgress(0);}
+function parentPath(path){if(!path||path==='/')return'/';var idx=path.lastIndexOf('/');return idx<=0?'/':path.slice(0,idx);}
+function esc(value){return String(value).replace(/[&<>"]/g,function(ch){return({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[ch];});}
+function updateSelectedFiles(){var input=document.getElementById('uploadFiles');var el=document.getElementById('selectedFiles');if(!input||!el||!input.files)return;if(input.files.length===0){el.textContent='No files selected.';return;}if(input.files.length===1){el.textContent=input.files[0].name;return;}el.textContent=input.files.length+' files selected';}
+function renderCrumbs(path){var wrap=document.getElementById('crumbs');if(!wrap)return;wrap.innerHTML='';var mk=function(label,target,current){var b=document.createElement('button');b.type='button';b.className='btn';b.textContent=label;if(current){b.style.background='#67d3ff';b.style.color='#071019';b.style.borderColor='#67d3ff';}b.addEventListener('click',function(){loadDirectory(target);});wrap.appendChild(b);};mk('Root','/',path==='/');if(!path||path==='/')return;var parts=path.split('/').filter(Boolean);var built='';parts.forEach(function(part,idx){built+='/'+part;mk(part,built,idx===parts.length-1);});}
+function isPlayable(entry){if(!entry||entry.isDir)return false;var name=String(entry.name||'').toLowerCase();return name.endsWith('.mp3')||name.endsWith('.wav')||name.endsWith('.ogg')||name.endsWith('.m4a')||name.endsWith('.aac');}
+function fileUrl(path){return'/api/app/storage/file?path='+encodeURIComponent(path||'');}
+function updatePlayButtons(){document.querySelectorAll('[data-play-path]').forEach(function(btn){var active=playingPath&&btn.getAttribute('data-play-path')===playingPath;btn.textContent=active?'Playing':'Play';if(active){btn.style.background='#67d3ff';btn.style.color='#071019';btn.style.borderColor='#67d3ff';}else{btn.style.background='';btn.style.color='';btn.style.borderColor='';}});}
+function playEntry(entry){if(!isPlayable(entry))return;var card=document.getElementById('playerCard');var player=document.getElementById('audioPlayer');var label=document.getElementById('playerFile');if(!card||!player||!label)return;card.style.display='';label.textContent=entry.name||entry.path||'Audio';if(playingPath===entry.path){if(!player.paused){player.pause();updatePlayButtons();return;}player.play().then(updatePlayButtons).catch(function(){setMsg('Playback failed',false);});return;}playingPath=entry.path||'';player.src=fileUrl(entry.path);player.play().then(updatePlayButtons).catch(function(){setMsg('Playback failed',false);playingPath='';updatePlayButtons();});updatePlayButtons();}
+function renderEntries(entries){var list=document.getElementById('entryList');if(!list)return;list.innerHTML='';entries=(entries||[]).slice().sort(function(a,b){if(!!a.isDir!==!!b.isDir)return a.isDir?-1:1;return String(a.name||'').localeCompare(String(b.name||''));});var folders=0,files=0;if(!entries.length){list.innerHTML='<li class=\"net\"><span>Directory is empty.</span></li>';document.getElementById('listSummary').textContent='0 items';return;}entries.forEach(function(entry){if(entry.isDir)folders++;else files++;var li=document.createElement('li');li.className='net';var left=document.createElement('div');left.innerHTML='<div>'+esc(entry.name||'--')+'</div><div class=\"meta\">'+(entry.isDir?'Folder':formatBytes(entry.size))+' | '+esc(entry.path||'--')+'</div>';var actions=document.createElement('div');actions.style.display='flex';actions.style.gap='8px';actions.style.flexWrap='wrap';if(entry.isDir){var openBtn=document.createElement('button');openBtn.className='btn';openBtn.type='button';openBtn.textContent='Open';openBtn.addEventListener('click',function(){loadDirectory(entry.path);});actions.appendChild(openBtn);}else{var down=document.createElement('a');down.className='btn';down.href=fileUrl(entry.path)+'&download=1';down.textContent='Download';actions.appendChild(down);if(isPlayable(entry)){var playBtn=document.createElement('button');playBtn.className='btn';playBtn.type='button';playBtn.setAttribute('data-play-path',entry.path||'');playBtn.textContent='Play';playBtn.addEventListener('click',function(){playEntry(entry);});actions.appendChild(playBtn);}}var del=document.createElement('button');del.className='btn danger';del.type='button';del.textContent='Delete';del.addEventListener('click',function(){deleteEntry(entry);});actions.appendChild(del);li.appendChild(left);li.appendChild(actions);list.appendChild(li);});document.getElementById('listSummary').textContent=entries.length+' items | '+folders+' folders | '+files+' files';updatePlayButtons();}
+async function loadDirectory(path){var target=path||currentPath||'/';try{const res=await fetch('/api/app/storage/list?path='+encodeURIComponent(target),{cache:'no-store'});const data=await res.json().catch(()=>({}));if(!res.ok||data.ok===false)throw new Error(data.error||'Load failed');currentPath=data.path||'/';document.getElementById('currentPath').textContent=currentPath;document.getElementById('cardInfo').textContent=text(data.cardType);document.getElementById('spaceInfo').textContent=formatBytes(data.usedBytes)+' used / '+formatBytes(data.totalBytes);document.getElementById('mountInfo').textContent=data.mounted?'Mounted':'Unavailable';renderEntries(data.entries||[]);setMsg('',true);}catch(err){renderEntries([]);setMsg(err.message||'Load failed',false);}}
+async function deleteEntry(entry){if(!entry||!entry.path)return;if(!window.confirm('Delete '+(entry.isDir?'folder':'file')+' '+entry.path+'?'))return;try{const res=await fetch('/api/app/storage/delete?path='+encodeURIComponent(entry.path)+'&recursive=1',{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok||data.ok===false)throw new Error(data.error||'Delete failed');setMsg(data.message||'Deleted.',true);loadDirectory(currentPath);}catch(err){setMsg(err.message||'Delete failed',false);}}
+async function createFolder(){var name=document.getElementById('folderName').value.trim();if(!name){setMsg('Folder name required.',false);return;}var path=(currentPath==='/'?'/'+name:currentPath+'/'+name);try{const res=await fetch('/api/app/storage/mkdir?path='+encodeURIComponent(path),{method:'POST'});const data=await res.json().catch(()=>({}));if(!res.ok||data.ok===false)throw new Error(data.error||'Create failed');document.getElementById('folderName').value='';setMsg(data.message||'Folder created.',true);loadDirectory(currentPath);}catch(err){setMsg(err.message||'Create failed',false);}}
+function uploadOne(file){return new Promise(function(resolve,reject){var xhr=new XMLHttpRequest();xhr.open('POST','/api/app/storage/upload?dir='+encodeURIComponent(currentPath),true);xhr.upload.onprogress=function(ev){if(ev.lengthComputable)setProgress((ev.loaded/ev.total)*100);};xhr.onload=function(){var data={};try{data=JSON.parse(xhr.responseText||'{}');}catch(e){}if(xhr.status>=200&&xhr.status<300&&(data.ok!==false)){resolve(data);}else{reject(new Error(data.error||xhr.responseText||('HTTP '+xhr.status)));}};xhr.onerror=function(){reject(new Error('Upload failed'));};var form=new FormData();form.append('file',file,file.name);xhr.send(form);});}
+async function uploadFiles(){var input=document.getElementById('uploadFiles');if(!input.files||!input.files.length){setMsg('Choose one or more files first.',false);return;}var btn=document.getElementById('uploadBtn');btn.disabled=true;resetProgress();try{for(var i=0;i<input.files.length;i++){setMsg('Uploading '+input.files[i].name+' ('+(i+1)+'/'+input.files.length+')...',true);await uploadOne(input.files[i]);}setProgress(100);setMsg('Upload complete.',true);input.value='';loadDirectory(currentPath);}catch(err){setMsg(err.message||'Upload failed',false);}finally{btn.disabled=false;setTimeout(resetProgress,600);}}
+document.getElementById('upBtn').addEventListener('click',function(){loadDirectory(parentPath(currentPath));});
+document.getElementById('refreshBtn').addEventListener('click',function(){loadDirectory(currentPath);});
+document.getElementById('mkdirBtn').addEventListener('click',createFolder);
+document.getElementById('uploadBtn').addEventListener('click',uploadFiles);
+document.getElementById('uploadFiles').addEventListener('change',updateSelectedFiles);
+document.getElementById('audioPlayer').addEventListener('ended',function(){playingPath='';updatePlayButtons();});
+document.getElementById('audioPlayer').addEventListener('pause',function(){updatePlayButtons();});
+document.getElementById('audioPlayer').addEventListener('play',function(){updatePlayButtons();});
+updateSelectedFiles();
+loadDirectory('/');
 </script></body></html>
 )rawliteral";
 #endif
@@ -4775,6 +5010,9 @@ void setupWebServer() {
   server.on("/ota.html", HTTP_GET, [](AsyncWebServerRequest *req) {
     sendEmbeddedAssetByPath(req, "/ota.html");
   });
+  server.on("/storage.html", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/storage.html");
+  });
   server.on("/style.css", HTTP_GET, [](AsyncWebServerRequest *req) {
     sendEmbeddedAssetByPath(req, "/style.css");
   });
@@ -4783,6 +5021,9 @@ void setupWebServer() {
   });
   server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
     sendEmbeddedAssetByPath(req, "/ota.html");
+  });
+  server.on("/storage", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendEmbeddedAssetByPath(req, "/storage.html");
   });
 #elif WEB_UI_MODE == WEB_UI_MINIMAL
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *req) {
@@ -4803,6 +5044,10 @@ void setupWebServer() {
 
   server.on("/ota", HTTP_GET, [](AsyncWebServerRequest *req) {
     sendMinimalPage(req, kMinimalOtaPage, kMinimalOtaPage2);
+  });
+
+  server.on("/storage", HTTP_GET, [](AsyncWebServerRequest *req) {
+    sendMinimalPage(req, kMinimalStoragePage, kMinimalStoragePage2);
   });
 #endif
 
@@ -4968,6 +5213,269 @@ void setupWebServer() {
     serializeJson(doc, *res);
     req->send(res);
   });
+
+  server.on("/api/app/storage/list", HTTP_GET, [](AsyncWebServerRequest *req) {
+    String requestedPath = req->hasParam("path") ? req->getParam("path")->value() : "/";
+    String path;
+    if (!normalizeStoragePath(requestedPath, path))
+    {
+      sendJsonMessage(req, 400, false, "Invalid path.");
+      return;
+    }
+
+    if (!ensureStorageMounted())
+    {
+      sendJsonMessage(req, 503, false, wxv::storage::lastStatus());
+      return;
+    }
+
+    File dir = SD.open(path.c_str(), FILE_READ);
+    if (!dir)
+    {
+      sendJsonMessage(req, 404, false, "Path not found.");
+      return;
+    }
+    if (!dir.isDirectory())
+    {
+      dir.close();
+      sendJsonMessage(req, 400, false, "Path is not a directory.");
+      return;
+    }
+
+    JsonDocument doc(wxv::memory::psramJsonAllocator());
+    doc["ok"] = true;
+    doc["mounted"] = true;
+    doc["path"] = path;
+    doc["parent"] = storageParentPath(path);
+    doc["cardType"] = wxv::storage::cardTypeName();
+    doc["totalBytes"] = SD.totalBytes();
+    doc["usedBytes"] = SD.usedBytes();
+    doc["freeBytes"] = (SD.totalBytes() >= SD.usedBytes()) ? (SD.totalBytes() - SD.usedBytes()) : 0;
+    JsonArray entries = doc["entries"].to<JsonArray>();
+
+    size_t count = 0;
+    File entry = dir.openNextFile();
+    while (entry)
+    {
+      if (count >= kMaxSdEntriesPerResponse)
+      {
+        doc["truncated"] = true;
+        entry.close();
+        break;
+      }
+
+      JsonObject item = entries.add<JsonObject>();
+      item["name"] = entry.name();
+      item["path"] = entry.path();
+      item["isDir"] = entry.isDirectory();
+      item["size"] = static_cast<uint64_t>(entry.size());
+      ++count;
+      entry.close();
+      entry = dir.openNextFile();
+    }
+    dir.close();
+
+    AsyncResponseStream *res = req->beginResponseStream("application/json");
+    res->addHeader("Cache-Control", "no-store, max-age=0");
+    serializeJson(doc, *res);
+    req->send(res);
+  });
+
+  server.on("/api/app/storage/file", HTTP_GET, [](AsyncWebServerRequest *req) {
+    if (!req->hasParam("path"))
+    {
+      sendJsonMessage(req, 400, false, "Missing path.");
+      return;
+    }
+
+    String path;
+    if (!normalizeStoragePath(req->getParam("path")->value(), path))
+    {
+      sendJsonMessage(req, 400, false, "Invalid path.");
+      return;
+    }
+
+    if (!ensureStorageMounted())
+    {
+      sendJsonMessage(req, 503, false, wxv::storage::lastStatus());
+      return;
+    }
+    if (!wxv::storage::exists(path.c_str()))
+    {
+      sendJsonMessage(req, 404, false, "File not found.");
+      return;
+    }
+    if (storagePathIsDirectory(path))
+    {
+      sendJsonMessage(req, 400, false, "Path is a directory.");
+      return;
+    }
+
+    req->send(SD, path.c_str(), storageContentType(path), req->hasParam("download"));
+  });
+
+  server.on("/api/app/storage/mkdir", HTTP_POST, [](AsyncWebServerRequest *req) {
+    if (!req->hasParam("path"))
+    {
+      sendJsonMessage(req, 400, false, "Missing path.");
+      return;
+    }
+
+    String path;
+    if (!normalizeStoragePath(req->getParam("path")->value(), path) || path == "/")
+    {
+      sendJsonMessage(req, 400, false, "Invalid path.");
+      return;
+    }
+
+    if (!ensureStorageMounted())
+    {
+      sendJsonMessage(req, 503, false, wxv::storage::lastStatus());
+      return;
+    }
+
+    if (wxv::storage::exists(path.c_str()))
+    {
+      sendJsonMessage(req, 409, false, "Path already exists.");
+      return;
+    }
+
+    if (!wxv::storage::mkdir(path.c_str()))
+    {
+      sendJsonMessage(req, 500, false, "Create folder failed.");
+      return;
+    }
+
+    sendJsonMessage(req, 200, true, "Folder created.");
+  });
+
+  server.on("/api/app/storage/delete", HTTP_POST, [](AsyncWebServerRequest *req) {
+    if (!req->hasParam("path"))
+    {
+      sendJsonMessage(req, 400, false, "Missing path.");
+      return;
+    }
+
+    String path;
+    if (!normalizeStoragePath(req->getParam("path")->value(), path) || path == "/")
+    {
+      sendJsonMessage(req, 400, false, "Invalid path.");
+      return;
+    }
+
+    if (!ensureStorageMounted())
+    {
+      sendJsonMessage(req, 503, false, wxv::storage::lastStatus());
+      return;
+    }
+    if (!wxv::storage::exists(path.c_str()))
+    {
+      sendJsonMessage(req, 404, false, "Path not found.");
+      return;
+    }
+
+    const bool recursive = req->hasParam("recursive") && req->getParam("recursive")->value().toInt() != 0;
+    bool ok = false;
+    if (storagePathIsDirectory(path))
+    {
+      ok = recursive ? deleteStorageRecursive(path) : wxv::storage::rmdir(path.c_str());
+    }
+    else
+    {
+      ok = wxv::storage::remove(path.c_str());
+    }
+
+    if (!ok)
+    {
+      sendJsonMessage(req, 500, false, "Delete failed.");
+      return;
+    }
+
+    sendJsonMessage(req, 200, true, "Deleted.");
+  });
+
+  server.on("/api/app/storage/upload", HTTP_POST,
+    [](AsyncWebServerRequest *req) {
+      SdUploadState *state = static_cast<SdUploadState *>(req->_tempObject);
+      bool ok = state && state->error.isEmpty() && !state->path.isEmpty();
+      if (!ok && state && !state->path.isEmpty())
+      {
+        wxv::storage::remove(state->path.c_str());
+      }
+
+      if (ok)
+        sendJsonMessage(req, 200, true, "Upload complete.");
+      else
+        sendJsonMessage(req, 500, false, state ? state->error : String("Upload failed."));
+
+      delete state;
+      req->_tempObject = nullptr;
+    },
+    [](AsyncWebServerRequest *req, String filename, size_t index, uint8_t *data, size_t len, bool final) {
+      SdUploadState *state = static_cast<SdUploadState *>(req->_tempObject);
+      if (index == 0)
+      {
+        state = new (std::nothrow) SdUploadState();
+        req->_tempObject = state;
+        if (!state)
+          return;
+
+        if (!ensureStorageMounted())
+        {
+          state->error = wxv::storage::lastStatus();
+          return;
+        }
+
+        String dir = req->hasParam("dir") ? req->getParam("dir")->value() : "/";
+        String normalizedDir;
+        String normalizedName;
+        if (!normalizeStoragePath(dir, normalizedDir) || !normalizeStorageName(filename, normalizedName))
+        {
+          state->error = "Invalid upload path.";
+          return;
+        }
+        if (!joinStoragePath(normalizedDir, normalizedName, state->path))
+        {
+          state->error = "Invalid upload target.";
+          return;
+        }
+        if (wxv::storage::exists(state->path.c_str()) && storagePathIsDirectory(state->path))
+        {
+          state->error = "Target is a directory.";
+          return;
+        }
+        if (wxv::storage::exists(state->path.c_str()))
+          wxv::storage::remove(state->path.c_str());
+
+        state->file = SD.open(state->path.c_str(), FILE_WRITE);
+        if (!state->file)
+        {
+          state->error = "Open for write failed.";
+          return;
+        }
+      }
+
+      if (!state || !state->error.isEmpty())
+        return;
+
+      if (len > 0)
+      {
+        const size_t written = state->file.write(data, len);
+        if (written != len)
+        {
+          state->error = "Write failed.";
+          state->file.close();
+          return;
+        }
+        state->written += written;
+      }
+
+      if (final && state->file)
+      {
+        state->file.close();
+      }
+    }
+  );
 
 #if WEB_UI_MODE == WEB_UI_FULL
   server.on("/ir", HTTP_GET, [](AsyncWebServerRequest *req) {
