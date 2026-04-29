@@ -238,16 +238,28 @@ void showDeviceLocationModal()
 
     static char latBuf[16];
     static char lonBuf[16];
+    static int elevationTempM = 0;
     snprintf(latBuf, sizeof(latBuf), "%.4f", noaaLatitude);
     snprintf(lonBuf, sizeof(lonBuf), "%.4f", noaaLongitude);
+    elevationTempM = static_cast<int>(lroundf(deviceElevationM));
 
-    String labels[] = {"Latitude", "Longitude"};
-    InfoFieldType types[] = {InfoText, InfoText};
+    String labels[] = {"Latitude", "Longitude", "Elevation (m)"};
+    InfoFieldType types[] = {InfoText, InfoText, InfoNumber};
+    int *numberRefs[] = {&elevationTempM};
     char *textRefs[] = {latBuf, lonBuf};
     int textSizes[] = {static_cast<int>(sizeof(latBuf)), static_cast<int>(sizeof(lonBuf))};
 
-    locationModal.setLines(labels, types, 2);
-    locationModal.setValueRefs(nullptr, 0, nullptr, 0, nullptr, nullptr, textRefs, 2, textSizes);
+    locationModal.setLines(labels, types, 3);
+    locationModal.setValueRefs(numberRefs, 1, nullptr, 0, nullptr, nullptr, textRefs, 2, textSizes);
+
+    NumberFieldConfig elevationCfg;
+    elevationCfg.step = 1;
+    elevationCfg.minValue = -500;
+    elevationCfg.maxValue = 9000;
+    elevationCfg.hasBounds = true;
+    elevationCfg.accelerateOnHold = true;
+    locationModal.setNumberFieldConfig(2, elevationCfg);
+
     locationModal.setCallback([](bool /*accepted*/, int) {
         String latStr = String(latBuf);
         String lonStr = String(lonBuf);
@@ -258,6 +270,8 @@ void showDeviceLocationModal()
         float lon = constrain(lonStr.toFloat(), -180.0f, 180.0f);
         noaaLatitude = lat;
         noaaLongitude = lon;
+        deviceElevationM = constrain(static_cast<float>(elevationTempM), -500.0f, 9000.0f);
+        deviceElevationAuto = false;
 
         saveNoaaSettings();
         notifyNoaaSettingsChanged();
@@ -267,7 +281,7 @@ void showDeviceLocationModal()
             wxv::provider::fetchActiveProviderData();
         }
 
-        Serial.printf("[Location] lat=%.4f lon=%.4f\n", noaaLatitude, noaaLongitude);
+        Serial.printf("[Location] lat=%.4f lon=%.4f elev=%.0fm\n", noaaLatitude, noaaLongitude, deviceElevationM);
     });
     locationModal.show();
 }

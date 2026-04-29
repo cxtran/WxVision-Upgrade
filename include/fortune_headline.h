@@ -18,9 +18,6 @@ String buildContextHeadline(
     int lunarDay, int lunarMonth, int lunarYear, bool lunarLeap,
     const LunarDayDetail &dayInfo);
 
-// Debug helper to verify deterministic phrase picks on a known sample date.
-void debugContextHeadlineSample(const LunarDayDetail &dayInfo);
-
 // Flag helpers are implemented in display.cpp and reused by headline builder.
 bool isTamNuongDay(int lunarDay);
 bool isNguyetKyDay(int lunarDay);

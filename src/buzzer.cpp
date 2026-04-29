@@ -5,6 +5,7 @@
 #include "settings.h"
 #include "music.h"
 #include "audio_out.h"
+#include "audio_announcer.h"
 #include "mp3_player.h"
 
 static bool buzzerReady = false;
@@ -28,7 +29,7 @@ static uint16_t volumeToAmplitude_()
 
 void setupBuzzer()
 {
-    if (wxv::audio::isSdMp3Active())
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
         return;
 
     speaker.holdQuietPins();
@@ -36,7 +37,7 @@ void setupBuzzer()
 
 bool ensureSpeakerReady()
 {
-    if (wxv::audio::isSdMp3Active())
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
     {
         return false;
     }
@@ -122,9 +123,9 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, uint16_t p
 void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env)
 {
     if (frequency <= 0 || durationMs <= 0) return;
-    if (wxv::audio::isSdMp3Active()) return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
     if (!ensureSpeakerReady()) return;
- //   if (buzzerVolume <= 0) return;
+    if (buzzerVolume <= 0) return;
 
     uint16_t amp = volumeToAmplitude_();
     playBuzzerToneADSRInternal(frequency, durationMs, amp, env);
@@ -145,75 +146,20 @@ void playBuzzerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env)
 void playBuzzerTone(int frequency, int duration)
 {
     if (frequency <= 0 || duration <= 0) return;
-    if (wxv::audio::isSdMp3Active()) return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
     if (!ensureSpeakerReady()) return;
-//    if (buzzerVolume <= 0) return;
+    if (buzzerVolume <= 0) return;
 
     int freq = frequency;
     int dur = duration;
-    uint16_t amp = volumeToAmplitude_();
-
-    switch (buzzerToneSet)
-    {
-        case 1: // Soft
-            freq = max(200, (frequency * 70) / 100);
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.45f)));
-            break;
-
-        case 2: // Click
-            freq = 5000;
-            dur = min(duration, 50);
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.35f)));
-            break;
-
-        case 3: // Chime
-            freq = 1500 + (frequency / 4);
-            dur = duration + 20;
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.60f)));
-            break;
-
-        case 4: // Pulse
-            freq = frequency;
-            dur = duration;
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.55f)));
-            break;
-
-        case 5: // Warm
-            freq = max(180, (frequency * 85) / 100);
-            dur = duration + 30;
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.50f)));
-            break;
-
-        case 6: // Melody
-        {
-            // Speaker-friendly version: two smooth tones instead of many ADSR micro-steps
-            uint16_t melodyAmp = static_cast<uint16_t>(max(150, static_cast<int>(amp * 0.65f)));
-            int firstDur = max(20, dur / 2);
-            int secondDur = max(20, dur - firstDur);
-
-            speaker.playTone(freq, firstDur, melodyAmp);
-            delay(12);
-            speaker.playTone(freq + 180, secondDur, melodyAmp / 2);
-            return;
-        }
-
-        default: // Bright
-            amp = static_cast<uint16_t>(max(100, static_cast<int>(amp * 0.70f)));
-            break;
-    }
+    uint16_t amp = static_cast<uint16_t>(max(100, static_cast<int>(volumeToAmplitude_() * 0.70f)));
 
     speaker.playTone(freq, dur, amp);
-
-    if (buzzerToneSet == 4)
-    {
-        delay(30);
-        speaker.playTone(freq, 40, amp);
-    }
 }
 
 void stopBuzzer()
 {
-    if (wxv::audio::isSdMp3Active()) return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
     if (!buzzerReady) return;
     speaker.stop();
 }

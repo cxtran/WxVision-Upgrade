@@ -8,7 +8,7 @@
 #include "InfoModal.h"
 #include "ir_codes.h"
 #include "sensors.h" // for enqueueVirtualIRKey
-#include "buzzer.h"
+#include "audio_announcer.h"
 #include "alarm.h"
 #include "notifications.h"
 
@@ -18,18 +18,18 @@ extern void cancelActiveAlarm();
 extern InfoModal dateModal;
 
 void setupButtons() {
-   
-// Serial.begin(115200);
+#if WXV_ENABLE_5WAY_BUTTONS
 if (BTN_UP >= 0) pinMode(BTN_UP, INPUT_PULLUP);
 if (BTN_DN >= 0) pinMode(BTN_DN, INPUT_PULLUP);
 if (BTN_LEFT >= 0) pinMode(BTN_LEFT, INPUT_PULLUP);
 if (BTN_RIGHT >= 0) pinMode(BTN_RIGHT, INPUT_PULLUP);
 if (BTN_SEL >= 0) pinMode(BTN_SEL, INPUT_PULLUP);
-
-    Serial.println("=== 5-Way Switch Test ===");
-    Serial.println("Press UP, DOWN, LEFT, RIGHT, or SELECT...");
+#endif
 }
 void getButton(){
+#if !WXV_ENABLE_5WAY_BUTTONS
+  return;
+#else
   static bool lastUp = HIGH, lastDn = HIGH, lastCtr = HIGH, lastLeft = HIGH, lastRight = HIGH;
   static unsigned long warmupUntilMs = 0;
   static unsigned long lastUpEdgeMs = 0;
@@ -53,8 +53,6 @@ void getButton(){
   bool left  = digitalRead(BTN_LEFT);
   bool right = digitalRead(BTN_RIGHT);
   bool ctr = digitalRead(BTN_SEL);
-  const int toneMs = 150;
-
   if (now < warmupUntilMs) {
     // Track the stable baseline during warmup so no synthetic edge is generated later.
     lastUp = up;
@@ -72,16 +70,12 @@ void getButton(){
   // Detect button press (HIGH to LOW transition)
   if (lastUp == HIGH && up == LOW && (now - lastUpEdgeMs) >= debounceMs) {
     lastUpEdgeMs = now;
-    Serial.println("UP button pressed");
-    playBuzzerTone(1500, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRKey(IRCodes::WxKey::Up);
   
   }
   if (lastDn == HIGH && dn == LOW && (now - lastDnEdgeMs) >= debounceMs) {
     lastDnEdgeMs = now;
-    Serial.println("DOWN button pressed");
-    playBuzzerTone(1200, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRKey(IRCodes::WxKey::Down);
   }
@@ -89,8 +83,6 @@ void getButton(){
     lastLeftEdgeMs = now;
     leftHoldStartMs = now;
     lastLeftRepeatMs = now;
-    Serial.println("LEFT button pressed");
-    playBuzzerTone(900, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRKey(IRCodes::WxKey::Left);
   }
@@ -98,18 +90,15 @@ void getButton(){
     lastRightEdgeMs = now;
     rightHoldStartMs = now;
     lastRightRepeatMs = now;
-    Serial.println("RIGHT button pressed");
-    playBuzzerTone(1800, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     enqueueVirtualIRKey(IRCodes::WxKey::Right);
   }
   if (lastCtr == HIGH && ctr == LOW && (now - lastCtrEdgeMs) >= debounceMs) {
     lastCtrEdgeMs = now;
-    Serial.println("CENTER button pressed");
-    playBuzzerTone(2200, toneMs);
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
     if (!menuActive)
     {
+      wxv::announce::playUiSound("select");
       menuActive = true;
       currentMenuLevel = MENU_MAIN;
       currentMenuIndex = 0;
@@ -172,6 +161,7 @@ void getButton(){
   lastLeft = left;
   lastRight = right;
   lastCtr = ctr;
+#endif
 }
 
 void triggerPhysicalReset() {

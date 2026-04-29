@@ -2,6 +2,8 @@
 #include "settings.h"
 #include "buzzer.h"
 #include "web.h"
+#include "audio_announcer.h"
+#include "chime_catalog.h"
 
 static bool s_alarmActive = false;
 static bool s_alarmFlashVisible = true;
@@ -12,6 +14,8 @@ static uint32_t s_silencedMinuteKey = 0;
 static int s_activeSlot = -1;
 static int s_melodyIndex = 0;
 static unsigned long s_melodyNoteEndMs = 0;
+static unsigned long s_nextAlarmAudioAttemptMs = 0;
+static bool s_alarmAudioOwned = false;
 
 static constexpr unsigned long kAlarmFlashIntervalMs = 400;
 static constexpr unsigned long kAlarmBeepIntervalMs = 1000;
@@ -135,6 +139,8 @@ static void resetRuntimeAlarm()
     s_silencedMinuteKey = 0;
     s_melodyIndex = 0;
     s_melodyNoteEndMs = 0;
+    s_nextAlarmAudioAttemptMs = 0;
+    s_alarmAudioOwned = false;
     stopAlarmBuzzer();
 }
 
@@ -221,42 +227,47 @@ void tickAlarmState(const DateTime &now)
     unsigned long nowMs = millis();
     if (s_alarmActive)
     {
+        if (s_alarmAudioOwned && !wxv::announce::isActive())
+        {
+            s_alarmAudioOwned = false;
+        }
+
         if (nowMs - s_lastFlashToggleMs >= kAlarmFlashIntervalMs)
         {
             s_alarmFlashVisible = !s_alarmFlashVisible;
             s_lastFlashToggleMs = nowMs;
         }
-        if (alarmSoundMode == 0)
-        {
-            if (nowMs - s_lastBeepMs >= kAlarmBeepIntervalMs)
-            {
-                playBuzzerTone(kAlarmBeepFreq, kAlarmBeepMs);
-                s_lastBeepMs = nowMs;
-            }
-        }
-        else // Melody mode
-        {
-            const MelodyNote *melody = kAlarmMelody;
-            int melodyLen = kAlarmMelodyLen;
-            if (alarmSoundMode == 1) { melody = kMelodyFurElise; melodyLen = kMelodyFurEliseLen; }
-            else if (alarmSoundMode == 2) { melody = kMelodySwanLake; melodyLen = kMelodySwanLakeLen; }
-            else if (alarmSoundMode == 3) { melody = kMelodyTurkishMarch; melodyLen = kMelodyTurkishMarchLen; }
-            else if (alarmSoundMode == 4) { melody = kMelodyMoonlight; melodyLen = kMelodyMoonlightLen; }
 
-            if (nowMs >= s_melodyNoteEndMs)
+        const int alarmChimeIndex = wxv::audio::clampChimeIndex(alarmSoundMode);
+        const char *alarmChimeKey = wxv::audio::chimeKeyAt(static_cast<size_t>(alarmChimeIndex));
+        if (!s_alarmAudioOwned &&
+            !wxv::announce::isActive() &&
+            nowMs >= s_nextAlarmAudioAttemptMs &&
+            alarmChimeKey && alarmChimeKey[0])
+        {
+            if (wxv::announce::playAlarm(alarmChimeKey))
             {
-                const MelodyNote &note = melody[s_melodyIndex];
-                const ADSR env{note.attackMs, note.decayMs, note.sustainPct, note.releaseMs};
-                playBuzzerPianoNoteADSR(note.midi, note.durMs, env);
-                s_melodyNoteEndMs = nowMs + (unsigned long)note.durMs + 20;
-                s_melodyIndex = (s_melodyIndex + 1) % melodyLen;
+                s_alarmAudioOwned = true;
+                s_nextAlarmAudioAttemptMs = nowMs + 250UL;
+            }
+            else
+            {
+                s_nextAlarmAudioAttemptMs = nowMs + 1000UL;
             }
         }
+
+        stopAlarmBuzzer();
     }
     else
     {
         s_alarmFlashVisible = true;
         s_lastFlashToggleMs = nowMs;
+        s_nextAlarmAudioAttemptMs = 0;
+        if (wasActive && s_alarmAudioOwned && wxv::announce::isActive())
+        {
+            wxv::announce::stop();
+        }
+        s_alarmAudioOwned = false;
         if (wasActive)
         {
             stopAlarmBuzzer();
@@ -298,6 +309,12 @@ void cancelActiveAlarm()
     s_lastFlashToggleMs = millis();
     s_melodyIndex = 0;
     s_melodyNoteEndMs = 0;
+    s_nextAlarmAudioAttemptMs = 0;
+    if (s_alarmAudioOwned && wxv::announce::isActive())
+    {
+        wxv::announce::stop();
+    }
+    s_alarmAudioOwned = false;
     stopAlarmBuzzer();
 }
 

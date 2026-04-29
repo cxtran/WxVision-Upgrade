@@ -8,6 +8,7 @@
 #include "default_values.h"
 #include "noaa.h"
 #include "screen_manager.h"
+#include "chime_catalog.h"
 
 // Preferences storage object
 Preferences prefs;
@@ -30,6 +31,8 @@ bool alarmOneShotPending[3] = {false, false, false};
 bool noaaAlertsEnabled = wxv::defaults::kDefaults.noaaAlertsEnabled;
 float noaaLatitude = wxv::defaults::kDefaults.noaaLatitude;
 float noaaLongitude = wxv::defaults::kDefaults.noaaLongitude;
+float deviceElevationM = wxv::defaults::kDefaults.deviceElevationM;
+bool deviceElevationAuto = true;
 NoaaFetchSource noaaFetchSource = wxv::defaults::kDefaults.noaaFetchSource;
 bool debugMemoryLogs = false;
 
@@ -61,7 +64,6 @@ int splashDurationSec = wxv::defaults::kDefaults.splashDurationSec;
 bool themeRefreshPending = false;
 int buzzerVolume = wxv::defaults::kDefaults.buzzerVolume;
 int mp3Volume = wxv::defaults::kDefaults.mp3Volume;
-int buzzerToneSet = wxv::defaults::kDefaults.buzzerToneSet; // 0=Bright,1=Soft,2=Click,3=Chime,4=Pulse,5=Warm,6=Melody
 int mp3PlayMode = 1;
 int alarmSoundMode = wxv::defaults::kDefaults.alarmSoundMode; // 0=Tone,1=FurElise,2=SwanLake,3=TurkeyMarch,4=Moonlight
 int forecastLinesPerDay = wxv::defaults::kDefaults.forecastLinesPerDay;
@@ -159,6 +161,43 @@ static void applyNoaaBuildDefaults()
 namespace
 {
 constexpr const char *kPrefsKeyOwmCountryCustom = "owmCtryCust";
+constexpr const char *kPrefsKeyDeviceElevationM = "devElevM";
+constexpr float kStandardSeaLevelPressureHpa = 1013.25f;
+constexpr float kMinElevationPressureHpa = 300.0f;
+constexpr float kMaxElevationPressureHpa = 1100.0f;
+constexpr float kMinDeviceElevationM = -500.0f;
+constexpr float kMaxDeviceElevationM = 9000.0f;
+}
+
+float calculateElevationFromPressureHpa(float pressureHpa)
+{
+    if (!isfinite(pressureHpa) ||
+        pressureHpa < kMinElevationPressureHpa ||
+        pressureHpa > kMaxElevationPressureHpa)
+    {
+        return NAN;
+    }
+
+    const float elevation = 44330.0f * (1.0f - powf(pressureHpa / kStandardSeaLevelPressureHpa, 0.19029495f));
+    return constrain(elevation, kMinDeviceElevationM, kMaxDeviceElevationM);
+}
+
+bool tryAutoSetDeviceElevationFromPressure()
+{
+    if (!deviceElevationAuto || !bmp280Ready)
+    {
+        return false;
+    }
+
+    const float calculated = calculateElevationFromPressureHpa(bmp280_pressure);
+    if (!isfinite(calculated))
+    {
+        return false;
+    }
+
+    deviceElevationM = calculated;
+    saveNoaaSettings();
+    return true;
 }
 
 void loadSettings() {
@@ -177,6 +216,9 @@ void loadSettings() {
     noaaAlertsEnabled = prefs.getBool("noaaEnabled", wxv::defaults::kDefaults.noaaAlertsEnabled);
     noaaLatitude = prefs.getFloat("noaaLat", wxv::defaults::kDefaults.noaaLatitude);
     noaaLongitude = prefs.getFloat("noaaLon", wxv::defaults::kDefaults.noaaLongitude);
+    deviceElevationAuto = !prefs.isKey(kPrefsKeyDeviceElevationM);
+    deviceElevationM = prefs.getFloat(kPrefsKeyDeviceElevationM, wxv::defaults::kDefaults.deviceElevationM);
+    deviceElevationM = constrain(deviceElevationM, kMinDeviceElevationM, kMaxDeviceElevationM);
     noaaFetchSource = static_cast<NoaaFetchSource>(prefs.getUChar("noaaSource", static_cast<uint8_t>(wxv::defaults::kDefaults.noaaFetchSource)));
     if (noaaFetchSource != NOAA_FETCH_SOURCE_RELAY && noaaFetchSource != NOAA_FETCH_SOURCE_DIRECT)
         noaaFetchSource = wxv::defaults::kDefaults.noaaFetchSource;
@@ -227,9 +269,8 @@ void loadSettings() {
       splashDurationSec = constrain(splashDurationSec, 1, 10);
       buzzerVolume = constrain(prefs.getInt("buzzVol", wxv::defaults::kDefaults.buzzerVolume), 0, 100);
       mp3Volume = constrain(prefs.getInt("mp3Vol", wxv::defaults::kDefaults.mp3Volume), 0, 100);
-      buzzerToneSet = constrain(prefs.getInt("buzzTone", wxv::defaults::kDefaults.buzzerToneSet), 0, 6);
       mp3PlayMode = constrain(prefs.getInt("mp3Mode", 1), 0, 2);
-      alarmSoundMode = constrain(prefs.getInt("alarmSound", wxv::defaults::kDefaults.alarmSoundMode), 0, 4);
+      alarmSoundMode = wxv::audio::clampChimeIndex(prefs.getInt("alarmSound", wxv::defaults::kDefaults.alarmSoundMode));
       forecastLinesPerDay = constrain(prefs.getInt("fcLines", wxv::defaults::kDefaults.forecastLinesPerDay), 2, 3);
       forecastPauseMs = constrain(prefs.getInt("fcPause", wxv::defaults::kDefaults.forecastPauseMs), 0, 10000);
       forecastIconSize = prefs.getInt("fcIcon", wxv::defaults::kDefaults.forecastIconSize);
@@ -325,9 +366,8 @@ void saveDeviceSettings() {
     prefs.putBool("memDbg", debugMemoryLogs);
     prefs.putInt("buzzVol", constrain(buzzerVolume, 0, 100));
     prefs.putInt("mp3Vol", constrain(mp3Volume, 0, 100));
-    prefs.putInt("buzzTone", constrain(buzzerToneSet, 0, 6));
     prefs.putInt("mp3Mode", constrain(mp3PlayMode, 0, 2));
-    prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 4));
+    prefs.putInt("alarmSound", wxv::audio::clampChimeIndex(alarmSoundMode));
     prefs.end();
     if (showedBusy) {
         refreshVisibleScreen();
@@ -414,7 +454,7 @@ void saveAlarmSettings() {
         prefs.putInt(("alarmWeekDay" + String(i)).c_str(), constrain(alarmWeeklyDay[i], 0, 6));
         prefs.putBool(("alarmOneShot" + String(i)).c_str(), alarmOneShotPending[i]);
     }
-    prefs.putInt("alarmSound", constrain(alarmSoundMode, 0, 4));
+    prefs.putInt("alarmSound", wxv::audio::clampChimeIndex(alarmSoundMode));
     prefs.end();
 }
 
@@ -424,6 +464,7 @@ void saveNoaaSettings() {
     prefs.putBool("noaaEnabled", noaaAlertsEnabled);
     prefs.putFloat("noaaLat", noaaLatitude);
     prefs.putFloat("noaaLon", noaaLongitude);
+    prefs.putFloat(kPrefsKeyDeviceElevationM, deviceElevationM);
     prefs.putUChar("noaaSource", static_cast<uint8_t>(noaaFetchSource));
     prefs.end();
 }

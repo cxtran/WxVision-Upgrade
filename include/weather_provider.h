@@ -28,6 +28,9 @@ struct CurrentWeatherSnapshot
     int humidityPct = -1;
     float pressureHpa = NAN;
     float windSpeedMps = NAN;
+    float windDirectionDeg = NAN;
+    float precipAmountMm = NAN;
+    int precipProbabilityPct = -1;
     String condition;
     String icon;
     uint32_t updatedMs = 0;

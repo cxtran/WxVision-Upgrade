@@ -48,6 +48,7 @@ void showWeatherSettingsModal();
 void showWfTempestModal();
 void showCalibrationModal();
 void showSystemModal();
+void showAudioAnnouncementsModal();
 void showScenePreviewModal();
 void showUnitSettingsModal();
 void showWorldTimeModal();
@@ -86,6 +87,7 @@ enum MenuLevel {
     MENU_TEMPEST,
     MENU_CALIBRATION,
     MENU_SYSTEM,
+    MENU_AUDIO_ANNOUNCE,
     MENU_WORLDTIME,
     MENU_SCENE_PREVIEW,
     MENU_INITIAL_SETUP,
@@ -164,6 +166,7 @@ extern InfoModal weatherModal;
 extern InfoModal tempestModal;
 extern InfoModal calibrationModal;
 extern InfoModal systemModal;
+extern InfoModal audioAnnouncementsModal;
 extern InfoModal scenePreviewModal;
 extern InfoModal setupPromptModal;
 extern InfoModal wifiSettingsModal;

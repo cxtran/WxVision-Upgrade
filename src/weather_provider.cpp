@@ -72,6 +72,9 @@ public:
         cur.humidityPct = (currentCond.humidity >= 0) ? currentCond.humidity : toIntOrNegOne(str_Humd);
         cur.pressureHpa = isnan(currentCond.pressure) ? toFloatOrNan(str_Pressure) : static_cast<float>(currentCond.pressure);
         cur.windSpeedMps = isnan(currentCond.windAvg) ? toFloatOrNan(str_Wind_Speed) : static_cast<float>(currentCond.windAvg);
+        cur.windDirectionDeg = static_cast<float>(currentCond.windDir);
+        cur.precipAmountMm = static_cast<float>(tempest.rain);
+        cur.precipProbabilityPct = currentCond.precipProb;
         cur.condition = (currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
         cur.icon = currentCond.icon;
         cur.updatedMs = forecast.lastUpdate;
@@ -113,6 +116,9 @@ public:
         cur.humidityPct = (currentCond.humidity >= 0) ? currentCond.humidity : static_cast<int>(roundf(static_cast<float>(tempest.humidity)));
         cur.pressureHpa = isnan(currentCond.pressure) ? static_cast<float>(tempest.pressure) : static_cast<float>(currentCond.pressure);
         cur.windSpeedMps = isnan(currentCond.windAvg) ? static_cast<float>(tempest.windAvg) : static_cast<float>(currentCond.windAvg);
+        cur.windDirectionDeg = isnan(currentCond.windDir) ? static_cast<float>(tempest.windDir) : static_cast<float>(currentCond.windDir);
+        cur.precipAmountMm = static_cast<float>(tempest.rain);
+        cur.precipProbabilityPct = currentCond.precipProb;
         cur.condition = (currentCond.cond.length() > 0) ? currentCond.cond : str_Weather_Conditions;
         cur.icon = currentCond.icon;
         cur.updatedMs = forecast.lastUpdate;

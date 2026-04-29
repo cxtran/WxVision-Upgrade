@@ -78,19 +78,6 @@ enum class MarqueeMode : uint8_t { Off = 0, Auto = 1, On = 2 };
 // Default: OpenWeatherMap
 enum class Provider : uint8_t { OpenWeatherMap = 0, WeatherFlow = 1, None = 2 };
 
-// SoundProfile:
-// - Bright, Soft, Click, Chime, Pulse, Warm, Melody
-// Default: Bright
-enum class SoundProfile : uint8_t {
-  Bright = 0,
-  Soft = 1,
-  Click = 2,
-  Chime = 3,
-  Pulse = 4,
-  Warm = 5,
-  Melody = 6
-};
-
 // DefaultConfig:
 // Central compile-time defaults used when preferences are missing/reset.
 struct DefaultConfig {
@@ -137,6 +124,7 @@ struct DefaultConfig {
   bool noaaAlertsEnabled;
   float noaaLatitude;
   float noaaLongitude;
+  float deviceElevationM;
   NoaaFetchSource noaaFetchSource;
   int themeIndex;             // 0 day, 1 night
   int autoThemeModeStorage;   // 0 off, 1 schedule, 2 ambient
@@ -151,8 +139,7 @@ struct DefaultConfig {
   int splashDurationSec;      // 1..10
   int buzzerVolume;           // 0..100
   int mp3Volume;              // 0..100
-  int buzzerToneSet;          // 0..6
-  int alarmSoundMode;         // 0..4
+  int alarmSoundMode;         // shared chime catalog index
   int forecastLinesPerDay;    // 2..3
   int forecastPauseMs;        // 0..10000
   int forecastIconSize;       // 0 or 16
@@ -228,7 +215,6 @@ static const int kSoundVolumeDefault = toInt(SoundVolumeBound::Default);
 static const int kSoundVolumeMin = toInt(SoundVolumeBound::Min);
 static const int kSoundVolumeMax = toInt(SoundVolumeBound::Max);
 static const int kSoundVolumeStep = toInt(SoundVolumeBound::Step);
-static const SoundProfile kSoundProfileDefault = SoundProfile::Melody;
 
 static const int kScrollDelays[10] = {500, 300, 200, 150, 100, 75, 50, 30, 20, 10};
 
@@ -265,6 +251,7 @@ static const DefaultConfig kDefaults = {
     false,      // noaaAlertsEnabled
     0.0f,       // noaaLatitude
     0.0f,       // noaaLongitude
+    0.0f,       // deviceElevationM
     NOAA_FETCH_SOURCE_RELAY, // noaaFetchSource
     0,          // themeIndex
     0,          // autoThemeModeStorage
@@ -279,7 +266,6 @@ static const DefaultConfig kDefaults = {
     3,          // splashDurationSec
     kSoundVolumeDefault,        // buzzerVolume
     50,         // mp3Volume
-    static_cast<int>(kSoundProfileDefault),          // buzzerToneSet
     0,          // alarmSoundMode
     3,          // forecastLinesPerDay
     3000,       // forecastPauseMs
@@ -292,7 +278,7 @@ static const DefaultConfig kDefaults = {
     true,       // envAlertHumidityEnabled
     1,          // defaultNtpPreset
     0,          // dateFormatStorage
-    true,       // cloudEnabled
+    false,      // cloudEnabled
     "https://api.wxvisions.com",
     "wss://relay.wxvisions.com/ws/device",
     30000,      // cloudHeartbeatIntervalMs
@@ -325,12 +311,6 @@ constexpr int toInt(MarqueeMode v) { return static_cast<int>(v); }
 constexpr int toInt(IconSet v) { return static_cast<int>(v); }
 constexpr int toInt(ForecastStrip v) { return static_cast<int>(v); }
 constexpr int toInt(WiFiPolicy v) { return static_cast<int>(v); }
-constexpr int toStorage(SoundProfile v) { return static_cast<int>(v); }
-constexpr SoundProfile fromStorageSoundProfile(int v, SoundProfile fallback) {
-  return (v >= static_cast<int>(SoundProfile::Bright) && v <= static_cast<int>(SoundProfile::Melody))
-             ? static_cast<SoundProfile>(v)
-             : fallback;
-}
 constexpr int toStorage(ScreenAutoRotate v) { return v == ScreenAutoRotate::On ? 1 : 0; }
 constexpr ScreenAutoRotate fromStorageScreenAutoRotate(int v, ScreenAutoRotate fallback) {
   return (v == 0) ? ScreenAutoRotate::Off : (v == 1 ? ScreenAutoRotate::On : fallback);
@@ -346,14 +326,6 @@ inline constexpr const char* toString(Theme v) {
 inline constexpr const char* toString(Provider v) {
   return (v == Provider::WeatherFlow) ? "WeatherFlow" :
          (v == Provider::None) ? "None" : "OpenWeatherMap";
-}
-inline constexpr const char* toString(SoundProfile v) {
-  return (v == SoundProfile::Soft) ? "Soft" :
-         (v == SoundProfile::Click) ? "Click" :
-         (v == SoundProfile::Chime) ? "Chime" :
-         (v == SoundProfile::Pulse) ? "Pulse" :
-         (v == SoundProfile::Warm) ? "Warm" :
-         (v == SoundProfile::Melody) ? "Melody" : "Bright";
 }
 inline constexpr const char* toString(ScreenAutoRotate v) { return (v == ScreenAutoRotate::On) ? "On" : "Off"; }
 

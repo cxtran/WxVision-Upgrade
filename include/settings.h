@@ -42,6 +42,8 @@ extern bool alarmOneShotPending[3];
 extern bool noaaAlertsEnabled;
 extern float noaaLatitude;
 extern float noaaLongitude;
+extern float deviceElevationM;
+extern bool deviceElevationAuto;
 extern NoaaFetchSource noaaFetchSource;
 extern bool debugMemoryLogs;
 
@@ -116,9 +118,8 @@ extern bool envAlertTempEnabled;
 extern bool envAlertHumidityEnabled;
 extern int buzzerVolume;   // 0-100
 extern int mp3Volume;      // 0-100
-extern int buzzerToneSet;  // 0 = Bright, 1 = Soft, 2 = Click, 3 = Chime, 4 = Pulse, 5 = Warm, 6 = Melody (ADSR)
 extern int mp3PlayMode;    // 0 = Play One, 1 = Continue Next, 2 = Repeat
-extern int alarmSoundMode; // 0 = Tone, 1 = Fur Elise, 2 = Swan Lake, 3 = Turkish March, 4 = Moonlight Sonata
+extern int alarmSoundMode; // index into the shared /audio/chimes catalog
 
 void loadSettings();
 void saveDeviceSettings();
@@ -128,6 +129,8 @@ void saveAllSettings();
 void saveWeatherSettings();
 void saveAlarmSettings();
 void saveNoaaSettings();
+float calculateElevationFromPressureHpa(float pressureHpa);
+bool tryAutoSetDeviceElevationFromPressure();
 void saveMqttSettings();
 void saveCloudSettings();
 

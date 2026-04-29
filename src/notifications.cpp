@@ -1,6 +1,8 @@
 #include "notifications.h"
 
+#include "audio_announcer.h"
 #include "display.h"
+#include "settings.h"
 
 namespace wxv {
 namespace notify {
@@ -97,6 +99,35 @@ static String appendWaitingDots(const String& line) {
   return clampNotifyLine(base);
 }
 
+static void playNotificationCue(NotifyId id, bool isWaiting) {
+  if (isWaiting || buzzerVolume <= 0) {
+    return;
+  }
+
+  switch (id) {
+    case NotifyId::WifiConnected:
+    case NotifyId::NtpOk:
+    case NotifyId::SaveOk:
+      wxv::announce::playUiSound("select");
+      break;
+
+    case NotifyId::WifiFail:
+    case NotifyId::WifiNoNet:
+    case NotifyId::WifiAuthFail:
+    case NotifyId::NtpFail:
+    case NotifyId::SaveFail:
+    case NotifyId::WeatherFail:
+    case NotifyId::SensorFail:
+    case NotifyId::SystemError:
+      wxv::announce::playUiSound("nav_error");
+      break;
+
+    default:
+      wxv::announce::playUiSound("right");
+      break;
+  }
+}
+
 void showNotification(NotifyId id, uint16_t line1Color, uint16_t line2Color, const String& line2Override) {
   if (dma_display == nullptr) {
     return;
@@ -141,6 +172,8 @@ void showNotification(NotifyId id, uint16_t line1Color, uint16_t line2Color, con
     dma_display->setCursor(x2, 18);
     dma_display->print(l2);
   }
+
+  playNotificationCue(id, msg.isWaiting);
 }
 
 void showNotification(NotifyId id, uint16_t line1Color, const String& line2Override) {

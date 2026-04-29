@@ -21,6 +21,7 @@
 #include <Update.h>
 #include <WiFi.h>
 #include <ESPmDNS.h>
+#include <esp_log.h>
 #include "settings.h"
 #include "datetimesettings.h"
 #include "config.h"
@@ -51,8 +52,15 @@
 #include "forecast_summary.h"
 #include "mqtt_client.h"
 #include "cloud_manager.h"
+#include "chime_catalog.h"
+#include "audio_announcer.h"
 #include "audio_out.h"
 #include "sd_card.h"
+
+#ifndef WXV_ENABLE_SERIAL_LOGS
+#define WXV_ENABLE_SERIAL_LOGS 0
+#endif
+
 unsigned long lastAudioTestBeep = 0;
 const unsigned long audioTestBeepInterval = 2000;
 static constexpr bool kRunStartupAudioDiag = false;
@@ -150,6 +158,54 @@ void scrollWeatherTick()
     {
         lastTick = millis();
         scrollWeatherDetails();
+    }
+}
+
+static uint32_t localHourKey(const DateTime &localNow)
+{
+    return (static_cast<uint32_t>(localNow.year()) * 1000000UL) +
+           (static_cast<uint32_t>(localNow.month()) * 10000UL) +
+           (static_cast<uint32_t>(localNow.day()) * 100UL) +
+           static_cast<uint32_t>(localNow.hour());
+}
+
+static void serviceHourlyTimeAnnouncement(const DateTime &localNow)
+{
+    static bool initialized = false;
+    static uint32_t lastHourKey = 0;
+
+    if (!hourlyTimeAnnouncementEnabled || localNow.year() < 2020)
+    {
+        initialized = false;
+        return;
+    }
+
+    uint32_t currentHourKey = localHourKey(localNow);
+    if (!initialized)
+    {
+        initialized = true;
+        lastHourKey = currentHourKey;
+        return;
+    }
+
+    if (currentHourKey == lastHourKey)
+        return;
+
+    lastHourKey = currentHourKey;
+    if (localNow.minute() != 0 || isAlarmCurrentlyActive() || wxv::announce::isActive())
+        return;
+
+    if (hourlyAnnouncementSoundMode <= 0)
+    {
+        wxv::announce::speakTime();
+        return;
+    }
+
+    const int chimeIndex = wxv::audio::clampChimeIndex(hourlyAnnouncementSoundMode - 1);
+    const char *chimeKey = wxv::audio::chimeKeyAt(static_cast<size_t>(chimeIndex));
+    if (!chimeKey || !chimeKey[0] || !wxv::announce::speakTimeWithChime(chimeKey))
+    {
+        wxv::announce::speakTime();
     }
 }
 
@@ -354,6 +410,7 @@ static bool isRotationBlocked()
            tempestModal.isActive() ||
            calibrationModal.isActive() ||
            systemModal.isActive() ||
+           audioAnnouncementsModal.isActive() ||
            locationModal.isActive() ||
            worldTimeModal.isActive() ||
            manageTzModal.isActive() ||
@@ -508,11 +565,17 @@ void setup()
     AudioOut startupAudioHold;
     startupAudioHold.holdQuietPins();
 
+#if !WXV_ENABLE_SERIAL_LOGS
+    esp_log_level_set("*", ESP_LOG_NONE);
+#endif
+
+#if WXV_ENABLE_SERIAL_LOGS
     Serial.begin(115200);
     Serial0.begin(115200);
     delay(100);
+#endif
 
-    Serial.println("[SD] Deferred init at boot");
+#if WXV_ENABLE_SERIAL_LOGS
     if (psramFound())
     {
         Serial.printf("PSRAM found: %u bytes total, %u bytes free\n", ESP.getPsramSize(), ESP.getFreePsram());
@@ -528,8 +591,11 @@ void setup()
                   ESP.getMinFreeHeap(),
                   heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT));
     Serial.printf("Flash size: %u bytes\n", ESP.getFlashChipSize());
+#endif
     deviceHostname = buildDefaultHostname();
+#if WXV_ENABLE_SERIAL_LOGS
     Serial.printf("Hostname: %s.local\n", deviceHostname.c_str());
+#endif
     loadSettings();
     // --- BEGIN WORLD TIME FEATURE ---
     loadWorldTimeSettings();
@@ -729,6 +795,7 @@ void loop()
     if (haveAlarmTime)
     {
         tickAlarmState(alarmNow);
+        serviceHourlyTimeAnnouncement(alarmNow);
     }
 
     bool wifiConnected = (WiFi.status() == WL_CONNECTED);
@@ -950,6 +1017,7 @@ void loop()
         lastReadAHT20_BMP280 = now;
         newAHT20_BMP280Data = true;
         readBMP280();
+        tryAutoSetDeviceElevationFromPressure();
         clockSensorUpdatePending = true;
     }
 
@@ -976,6 +1044,7 @@ void loop()
         !tempestModal.isActive() &&
         !calibrationModal.isActive() &&
         !systemModal.isActive() &&
+        !audioAnnouncementsModal.isActive() &&
         !locationModal.isActive() &&
         !worldTimeModal.isActive() &&
         !manageTzModal.isActive() &&
@@ -1011,6 +1080,7 @@ void loop()
     // the loop, otherwise temporary alerts and section headings can starve MP3
     // decoding long enough to produce audible stutter.
     tickSdMp3Playback();
+    wxv::announce::tick();
 
     handleAutoRotate(now);
     handleReturnToDefault(now);
@@ -1234,6 +1304,13 @@ void loop()
         delay(5);
         return;
     }
+    if (audioAnnouncementsModal.isActive())
+    {
+        audioAnnouncementsModal.tick();
+        audioAnnouncementsModal.handleIR(IRCodes::legacyCodeForKey(getIRCodeNonBlocking()));
+        delay(5);
+        return;
+    }
     if (locationModal.isActive())
     {
         locationModal.tick();
@@ -1335,7 +1412,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         udpScreen.tick();
@@ -1356,7 +1433,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         lightningScreen.tick();
@@ -1372,7 +1449,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         forecastScreen.tick();
@@ -1388,7 +1465,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         currentCondScreen.tick();
@@ -1404,7 +1481,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         hourlyScreen.tick();
@@ -1545,7 +1622,7 @@ void loop()
     if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
     {
         showMainMenuModal();
-        playBuzzerTone(3000, 100);
+        wxv::announce::playUiSound("back");
         noteScreenRotation(millis());
         delay(100);
         return;
@@ -1568,6 +1645,7 @@ void loop()
         alarmModal.isActive() ||
         noaaModal.isActive() ||
         systemModal.isActive() ||
+        audioAnnouncementsModal.isActive() ||
         locationModal.isActive() ||
         worldTimeModal.isActive() ||
         manageTzModal.isActive() ||
@@ -1869,21 +1947,21 @@ void loop()
             {
                 finishForecastSummaryDisplay();
                 showMainMenuModal();
-                playBuzzerTone(3000, 100);
+                wxv::announce::playUiSound("back");
                 return;
             }
             if (key == IRCodes::WxKey::Left)
             {
                 ScreenMode next = nextAllowedScreen(currentScreen, -1);
                 finishForecastSummaryDisplay();
-                transitionToScreen(next);
+                transitionToScreen(next, -1);
                 return;
             }
             if (key == IRCodes::WxKey::Right)
             {
                 ScreenMode next = nextAllowedScreen(currentScreen, +1);
                 finishForecastSummaryDisplay();
-                transitionToScreen(next);
+                transitionToScreen(next, +1);
                 return;
             }
         }
@@ -1905,7 +1983,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         envQualityScreen.tick();
@@ -1977,7 +2055,7 @@ void loop()
         {
             hideAllInfoScreens();
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            wxv::announce::playUiSound("back");
             return;
         }
         noaaAlertScreen.tick();

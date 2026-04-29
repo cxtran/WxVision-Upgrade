@@ -10,6 +10,8 @@ extern int tzStandardOffset;     // Base offset without DST (minutes)
 extern bool tzAutoDst;           // true if automatic DST adjustment enabled
 extern int fmt24;                // 0 = 12h, 1 = 24h
 extern int dateFmt;              // 0 = YYYY-MM-DD, etc.
+extern bool hourlyTimeAnnouncementEnabled;
+extern int hourlyAnnouncementSoundMode; // 0 = time only, 1..N = chime + time
 extern char ntpServerHost[64];
 extern int ntpServerPreset;      // 0..NTP_PRESET_CUSTOM
 

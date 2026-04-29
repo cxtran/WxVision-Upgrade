@@ -40,6 +40,7 @@ namespace wxv::storage
             g_lastStatus = status;
             Serial.printf("[SD] %s\n", g_lastStatus.c_str());
         }
+
     }
 
     bool begin()

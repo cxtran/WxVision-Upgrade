@@ -9,10 +9,21 @@
 #include <Wire.h>
 #include "units.h"
 #include "system.h"
-#include "buzzer.h"
 #include "ir_learn.h"
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
+
+#ifndef WXV_ENABLE_SERIAL_LOGS
+#define WXV_ENABLE_SERIAL_LOGS 0
+#endif
+
+#if WXV_ENABLE_SERIAL_LOGS
+#define WXV_SENSOR_LOG_PRINTF(...) Serial0.printf(__VA_ARGS__)
+#define WXV_SENSOR_LOG_PRINTLN(...) Serial0.println(__VA_ARGS__)
+#else
+#define WXV_SENSOR_LOG_PRINTF(...) do {} while (0)
+#define WXV_SENSOR_LOG_PRINTLN(...) do {} while (0)
+#endif
 
 // Brightness Sensor
 // #define BRIGHTNESS_PIN 36    // GPIO 36 (ADC1_CH0)
@@ -82,7 +93,7 @@ namespace
 
   void logI2cDiagnostics()
   {
-    Serial0.printf("I2C pins SDA=%d SCL=%d\n", I2C_SDA, I2C_SCL);
+    WXV_SENSOR_LOG_PRINTF("I2C pins SDA=%d SCL=%d\n", I2C_SDA, I2C_SCL);
 
     bool anyFound = false;
     for (uint8_t address = 1; address < 0x7F; ++address)
@@ -90,26 +101,26 @@ namespace
       if (!i2cDeviceResponds(address))
         continue;
       anyFound = true;
-      Serial0.printf("I2C device found at 0x%02X\n", address);
+      WXV_SENSOR_LOG_PRINTF("I2C device found at 0x%02X\n", address);
     }
 
     if (!anyFound)
-      Serial0.println(F("I2C scan: no devices found"));
+      WXV_SENSOR_LOG_PRINTLN(F("I2C scan: no devices found"));
 
     const uint8_t probeAddresses[] = {0x76, 0x77};
     for (uint8_t address : probeAddresses)
     {
       if (!i2cDeviceResponds(address))
       {
-        Serial0.printf("Probe 0x%02X: no ACK\n", address);
+        WXV_SENSOR_LOG_PRINTF("Probe 0x%02X: no ACK\n", address);
         continue;
       }
 
       const int chipId = readI2cRegister8(address, 0xD0);
       if (chipId < 0)
-        Serial0.printf("Probe 0x%02X: ACK but chip ID read failed\n", address);
+        WXV_SENSOR_LOG_PRINTF("Probe 0x%02X: ACK but chip ID read failed\n", address);
       else
-        Serial0.printf("Probe 0x%02X: chip ID 0x%02X\n", address, chipId & 0xFF);
+        WXV_SENSOR_LOG_PRINTF("Probe 0x%02X: chip ID 0x%02X\n", address, chipId & 0xFF);
     }
   }
 
@@ -121,31 +132,49 @@ namespace
     {
       scd40Ready = true;
       scd40ReadFailures = 0;
-      Serial0.println(F("SCD40 initialized"));
+      WXV_SENSOR_LOG_PRINTLN(F("SCD40 initialized"));
       return true;
     }
 
     scd40Ready = false;
-    Serial0.printf("SCD40 startPeriodicMeasurement failed: %d\n", scd40LastError);
+    WXV_SENSOR_LOG_PRINTF("SCD40 startPeriodicMeasurement failed: %d\n", scd40LastError);
     return false;
+  }
+
+  bool initializeScd40()
+  {
+    scd4x.begin(Wire, 0x62);
+
+    if (startScd40PeriodicMeasurement())
+      return true;
+
+    // Warm resets can leave the SCD40 already measuring; stop/reinit and retry
+    // so the sensor recovers without affecting other I2C devices.
+    WXV_SENSOR_LOG_PRINTLN(F("SCD40 init retry after stop/reinit"));
+    scd4x.stopPeriodicMeasurement();
+    delay(500);
+    scd4x.reinit();
+    delay(20);
+    return startScd40PeriodicMeasurement();
   }
 
   void handleScd40ReadError(const char *step, int16_t error)
   {
     scd40LastError = error;
     ++scd40ReadFailures;
-    Serial0.printf("SCD40 %s failed: %d\n", step, error);
+    WXV_SENSOR_LOG_PRINTF("SCD40 %s failed: %d\n", step, error);
 
     if (scd40ReadFailures < kScd40RestartThreshold)
       return;
 
-    Serial0.println(F("SCD40 restarting periodic measurement"));
+    WXV_SENSOR_LOG_PRINTLN(F("SCD40 restarting periodic measurement"));
     scd4x.stopPeriodicMeasurement();
     delay(20);
     scd4x.reinit();
     delay(20);
     startScd40PeriodicMeasurement();
   }
+
 }
 
 namespace
@@ -174,12 +203,11 @@ namespace
 void setupIRSensor()
 {
   irrecv.enableIRIn(); // Start the receiver
-  Serial0.println(F("VS1838B IR receiver test. Press buttons on your remote..."));
+  WXV_SENSOR_LOG_PRINTLN(F("VS1838B IR receiver test. Press buttons on your remote..."));
 }
 
 // Forward declaration for use in readIRSensor
 static inline bool isAlarmCancelCode(IRCodes::WxKey key);
-static inline bool isNavKey(IRCodes::WxKey key);
 
 void readIRSensor()
 {
@@ -211,7 +239,7 @@ void readIRSensor()
 void setupBrightnessSensor()
 {
   analogReadResolution(12); // ESP32 default is 12 bits (0-4095)
-  Serial0.println(F("GL5528 Brightness Sensor Test"));
+  WXV_SENSOR_LOG_PRINTLN(F("GL5528 Brightness Sensor Test"));
 }
 
 float readBrightnessSensor()
@@ -284,13 +312,6 @@ static const unsigned long IR_PHYSICAL_REPEAT_BLOCK_MS = 180UL;
 // While alarm is firing, any IR key cancels/snoozes it.
 static inline bool isAlarmCancelCode(IRCodes::WxKey /*key*/) { return true; }
 
-static inline bool isNavKey(IRCodes::WxKey key)
-{
-  return key == IRCodes::WxKey::Up || key == IRCodes::WxKey::Down ||
-         key == IRCodes::WxKey::Left || key == IRCodes::WxKey::Right ||
-         key == IRCodes::WxKey::Ok || key == IRCodes::WxKey::Cancel;
-}
-
 bool startUniversalRemoteLearning()
 {
   return wxv::irlearn::start();
@@ -314,11 +335,7 @@ IRCodes::WxKey getIRCodeNonBlocking()
       }
       return IRCodes::WxKey::Unknown;
     }
-    Serial0.printf("Virtual IR Key: %s\n", IRCodes::keyName(queuedKey));
-    if (!menuActive && isNavKey(queuedKey))
-    {
-      playBuzzerTone(1200, 80);
-    }
+    WXV_SENSOR_LOG_PRINTF("Virtual IR Key: %s\n", IRCodes::keyName(queuedKey));
     if (isAlarmCurrentlyActive() && isAlarmCancelCode(queuedKey))
     {
         cancelActiveAlarm();
@@ -392,10 +409,6 @@ IRCodes::WxKey getIRCodeNonBlocking()
 
       s_lastPhysicalDeliveredKey = key;
       s_lastPhysicalDeliveredAt = now;
-      if (!menuActive && isNavKey(key))
-      {
-          playBuzzerTone(1200, 80);
-      }
       if (isAlarmCurrentlyActive() && isAlarmCancelCode(key))
       {
           cancelActiveAlarm();
@@ -484,24 +497,23 @@ void setupSensors()
   IRCodes::loadLearnedProfile();
 
   // --- SCD40 ---
-  scd4x.begin(Wire, 0x62);
-  startScd40PeriodicMeasurement();
+  initializeScd40();
 
   // --- BMP280 (try both addresses) ---
   if (bmp280.begin(0x76))
   {
     bmp280Ready = true;
-    Serial0.println(F("BMP280 found at 0x76"));
+    WXV_SENSOR_LOG_PRINTLN(F("BMP280 found at 0x76"));
   }
   else if (bmp280.begin(0x77))
   {
     bmp280Ready = true;
-    Serial0.println(F("BMP280 found at 0x77"));
+    WXV_SENSOR_LOG_PRINTLN(F("BMP280 found at 0x77"));
   }
   else
   {
     bmp280Ready = false;
-    Serial0.println(F("Could not find BMP280!"));
+    WXV_SENSOR_LOG_PRINTLN(F("Could not find BMP280!"));
   }
 }
 
@@ -532,7 +544,7 @@ void readSCD40()
   {
     if (scd40LastSuccessMs != 0 && (millis() - scd40LastSuccessMs) > 180000UL)
     {
-      Serial0.println(F("SCD40 stale, restarting measurement"));
+      WXV_SENSOR_LOG_PRINTLN(F("SCD40 stale, restarting measurement"));
       scd4x.stopPeriodicMeasurement();
       delay(20);
       scd4x.reinit();

@@ -248,12 +248,8 @@ void updateBannerState(unsigned long nowMs)
                 break;
             if (nowMs - s_lastScrollStepMs >= SCROLL_STEP_MS)
             {
-                unsigned long elapsed = nowMs - s_lastScrollStepMs;
-                int steps = static_cast<int>(elapsed / SCROLL_STEP_MS);
-                if (steps < 1)
-                    steps = 1;
-                s_cityScrollX -= steps;
-                s_lastScrollStepMs += static_cast<unsigned long>(steps) * SCROLL_STEP_MS;
+                s_cityScrollX -= 1;
+                s_lastScrollStepMs = nowMs;
             }
             if (s_cityScrollX + s_cityTextWidth < 0)
             {
@@ -323,12 +319,8 @@ void updateBannerState(unsigned long nowMs)
 
         if (nowMs - s_lastScrollStepMs >= SCROLL_STEP_MS)
         {
-            unsigned long elapsed = nowMs - s_lastScrollStepMs;
-            int steps = static_cast<int>(elapsed / SCROLL_STEP_MS);
-            if (steps < 1)
-                steps = 1;
-            s_scrollX -= steps;
-            s_lastScrollStepMs += static_cast<unsigned long>(steps) * SCROLL_STEP_MS;
+            s_scrollX -= 1;
+            s_lastScrollStepMs = nowMs;
         }
         if (s_scrollX + s_weatherTextWidth < 0)
         {

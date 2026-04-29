@@ -887,8 +887,9 @@ void InfoScreen::tick() {
 
         if (i == selIndex && lineW > SCREEN_WIDTH) {
             int cursorX = SCREEN_WIDTH - scrollOffset;
-            if (now - lastScrollTime > (unsigned)scrollSpeed) {
-                scrollOffset++;
+            const unsigned long intervalMs = static_cast<unsigned long>(max(1, scrollSpeed));
+            if (now - lastScrollTime >= intervalMs) {
+                scrollOffset += 1;
                 lastScrollTime = now;
                 if (cursorX + lineW < 0) {
                     scrollOffset = 0;
@@ -945,7 +946,7 @@ void InfoScreen::handleIR(uint32_t code) {
         ScreenMode next = nextAllowedScreen(_screenMode, direction);
         next = enforceAllowedScreen(next);
         hide();
-        transitionToScreen(next);
+        transitionToScreen(next, direction);
         return;
     }
     draw();

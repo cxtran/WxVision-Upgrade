@@ -2,7 +2,7 @@
 #include "display.h"
 
 void applyDataSourcePolicies(bool wifiConnected);
-void transitionToScreen(ScreenMode target);
+void transitionToScreen(ScreenMode target, int navigationDirection = 0);
 void rotateScreen(int direction);
 void handleAutoRotate(unsigned long now);
 void handleReturnToDefault(unsigned long now);

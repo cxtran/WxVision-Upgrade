@@ -19,6 +19,7 @@
 #include "display_astronomy.h"
 #include "display_sky_facts.h"
 #include "forecast_summary.h"
+#include "audio_announcer.h"
 
 extern ScreenMode currentScreen;
 extern InfoScreen udpScreen;
@@ -145,6 +146,8 @@ void activateTemporaryAlert(const TemporaryHeadingAlert &alert, unsigned long no
                            s_temporaryAlertDurationMs);
         s_temporaryAlertRendered = true;
     }
+
+    wxv::announce::playUiSound("select");
 }
 
 bool beginNextTemporaryAlert(unsigned long now)
@@ -719,15 +722,17 @@ void rotateScreen(int direction)
 
     if (next == currentScreen)
     {
+        wxv::announce::playUiSound("nav_error");
         playScreenRevealEffect(currentScreen);
         noteScreenRotation(millis());
         return;
     }
 
+    wxv::announce::playUiSound(direction < 0 ? "left" : "right");
     beginScreenTransition(next, millis());
 }
 
-void transitionToScreen(ScreenMode target)
+void transitionToScreen(ScreenMode target, int navigationDirection)
 {
     ScreenMode next = enforceAllowedScreen(target);
     if (!screenIsAllowed(next))
@@ -739,6 +744,11 @@ void transitionToScreen(ScreenMode target)
         noteScreenRotation(millis());
         return;
     }
+
+    if (navigationDirection < 0)
+        wxv::announce::playUiSound("left");
+    else if (navigationDirection > 0)
+        wxv::announce::playUiSound("right");
 
     beginScreenTransition(next, millis());
 }
@@ -866,11 +876,14 @@ void stepSectionHeading(int direction, unsigned long now)
 
     if (next == base)
     {
+        wxv::announce::playUiSound("nav_error");
         // Keep heading visible but restart timer so interaction feels immediate.
         s_sectionHeadingStartMs = now;
         s_sectionHeadingRendered = false;
         return;
     }
+
+    wxv::announce::playUiSound((direction < 0) ? "left" : "right");
 
     const char *title = nullptr;
     const char *subtitle = nullptr;

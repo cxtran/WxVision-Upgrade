@@ -12,6 +12,7 @@
 #include <esp_sntp.h>
 #include "display.h"
 #include "display_runtime.h"
+#include "chime_catalog.h"
 #include "default_values.h"
 
 
@@ -21,6 +22,8 @@ bool tzAutoDst = false;
 static bool s_tzAutoDstPreferred = false;
 int fmt24 = wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat);
 int dateFmt = wxv::defaults::kDefaults.dateFormatStorage;
+bool hourlyTimeAnnouncementEnabled = false;
+int hourlyAnnouncementSoundMode = 0;
 extern RTC_DS3231 rtc;
 char tzName[TZ_NAME_MAX] = "UTC";
 char ntpServerHost[64] = "";
@@ -634,6 +637,8 @@ void loadDateTimeSettings()
     int storedStd = prefs.getInt("tz_std", storedOffset);
     dateFmt = prefs.getInt("date_fmt", wxv::defaults::kDefaults.dateFormatStorage);
     fmt24 = prefs.getInt("time_24h", wxv::defaults::toStorage(wxv::defaults::kDefaults.timeFormat));
+    hourlyTimeAnnouncementEnabled = prefs.getBool("hourAnnounce", false);
+    hourlyAnnouncementSoundMode = prefs.getInt("hourAnnSound", 0);
     bool storedAutoDst = prefs.getBool("tz_dst_auto", false);
     ntpServerPreset = prefs.getInt("ntp_preset", -1);
     String savedHost = prefs.getString("ntp_host", wxv::defaults::kDefaults.ntpServer2);
@@ -727,6 +732,8 @@ void loadDateTimeSettings()
         }
     }
 
+    hourlyAnnouncementSoundMode = constrain(hourlyAnnouncementSoundMode, 0, static_cast<int>(wxv::audio::chimeCount()));
+
     refreshNtpHostCache();
     applySystemTimezone();
     updateTimezoneOffset();
@@ -745,6 +752,8 @@ void saveDateTimeSettings()
     prefs.putString("tz_name", timezoneIsCustom() ? "" : tzName);
     prefs.putInt("date_fmt", dateFmt);
     prefs.putInt("time_24h", fmt24);
+    prefs.putBool("hourAnnounce", hourlyTimeAnnouncementEnabled);
+    prefs.putInt("hourAnnSound", constrain(hourlyAnnouncementSoundMode, 0, static_cast<int>(wxv::audio::chimeCount())));
 
     refreshNtpHostCache();
     const char *toStore = (ntpServerPreset >= 0 && ntpServerPreset < NTP_PRESET_COUNT)

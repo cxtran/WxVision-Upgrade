@@ -1,0 +1,595 @@
+Processing esp32-s3 (platform: espressif32; board: esp32-s3-n16r8; framework: arduino)
+--------------------------------------------------------------------------------
+Verbose mode can be enabled via `-v, --verbose` option
+CONFIGURATION: https://docs.platformio.org/page/boards/espressif32/esp32-s3-n16r8.html
+PLATFORM: Espressif 32 (53.3.11) > Custom ESP32-S3 N16R8 (16 MB QIO Flash, 8 MB OPI PSRAM)
+HARDWARE: ESP32S3 240MHz, 320KB RAM, 16MB Flash
+DEBUG: Current (esp-builtin) On-board (esp-builtin) External (cmsis-dap, esp-bridge, esp-prog, iot-bus-jtag, jlink, minimodule, olimex-arm-usb-ocd, olimex-arm-usb-ocd-h, olimex-arm-usb-tiny-h, olimex-jtag-tiny, tumpa)
+PACKAGES: 
+ - framework-arduinoespressif32 @ 3.1.1 
+ - framework-arduinoespressif32-libs @ 5.3.0+sha.cfea4f7c98 
+ - tool-esptoolpy @ 4.8.5 
+ - tool-mklittlefs @ 3.2.0 
+ - tool-riscv32-esp-elf-gdb @ 14.2.0+20240403 
+ - tool-xtensa-esp-elf-gdb @ 14.2.0+20240403 
+ - toolchain-riscv32-esp @ 13.2.0+20240530 
+ - toolchain-xtensa-esp-elf @ 13.2.0+20240530
+LDF: Library Dependency Finder -> https://bit.ly/configure-pio-ldf
+LDF Modes: Finder ~ chain, Compatibility ~ soft
+Found 60 compatible libraries
+Scanning dependencies...
+Dependency Graph
+|-- ArduinoJson @ 7.4.3
+|-- ESPAsyncWebServer @ 3.6.0+sha.ad3741d
+|-- AsyncTCP @ 3.3.2+sha.ef448a8
+|-- RTClib @ 2.1.4
+|-- Adafruit GFX Library @ 1.12.6
+|-- Adafruit BusIO @ 1.17.4
+|-- Arduino_JSON @ 0.2.0
+|-- AsyncOta @ 1.0.2
+|-- IRremoteESP8266 @ 2.9.0
+|-- Sensirion I2C SCD4x @ 1.1.0
+|-- Adafruit Unified Sensor @ 1.1.15
+|-- Adafruit BMP280 Library @ 2.6.8
+|-- U8g2_for_Adafruit_GFX @ 1.8.0
+|-- PubSubClient @ 2.8.0
+|-- ESP32 HUB75 LED MATRIX PANEL DMA Display @ 3.0.14+sha.c886f40
+|-- WebSockets @ 2.7.3
+|-- ESP8266Audio @ 2.4.1+sha.05f2fb0
+|-- FS @ 3.1.1
+|-- SD @ 3.1.1
+|-- SPI @ 3.1.1
+|-- HTTPClient @ 3.1.1
+|-- WiFi @ 3.1.1
+|-- NetworkClientSecure @ 3.1.1
+|-- SPIFFS @ 3.1.1
+|-- EEPROM @ 3.1.1
+|-- Preferences @ 3.1.1
+|-- ESPmDNS @ 3.1.1
+|-- Update @ 3.1.1
+|-- Wire @ 3.1.1
+Building in release mode
+Compiling .pio\build\esp32-s3\src\speech_service.cpp.o
+Compiling .pio\build\esp32-s3\libcac\Network\NetworkServer.cpp.o
+Compiling .pio\build\esp32-s3\libcac\Network\NetworkUdp.cpp.o
+Compiling .pio\build\esp32-s3\lib1bd\AsyncTCP@src-7fb2940bccb78b8d2de6915ae328b7fc\AsyncTCP.cpp.o
+Compiling .pio\build\esp32-s3\lib958\FS\FS.cpp.o
+Compiling .pio\build\esp32-s3\lib958\FS\vfs_api.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\Parsing.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\WebServer.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\detail\mimetable.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\middleware\AuthenticationMiddleware.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\middleware\CorsMiddleware.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\middleware\LoggingMiddleware.cpp.o
+Compiling .pio\build\esp32-s3\lib04b\WebServer\middleware\MiddlewareChain.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\AP.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\STA.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFi.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFiAP.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFiGeneric.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFiMulti.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFiSTA.cpp.o
+Compiling .pio\build\esp32-s3\libdfc\WiFi\WiFiScan.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\AsyncEventSource.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\AsyncJson.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\AsyncMessagePack.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\AsyncWebHeader.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\AsyncWebSocket.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\BackPort_SHA1Builder.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\ChunkPrint.cpp.o
+Archiving .pio\build\esp32-s3\libcac\libNetwork.a
+Archiving .pio\build\esp32-s3\lib1bd\libAsyncTCP@src-7fb2940bccb78b8d2de6915ae328b7fc.a
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\Middleware.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\WebAuthentication.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\WebHandlers.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\WebRequest.cpp.o
+Archiving .pio\build\esp32-s3\lib958\libFS.a
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\WebResponses.cpp.o
+Compiling .pio\build\esp32-s3\lib5ba\ESPAsyncWebServer\WebServer.cpp.o
+Compiling .pio\build\esp32-s3\lib720\Wire\Wire.cpp.o
+Compiling .pio\build\esp32-s3\libe35\SPI\SPI.cpp.o
+Compiling .pio\build\esp32-s3\lib4e1\Adafruit BusIO\Adafruit_BusIO_Register.cpp.o
+Compiling .pio\build\esp32-s3\lib4e1\Adafruit BusIO\Adafruit_GenericDevice.cpp.o
+Compiling .pio\build\esp32-s3\lib4e1\Adafruit BusIO\Adafruit_I2CDevice.cpp.o
+Compiling .pio\build\esp32-s3\lib4e1\Adafruit BusIO\Adafruit_SPIDevice.cpp.o
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_DS1307.cpp.o
+Archiving .pio\build\esp32-s3\libdfc\libWiFi.a
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_DS3231.cpp.o
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_Micros.cpp.o
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_Millis.cpp.o
+Archiving .pio\build\esp32-s3\lib04b\libWebServer.a
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_PCF8523.cpp.o
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTC_PCF8563.cpp.o
+Compiling .pio\build\esp32-s3\lib5f0\RTClib\RTClib.cpp.o
+Compiling .pio\build\esp32-s3\libba6\Adafruit GFX Library\Adafruit_GFX.cpp.o
+Compiling .pio\build\esp32-s3\libba6\Adafruit GFX Library\Adafruit_GrayOLED.cpp.o
+Compiling .pio\build\esp32-s3\libba6\Adafruit GFX Library\Adafruit_SPITFT.cpp.o
+Compiling .pio\build\esp32-s3\libba6\Adafruit GFX Library\glcdfont.c.o
+Compiling .pio\build\esp32-s3\lib005\Arduino_JSON\JSON.cpp.o
+Compiling .pio\build\esp32-s3\lib005\Arduino_JSON\JSONVar.cpp.o
+Archiving .pio\build\esp32-s3\libe35\libSPI.a
+Archiving .pio\build\esp32-s3\lib720\libWire.a
+Compiling .pio\build\esp32-s3\lib005\Arduino_JSON\cjson\cJSON.c.o
+Compiling .pio\build\esp32-s3\lib551\Update\HttpsOTAUpdate.cpp.o
+Compiling .pio\build\esp32-s3\lib551\Update\Updater.cpp.o
+Archiving .pio\build\esp32-s3\lib4e1\libAdafruit BusIO.a
+Compiling .pio\build\esp32-s3\lib8af\AsyncOta\AsyncOTA.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRac.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRrecv.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRsend.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRtext.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRtimer.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\IRutils.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Airton.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Airwell.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Aiwa.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Amcor.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Argo.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Arris.cpp.o
+Archiving .pio\build\esp32-s3\lib5f0\libRTClib.a
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_BluestarHeavy.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Bosch.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Bose.cpp.o
+Archiving .pio\build\esp32-s3\lib5ba\libESPAsyncWebServer.a
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Carrier.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_ClimaButler.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Coolix.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Corona.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Daikin.cpp.o
+Archiving .pio\build\esp32-s3\libba6\libAdafruit GFX Library.a
+Archiving .pio\build\esp32-s3\lib005\libArduino_JSON.a
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Delonghi.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Denon.cpp.o
+Archiving .pio\build\esp32-s3\lib551\libUpdate.a
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Dish.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Doshisha.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Ecoclim.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Electra.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_EliteScreens.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Epson.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Eurom.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Fujitsu.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_GICable.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_GlobalCache.cpp.o
+.pio/libdeps/esp32-s3/IRremoteESP8266/src/IRac.cpp: In static member function 'static bool IRac::isProtocolSupported(decode_type_t)':
+.pio/libdeps/esp32-s3/IRremoteESP8266/src/IRac.cpp:382:14: warning: statement will never be executed [-Wswitch-unreachable]
+  382 |       return true;
+      |              ^~~~
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Goodweather.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Gorenje.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Gree.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Haier.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Hitachi.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Inax.cpp.o
+.pio/libdeps/esp32-s3/AsyncOta/src/AsyncOTA.cpp: In lambda function:
+.pio/libdeps/esp32-s3/AsyncOta/src/AsyncOTA.cpp:53:33: warning: 'AsyncWebServerResponse* AsyncWebServerRequest::beginResponse_P(int, const String&, const char*, AwsTemplateProcessor)' is deprecated: Replaced by beginResponse(int code, const String& contentType, const char* content = asyncsrv::empty, AwsTemplateProcessor callback = nullptr) [-Wdeprecated-declarations]
+   53 |         request->beginResponse_P(200, "text/html", OTA_HTML);
+      |         ~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from .pio/libdeps/esp32-s3/AsyncOta/include/AsyncOTA.h:4,
+                 from .pio/libdeps/esp32-s3/AsyncOta/src/AsyncOTA.cpp:1:
+.pio/libdeps/esp32-s3/ESPAsyncWebServer/src/ESPAsyncWebServer.h:393:29: note: declared here
+  393 |     AsyncWebServerResponse* beginResponse_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback = nullptr);
+      |                             ^~~~~~~~~~~~~~~
+.pio/libdeps/esp32-s3/AsyncOta/src/AsyncOTA.cpp: In lambda function:
+.pio/libdeps/esp32-s3/AsyncOta/src/AsyncOTA.cpp:61:68: warning: 'AsyncWebServerResponse* AsyncWebServerRequest::beginResponse_P(int, const String&, const char*, AwsTemplateProcessor)' is deprecated: Replaced by beginResponse(int code, const String& contentType, const char* content = asyncsrv::empty, AwsTemplateProcessor callback = nullptr) [-Wdeprecated-declarations]
+   61 |         AsyncWebServerResponse* response = request->beginResponse_P(
+      |                                            ~~~~~~~~~~~~~~~~~~~~~~~~^
+   62 |             200, "text/plain", (Update.hasError()) ? "FAIL" : "OK");
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ 
+.pio/libdeps/esp32-s3/ESPAsyncWebServer/src/ESPAsyncWebServer.h:393:29: note: declared here
+  393 |     AsyncWebServerResponse* beginResponse_P(int code, const String& contentType, PGM_P content, AwsTemplateProcessor callback = nullptr);
+      |                             ^~~~~~~~~~~~~~~
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_JVC.cpp.o
+Archiving .pio\build\esp32-s3\lib8af\libAsyncOta.a
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Kelon.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Kelvinator.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_LG.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Lasertag.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Lego.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Lutron.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_MWM.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Magiquest.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Metz.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Midea.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_MilesTag2.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Mirage.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Mitsubishi.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_MitsubishiHeavy.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Multibrackets.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_NEC.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Neoclima.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Nikai.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Panasonic.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Pioneer.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Pronto.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_RC5_RC6.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_RCMM.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Rhoss.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Samsung.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Sanyo.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Sharp.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Sherwood.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Sony.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Symphony.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Tcl.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Technibel.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Teco.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Teknopoint.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Toshiba.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Toto.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Transcold.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Trotec.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Truma.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Vestel.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Voltas.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Whirlpool.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Whynter.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Wowwee.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Xmp.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_York.cpp.o
+Compiling .pio\build\esp32-s3\libe0e\IRremoteESP8266\ir_Zepeal.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionCrc.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionErrors.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionI2CCommunication.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionI2CTxFrame.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionRxFrame.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionShdlcCommunication.cpp.o
+Compiling .pio\build\esp32-s3\libb22\Sensirion Core\SensirionShdlcTxFrame.cpp.o
+Compiling .pio\build\esp32-s3\lib9d7\Sensirion I2C SCD4x\SensirionI2cScd4x.cpp.o
+Compiling .pio\build\esp32-s3\lib7f3\Adafruit Unified Sensor\Adafruit_Sensor.cpp.o
+Compiling .pio\build\esp32-s3\lib8eb\Adafruit BMP280 Library\Adafruit_BMP280.cpp.o
+Compiling .pio\build\esp32-s3\libfed\U8g2_for_Adafruit_GFX\U8g2_for_Adafruit_GFX.cpp.o
+Compiling .pio\build\esp32-s3\libfed\U8g2_for_Adafruit_GFX\u8g2_fonts.c.o
+Compiling .pio\build\esp32-s3\libc45\PubSubClient\PubSubClient.cpp.o
+Compiling .pio\build\esp32-s3\libf58\ESP32 HUB75 LED MATRIX PANEL DMA Display\ESP32-HUB75-MatrixPanel-I2S-DMA.cpp.o
+Compiling .pio\build\esp32-s3\libf58\ESP32 HUB75 LED MATRIX PANEL DMA Display\ESP32-HUB75-MatrixPanel-leddrivers.cpp.o
+Compiling .pio\build\esp32-s3\libf58\ESP32 HUB75 LED MATRIX PANEL DMA Display\platforms\esp32\esp32_i2s_parallel_dma.cpp.o
+Compiling .pio\build\esp32-s3\libf58\ESP32 HUB75 LED MATRIX PANEL DMA Display\platforms\esp32s3\gdma_lcd_parallel16.cpp.o
+Compiling .pio\build\esp32-s3\lib0ef\Ethernet\ETH.cpp.o
+Compiling .pio\build\esp32-s3\lib56f\NetworkClientSecure\NetworkClientSecure.cpp.o
+Archiving .pio\build\esp32-s3\libe0e\libIRremoteESP8266.a
+Compiling .pio\build\esp32-s3\lib56f\NetworkClientSecure\ssl_client.cpp.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\SocketIOclient.cpp.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\WebSockets.cpp.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\WebSocketsClient.cpp.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\WebSocketsServer.cpp.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\libb64\cdecode.c.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\libb64\cencode.c.o
+Compiling .pio\build\esp32-s3\lib524\WebSockets\libsha1\libsha1.c.o
+Compiling .pio\build\esp32-s3\lib64f\SPIFFS\SPIFFS.cpp.o
+Archiving .pio\build\esp32-s3\lib7f3\libAdafruit Unified Sensor.a
+Archiving .pio\build\esp32-s3\libb22\libSensirion Core.a
+Compiling .pio\build\esp32-s3\lib261\HTTPClient\HTTPClient.cpp.o
+Compiling .pio\build\esp32-s3\lib885\SD\SD.cpp.o
+Archiving .pio\build\esp32-s3\lib9d7\libSensirion I2C SCD4x.a
+Compiling .pio\build\esp32-s3\lib885\SD\sd_diskio.cpp.o
+Archiving .pio\build\esp32-s3\lib8eb\libAdafruit BMP280 Library.a
+Compiling .pio\build\esp32-s3\lib885\SD\sd_diskio_crc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceBuffer.cpp.o
+Archiving .pio\build\esp32-s3\libfed\libU8g2_for_Adafruit_GFX.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceFS.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceFunction.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceHTTPStream.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceICYStream.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceID3.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourcePROGMEM.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceSD.cpp.o
+Archiving .pio\build\esp32-s3\libc45\libPubSubClient.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceSPIRAMBuffer.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileSourceSTDIO.cpp.o
+.pio/libdeps/esp32-s3/ESP32 HUB75 LED MATRIX PANEL DMA Display/src/platforms/esp32s3/gdma_lcd_parallel16.cpp:21:19: note: '#pragma message: Compiling for ESP32-S3'
+   21 |   #pragma message "Compiling for ESP32-S3"
+      |                   ^~~~~~~~~~~~~~~~~~~~~~~~
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioFileStream.cpp.o
+C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src/ETH.cpp: In member function 'void ETHClass::end()':
+C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src/ETH.cpp:886:22: warning: 'void NetworkEvents::removeEvent(NetworkEventFuncCb, arduino_event_id_t)' is deprecated: removing functional callbacks via pointer is deprecated, use removeEvent(network_event_handle_t) instead [-Wdeprecated-declarations]
+  886 |   Network.removeEvent(onEthConnected, ARDUINO_EVENT_ETH_CONNECTED);
+      |   ~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+In file included from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Network/src/Network.h:9,
+                 from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src/ETH.h:70,
+                 from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Ethernet/src/ETH.cpp:24:
+C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Network/src/NetworkEvents.h:204:8: note: declared here
+  204 |   void removeEvent(NetworkEventFuncCb cbEvent, arduino_event_id_t event = ARDUINO_EVENT_MAX)
+      |        ^~~~~~~~~~~
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorAAC.cpp.o
+Archiving .pio\build\esp32-s3\libf58\libESP32 HUB75 LED MATRIX PANEL DMA Display.a
+Archiving .pio\build\esp32-s3\lib0ef\libEthernet.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorFLAC.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorMIDI.cpp.o
+.pio/libdeps/esp32-s3/WebSockets/src/WebSocketsClient.cpp: In member function 'void WebSocketsClient::clientDisconnect(WSclient_t*, const char*)':
+.pio/libdeps/esp32-s3/WebSockets/src/WebSocketsClient.cpp:573:31: warning: 'virtual void NetworkClient::flush()' is deprecated: Use clear() instead. [-Wdeprecated-declarations]
+  573 |             client->tcp->flush();
+      |             ~~~~~~~~~~~~~~~~~~^~
+In file included from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Network/src/Network.h:12,
+                 from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiGeneric.h:44,
+                 from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFiSTA.h:30,
+                 from C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/WiFi/src/WiFi.h:34,
+                 from .pio/libdeps/esp32-s3/WebSockets/src/WebSockets.h:236,
+                 from .pio/libdeps/esp32-s3/WebSockets/src/WebSocketsClient.cpp:25:
+C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32/libraries/Network/src/NetworkClient.h:61:8: note: declared here
+   61 |   void flush();  // Print::flush tx
+      |        ^~~~~
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorMOD.cpp.o
+Archiving .pio\build\esp32-s3\lib56f\libNetworkClientSecure.a
+Archiving .pio\build\esp32-s3\lib64f\libSPIFFS.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorMP3.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorMP3a.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorOpus.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorRTTTL.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorTalkie.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioGeneratorWAV.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioLogger.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputBuffer.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputFilterBiquad.cpp.o
+Archiving .pio\build\esp32-s3\lib885\libSD.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputFilterDecimate.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputI2S.cpp.o
+Archiving .pio\build\esp32-s3\lib524\libWebSockets.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputI2SNoDAC.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputMixer.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputPDM.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputPWM.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputSPDIF.cpp.o
+Archiving .pio\build\esp32-s3\lib261\libHTTPClient.a
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputSPIFFSWAV.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputSTDIO.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputSerialWAV.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\AudioOutputULP.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\driver\SinglePinI2SDriver.cpp.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\bitmath.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\bitreader.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\cpu.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\crc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\fixed.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\float.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\format.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\lpc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\md5.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\memory.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\stream_decoder.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libflac\window.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\aacdec.c.o
+In file included from .pio/libdeps/esp32-s3/ESP8266Audio/src/AudioOutputPDM.h:25,
+                 from .pio/libdeps/esp32-s3/ESP8266Audio/src/AudioOutputPDM.cpp:22:
+.pio/libdeps/esp32-s3/ESP8266Audio/src/AudioOutputPDM.cpp: In member function 'virtual bool AudioOutputPDM::begin()':
+.pio/libdeps/esp32-s3/ESP8266Audio/src/AudioOutputPDM.cpp:64:63: warning: narrowing conversion of '((AudioOutputPDM*)this)->AudioOutputPDM::AdjustI2SRate(((int)((AudioOutputPDM*)this)->AudioOutputPDM::<anonymous>.AudioOutputI2S::<anonymous>.AudioOutput::hertz))' from 'int' to 'uint32_t' {aka 'long unsigned int'} [-Wnarrowing]
+   64 |         .clk_cfg = I2S_PDM_TX_CLK_DEFAULT_CONFIG(AdjustI2SRate(hertz)),
+      |                                                  ~~~~~~~~~~~~~^~~~~~~
+C:/Users/cxtra/.platformio/packages/framework-arduinoespressif32-libs/esp32s3/include/esp_driver_i2s/include/driver/i2s_pdm.h:268:23: note: in definition of macro 'I2S_PDM_TX_CLK_DEFAULT_CONFIG'
+  268 |     .sample_rate_hz = rate, \
+      |                       ^~~~
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\aactabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\bitstream.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\buffers.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\dct4.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\decelmnt.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\dequant.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\fft.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\filefmt.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\huffmanaac.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\hufftabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\imdct.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\noiseless.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\pns.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbr.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrfft.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrfreq.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrhfadj.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrhfgen.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrhuff.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrimdct.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrmath.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrqmf.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrside.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\sbrtabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\stproc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\tns.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-aac\trigtabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\bitstream.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\buffers.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\dct32.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\dequant.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\dqchan.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\huffman.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\hufftabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\imdct.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\mp3dec.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\mp3tabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\polyphase.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\scalfact.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\stproc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\subband.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libhelix-mp3\trigtabs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\bit.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\decoder.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\fixed.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\frame.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\huffman.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\layer3.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\stream.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\synth.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\timer.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libmad\version.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\bands.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\celt.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\celt_decoder.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\celt_lpc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\cwrs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\entcode.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\entdec.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\entenc.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\kiss_fft.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\laplace.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\mathops.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\mdct.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\modes.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\pitch.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\quant_bands.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\rate.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\celt\vq.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\A2NLSF.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\CNG.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\HP_variable_cutoff.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\LPC_analysis_filter.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\LPC_fit.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\LPC_inv_pred_gain.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\LP_variable_cutoff.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF2A.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_VQ.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_VQ_weights_laroia.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_decode.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_del_dec_quant.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_encode.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_stabilize.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\NLSF_unpack.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\PLC.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\VQ_WMat_EC.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\ana_filt_bank_1.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\biquad_alt.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\bwexpander.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\bwexpander_32.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\check_control_input.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\code_signs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\control_SNR.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\control_audio_bandwidth.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\control_codec.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\debug.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\dec_API.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_core.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_frame.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_indices.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_parameters.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_pitch.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decode_pulses.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\decoder_set_fs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\encode_indices.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\encode_pulses.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\LTP_analysis_filter_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\LTP_scale_ctrl_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\apply_sine_window_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\autocorr_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\burg_modified_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\corrMatrix_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\find_LPC_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\find_LTP_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\find_pred_coefs_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\k2a_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\k2a_Q16_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\process_gains_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\regularize_correlations_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\residual_energy16_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\residual_energy_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\schur64_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\schur_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\vector_ops_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\fixed\warped_autocorrelation_FIX.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\gain_quant.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\init_decoder.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\inner_prod_aligned.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\interpolate.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\lin2log.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\log2lin.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\pitch_est_tables.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\process_NLSFs.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\quant_LTP_gains.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_down2.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_down2_3.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_private_AR2.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_private_IIR_FIR.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_private_down_FIR.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_private_up2_HQ.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\resampler_rom.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\shell_coder.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\sigm_Q15.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\sort.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_LR_to_MS.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_MS_to_LR.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_decode_pred.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_encode_pred.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_find_predictor.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\stereo_quant_pred.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\sum_sqr_shift.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\table_LSF_cos.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_LTP.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_NLSF_CB_NB_MB.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_NLSF_CB_WB.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_gain.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_other.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_pitch_lag.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\silk\tables_pulses_per_block.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\src\opus.c.o
+Compiling .pio\build\esp32-s3\lib997\ESP8266Audio\libopus\src\opus_decoder.c.o
+Compiling .pio\build\esp32-s3\libfc0\EEPROM\EEPROM.cpp.o
+Compiling .pio\build\esp32-s3\lib65c\Preferences\Preferences.cpp.o
+Compiling .pio\build\esp32-s3\lib2f1\ESPmDNS\ESPmDNS.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\ColorFormat.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\Esp.cpp.o
+Archiving .pio\build\esp32-s3\lib997\libESP8266Audio.a
+Compiling .pio\build\esp32-s3\FrameworkArduino\FirmwareMSC.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\FunctionalInterrupt.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\HEXBuilder.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\HWCDC.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\HardwareSerial.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\IPAddress.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\MD5Builder.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\MacAddress.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\Print.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\SHA1Builder.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\Stream.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\StreamString.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\Tone.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\USB.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\USBCDC.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\USBMSC.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\WMath.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\WString.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\base64.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\cbuf.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\chip-debug-report.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-adc.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-bt.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-cpu.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-dac.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-gpio.c.o
+Archiving .pio\build\esp32-s3\libfc0\libEEPROM.a
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-i2c-slave.c.o
+Archiving .pio\build\esp32-s3\lib2f1\libESPmDNS.a
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-i2c.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-ledc.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-matrix.c.o
+Archiving .pio\build\esp32-s3\lib65c\libPreferences.a
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-misc.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-periman.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-psram.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-rgb-led.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-rmt.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-sigmadelta.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-spi.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-time.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-timer.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-tinyusb.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-touch-ng.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-touch.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\esp32-hal-uart.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\firmware_msc_fat.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\freertos_stats.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\libb64\cdecode.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\libb64\cencode.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\main.cpp.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\stdlib_noniso.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\wiring_pulse.c.o
+Compiling .pio\build\esp32-s3\FrameworkArduino\wiring_shift.c.o
+Archiving .pio\build\esp32-s3\libFrameworkArduino.a
+Linking .pio\build\esp32-s3\firmware.elf
+Retrieving maximum program size .pio\build\esp32-s3\firmware.elf
+Checking size .pio\build\esp32-s3\firmware.elf
+Advanced Memory Usage is available via "PlatformIO Home > Project Inspect"
+RAM:   [====      ]  39.7% (used 130188 bytes from 327680 bytes)
+Flash: [====      ]  43.5% (used 2509148 bytes from 5767168 bytes)
+Building .pio\build\esp32-s3\firmware.bin
+esptool.py v4.8.5
+Creating esp32s3 image...
+Merged 2 ELF sections
+Successfully created esp32s3 image.
+======================== [SUCCESS] Took 129.84 seconds ========================

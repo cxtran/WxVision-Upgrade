@@ -11,6 +11,10 @@
 #include "settings.h"
 #include "web.h"
 
+#ifndef WXV_ENABLE_CLOUD
+#define WXV_ENABLE_CLOUD 0
+#endif
+
 namespace wxv {
 namespace cloud {
 namespace {
@@ -99,6 +103,11 @@ String buildRelayUrlWithDeviceAuth_(const String &baseUrl, const DeviceIdentity 
 void CloudManager::begin(const String &fallbackDeviceName)
 {
     fallbackDeviceName_ = fallbackDeviceName;
+#if !WXV_ENABLE_CLOUD
+    state_.enabled = false;
+    cloudEnabled = false;
+    return;
+#endif
     state_.enabled = cloudEnabled;
     state_.registered = false;
     state_.relayConnected = false;
@@ -118,6 +127,15 @@ void CloudManager::begin(const String &fallbackDeviceName)
 
 void CloudManager::loop()
 {
+#if !WXV_ENABLE_CLOUD
+    if (relayClient_.isConnected())
+        relayClient_.stop();
+    state_.enabled = false;
+    state_.relayConnected = false;
+    state_.relayAuthenticated = false;
+    cloudEnabled = false;
+    return;
+#endif
     state_.enabled = cloudEnabled;
     state_.timeReady = hasUsableTime_();
 

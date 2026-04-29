@@ -40,7 +40,6 @@ AppState &appState()
         lightGain,
         buzzerVolume,
         mp3Volume,
-        buzzerToneSet,
         alarmSoundMode,
 
         deviceHostname,

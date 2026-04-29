@@ -1,5 +1,5 @@
 #include <Arduino.h>
-#include "buzzer.h"
+#include "audio_announcer.h"
 #include "menu.h"
 #include "display.h"
 #include <vector>
@@ -75,6 +75,14 @@ static AppState &app = appState();
 #define dateFmt app.dateFmt
 #define deviceHostname app.deviceHostname
 
+namespace
+{
+void playMenuUiSound(const char *key)
+{
+    wxv::announce::playUiSound(key);
+}
+}
+
 InfoModal sysInfoModal("Sys Info");
 InfoModal wifiInfoModal("WiFi Info");
 InfoModal dateModal("Date/Time");
@@ -86,6 +94,7 @@ InfoModal weatherModal("OW Map");
 InfoModal tempestModal("WF Tempest");
 InfoModal calibrationModal("Calibration");
 InfoModal systemModal("System");
+InfoModal audioAnnouncementsModal("Audio Announce");
 InfoModal scenePreviewModal("Preview Scr");
 InfoModal setupPromptModal("Welcome");
 InfoModal wifiSettingsModal("WiFi Setting");
@@ -156,6 +165,8 @@ int dtFmt24;
 int dtDateFmt;
 int dtNtpPreset;
 int dtAutoDst;
+int dtHourlyAnnounce;
+int dtHourlySoundMode;
 int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel, unitDistanceSel;
 
 const char *mainMenu[] = {"Device", "WiFi", "Display", "OW Map", "WF Tempest", "Calibration", "System", "World Time", "Exit Menu"};
@@ -290,6 +301,11 @@ void handleIRKey(IRCodes::WxKey key)
         systemModal.handleIR(legacyCode);
         return;
     }
+    if (audioAnnouncementsModal.isActive())
+    {
+        audioAnnouncementsModal.handleIR(legacyCode);
+        return;
+    }
     if (locationModal.isActive())
     {
         locationModal.handleIR(legacyCode);
@@ -319,12 +335,12 @@ void handleIRKey(IRCodes::WxKey key)
         if (key == IRCodes::WxKey::Up)
         {
             handleUp();
-            playBuzzerTone(1000, 60);
+            playMenuUiSound("up");
         }
         else if (key == IRCodes::WxKey::Down)
         {
             handleDown();
-            playBuzzerTone(1300, 60);
+            playMenuUiSound("down");
         }
         else if (key == IRCodes::WxKey::Ok)
         {
@@ -342,7 +358,7 @@ void handleIRKey(IRCodes::WxKey key)
                     currentMenuLevel = MENU_NONE;
                     menuScroll = 0;
                     handleInitialSetupDecision(false);
-                    playBuzzerTone(900, 80);
+                    playMenuUiSound("back");
                     return;
                 }
                 bool returnToWifiSettings = wifiSelectReturnToSettings;
@@ -362,12 +378,12 @@ void handleIRKey(IRCodes::WxKey key)
                     menuScroll = 0;
                     showMainMenuModal(); // Show main menu modal
                 }
-                playBuzzerTone(900, 80);
+                playMenuUiSound("back");
                 return;
             }
             if (scannedSSIDs[wifiSelectIndex] == "(No networks)")
             {
-                playBuzzerTone(500, 100);
+                playMenuUiSound("nav_error");
                 return;
             }
             wifiSSID = scannedSSIDs[wifiSelectIndex];
@@ -396,7 +412,7 @@ void handleIRKey(IRCodes::WxKey key)
                     }
                 }
                 drawMenu(); },"Enter Pwd:");
-            playBuzzerTone(2200, 120);
+            playMenuUiSound("select");
             return;
         }
         else if (key == IRCodes::WxKey::Cancel || key == IRCodes::WxKey::Menu)
@@ -430,7 +446,7 @@ void handleIRKey(IRCodes::WxKey key)
                     showMainMenuModal(); // Show main menu modal on cancel
                 }
             }
-            playBuzzerTone(700, 80);
+            playMenuUiSound("back");
         }
         return;
     }
@@ -438,8 +454,6 @@ void handleIRKey(IRCodes::WxKey key)
     static unsigned long lastMenuToggle = 0;
     if (!menuActive)
     {
-        // Always provide audible feedback when not in a menu
-        playBuzzerTone(1200, 80);
         if (key == IRCodes::WxKey::Left)
         {
             handleScreenSwitch(-1);
@@ -459,7 +473,7 @@ void handleIRKey(IRCodes::WxKey key)
             currentMenuIndex = 0;
             menuScroll = 0;
             showMainMenuModal();
-            playBuzzerTone(3000, 100);
+            playMenuUiSound("select");
             lastMenuToggle = millis();
             return;
         }
@@ -471,23 +485,24 @@ void handleIRKey(IRCodes::WxKey key)
     case IRCodes::WxKey::Cancel:
     case IRCodes::WxKey::Menu:
         exitToHomeScreen();
+        playMenuUiSound("back");
         lastMenuToggle = millis();
         break;
     case IRCodes::WxKey::Up:
         handleUp();
-        playBuzzerTone(1500, 100);
+        playMenuUiSound("up");
         break;
     case IRCodes::WxKey::Down:
         handleDown();
-        playBuzzerTone(1200, 100);
+        playMenuUiSound("down");
         break;
     case IRCodes::WxKey::Right:
         handleRight();
-        playBuzzerTone(1800, 100);
+        playMenuUiSound("right");
         break;
     case IRCodes::WxKey::Left:
         handleLeft();
-        playBuzzerTone(900, 100);
+        playMenuUiSound("left");
         break;
     case IRCodes::WxKey::Ok:
         handleSelect();
@@ -497,14 +512,14 @@ void handleIRKey(IRCodes::WxKey key)
         }
         else
         {
-            playBuzzerTone(2200, 100);
+            playMenuUiSound("select");
         }
         break;
     default:
         Serial.printf("Unknown key: %s\n", IRCodes::keyName(key));
-        playBuzzerTone(500, 100);
+        playMenuUiSound("nav_error");
         delay(100);
-        playBuzzerTone(500, 100);
+        playMenuUiSound("nav_error");
         break;
     }
 }
@@ -978,7 +993,7 @@ void handleScreenSwitch(int dir)
         dma_display->clearScreen();
         delay(50);
     }
-    playBuzzerTone(2000 + dir * 200, 80);
+    playMenuUiSound(dir < 0 ? "left" : "right");
 }
 
 
@@ -1105,3 +1120,4 @@ void showWiFiSettingsModal()
 
     wifiSettingsModal.show();
 }
+

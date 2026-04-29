@@ -94,7 +94,7 @@ struct ForecastData {
     int          numDays = 0;
     ForecastHour hours[MAX_FORECAST_HOURS];
     int          numHours = 0;
-    bool         hourlyKeyPresent = false;  // for debugging/logging
+    bool         hourlyKeyPresent = false;
     uint32_t     lastUpdate = 0;
 };
 
@@ -148,7 +148,6 @@ void showWindDirectionScreen();
 String formatEpochTime(uint32_t epoch);
 
 // ---- Helpers ----
-void debugPrintJsonKeys(JSONVar obj);
 String extractJsonArray(const String& json, const String& key);
 String extractJsonObject(const String& src, const char* key);
 void updateWindInfoScroll(bool resetPosition = false);

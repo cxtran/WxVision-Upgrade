@@ -252,6 +252,7 @@ void AudioOut::playTone(uint16_t frequency, uint16_t durationMs, uint16_t amplit
     }
 
     const uint32_t totalSamples = (sampleRate_ * durationMs) / 1000U;
+    const uint32_t fadeSamples = min<uint32_t>(totalSamples / 2U, (sampleRate_ * 5U) / 1000U);
     int16_t buffer[kBufferSamples];
     uint32_t generated = 0;
 
@@ -260,9 +261,23 @@ void AudioOut::playTone(uint16_t frequency, uint16_t durationMs, uint16_t amplit
         const size_t chunk = min<size_t>(kBufferSamples, totalSamples - generated);
         for (size_t i = 0; i < chunk; ++i)
         {
-            const float t = static_cast<float>(generated + i) / static_cast<float>(sampleRate_);
+            const uint32_t sampleIndex = generated + i;
+            float env = 1.0f;
+            if (fadeSamples > 0U)
+            {
+                if (sampleIndex < fadeSamples)
+                {
+                    env = static_cast<float>(sampleIndex) / static_cast<float>(fadeSamples);
+                }
+                else if (sampleIndex > (totalSamples - fadeSamples))
+                {
+                    env = static_cast<float>(totalSamples - sampleIndex) / static_cast<float>(fadeSamples);
+                }
+            }
+
+            const float t = static_cast<float>(sampleIndex) / static_cast<float>(sampleRate_);
             const float s = sinf(2.0f * PI * static_cast<float>(frequency) * t);
-            buffer[i] = static_cast<int16_t>(s * amplitude);
+            buffer[i] = static_cast<int16_t>(s * static_cast<float>(amplitude) * env);
         }
 
         writeSamples_(buffer, chunk);

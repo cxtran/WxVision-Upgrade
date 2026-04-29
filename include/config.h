@@ -5,7 +5,7 @@
 // General Project Settings
 //==========================
 #define PROJECT_NAME "WxVision"
-#define DEBUG true    // Set false to disable debug prints
+#define DEBUG false
 
 //==========================
 // Time Settings

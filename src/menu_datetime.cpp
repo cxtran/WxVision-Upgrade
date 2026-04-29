@@ -6,6 +6,7 @@
 #include "menu.h"
 #include "display.h"
 #include "settings.h"
+#include "chime_catalog.h"
 #include "datetimesettings.h"
 #include "notifications.h"
 #include "units.h"
@@ -17,6 +18,8 @@ extern int dtFmt24;
 extern int dtDateFmt;
 extern int dtNtpPreset;
 extern int dtAutoDst;
+extern int dtHourlyAnnounce;
+extern int dtHourlySoundMode;
 extern int unitTempSel, unitPressSel, unitClockSel, unitWindSel, unitPrecipSel, unitDistanceSel;
 
 void showDateTimeModal()
@@ -60,6 +63,8 @@ void showDateTimeModal()
 
     dtFmt24 = (fmt24 < 0 || fmt24 > 1) ? 1 : fmt24;
     dtDateFmt = (dateFmt < 0 || dateFmt > 2) ? 0 : dateFmt;
+    dtHourlyAnnounce = hourlyTimeAnnouncementEnabled ? 1 : 0;
+    dtHourlySoundMode = constrain(hourlyAnnouncementSoundMode, 0, static_cast<int>(wxv::audio::chimeCount()));
 
     static char ntpServerBuf[64];
     dtNtpPreset = ntpServerPreset;
@@ -87,6 +92,12 @@ void showDateTimeModal()
     static const char *fmt24Opts[] = {"12h", "24h"};
     static const char *dateFmtOpts[] = {"YYYY-MM-DD", "MM/DD/YYYY", "DD/MM/YYYY"};
     static const char *autoDstOpts[] = {"Off", "On"};
+    static const char *hourlySoundOpts[1 + wxv::audio::kChimeCatalogCount];
+    hourlySoundOpts[0] = "Time Only";
+    for (size_t i = 0; i < wxv::audio::chimeCount(); ++i)
+    {
+        hourlySoundOpts[i + 1] = wxv::audio::chimeHourlyLabelAt(i);
+    }
 
     char timeBuf[16];
     snprintf(timeBuf, sizeof(timeBuf), "%02d:%02d:%02d", dtHour, dtMinute, dtSecond);
@@ -135,8 +146,8 @@ void showDateTimeModal()
 
     String rtcNote = "RTC stores UTC; display applies TZ & DST";
 
-    String lines[16];
-    InfoFieldType types[16];
+    String lines[InfoModal::MAX_LINES];
+    InfoFieldType types[InfoModal::MAX_LINES];
     int lineIdx = 0;
 
     lines[lineIdx] = localSummary;
@@ -162,12 +173,17 @@ void showDateTimeModal()
     types[lineIdx++] = InfoNumber;
     lines[lineIdx] = "Time Format";
     types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Hourly Announce";
+    types[lineIdx++] = InfoChooser;
+    lines[lineIdx] = "Hourly Sound";
+    types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "Date Format";
     types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "NTP Preset";
     types[lineIdx++] = InfoChooser;
     lines[lineIdx] = "NTP Server";
     types[lineIdx++] = InfoText;
+    const int syncButtonIndex = lineIdx;
     lines[lineIdx] = "Sync NTP";
     types[lineIdx++] = InfoButton;
     lines[lineIdx] = rtcNote;
@@ -175,14 +191,14 @@ void showDateTimeModal()
 
     int *intRefs[] = {&dtManualOffset, &dtYear, &dtMonth, &dtDay, &dtHour,
                       &dtMinute, &dtSecond};
-    int *chooserRefs[] = {&dtTimezoneIndex, &dtAutoDst, &dtFmt24, &dtDateFmt, &dtNtpPreset};
-    const char *const *chooserOptPtrs[] = {timezoneOptions, autoDstOpts, fmt24Opts, dateFmtOpts, ntpPresetOptions};
-    int chooserOptCounts[] = {timezoneChooserCount, 2, 2, 3, NTP_PRESET_CUSTOM + 1};
+    int *chooserRefs[] = {&dtTimezoneIndex, &dtAutoDst, &dtFmt24, &dtHourlyAnnounce, &dtHourlySoundMode, &dtDateFmt, &dtNtpPreset};
+    const char *const *chooserOptPtrs[] = {timezoneOptions, autoDstOpts, fmt24Opts, autoDstOpts, hourlySoundOpts, dateFmtOpts, ntpPresetOptions};
+    int chooserOptCounts[] = {timezoneChooserCount, 2, 2, 2, static_cast<int>(wxv::audio::chimeCount()) + 1, 3, NTP_PRESET_CUSTOM + 1};
     char *textRefs[] = {ntpServerBuf};
     int textSizes[] = {64};
 
     dateModal.setLines(lines, types, lineIdx);
-    dateModal.setValueRefs(intRefs, 7, chooserRefs, 5,
+    dateModal.setValueRefs(intRefs, 7, chooserRefs, 7,
                            chooserOptPtrs, chooserOptCounts,
                            textRefs, 1, textSizes);
     dateModal.clearNumberFieldConfigs();
@@ -232,9 +248,8 @@ void showDateTimeModal()
     dateModal.setNumberFieldConfig(9, minuteConfig);
     dateModal.setShowNumberArrows(true);
 
-    dateModal.setCallback([](bool accepted, int /*btnIdx*/) {
+    dateModal.setCallback([syncButtonIndex](bool accepted, int /*btnIdx*/) {
         int sel = dateModal.getSelIndex();
-        constexpr int kSyncButtonIndex = 14;
         auto applyCurrentTimezoneSelectionForSync = []() {
             int tzCountInt = static_cast<int>(timezoneCount());
             if (tzCountInt > 31)
@@ -257,7 +272,7 @@ void showDateTimeModal()
             }
         };
 
-        if (sel == kSyncButtonIndex)
+        if (sel == syncButtonIndex)
         {
             applyCurrentTimezoneSelectionForSync();
             dateModal.hide();
@@ -297,6 +312,8 @@ void showDateTimeModal()
                 dtSecond = localNow.second();
                 reset_Time_and_Date_Display = true;
             }
+            hourlyTimeAnnouncementEnabled = (dtHourlyAnnounce > 0);
+            hourlyAnnouncementSoundMode = constrain(dtHourlySoundMode, 0, static_cast<int>(wxv::audio::chimeCount()));
             saveDateTimeSettings();
             pendingModalFn = showDateTimeModal;
             pendingModalTime = millis() + 1500;
@@ -343,6 +360,8 @@ void showDateTimeModal()
         bool formatChanged = (fmt24 != dtFmt24);
         fmt24 = dtFmt24;
         units.clock24h = (fmt24 == 1);
+        hourlyTimeAnnouncementEnabled = (dtHourlyAnnounce > 0);
+        hourlyAnnouncementSoundMode = constrain(dtHourlySoundMode, 0, static_cast<int>(wxv::audio::chimeCount()));
         dateFmt = dtDateFmt;
         String hostSelection;
         if (dtNtpPreset == NTP_PRESET_CUSTOM)

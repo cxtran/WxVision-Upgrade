@@ -4637,7 +4637,7 @@ void tickLunarLuckMarquee()
 
         if (nowMs - lastScrollMs >= intervalMs)
         {
-            marqueeOffsetPx -= SCROLL_STEP_PX;
+            marqueeOffsetPx -= static_cast<int16_t>(SCROLL_STEP_PX);
             lastScrollMs = nowMs;
             renderCurrentLunarLuckSection();
         }
@@ -4870,6 +4870,8 @@ void fetchWeatherFromOWM(bool showBusy)
 
     JSONVar mainBlock = data["main"];
     JSONVar windBlock = data["wind"];
+    JSONVar rainBlock = data["rain"];
+    JSONVar snowBlock = data["snow"];
 
     double tempC = toCelsius(readNumber(mainBlock, "temp"));
     double tempMaxC = toCelsius(readNumber(mainBlock, "temp_max"));
@@ -4880,6 +4882,12 @@ void fetchWeatherFromOWM(bool showBusy)
     double windSpeed = toMetersPerSecond(readNumber(windBlock, "speed"));
     double windDir = readNumber(windBlock, "deg");
     double windGust = toMetersPerSecond(readNumber(windBlock, "gust"));
+    double rainAmount = readNumber(rainBlock, "1h");
+    if (isnan(rainAmount))
+        rainAmount = readNumber(rainBlock, "3h");
+    double snowAmount = readNumber(snowBlock, "1h");
+    if (isnan(snowAmount))
+        snowAmount = readNumber(snowBlock, "3h");
     double obsTime = readNumber(data, "dt");
 
     str_Weather_Icon = JSON.stringify(data["weather"][0]["icon"]);
@@ -4922,6 +4930,7 @@ void fetchWeatherFromOWM(bool showBusy)
     tempest.windAvg = currentCond.windAvg;
     tempest.windGust = currentCond.windGust;
     tempest.windDir = currentCond.windDir;
+    tempest.rain = !isnan(rainAmount) ? rainAmount : snowAmount;
     tempest.obsWindAvg = currentCond.windAvg;
     tempest.obsWindDir = currentCond.windDir;
     tempest.obsEpoch = currentCond.time;
@@ -5590,14 +5599,17 @@ void scrollWeatherDetails()
         start_Scroll_Text = true;
     }
 
-    // Use same timing as InfoModal
-    if (millis() - lastScrollTime > scrollSpeed)
+    const unsigned long now = millis();
+    const unsigned long intervalMs = static_cast<unsigned long>(max(1, scrollSpeed));
+    if (lastScrollTime == 0)
+        lastScrollTime = now;
+    if (now - lastScrollTime >= intervalMs)
     {
-        lastScrollTime = millis();
+        lastScrollTime = now;
 
         if (text_Length_In_Pixel > PANEL_RES_X)
         {
-            scrollOffset++;
+            scrollOffset += 1;
             if (scrollOffset > text_Length_In_Pixel)
                 scrollOffset = -PANEL_RES_X; // restart
         }

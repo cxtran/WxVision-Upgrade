@@ -38,11 +38,12 @@
 // ------------------------------
 // 5-Way Switch Buttons
 // ------------------------------
-#define BTN_UP 1
-#define BTN_DN 2
-#define BTN_LEFT 19
-#define BTN_RIGHT 20
-#define BTN_SEL 44
+#define WXV_ENABLE_5WAY_BUTTONS 0
+#define BTN_UP -1
+#define BTN_DN -1
+#define BTN_LEFT -1
+#define BTN_RIGHT -1
+#define BTN_SEL -1
 
 
 
@@ -85,8 +86,6 @@
 #define I2S_BCLK_PIN   47
 #define I2S_LRC_PIN    38
 #define I2S_DOUT_PIN   39
-
-
 
 
 // ------------------------------

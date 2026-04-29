@@ -4,7 +4,7 @@
 #include "settings.h"
 #include "alarm.h"
 #include "keyboard.h"
-#include "buzzer.h"
+#include "audio_announcer.h"
 #include "datetimesettings.h"
 #include <RTClib.h>
 #include <cstring>
@@ -603,6 +603,7 @@ void InfoModal::draw()
                 scrollOffset = 0;
                 firstScroll = true;
                 lastSelIndex = selIndex;
+                lastScrollTime = millis();
                 scrollPaused = false;
                 scrollPauseTime = 0;
             }
@@ -610,10 +611,12 @@ void InfoModal::draw()
             bool needsScroll = isAlarmAmPmLine || textW > availableWidth;
             if (needsScroll && !scrollPaused)
             {
-                if (millis() - lastScrollTime > scrollSpeed)
+                unsigned long now = millis();
+                const unsigned long intervalMs = static_cast<unsigned long>(max(1, scrollSpeed));
+                if (now - lastScrollTime >= intervalMs)
                 {
-                    lastScrollTime = millis();
-                    scrollOffset++;
+                    lastScrollTime = now;
+                    scrollOffset += 1;
                     if (textW > SCREEN_WIDTH)
                     {
                         if (scrollOffset > (textW - SCREEN_WIDTH))
@@ -1021,7 +1024,27 @@ void InfoModal::handleIR(uint32_t code)
 {
     if (!active)
         return;
-    auto beep = [&](int freq, int ms = 80) { playBuzzerTone(freq, ms); };
+    auto beep = [&](int freq, int ms = 80) {
+        (void)ms;
+        if (code == IR_UP)
+            wxv::announce::playUiSound("up");
+        else if (code == IR_DOWN)
+            wxv::announce::playUiSound("down");
+        else if (code == IR_LEFT)
+            wxv::announce::playUiSound("left");
+        else if (code == IR_RIGHT)
+            wxv::announce::playUiSound("right");
+        else if (code == IR_OK)
+            wxv::announce::playUiSound("select");
+        else if (code == IR_CANCEL || code == IR_MENU)
+            wxv::announce::playUiSound("back");
+        else if (freq <= 700)
+            wxv::announce::playUiSound("nav_error");
+        else if (freq >= 2000)
+            wxv::announce::playUiSound("select");
+        else
+            wxv::announce::playUiSound("right");
+    };
     //   Serial.printf("IR: %08lX | inButtonBar=%d, btnCount=%d, selIndex=%d\n", code, inButtonBar, btnCount, selIndex);
 
     if (inEdit && fieldTypes[editIndex] == InfoText)
@@ -1256,6 +1279,7 @@ void InfoModal::handleIR(uint32_t code)
 
         InfoFieldType type = fieldTypes[selIndex];
         int direction = (code == IR_LEFT) ? -1 : 1;
+        bool customUiTonePlayed = false;
 
         if (type == InfoNumber)
         {
@@ -1325,7 +1349,8 @@ void InfoModal::handleIR(uint32_t code)
                     buzzerVolume = *ptr;
                     if (buzzerVolume > 0)
                     {
-                        playBuzzerTone((buzzerToneSet == 0) ? 2000 : 1200, 80);
+                        wxv::announce::playUiSound(code == IR_LEFT ? "volume_down" : "volume_up");
+                        customUiTonePlayed = true;
                     }
                     saveDeviceSettings();
                 }
@@ -1426,7 +1451,8 @@ void InfoModal::handleIR(uint32_t code)
                                 envAlertHumidityLowThreshold, envAlertHumidityHighThreshold);
                 }
 
-                beep(code == IR_LEFT ? 900 : 1800);
+                if (!customUiTonePlayed)
+                    beep(code == IR_LEFT ? 900 : 1800);
                 draw();
             }
         }
@@ -1463,6 +1489,8 @@ void InfoModal::handleIR(uint32_t code)
                     if (lines[selIndex].equalsIgnoreCase("Auto Brightness"))
                     { // Auto Brightness toggle
                         autoBrightness = (val > 0);
+                        wxv::announce::playUiSound(autoBrightness ? "toggle_on" : "toggle_off");
+                        customUiTonePlayed = true;
                         //         Serial.printf("[Live] AutoBrightness: %s\n", autoBrightness ? "ON" : "OFF");
 
                         if (autoBrightness)
@@ -1499,6 +1527,8 @@ void InfoModal::handleIR(uint32_t code)
                     if (lines[selIndex] == "Auto Rotate")
                     { // Auto Rotate toggle
                         setAutoRotateEnabled(val > 0, true);
+                        wxv::announce::playUiSound((val > 0) ? "toggle_on" : "toggle_off");
+                        customUiTonePlayed = true;
                     }
 
                     if (lines[selIndex] == "Timezone")
@@ -1606,33 +1636,19 @@ void InfoModal::handleIR(uint32_t code)
                         envAlertCo2Enabled = (lines[selIndex] == "CO2 Alert") ? (val > 0) : envAlertCo2Enabled;
                         envAlertTempEnabled = (lines[selIndex] == "Temp Alert") ? (val > 0) : envAlertTempEnabled;
                         envAlertHumidityEnabled = (lines[selIndex] == "Humidity Alert") ? (val > 0) : envAlertHumidityEnabled;
+                        wxv::announce::playUiSound((val > 0) ? "toggle_on" : "toggle_off");
+                        customUiTonePlayed = true;
                         saveNoaaSettings();
                         saveCalibrationSettings();
                         if (lines[selIndex] == "NOAA Alerts")
                             notifyNoaaSettingsChanged();
                         requestNoaaSettingsModalRefresh();
-                        beep(code == IR_LEFT ? 900 : 1800);
+                        if (!customUiTonePlayed)
+                            beep(code == IR_LEFT ? 900 : 1800);
                         return;
                     }
-                    if (lines[selIndex].startsWith("Sound Profile"))
-                    {
-                        val = constrain(val, 0, 6);
-                        buzzerToneSet = val;
-                        int preview = 0;
-                        switch (val) {
-                            case 0: preview = 2200; break; // Bright
-                            case 1: preview = 1200; break; // Soft
-                            case 2: preview = 5000; break; // Click
-                            case 3: preview = 1800; break; // Chime
-                            case 4: preview = 2000; break; // Pulse
-                            case 5: preview = 900;  break; // Warm
-                            case 6: preview = 1600; break; // Melody
-                        }
-                        playBuzzerTone(preview, 70);
-                        saveDeviceSettings();
-                    }
-
-                    beep(code == IR_LEFT ? 900 : 1800);
+                    if (!customUiTonePlayed)
+                        beep(code == IR_LEFT ? 900 : 1800);
                     draw();
                 }
             }
@@ -1644,6 +1660,7 @@ void InfoModal::handleIR(uint32_t code)
 
     if (code == IR_OK)
     {
+        bool callbackKeptOpen = false;
         if (fieldTypes[selIndex] == InfoText)
         {
             int textIdx = textFieldIndices[selIndex];
@@ -1685,10 +1702,14 @@ void InfoModal::handleIR(uint32_t code)
             }
             else
             {
+                callbackKeptOpen = true;
                 draw();
             }
         }
-        beep(2200);
+        if (!callbackKeptOpen)
+        {
+            beep(2200);
+        }
         return;
     }
 

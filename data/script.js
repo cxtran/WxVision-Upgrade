@@ -1221,9 +1221,6 @@ function loadAll(background){
     if (humHighAlertEl) humHighAlertEl.value = (typeof s.envAlertHumidityHighThreshold !== 'undefined' ? s.envAlertHumidityHighThreshold : 60);
     var buzzVolEl = document.getElementById('buzzerVolume');
     if (buzzVolEl) buzzVolEl.value = (typeof s.buzzerVolume !== 'undefined' ? s.buzzerVolume : 100);
-    var buzzToneEl = document.getElementById('buzzerToneSet');
-    if (buzzToneEl) buzzToneEl.value = (typeof s.buzzerTone !== 'undefined' ? s.buzzerTone : 0);
-
     // Alarms
     if (Array.isArray(s.alarms))
     {
@@ -1524,7 +1521,6 @@ function readSettingsForm() {
     })(),
     buzzerVolume: +(byId('buzzerVolume')?.value ?? 100),
     mp3Volume: +(byId('mp3Volume')?.value ?? 50),
-    buzzerTone:  +(byId('buzzerToneSet')?.value ?? 0),
     alarmSound:  +(byId('alarmSoundMode')?.value ?? 0),
     alarms: [0,1,2].map(function(i){
       var idx = i + 1;
@@ -1681,7 +1677,7 @@ async function saveAlarmSettingsWeb(event){
   if (event && typeof event.preventDefault === 'function') {
     event.preventDefault();
   }
-  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','mp3Volume','buzzerTone']);
+  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','mp3Volume']);
   await submitSettings(payload, 'saveAlarmsMsg');
 }
 

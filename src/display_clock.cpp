@@ -176,14 +176,10 @@ void drawClockTimeLine(const DateTime &now, bool alarmActive)
 
     char timeStr[6];
     snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hour, minute);
-    bool showTimeDigits = !alarmActive || isAlarmFlashVisible();
-
     dma_display->setFont(&verdanab8pt7b);
     dma_display->setTextSize(1);
     uint16_t timeColor = (theme == 1) ? dma_display->color565(60, 60, 120)
                                       : dma_display->color565(255, 255, 80);
-    if (alarmActive)
-        timeColor = dma_display->color565(255, 80, 80);
     dma_display->setTextColor(timeColor);
 
     int timeW = getTextWidth(timeStr);
@@ -206,51 +202,48 @@ void drawClockTimeLine(const DateTime &now, bool alarmActive)
 
     int boxY = (32 - timeH) / 2;
 
-    if (showTimeDigits)
+    dma_display->setCursor(boxX, boxY + timeH - 1);
+    dma_display->print(timeStr);
+
+    if (!units.clock24h)
     {
-        dma_display->setCursor(boxX, boxY + timeH - 1);
-        dma_display->print(timeStr);
+        String ampmStr = isPM ? "PM" : "AM";
+        dma_display->setFont(&Font5x7Uts);
+        dma_display->setTextSize(1);
 
-        if (!units.clock24h)
+        dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
+        int digitH = h;
+        dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
+        int ampmWidth = w;
+        int ampmH = h;
+        int ampmX = 64 - ampmWidth - 1;
+        int ampmY = boxY + digitH - (digitH - ampmH) - 1;
+        ampmY -= 1;
+
+        uint16_t ampmColor, bgColor;
+        if (theme == 1)
         {
-            String ampmStr = isPM ? "PM" : "AM";
-            dma_display->setFont(&Font5x7Uts);
-            dma_display->setTextSize(1);
-
-            dma_display->getTextBounds(timeStr, 0, 0, &x1, &y1, &w, &h);
-            int digitH = h;
-            dma_display->getTextBounds(ampmStr.c_str(), 0, 0, &x1, &y1, &w, &h);
-            int ampmWidth = w;
-            int ampmH = h;
-            int ampmX = 64 - ampmWidth - 1;
-            int ampmY = boxY + digitH - (digitH - ampmH) - 1;
-            ampmY -= 1;
-
-            uint16_t ampmColor, bgColor;
-            if (theme == 1)
+            ampmColor = dma_display->color565(100, 100, 140);
+            bgColor = dma_display->color565(20, 20, 40);
+        }
+        else
+        {
+            if (isPM)
             {
-                ampmColor = dma_display->color565(100, 100, 140);
-                bgColor = dma_display->color565(20, 20, 40);
+                ampmColor = dma_display->color565(255, 170, 60);
+                bgColor = dma_display->color565(50, 30, 0);
             }
             else
             {
-                if (isPM)
-                {
-                    ampmColor = dma_display->color565(255, 170, 60);
-                    bgColor = dma_display->color565(50, 30, 0);
-                }
-                else
-                {
-                    ampmColor = dma_display->color565(100, 200, 255);
-                    bgColor = dma_display->color565(10, 30, 50);
-                }
+                ampmColor = dma_display->color565(100, 200, 255);
+                bgColor = dma_display->color565(10, 30, 50);
             }
-
-            dma_display->setTextColor(ampmColor);
-            dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmWidth + 2, ampmH + 2, bgColor);
-            dma_display->setCursor(ampmX, ampmY);
-            dma_display->print(ampmStr);
         }
+
+        dma_display->setTextColor(ampmColor);
+        dma_display->fillRect(ampmX - 1, ampmY - ampmH + 6, ampmWidth + 2, ampmH + 2, bgColor);
+        dma_display->setCursor(ampmX, ampmY);
+        dma_display->print(ampmStr);
     }
 }
 
@@ -369,7 +362,9 @@ void drawClockScreen()
     if (isAnyAlarmEnabled() || alarmActive)
     {
         uint16_t alarmColor = alarmActive
-                                  ? dma_display->color565(255, 80, 80)
+                                  ? (isAlarmFlashVisible()
+                                         ? dma_display->color565(255, 80, 80)
+                                         : myBLACK)
                                   : ((theme == 1) ? dma_display->color565(120, 120, 180)
                                                   : dma_display->color565(255, 255, 120));
         drawAlarmIcon(alarmX, alarmY, alarmColor);

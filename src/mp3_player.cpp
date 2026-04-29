@@ -11,10 +11,12 @@
 #include "AudioFileSourceSD.h"
 #include "AudioGeneratorMP3.h"
 #include "AudioOutputI2S.h"
+#include "audio_announcer.h"
 #include "buzzer.h"
 #include "display.h"
 #include "pins.h"
 #include "sd_card.h"
+#include "settings.h"
 
 namespace wxv::audio
 {
@@ -50,6 +52,13 @@ namespace wxv::audio
             const float normalized = static_cast<float>(clamped) / 100.0f;
             // Keep the loud end below unity gain to avoid clipping distortion.
             return 0.02f + (0.98f * normalized * normalized);
+        }
+
+        int effectiveAudioVolumePercent(int contentPercent)
+        {
+            const int master = constrain(buzzerVolume, 0, 100);
+            const int content = constrain(contentPercent, 0, 100);
+            return (master * content + 50) / 100;
         }
 
         void cleanupPlayback(bool reenableSpeaker)
@@ -179,7 +188,11 @@ namespace wxv::audio
             return 0;
         }
 
-        File root = SD.open("/");
+        File root = SD.open("/Audio/music");
+        if (!root)
+        {
+            root = SD.open("/");
+        }
         if (!root)
         {
             return 0;
@@ -256,6 +269,11 @@ namespace wxv::audio
 
     bool startSdMp3(const String &path, int volumePercent)
     {
+        if (wxv::announce::isActive())
+        {
+            wxv::announce::stop();
+        }
+
         stopSdMp3();
 
         g_lastMp3Status = "start";
@@ -355,7 +373,7 @@ namespace wxv::audio
         // The MAX98357A path is a single-speaker output, so downmix stereo
         // content instead of dropping one side or relying on board strapping.
         g_out->SetOutputModeMono(true);
-        g_out->SetGain(volumePercentToGain(g_volumePercent));
+        g_out->SetGain(volumePercentToGain(effectiveAudioVolumePercent(g_volumePercent)));
 
         if (!g_mp3->begin(g_id3.get(), g_out.get()))
         {
@@ -433,7 +451,7 @@ namespace wxv::audio
         g_volumePercent = constrain(volumePercent, 0, 100);
         if (g_out)
         {
-            return g_out->SetGain(volumePercentToGain(g_volumePercent));
+            return g_out->SetGain(volumePercentToGain(effectiveAudioVolumePercent(g_volumePercent)));
         }
         return true;
     }

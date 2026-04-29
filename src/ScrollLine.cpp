@@ -3,6 +3,23 @@
 
 extern int theme;
 
+namespace
+{
+    unsigned long elapsedSteps(unsigned long now, unsigned long &lastMs, unsigned int intervalMs)
+    {
+        if (intervalMs == 0)
+            intervalMs = 1;
+        if (lastMs == 0)
+            lastMs = now;
+        const unsigned long elapsed = now - lastMs;
+        if (elapsed < intervalMs)
+            return 0;
+
+        lastMs = now;
+        return 1;
+    }
+}
+
 ScrollLine::ScrollLine(int screenWidth, unsigned int scrollSpeedMs)
     : _screenWidth(screenWidth), _scrollSpeedMs(scrollSpeedMs),
       _startPauseMs(0), _scrollStepPx(1), _continuousWrap(true),
@@ -78,12 +95,13 @@ void ScrollLine::update() {
     if (_isTitleMode) {
         if (_titleTextWidth <= _screenWidth) return;
 
-        if (now - _titleLastScrollTime >= _scrollSpeedMs) {
-            if (_titleScrollOffset == 0 && (now - _titleLastScrollTime) < _startPauseMs) {
+        const unsigned long steps = elapsedSteps(now, _titleLastScrollTime, _scrollSpeedMs);
+        if (steps > 0) {
+            if (_titleScrollOffset == 0 && _startPauseMs > 0 && (now - _titleLastScrollTime) < _startPauseMs) {
                 return;
             }
             int prevOffset = _titleScrollOffset;
-            _titleScrollOffset += _scrollStepPx;
+            _titleScrollOffset += _scrollStepPx * static_cast<int>(steps);
             int entryThreshold = _titleTextWidth + 1 - _screenWidth;
             if (entryThreshold < 0) entryThreshold = 0;
             if (prevOffset < entryThreshold && _titleScrollOffset >= entryThreshold) {
@@ -93,7 +111,6 @@ void ScrollLine::update() {
                 _titleScrollOffset = 0;  // reset to start smoothly
                 _cycleCompleted = true;
             }
-            _titleLastScrollTime = now;
         }
     } else {
         if (_lineCount == 0) return;
@@ -105,12 +122,13 @@ void ScrollLine::update() {
             unsigned long& lastScrollTime = _lastScrollTimes[i];
 
             if (i == _selIndex && lineW > _screenWidth) {
-                if (now - lastScrollTime >= _scrollSpeedMs) {
-                    if (scrollOffset == 0 && (now - lastScrollTime) < _startPauseMs) {
+                const unsigned long steps = elapsedSteps(now, lastScrollTime, _scrollSpeedMs);
+                if (steps > 0) {
+                    if (scrollOffset == 0 && _startPauseMs > 0 && (now - lastScrollTime) < _startPauseMs) {
                         continue;
                     }
                     int prevOffset = scrollOffset;
-                    scrollOffset += _scrollStepPx;
+                    scrollOffset += _scrollStepPx * static_cast<int>(steps);
                     int entryThreshold = lineW + 1 - _screenWidth;
                     if (entryThreshold < 0) entryThreshold = 0;
                     if (prevOffset < entryThreshold && scrollOffset >= entryThreshold) {
@@ -120,7 +138,6 @@ void ScrollLine::update() {
                         scrollOffset = 0;  // loop continuous marquee
                         _cycleCompleted = true;
                     }
-                    lastScrollTime = now;
                 }
             } else {
                 scrollOffset = 0;

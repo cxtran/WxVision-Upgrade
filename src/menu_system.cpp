@@ -12,6 +12,7 @@
 #include "sensors.h"
 #include "cloud_manager.h"
 #include "device_identity.h"
+#include "audio_announcer.h"
 #include "buzzer.h"
 #include "mp3_player.h"
 #include "audio_out.h"
@@ -423,6 +424,116 @@ void rebuildSdDiagnosticsModal()
 }
 } // namespace
 
+void showAudioAnnouncementsModal()
+{
+    if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_AUDIO_ANNOUNCE)
+    {
+        pushMenu(currentMenuLevel);
+    }
+    currentMenuLevel = MENU_AUDIO_ANNOUNCE;
+    menuActive = true;
+
+    String labels[] = {
+        "Speak Time",
+        "Speak Date",
+        "Speak Indoor Temp",
+        "Speak Outdoor Temp",
+        "Speak Indoor Humidity",
+        "Speak Weather",
+        "Speak Wind Speed",
+        "Speak Wind Direction",
+        "Speak Pressure",
+        "Speak Rain",
+        "Speak Alerts",
+        "Speak Internal Alerts",
+        "Speak Full Summary"};
+    InfoFieldType types[] = {
+        InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton,
+        InfoButton, InfoButton, InfoButton,
+        InfoButton};
+
+    audioAnnouncementsModal.setLines(labels, types, 13);
+    audioAnnouncementsModal.setKeepOpenOnSelect(true);
+    audioAnnouncementsModal.setShowForwardArrow(true);
+    audioAnnouncementsModal.setCallback([](bool accepted, int btnIdx) {
+        if (!accepted)
+        {
+            audioAnnouncementsModal.hide();
+            pendingModalFn = showSystemModal;
+            pendingModalTime = millis() + 10;
+            return;
+        }
+
+        const int action = (btnIdx >= 0) ? btnIdx : audioAnnouncementsModal.getSelIndex();
+        bool started = false;
+        switch (action)
+        {
+        case 0:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakTime();
+            break;
+        case 1:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakDate();
+            break;
+        case 2:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakIndoorTemperature();
+            break;
+        case 3:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakOutdoorTemperature();
+            break;
+        case 4:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakIndoorHumidity();
+            break;
+        case 5:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakOutdoorWeather();
+            break;
+        case 6:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakWindSpeed();
+            break;
+        case 7:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakWindDirection();
+            break;
+        case 8:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakPressure();
+            break;
+        case 9:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakRain();
+            break;
+        case 10:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakAlerts();
+            break;
+        case 11:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakInternalAlerts();
+            break;
+        case 12:
+            suppressNextMenuOkTone();
+            started = wxv::announce::speakWeatherSummary();
+            break;
+        default:
+            break;
+        }
+
+        if (!started)
+        {
+            audioAnnouncementsModal.redraw();
+        }
+    });
+    audioAnnouncementsModal.show();
+}
+
 void showSystemModal()
 {
     if (currentMenuLevel != MENU_NONE && currentMenuLevel != MENU_MAIN)
@@ -435,15 +546,14 @@ void showSystemModal()
     String labels[] = {
         "System Volume (0-100)",
         "MP3 Volume (0-100)",
-        "Sound Profile",
         "MP3 Mode",
+        "Audio Announcements",
         "Date & Time",
         "Units",
         "Device Location",
         "System Info",
         "WiFi Signal Test",
         "SD Diagnostics",
-        "Audio Test Tone",
         "Play SD MP3",
         "Now Playing",
         "Preview Screens",
@@ -454,18 +564,17 @@ void showSystemModal()
         "Reboot"};
 
     InfoFieldType types[] = {
-        InfoNumber, InfoNumber, InfoChooser, InfoChooser, InfoButton, InfoButton, InfoButton,
+        InfoNumber, InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
-        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
+        InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
     int *numberRefs[] = {&buzzerVolume, &mp3Volume};
-    int *chooserRefs[] = {&buzzerToneSet, &mp3PlayMode};
-    static const char *toneOpts[] = {"Bright", "Soft", "Click", "Chime", "Pulse", "Warm", "Melody"};
+    int *chooserRefs[] = {&mp3PlayMode};
     static const char *mp3ModeOpts[] = {"Play One", "Continue Next", "Repeat"};
-    const char *const *chooserOpts[] = {toneOpts, mp3ModeOpts};
-    int chooserCounts[] = {7, 3};
+    const char *const *chooserOpts[] = {mp3ModeOpts};
+    int chooserCounts[] = {3};
 
-    systemModal.setLines(labels, types, 19);
-    systemModal.setValueRefs(numberRefs, 2, chooserRefs, 2, chooserOpts, chooserCounts, nullptr, 0, nullptr);
+    systemModal.setLines(labels, types, 18);
+    systemModal.setValueRefs(numberRefs, 2, chooserRefs, 1, chooserOpts, chooserCounts, nullptr, 0, nullptr);
     systemModal.setShowNumberArrows(true);
     systemModal.setShowChooserArrows(true);
     systemModal.setShowForwardArrow(true);
@@ -481,11 +590,12 @@ void showSystemModal()
             action = systemModal.getSelIndex();
         }
 
-        // Persist volume/profile regardless of which action chosen
+        // Persist volume/mode regardless of which action chosen
         buzzerVolume = constrain(buzzerVolume, 0, 100);
         mp3Volume = constrain(mp3Volume, 0, 100);
-        buzzerToneSet = constrain(buzzerToneSet, 0, 6);
         mp3PlayMode = constrain(mp3PlayMode, 0, 2);
+        wxv::audio::setSdMp3VolumePercent(mp3Volume);
+        wxv::announce::refreshOutputVolume();
         saveDeviceSettings();
 
         if (action >= 0)
@@ -495,8 +605,11 @@ void showSystemModal()
             case 0:
             case 1:
             case 2:
-            case 3:
                 break;
+            case 3:
+                systemModal.hide();
+                showAudioAnnouncementsModal();
+                return;
             case 4:
                 systemModal.hide();
                 showDateTimeModal();
@@ -524,17 +637,12 @@ void showSystemModal()
                 return;
             case 10:
                 systemModal.hide();
-                pendingModalFn = playAudioTestTone;
-                pendingModalTime = millis() + 10;
-                return;
-            case 11:
-                systemModal.hide();
                 g_sdMp3Paths.clear();
                 g_sdMp3Page = 0;
                 pendingModalFn = beginSdMp3ListLoad;
                 pendingModalTime = millis() + 10;
                 return;
-            case 12:
+            case 11:
                 systemModal.hide();
                 if (wxv::audio::isSdMp3Active())
                 {
@@ -548,27 +656,27 @@ void showSystemModal()
                     pendingModalTime = millis() + 1100;
                 }
                 return;
-            case 13:
+            case 12:
                 systemModal.hide();
                 showScenePreviewModal();
                 return;
-            case 14:
+            case 13:
                 systemModal.hide();
                 startUniversalRemoteLearning();
                 return;
-            case 15:
+            case 14:
                 systemModal.hide();
                 clearUniversalRemoteLearning();
                 break;
-            case 16:
+            case 15:
                 systemModal.hide();
                 quickRestore();
                 break;
-            case 17:
+            case 16:
                 systemModal.hide();
                 factoryReset();
                 break;
-            case 18:
+            case 17:
                 systemModal.hide();
                 ESP.restart();
                 return;

@@ -2,6 +2,7 @@
 
 #include "menu.h"
 #include "alarm.h"
+#include "chime_catalog.h"
 #include "settings.h"
 
 static int alarmEnabledTemp = 0;
@@ -80,7 +81,12 @@ void showAlarmSettingsModal()
     static const char *repeatOpts[] = {"No Repeat", "Daily", "Weekly", "Weekdays", "Weekend"};
     static const char *dowOpts[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
     static const char *ampmOpts[] = {"AM", "PM"};
-    static const char *alarmSoundOpts[] = {"Tone", "Fur Elise", "Swan Lake", "Turkey March", "Moon Light Sonata"};
+    static const char *alarmSoundOpts[wxv::audio::kChimeCatalogCount];
+    for (size_t i = 0; i < wxv::audio::chimeCount(); ++i)
+    {
+        alarmSoundOpts[i] = wxv::audio::chimeLabelAt(i);
+    }
+    alarmSoundMode = wxv::audio::clampChimeIndex(alarmSoundMode);
 
     addChooserLine("Select Alarm", &alarmSlotSelection, alarmSlotOpts, 3);
     addChooserLine("Alarm Enabled", &alarmEnabledTemp, enableOpts, 2);
@@ -93,7 +99,7 @@ void showAlarmSettingsModal()
     addNumberLine("Minute (0-59)", &alarmMinuteTemp);
     addChooserLine("Repeat Mode", &alarmRepeatTemp, repeatOpts, 5);
     addChooserLine("Weekly Day", &alarmWeeklyDayTemp, dowOpts, 7);
-    addChooserLine("Alarm Sound", &alarmSoundMode, alarmSoundOpts, 5);
+    addChooserLine("Alarm Sound", &alarmSoundMode, alarmSoundOpts, static_cast<int>(wxv::audio::chimeCount()));
 
     alarmModal.setLines(labels, types, lineCount);
     alarmModal.setValueRefs(numberRefs, numberCount, chooserRefs, chooserCount, chooserOpts, chooserCounts, nullptr, 0, nullptr);
@@ -138,7 +144,7 @@ void showAlarmSettingsModal()
         }
         alarmMinute[slot] = constrain(alarmMinuteTemp, 0, 59);
         alarmWeeklyDay[slot] = constrain(alarmWeeklyDayTemp, 0, 6);
-        alarmSoundMode = constrain(alarmSoundMode, 0, 4);
+        alarmSoundMode = wxv::audio::clampChimeIndex(alarmSoundMode);
 
         refreshAlarmArming();
         saveAlarmSettings();

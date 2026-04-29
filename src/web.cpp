@@ -26,7 +26,9 @@
 #include "default_values.h"
 #include "notifications.h"
 #include "alarm.h"
+#include "audio_announcer.h"
 #include "menu.h"
+#include "mp3_player.h"
 #include "noaa.h"
 #include "worldtime.h"
 #include "app_state.h"
@@ -38,6 +40,7 @@
 #include "web.h"
 #include "cloud_manager.h"
 #include "device_identity.h"
+#include "chime_catalog.h"
 #include <new>
 
 static AppState &app = appState();
@@ -69,7 +72,6 @@ bool otaInProgress = false;
 #define lightGain app.lightGain
 #define buzzerVolume app.buzzerVolume
 #define mp3Volume app.mp3Volume
-#define buzzerToneSet app.buzzerToneSet
 #define alarmSoundMode app.alarmSoundMode
 #define alarmEnabled app.alarmEnabled
 #define alarmHour app.alarmHour
@@ -2342,7 +2344,6 @@ static void serializeAppSoundSettings(JsonObject obj)
   obj["enabled"] = buzzerVolume > 0;
   obj["volume"] = buzzerVolume;
   obj["mp3Volume"] = mp3Volume;
-  obj["toneSet"] = buzzerToneSet;
   obj["alarmSound"] = alarmSoundMode;
   obj["mp3Mode"] = mp3PlayMode;
 }
@@ -3221,11 +3222,12 @@ static bool applyAppAlarmsSettings(JsonObjectConst obj, JsonObject fieldErrors, 
   if (!obj["alarmSound"].isNull())
   {
     int value = obj["alarmSound"].as<int>();
-    if (value < 0 || value > 4)
-      setFieldError(fieldErrors, "alarmSound", "must be between 0 and 4");
+    const int clamped = wxv::audio::clampChimeIndex(value);
+    if (clamped != value)
+      setFieldError(fieldErrors, "alarmSound", "must be a valid chime index");
     else
     {
-      alarmSoundMode = value;
+      alarmSoundMode = clamped;
       dirty.alarms = true;
       dirty.device = true;
     }
@@ -3506,25 +3508,15 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       dirty.device = true;
     }
   }
-  if (!obj["toneSet"].isNull())
-  {
-    int value = obj["toneSet"].as<int>();
-    if (value < 0 || value > 6)
-      setFieldError(fieldErrors, "toneSet", "must be between 0 and 6");
-    else
-    {
-      buzzerToneSet = value;
-      dirty.device = true;
-    }
-  }
   if (!obj["alarmSound"].isNull())
   {
     int value = obj["alarmSound"].as<int>();
-    if (value < 0 || value > 4)
-      setFieldError(fieldErrors, "alarmSound", "must be between 0 and 4");
+    const int clamped = wxv::audio::clampChimeIndex(value);
+    if (clamped != value)
+      setFieldError(fieldErrors, "alarmSound", "must be a valid chime index");
     else
     {
-      alarmSoundMode = value;
+      alarmSoundMode = clamped;
       dirty.device = true;
       dirty.alarms = true;
     }
@@ -3539,6 +3531,12 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
       mp3PlayMode = value;
       dirty.device = true;
     }
+  }
+
+  if (dirty.device)
+  {
+    wxv::audio::setSdMp3VolumePercent(mp3Volume);
+    wxv::announce::refreshOutputVolume();
   }
 
   return fieldErrors.size() == 0;
@@ -5128,7 +5126,6 @@ void setupWebServer() {
       doc["customMsg"]        = customMsg;
       doc["buzzerVolume"]     = buzzerVolume;
       doc["mp3Volume"]        = mp3Volume;
-      doc["buzzerTone"]       = buzzerToneSet;
       doc["mp3Mode"]          = mp3PlayMode;
       doc["alarmSound"]       = alarmSoundMode;
     // Live sensor snapshot
@@ -5361,16 +5358,12 @@ void setupWebServer() {
           mp3Volume = constrain(doc["mp3Volume"].as<int>(), 0, 100);
           dirtyDevice = true;
         }
-        if (!doc["buzzerTone"].isNull()) {
-          buzzerToneSet = constrain(doc["buzzerTone"].as<int>(), 0, 6);
-          dirtyDevice = true;
-        }
         if (!doc["mp3Mode"].isNull()) {
           mp3PlayMode = constrain(doc["mp3Mode"].as<int>(), 0, 2);
           dirtyDevice = true;
         }
         if (!doc["alarmSound"].isNull()) {
-          alarmSoundMode = constrain(doc["alarmSound"].as<int>(), 0, 4);
+          alarmSoundMode = wxv::audio::clampChimeIndex(doc["alarmSound"].as<int>());
           dirtyAlarm = true;
           dirtyDevice = true;
         }

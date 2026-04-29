@@ -40,7 +40,6 @@ struct AppState
     int &lightGain;
     int &buzzerVolume;
     int &mp3Volume;
-    int &buzzerToneSet;
     int &alarmSoundMode;
 
     String &deviceHostname;

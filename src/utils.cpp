@@ -48,10 +48,11 @@ void drawScrollingText(const char* text, int y, uint16_t color, int selectedInde
     if (selectedIndex != lastScrollMenuIndex) {
         scrollOffset = 0;
         lastScrollMenuIndex = selectedIndex;
+        lastScrollTime = now;
     }
 
     // Only update offset every 40ms for smooth scroll
-    if (now - lastScrollTime > 40) {
+    if (now - lastScrollTime >= 40) {
         lastScrollTime = now;
         scrollOffset++;
         if (scrollOffset > (textW + 8)) scrollOffset = -SCREEN_WIDTH;
