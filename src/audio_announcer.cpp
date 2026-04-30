@@ -12,6 +12,7 @@
 #include "speaker.h"
 #include "datetimesettings.h"
 #include "display.h"
+#include "alarm.h"
 #include "mp3_player.h"
 #include "keyboard.h"
 #include "menu.h"
@@ -346,7 +347,12 @@ namespace wxv::announce
             {
                 g_lastStatus = "done";
                 cleanupPlayback(true);
-                restoreUiAfterAnnouncement();
+                // Alarm loops immediately restart playback; restoring the full UI
+                // between repeats makes the panel visibly blink.
+                if (!isAlarmCurrentlyActive())
+                {
+                    restoreUiAfterAnnouncement();
+                }
                 return false;
             }
 

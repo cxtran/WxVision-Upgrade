@@ -158,9 +158,8 @@ function readAlarmHourFromInputs(idx, sourceClock24h){
   var period = (periodEl && periodEl.value === 'pm') ? 'pm' : 'am';
   var h12 = clamp(raw, 1, 12);
   if (hourEl) hourEl.value = h12;
-  if (period === 'pm' && h12 !== 12) return h12 + 12;
-  if (period === 'am' && h12 === 12) return 0;
-  return h12 % 12;
+  if (period === 'pm') return (h12 === 12) ? 12 : (h12 + 12);
+  return (h12 === 12) ? 0 : h12;
 }
 
 function readAlarmMinute(idx){
