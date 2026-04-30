@@ -11,11 +11,36 @@
 #include "audio_announcer.h"
 #include "alarm.h"
 #include "notifications.h"
+#include "keyboard.h"
+#include "screen_manager.h"
 
 // Explicit forward declarations to satisfy compilation order
 extern bool isAlarmCurrentlyActive();
 extern void cancelActiveAlarm();
 extern InfoModal dateModal;
+
+namespace
+{
+bool shouldRotateScreenDirectlyFromButton()
+{
+  return !menuActive &&
+         !wifiSelecting &&
+         !inKeyboardMode &&
+         !isSectionHeadingActive() &&
+         !isTemporaryAlertActive() &&
+         currentScreen != SCREEN_NOAA_ALERT;
+}
+
+void dispatchHorizontalButton(IRCodes::WxKey key, int direction)
+{
+  if (shouldRotateScreenDirectlyFromButton())
+  {
+    rotateScreen(direction);
+    return;
+  }
+  enqueueVirtualIRKey(key);
+}
+}
 
 void setupButtons() {
 #if WXV_ENABLE_5WAY_BUTTONS
@@ -84,14 +109,14 @@ void getButton(){
     leftHoldStartMs = now;
     lastLeftRepeatMs = now;
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRKey(IRCodes::WxKey::Left);
+    dispatchHorizontalButton(IRCodes::WxKey::Left, -1);
   }
   if (lastRight == HIGH && right == LOW && (now - lastRightEdgeMs) >= debounceMs) {
     lastRightEdgeMs = now;
     rightHoldStartMs = now;
     lastRightRepeatMs = now;
     if (isAlarmCurrentlyActive()) cancelActiveAlarm();
-    enqueueVirtualIRKey(IRCodes::WxKey::Right);
+    dispatchHorizontalButton(IRCodes::WxKey::Right, 1);
   }
   if (lastCtr == HIGH && ctr == LOW && (now - lastCtrEdgeMs) >= debounceMs) {
     lastCtrEdgeMs = now;
