@@ -1343,11 +1343,11 @@ void InfoModal::handleIR(uint32_t code)
                 {
                     *ptr = normalizeThemeScheduleMinutes(*ptr);
                 }
-                else if (label.startsWith("Sound Volume"))
+                else if (label.startsWith("Speaker Tone Volume") || label.startsWith("System Volume"))
                 {
                     *ptr = constrain(*ptr, 0, 100);
-                    buzzerVolume = *ptr;
-                    if (buzzerVolume > 0)
+                    speakerVolume = *ptr;
+                    if (speakerVolume > 0)
                     {
                         wxv::announce::playUiSound(code == IR_LEFT ? "volume_down" : "volume_up");
                         customUiTonePlayed = true;

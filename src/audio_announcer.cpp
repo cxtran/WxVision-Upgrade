@@ -9,7 +9,7 @@
 #include "AudioFileSourceBuffer.h"
 #include "AudioFileSourceSD.h"
 #include "AudioOutputI2S.h"
-#include "buzzer.h"
+#include "speaker.h"
 #include "datetimesettings.h"
 #include "display.h"
 #include "mp3_player.h"
@@ -66,14 +66,14 @@ namespace wxv::announce
         {
             const int clamped = constrain(volumePercent, 0, 100);
             const float normalized = static_cast<float>(clamped) / 100.0f;
-            return 0.02f + (0.98f * normalized * normalized);
+            // Match MP3 playback so spoken clips reach a fuller level without
+            // pushing the I2S output into harsh distortion.
+            return 0.03f + (1.07f * powf(normalized, 1.7f));
         }
 
         int effectiveAudioVolumePercent(int contentPercent)
         {
-            const int master = constrain(buzzerVolume, 0, 100);
-            const int content = constrain(contentPercent, 0, 100);
-            return (master * content + 50) / 100;
+            return constrain(contentPercent, 0, 100);
         }
 
         float clipGainScaleForPath(const String &path)
@@ -373,7 +373,7 @@ namespace wxv::announce
                 clearQueue();
             }
 
-            setupBuzzer();
+            setupSpeaker();
         }
 
         bool ensureSdReady()

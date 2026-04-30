@@ -20,5 +20,5 @@ bool isAlarmCurrentlyActive();
 bool isAlarmFlashVisible();
 bool isAnyAlarmEnabled();
 
-// Integrations (buzzer)
-void stopAlarmBuzzer();
+// Integrations (speaker)
+void stopAlarmSound();

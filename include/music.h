@@ -36,7 +36,7 @@ constexpr int8_t NOTE_FS5 = 78;
 constexpr int8_t NOTE_G5  = 79;
 constexpr int8_t NOTE_A5  = 81;
 
-// ADSR envelope for buzzer playback (times in ms, sustain in percent).
+// ADSR envelope for speaker tone playback (times in ms, sustain in percent).
 struct ADSR
 {
     uint16_t attackMs;

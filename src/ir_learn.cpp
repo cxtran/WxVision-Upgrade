@@ -20,6 +20,8 @@ const IRCodes::WxKey kLearnOrder[] = {
     IRCodes::WxKey::Down,
     IRCodes::WxKey::Left,
     IRCodes::WxKey::Right,
+    IRCodes::WxKey::VolumeUp,
+    IRCodes::WxKey::VolumeDown,
     IRCodes::WxKey::Ok,
     IRCodes::WxKey::Menu,
     IRCodes::WxKey::Screen,
@@ -87,6 +89,8 @@ const char *stepLabel(IRCodes::WxKey key) {
   case IRCodes::WxKey::Down: return "DOWN";
   case IRCodes::WxKey::Left: return "LEFT";
   case IRCodes::WxKey::Right: return "RIGHT";
+  case IRCodes::WxKey::VolumeUp: return "VOL+";
+  case IRCodes::WxKey::VolumeDown: return "VOL-";
   case IRCodes::WxKey::Ok: return "OK";
   case IRCodes::WxKey::Cancel: return "MENU";
   case IRCodes::WxKey::Menu: return "MENU";

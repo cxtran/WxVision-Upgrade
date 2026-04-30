@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "audio_announcer.h"
+#include "mp3_player.h"
 #include "menu.h"
 #include "display.h"
 #include <vector>
@@ -185,6 +186,34 @@ const int calibCount = sizeof(calibMenu) / sizeof(calibMenu[0]);
 const char *systemMenu[] = {"System Info", "Date & Time", "Units", "WiFi Signal Test", "Preview Screens", "Reset Settings", "Factory Reset (Erase Wi-Fi + Logs)", "Reboot"};
 const int systemCount = sizeof(systemMenu) / sizeof(systemMenu[0]);
 
+namespace {
+void persistSharedAudioVolume()
+{
+    Preferences prefs;
+    if (prefs.begin("visionwx", false))
+    {
+        prefs.putInt("mp3Vol", constrain(mp3Volume, 0, 100));
+        prefs.end();
+    }
+}
+
+bool adjustSharedAudioVolume(int delta, const char *uiSound)
+{
+    const int nextVolume = constrain(mp3Volume + delta, 0, 100);
+    if (nextVolume == mp3Volume)
+    {
+        wxv::announce::playUiSound("nav_error");
+        return true;
+    }
+
+    mp3Volume = nextVolume;
+    wxv::audio::setSdMp3VolumePercent(mp3Volume);
+    wxv::announce::refreshOutputVolume();
+    persistSharedAudioVolume();
+    wxv::announce::playUiSound(uiSound);
+    return true;
+}
+} // namespace
 
 bool handleGlobalIRKey(IRCodes::WxKey key)
 {
@@ -207,6 +236,14 @@ bool handleGlobalIRKey(IRCodes::WxKey key)
         reset_Time_and_Date_Display = true;
         requestScrollRebuild();
         return true;
+    }
+    if (key == IRCodes::WxKey::VolumeUp)
+    {
+        return adjustSharedAudioVolume(+5, "volume_up");
+    }
+    if (key == IRCodes::WxKey::VolumeDown)
+    {
+        return adjustSharedAudioVolume(-5, "volume_down");
     }
     return false;
 }

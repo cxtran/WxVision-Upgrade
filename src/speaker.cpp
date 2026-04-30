@@ -1,19 +1,20 @@
 #include <Arduino.h>
 #include <math.h>
-#include "pins.h"
-#include "buzzer.h"
-#include "settings.h"
-#include "music.h"
-#include "audio_out.h"
-#include "audio_announcer.h"
-#include "mp3_player.h"
 
-static bool buzzerReady = false;
+#include "audio_announcer.h"
+#include "audio_out.h"
+#include "mp3_player.h"
+#include "music.h"
+#include "settings.h"
+#include "speaker.h"
+
+static bool speakerReady = false;
 static AudioOut speaker;
 
 int midiNoteToFrequencyHz(int8_t midiNote)
 {
-    if (midiNote < 0) return 0;
+    if (midiNote < 0)
+        return 0;
     float expv = (static_cast<float>(midiNote) - 69.0f) / 12.0f;
     float f = 440.0f * powf(2.0f, expv);
     int hz = static_cast<int>(lroundf(f));
@@ -23,11 +24,10 @@ int midiNoteToFrequencyHz(int8_t midiNote)
 static uint16_t volumeToAmplitude_()
 {
     return static_cast<uint16_t>(
-        map(constrain(buzzerVolume, 0, 100), 0, 100, 300, 2500)
-    );
+        map(constrain(speakerVolume, 0, 100), 0, 100, 300, 2500));
 }
 
-void setupBuzzer()
+void setupSpeaker()
 {
     if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
         return;
@@ -42,20 +42,20 @@ bool ensureSpeakerReady()
         return false;
     }
 
-    if (!buzzerReady)
+    if (!speakerReady)
     {
-        buzzerReady = speaker.begin();
-        if (buzzerReady)
+        speakerReady = speaker.begin();
+        if (speakerReady)
         {
-            Serial.println("Speaker wrapper initialized");
+            Serial.println("Speaker output initialized");
         }
         else
         {
-            Serial.println("Speaker wrapper init failed");
+            Serial.println("Speaker output init failed");
         }
     }
 
-    return buzzerReady;
+    return speakerReady;
 }
 
 AudioOut &speakerAudioOut()
@@ -67,12 +67,13 @@ void releaseSpeaker()
 {
     speaker.stop();
     speaker.shutdown();
-    buzzerReady = false;
+    speakerReady = false;
 }
 
-static void playBuzzerToneADSRInternal(int frequency, int durationMs, uint16_t peakAmp, const ADSR &env)
+static void playSpeakerToneADSRInternal(int frequency, int durationMs, uint16_t peakAmp, const ADSR &env)
 {
-    if (frequency <= 0 || durationMs <= 0 || peakAmp == 0) return;
+    if (frequency <= 0 || durationMs <= 0 || peakAmp == 0)
+        return;
 
     constexpr int kStepMs = 8;
 
@@ -92,12 +93,12 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, uint16_t p
     }
 
     uint16_t sustainAmp = static_cast<uint16_t>(
-        (peakAmp * constrain(static_cast<int>(env.sustainPct), 0, 100)) / 100
-    );
+        (peakAmp * constrain(static_cast<int>(env.sustainPct), 0, 100)) / 100);
 
     auto rampSegment = [&](uint16_t fromAmp, uint16_t toAmp, int ms)
     {
-        if (ms <= 0) return;
+        if (ms <= 0)
+            return;
         int steps = max(1, ms / kStepMs);
         int stepDur = max(1, ms / steps);
 
@@ -120,58 +121,66 @@ static void playBuzzerToneADSRInternal(int frequency, int durationMs, uint16_t p
     rampSegment(sustainAmp, 0, releaseMs);
 }
 
-void playBuzzerToneADSR(int frequency, int durationMs, const ADSR &env)
+void playSpeakerToneADSR(int frequency, int durationMs, const ADSR &env)
 {
-    if (frequency <= 0 || durationMs <= 0) return;
-    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
-    if (!ensureSpeakerReady()) return;
-    if (buzzerVolume <= 0) return;
+    if (frequency <= 0 || durationMs <= 0)
+        return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
+        return;
+    if (!ensureSpeakerReady())
+        return;
+    if (speakerVolume <= 0)
+        return;
 
     uint16_t amp = volumeToAmplitude_();
-    playBuzzerToneADSRInternal(frequency, durationMs, amp, env);
+    playSpeakerToneADSRInternal(frequency, durationMs, amp, env);
 }
 
-void playBuzzerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env)
+void playSpeakerPianoNoteADSR(int8_t midiNote, int durationMs, const ADSR &env)
 {
-    if (durationMs <= 0) return;
+    if (durationMs <= 0)
+        return;
     int hz = midiNoteToFrequencyHz(midiNote);
     if (hz <= 0)
     {
         delay(durationMs);
         return;
     }
-    playBuzzerToneADSR(hz, durationMs, env);
+    playSpeakerToneADSR(hz, durationMs, env);
 }
 
-void playBuzzerTone(int frequency, int duration)
+void playSpeakerTone(int frequency, int duration)
 {
-    if (frequency <= 0 || duration <= 0) return;
-    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
-    if (!ensureSpeakerReady()) return;
-    if (buzzerVolume <= 0) return;
+    if (frequency <= 0 || duration <= 0)
+        return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
+        return;
+    if (!ensureSpeakerReady())
+        return;
+    if (speakerVolume <= 0)
+        return;
 
-    int freq = frequency;
-    int dur = duration;
     uint16_t amp = static_cast<uint16_t>(max(100, static_cast<int>(volumeToAmplitude_() * 0.70f)));
-
-    speaker.playTone(freq, dur, amp);
+    speaker.playTone(frequency, duration, amp);
 }
 
-void stopBuzzer()
+void stopSpeaker()
 {
-    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive()) return;
-    if (!buzzerReady) return;
+    if (wxv::audio::isSdMp3Active() || wxv::announce::isActive())
+        return;
+    if (!speakerReady)
+        return;
     speaker.stop();
 }
 
 void tone(uint8_t _pin, unsigned int frequency, unsigned long duration)
 {
     (void)_pin;
-    playBuzzerTone(static_cast<int>(frequency), static_cast<int>(duration));
+    playSpeakerTone(static_cast<int>(frequency), static_cast<int>(duration));
 }
 
 void noTone(uint8_t _pin)
 {
     (void)_pin;
-    stopBuzzer();
+    stopSpeaker();
 }

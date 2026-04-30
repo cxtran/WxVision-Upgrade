@@ -7,7 +7,7 @@
 #include "settings.h"
 #include "utils.h"
 #include "display.h"
-#include "buzzer.h"
+#include "speaker.h"
 #include "menu.h"
 #include "config.h"
 

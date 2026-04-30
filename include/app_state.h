@@ -38,7 +38,7 @@ struct AppState
     float &tempOffset;
     int &humOffset;
     int &lightGain;
-    int &buzzerVolume;
+    int &speakerVolume;
     int &mp3Volume;
     int &alarmSoundMode;
 

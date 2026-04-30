@@ -137,7 +137,7 @@ struct DefaultConfig {
   bool sceneClockEnabled;
   int returnToDefaultSec;    // 0 disables auto-return, otherwise timeout in seconds
   int splashDurationSec;      // 1..10
-  int buzzerVolume;           // 0..100
+  int speakerVolume;          // 0..100
   int mp3Volume;              // 0..100
   int alarmSoundMode;         // shared chime catalog index
   int forecastLinesPerDay;    // 2..3
@@ -264,7 +264,7 @@ static const DefaultConfig kDefaults = {
     true,       // sceneClockEnabled
     0,          // returnToDefaultSec
     3,          // splashDurationSec
-    kSoundVolumeDefault,        // buzzerVolume
+    kSoundVolumeDefault,        // speakerVolume
     50,         // mp3Volume
     0,          // alarmSoundMode
     3,          // forecastLinesPerDay

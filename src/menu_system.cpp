@@ -505,8 +505,8 @@ void showSystemModal()
     menuActive = true;
 
     String labels[] = {
-        "System Volume (0-100)",
-        "MP3 Volume (0-100)",
+        "Speaker Tone Volume (0-100)",
+        "Voice / MP3 Volume (0-100)",
         "MP3 Mode",
         "Audio Announcements",
         "Date & Time",
@@ -528,7 +528,7 @@ void showSystemModal()
         InfoNumber, InfoNumber, InfoChooser, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton,
         InfoButton, InfoButton, InfoButton, InfoButton, InfoButton, InfoButton};
-    int *numberRefs[] = {&buzzerVolume, &mp3Volume};
+    int *numberRefs[] = {&speakerVolume, &mp3Volume};
     int *chooserRefs[] = {&mp3PlayMode};
     static const char *mp3ModeOpts[] = {"Play One", "Continue Next", "Repeat"};
     const char *const *chooserOpts[] = {mp3ModeOpts};
@@ -552,7 +552,7 @@ void showSystemModal()
         }
 
         // Persist volume/mode regardless of which action chosen
-        buzzerVolume = constrain(buzzerVolume, 0, 100);
+        speakerVolume = constrain(speakerVolume, 0, 100);
         mp3Volume = constrain(mp3Volume, 0, 100);
         mp3PlayMode = constrain(mp3PlayMode, 0, 2);
         wxv::audio::setSdMp3VolumePercent(mp3Volume);

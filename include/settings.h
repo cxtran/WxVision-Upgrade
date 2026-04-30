@@ -116,7 +116,7 @@ extern int envAlertHumidityHighThreshold;
 extern bool envAlertCo2Enabled;
 extern bool envAlertTempEnabled;
 extern bool envAlertHumidityEnabled;
-extern int buzzerVolume;   // 0-100
+extern int speakerVolume;  // 0-100
 extern int mp3Volume;      // 0-100
 extern int mp3PlayMode;    // 0 = Play One, 1 = Continue Next, 2 = Repeat
 extern int alarmSoundMode; // index into the shared /audio/chimes catalog

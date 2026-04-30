@@ -1,6 +1,6 @@
 #include "alarm.h"
 #include "settings.h"
-#include "buzzer.h"
+#include "speaker.h"
 #include "web.h"
 #include "audio_announcer.h"
 #include "chime_catalog.h"
@@ -141,7 +141,7 @@ static void resetRuntimeAlarm()
     s_melodyNoteEndMs = 0;
     s_nextAlarmAudioAttemptMs = 0;
     s_alarmAudioOwned = false;
-    stopAlarmBuzzer();
+    stopAlarmSound();
 }
 
 void initAlarmModule()
@@ -168,7 +168,7 @@ void tickAlarmState(const DateTime &now)
         s_lastBeepMs = millis();
         s_melodyIndex = 0;
         s_melodyNoteEndMs = 0;
-        stopAlarmBuzzer();
+        stopAlarmSound();
         return;
     }
 
@@ -256,7 +256,7 @@ void tickAlarmState(const DateTime &now)
             }
         }
 
-        stopAlarmBuzzer();
+        stopAlarmSound();
     }
     else
     {
@@ -270,7 +270,7 @@ void tickAlarmState(const DateTime &now)
         s_alarmAudioOwned = false;
         if (wasActive)
         {
-            stopAlarmBuzzer();
+            stopAlarmSound();
         }
     }
 }
@@ -315,10 +315,10 @@ void cancelActiveAlarm()
         wxv::announce::stop();
     }
     s_alarmAudioOwned = false;
-    stopAlarmBuzzer();
+    stopAlarmSound();
 }
 
-void stopAlarmBuzzer()
+void stopAlarmSound()
 {
-    stopBuzzer();
+    stopSpeaker();
 }

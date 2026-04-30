@@ -12,6 +12,8 @@ enum class WxKey : uint8_t {
   Down,
   Left,
   Right,
+  VolumeUp,
+  VolumeDown,
   Ok,
   Cancel,
   Menu,
@@ -34,6 +36,8 @@ struct RemoteProfile {
   IrCode down;
   IrCode left;
   IrCode right;
+  IrCode volumeUp;
+  IrCode volumeDown;
   IrCode ok;
   IrCode cancel;
   IrCode menu;
@@ -57,6 +61,8 @@ constexpr IrCode kDefaultUp{NEC, 0xFFFF30CFULL, 32};
 constexpr IrCode kDefaultDown{NEC, 0xFFFF906FULL, 32};
 constexpr IrCode kDefaultLeft{NEC, 0xFFFF50AFULL, 32};
 constexpr IrCode kDefaultRight{NEC, 0xFFFFE01FULL, 32};
+constexpr IrCode kDefaultVolumeUp{UNKNOWN, 0, 0};
+constexpr IrCode kDefaultVolumeDown{UNKNOWN, 0, 0};
 constexpr IrCode kDefaultOk{NEC, 0xFFFF48B7ULL, 32};
 constexpr IrCode kDefaultCancel{NEC, 0xFFFF08F7ULL, 32};
 constexpr IrCode kDefaultMenu{kDefaultCancel};
@@ -71,6 +77,8 @@ constexpr RemoteProfile kRemote_Default{
     kDefaultDown,
     kDefaultLeft,
     kDefaultRight,
+    kDefaultVolumeUp,
+    kDefaultVolumeDown,
     kDefaultOk,
     kDefaultCancel,
     kDefaultMenu,
@@ -86,6 +94,8 @@ constexpr RemoteProfile kRemote_SamsungTV{
     {SAMSUNG, 0xE0E08679ULL, 32}, // Down
     {SAMSUNG, 0xE0E0A659ULL, 32}, // Left
     {SAMSUNG, 0xE0E046B9ULL, 32}, // Right
+    {UNKNOWN, 0, 0},              // Volume Up
+    {UNKNOWN, 0, 0},              // Volume Down
     {SAMSUNG, 0xE0E016E9ULL, 32}, // OK
     {SAMSUNG, 0xE0E01AE5ULL, 32}, // Cancel (Return)
     {SAMSUNG, 0xE0E01AE5ULL, 32}, // Menu alias -> Return
@@ -158,13 +168,15 @@ inline RemoteProfile &learnedProfileRef() {
       emptyCode(),
       emptyCode(),
       emptyCode(),
+      emptyCode(),
+      emptyCode(),
   };
   profile.name = learnedProfileName();
   return profile;
 }
 
 inline bool *learnedValidRef() {
-  static bool valid[10] = {false, false, false, false, false, false, false, false, false, false};
+  static bool valid[12] = {false, false, false, false, false, false, false, false, false, false, false, false};
   return valid;
 }
 
@@ -182,19 +194,23 @@ inline int learnedSlotForKey(WxKey key) {
     return 2;
   case WxKey::Right:
     return 3;
-  case WxKey::Ok:
+  case WxKey::VolumeUp:
     return 4;
+  case WxKey::VolumeDown:
+    return 5;
+  case WxKey::Ok:
+    return 6;
   case WxKey::Cancel:
   case WxKey::Menu:
-    return 5;
-  case WxKey::Screen:
-    return 6;
-  case WxKey::Theme:
     return 7;
-  case WxKey::C0:
+  case WxKey::Screen:
     return 8;
-  case WxKey::C1:
+  case WxKey::Theme:
     return 9;
+  case WxKey::C0:
+    return 10;
+  case WxKey::C1:
+    return 11;
   default:
     return -1;
   }
@@ -210,6 +226,10 @@ inline const char *learnedKeyStoragePrefix(WxKey key) {
     return "lt";
   case WxKey::Right:
     return "rt";
+  case WxKey::VolumeUp:
+    return "vu";
+  case WxKey::VolumeDown:
+    return "vd";
   case WxKey::Ok:
     return "ok";
   case WxKey::Cancel:
@@ -239,6 +259,10 @@ inline IrCode *learnedCodeRefByKey(WxKey key) {
     return &p.left;
   case WxKey::Right:
     return &p.right;
+  case WxKey::VolumeUp:
+    return &p.volumeUp;
+  case WxKey::VolumeDown:
+    return &p.volumeDown;
   case WxKey::Ok:
     return &p.ok;
   case WxKey::Cancel:
@@ -267,7 +291,7 @@ inline bool isLearnedProfileValid() {
     loadLearnedProfile();
   }
   bool *valid = learnedValidRef();
-  return valid[0] && valid[1] && valid[2] && valid[3] && valid[4] && valid[5];
+  return valid[0] && valid[1] && valid[2] && valid[3] && valid[6] && valid[7];
 }
 
 inline bool setActiveProfile(size_t idx) {
@@ -300,6 +324,10 @@ inline const char *keyName(WxKey key) {
     return "Left";
   case WxKey::Right:
     return "Right";
+  case WxKey::VolumeUp:
+    return "VolumeUp";
+  case WxKey::VolumeDown:
+    return "VolumeDown";
   case WxKey::Ok:
     return "Ok";
   case WxKey::Cancel:
@@ -349,6 +377,14 @@ inline bool matchProfile(const RemoteProfile &profile,
     outKey = WxKey::Right;
     return true;
   }
+  if (sameCode(profile.volumeUp, p, v, b)) {
+    outKey = WxKey::VolumeUp;
+    return true;
+  }
+  if (sameCode(profile.volumeDown, p, v, b)) {
+    outKey = WxKey::VolumeDown;
+    return true;
+  }
   if (sameCode(profile.ok, p, v, b)) {
     outKey = WxKey::Ok;
     return true;
@@ -390,6 +426,8 @@ inline bool loadLearnedProfile() {
   learned.down = emptyCode();
   learned.left = emptyCode();
   learned.right = emptyCode();
+  learned.volumeUp = emptyCode();
+  learned.volumeDown = emptyCode();
   learned.ok = emptyCode();
   learned.cancel = emptyCode();
   learned.menu = emptyCode();
@@ -398,7 +436,7 @@ inline bool loadLearnedProfile() {
   learned.c0 = emptyCode();
   learned.c1 = emptyCode();
 
-  for (int i = 0; i < 10; ++i)
+  for (int i = 0; i < 12; ++i)
     valid[i] = false;
 
   if (!prefs.begin("wx_ir", true)) {
@@ -415,8 +453,9 @@ inline bool loadLearnedProfile() {
   }
 
   const WxKey keys[] = {
-      WxKey::Up, WxKey::Down, WxKey::Left, WxKey::Right, WxKey::Ok,
-      WxKey::Cancel, WxKey::Screen, WxKey::Theme, WxKey::C0, WxKey::C1};
+      WxKey::Up, WxKey::Down, WxKey::Left, WxKey::Right, WxKey::VolumeUp,
+      WxKey::VolumeDown, WxKey::Ok, WxKey::Cancel, WxKey::Screen,
+      WxKey::Theme, WxKey::C0, WxKey::C1};
 
   for (size_t i = 0; i < (sizeof(keys) / sizeof(keys[0])); ++i) {
     const WxKey key = keys[i];
@@ -628,6 +667,10 @@ inline uint32_t legacyCodeForKey(WxKey key) {
     return static_cast<uint32_t>(kDefaultLeft.value);
   case WxKey::Right:
     return static_cast<uint32_t>(kDefaultRight.value);
+  case WxKey::VolumeUp:
+    return static_cast<uint32_t>(kDefaultVolumeUp.value);
+  case WxKey::VolumeDown:
+    return static_cast<uint32_t>(kDefaultVolumeDown.value);
   case WxKey::Ok:
     return static_cast<uint32_t>(kDefaultOk.value);
   case WxKey::Cancel:
@@ -655,6 +698,12 @@ inline WxKey mapLegacyCodeToKey(uint32_t legacy) {
     return WxKey::Left;
   if (legacy == static_cast<uint32_t>(kDefaultRight.value))
     return WxKey::Right;
+  if (kDefaultVolumeUp.bits != 0 &&
+      legacy == static_cast<uint32_t>(kDefaultVolumeUp.value))
+    return WxKey::VolumeUp;
+  if (kDefaultVolumeDown.bits != 0 &&
+      legacy == static_cast<uint32_t>(kDefaultVolumeDown.value))
+    return WxKey::VolumeDown;
   if (legacy == static_cast<uint32_t>(kDefaultOk.value))
     return WxKey::Ok;
   if (legacy == static_cast<uint32_t>(kDefaultCancel.value))

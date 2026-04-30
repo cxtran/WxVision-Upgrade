@@ -1,6 +1,6 @@
 #include "ui_tone.h"
 
-#include "buzzer.h"
+#include "speaker.h"
 #include "settings.h"
 
 namespace
@@ -11,7 +11,7 @@ unsigned long lastUiToneMs = 0;
 
 uint16_t uiToneAmplitude()
 {
-    const int base = map(constrain(buzzerVolume, 0, 100), 0, 100, 220, 1800);
+    const int base = map(constrain(speakerVolume, 0, 100), 0, 100, 220, 1800);
     return static_cast<uint16_t>(constrain(static_cast<int>(base * uiToneVolume), 0, 2200));
 }
 
@@ -21,7 +21,7 @@ void playToneStep(int freq, int durationMs)
     {
         return;
     }
-    if (buzzerVolume <= 0)
+    if (speakerVolume <= 0)
     {
         return;
     }

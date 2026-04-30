@@ -12,7 +12,7 @@
 #include "AudioGeneratorMP3.h"
 #include "AudioOutputI2S.h"
 #include "audio_announcer.h"
-#include "buzzer.h"
+#include "speaker.h"
 #include "display.h"
 #include "pins.h"
 #include "sd_card.h"
@@ -50,15 +50,14 @@ namespace wxv::audio
         {
             const int clamped = constrain(volumePercent, 0, 100);
             const float normalized = static_cast<float>(clamped) / 100.0f;
-            // Keep the loud end below unity gain to avoid clipping distortion.
-            return 0.02f + (0.98f * normalized * normalized);
+            // Lift the top end slightly above unity, but keep enough headroom
+            // to avoid obvious clipping on typical MP3 program material.
+            return 0.03f + (1.07f * powf(normalized, 1.7f));
         }
 
         int effectiveAudioVolumePercent(int contentPercent)
         {
-            const int master = constrain(buzzerVolume, 0, 100);
-            const int content = constrain(contentPercent, 0, 100);
-            return (master * content + 50) / 100;
+            return constrain(contentPercent, 0, 100);
         }
 
         void cleanupPlayback(bool reenableSpeaker)
@@ -96,7 +95,7 @@ namespace wxv::audio
 
         if (reenableSpeaker)
         {
-            setupBuzzer();
+            setupSpeaker();
         }
         }
 

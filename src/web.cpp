@@ -71,7 +71,7 @@ bool otaInProgress = false;
 #define tempOffset app.tempOffset
 #define humOffset app.humOffset
 #define lightGain app.lightGain
-#define buzzerVolume app.buzzerVolume
+#define speakerVolume app.speakerVolume
 #define mp3Volume app.mp3Volume
 #define alarmSoundMode app.alarmSoundMode
 #define alarmEnabled app.alarmEnabled
@@ -1895,7 +1895,7 @@ static void refreshAppRuntimeState(bool force = false)
   next.settings.returnToDefaultSec = returnToDefaultSec;
   next.settings.noaaEnabled = noaaAlertsEnabled;
   next.settings.lightningEnabled = g_appLightningEnabled;
-  next.settings.soundEnabled = (buzzerVolume > 0);
+  next.settings.soundEnabled = (speakerVolume > 0);
   next.lastRefreshMs = nowMs;
   next.lastWeatherBroadcastMs = lastWeatherBroadcastMs;
   next.lastIndoorBroadcastMs = lastIndoorBroadcastMs;
@@ -2614,8 +2614,8 @@ static void serializeAppWorldTimeSettings(JsonObject obj)
 
 static void serializeAppSoundSettings(JsonObject obj)
 {
-  obj["enabled"] = buzzerVolume > 0;
-  obj["volume"] = buzzerVolume;
+  obj["enabled"] = speakerVolume > 0;
+  obj["speakerVolume"] = speakerVolume;
   obj["mp3Volume"] = mp3Volume;
   obj["alarmSound"] = alarmSoundMode;
   obj["mp3Mode"] = mp3PlayMode;
@@ -3756,17 +3756,19 @@ static bool applyAppSoundSettings(JsonObjectConst obj, JsonObject fieldErrors, A
   if (!obj["enabled"].isNull())
   {
     bool enabled = obj["enabled"].as<bool>();
-    buzzerVolume = enabled ? max(buzzerVolume, 35) : 0;
+    speakerVolume = enabled ? max(speakerVolume, 35) : 0;
     dirty.device = true;
   }
-  if (!obj["volume"].isNull())
+  if (!obj["speakerVolume"].isNull() || !obj["volume"].isNull())
   {
-    int value = obj["volume"].as<int>();
+    int value = !obj["speakerVolume"].isNull()
+                    ? obj["speakerVolume"].as<int>()
+                    : obj["volume"].as<int>();
     if (value < 0 || value > 100)
-      setFieldError(fieldErrors, "volume", "must be between 0 and 100");
+      setFieldError(fieldErrors, "speakerVolume", "must be between 0 and 100");
     else
     {
-      buzzerVolume = value;
+      speakerVolume = value;
       dirty.device = true;
     }
   }
@@ -4702,6 +4704,10 @@ static IRCodes::WxKey irKeyForButton(String btn)
     return IRCodes::WxKey::Left;
   if (btn == "right")
     return IRCodes::WxKey::Right;
+  if (btn == "volup" || btn == "volumeup" || btn == "volume+" || btn == "vol+")
+    return IRCodes::WxKey::VolumeUp;
+  if (btn == "voldown" || btn == "volumedown" || btn == "volume-" || btn == "vol-")
+    return IRCodes::WxKey::VolumeDown;
   if (btn == "select" || btn == "enter" || btn == "ok")
     return IRCodes::WxKey::Ok;
   if (btn == "menu" || btn == "setup" || btn == "cancel")
@@ -5688,7 +5694,7 @@ void setupWebServer() {
       forecastUi["pauseMs"] = forecastPauseMs;
       forecastUi["iconSize"] = forecastIconSize;
       doc["customMsg"]        = customMsg;
-      doc["buzzerVolume"]     = buzzerVolume;
+      doc["speakerVolume"]    = speakerVolume;
       doc["mp3Volume"]        = mp3Volume;
       doc["mp3Mode"]          = mp3PlayMode;
       doc["alarmSound"]       = alarmSoundMode;
@@ -5914,8 +5920,11 @@ void setupWebServer() {
             }
             dirtyDisplay = true;
           }
-        if (!doc["buzzerVolume"].isNull()) {
-          buzzerVolume = constrain(doc["buzzerVolume"].as<int>(), 0, 100);
+        if (!doc["speakerVolume"].isNull() || !doc["buzzerVolume"].isNull()) {
+          const int value = !doc["speakerVolume"].isNull()
+                                ? doc["speakerVolume"].as<int>()
+                                : doc["buzzerVolume"].as<int>();
+          speakerVolume = constrain(value, 0, 100);
           dirtyDevice = true;
         }
         if (!doc["mp3Volume"].isNull()) {

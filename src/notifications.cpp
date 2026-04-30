@@ -100,7 +100,7 @@ static String appendWaitingDots(const String& line) {
 }
 
 static void playNotificationCue(NotifyId id, bool isWaiting) {
-  if (isWaiting || buzzerVolume <= 0) {
+  if (isWaiting || speakerVolume <= 0) {
     return;
   }
 

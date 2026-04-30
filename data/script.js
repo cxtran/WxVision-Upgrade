@@ -1729,8 +1729,8 @@ function loadAll(background){
     if (humLowAlertEl) humLowAlertEl.value = (typeof s.envAlertHumidityLowThreshold !== 'undefined' ? s.envAlertHumidityLowThreshold : 30);
     var humHighAlertEl = document.getElementById('envAlertHumidityHighThreshold');
     if (humHighAlertEl) humHighAlertEl.value = (typeof s.envAlertHumidityHighThreshold !== 'undefined' ? s.envAlertHumidityHighThreshold : 60);
-    var buzzVolEl = document.getElementById('buzzerVolume');
-    if (buzzVolEl) buzzVolEl.value = (typeof s.buzzerVolume !== 'undefined' ? s.buzzerVolume : 100);
+    var speakerVolEl = document.getElementById('speakerVolume');
+    if (speakerVolEl) speakerVolEl.value = (typeof s.speakerVolume !== 'undefined' ? s.speakerVolume : (typeof s.buzzerVolume !== 'undefined' ? s.buzzerVolume : 100));
     // Alarms
     if (Array.isArray(s.alarms))
     {
@@ -2029,7 +2029,7 @@ function readSettingsForm() {
       v = clamp(Math.round(v), 0, 100);
       return v;
     })(),
-    buzzerVolume: +(byId('buzzerVolume')?.value ?? 100),
+    speakerVolume: +(byId('speakerVolume')?.value ?? 100),
     mp3Volume: +(byId('mp3Volume')?.value ?? 50),
     alarmSound:  +(byId('alarmSoundMode')?.value ?? 0),
     alarms: [0,1,2].map(function(i){
@@ -2187,7 +2187,7 @@ async function saveAlarmSettingsWeb(event){
   if (event && typeof event.preventDefault === 'function') {
     event.preventDefault();
   }
-  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','buzzerVolume','mp3Volume']);
+  const payload = pickSettings(readSettingsForm(), ['alarms','alarmSound','speakerVolume','mp3Volume']);
   await submitSettings(payload, 'saveAlarmsMsg');
 }
 

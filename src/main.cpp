@@ -27,7 +27,7 @@
 #include "config.h"
 #include "wifisettings.h"
 #include "web.h"
-#include "buzzer.h"
+#include "speaker.h"
 #include "notifications.h"
 #include "menu.h"
 #include "alarm.h"
@@ -618,8 +618,8 @@ void setup()
     splashUpdate("IR Remote", 3, 6);
     setupIRSensor();
 
-    splashUpdate("Buzzer", 4, 6);
-    setupBuzzer();
+    splashUpdate("Speaker", 4, 6);
+    setupSpeaker();
 
     if (kRunStartupAudioDiag)
     {
@@ -760,7 +760,7 @@ void loop()
 //if (now - lastAudioTestBeep >= audioTestBeepInterval)
 //{
 //    lastAudioTestBeep = now;
-//    playBuzzerTone(1000, 300);
+//    playSpeakerTone(1000, 300);
 //}
 
 
