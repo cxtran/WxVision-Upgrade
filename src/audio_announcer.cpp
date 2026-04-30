@@ -1195,6 +1195,27 @@ namespace wxv::announce
         return playAudioPath(path);
     }
 
+    bool playFirstExistingClip(const char *primaryPath, const char *fallbackPath)
+    {
+        const unsigned long now = millis();
+        if ((now - g_lastRequestMs) < kRequestDebounceMs)
+        {
+            return false;
+        }
+        g_lastRequestMs = now;
+
+        clearQueue();
+        if (!enqueueFirstExisting(primaryPath == nullptr ? String() : String(primaryPath),
+                                  fallbackPath == nullptr ? String() : String(fallbackPath)))
+        {
+            g_lastStatus = "clip missing";
+            clearQueue();
+            return false;
+        }
+
+        return beginSequence();
+    }
+
     bool playClipSequence(const char *firstPath, const char *secondPath)
     {
         const unsigned long now = millis();

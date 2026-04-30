@@ -12,6 +12,7 @@ ASSETS = [
     ("index.html", "text/html; charset=utf-8", "no-cache"),
     ("ota.html", "text/html; charset=utf-8", "no-cache"),
     ("script.js", "application/javascript; charset=utf-8", "max-age=86400, public"),
+    ("storage.html", "text/html; charset=utf-8", "no-cache"),
     ("status.html", "text/html; charset=utf-8", "no-cache"),
     ("style.css", "text/css; charset=utf-8", "max-age=86400, public"),
 ]

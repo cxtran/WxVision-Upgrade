@@ -5606,7 +5606,7 @@ void setupWebServer() {
     JsonDocument doc(wxv::memory::psramJsonAllocator());
     doc["wifiSSID"]         = wifiSSID;
     doc["wifiPass"]         = wifiPass;
-    unitsToJson(doc.createNestedObject("units"));
+    unitsToJson(doc["units"].to<JsonObject>());
     doc["dayFormat"]        = dayFormat;
     doc["dataSource"]       = dataSource;
     doc["forecastSrc"]      = dataSource; // legacy field for older clients
@@ -5627,7 +5627,7 @@ void setupWebServer() {
       doc["scrollSpeed"]      = scrollSpeed;
       doc["scrollLevel"]      = scrollLevel;
       doc["splashDuration"]   = splashDurationSec;
-      JsonObject forecastUi = doc.createNestedObject("forecastUi");
+      JsonObject forecastUi = doc["forecastUi"].to<JsonObject>();
       forecastUi["linesPerDay"] = forecastLinesPerDay;
       forecastUi["pauseMs"] = forecastPauseMs;
       forecastUi["iconSize"] = forecastIconSize;
@@ -5661,7 +5661,7 @@ void setupWebServer() {
     doc["envAlertHumidityHighThreshold"] = envAlertHumidityHighThreshold;
     doc["ntpServer"]        = ntpServerHost;
     doc["ntpPreset"]        = ntpServerPreset;
-    JsonArray alarms = doc.createNestedArray("alarms");
+    JsonArray alarms = doc["alarms"].to<JsonArray>();
     for (int i = 0; i < 3; ++i)
     {
       JsonObject a = alarms.add<JsonObject>();
@@ -5671,7 +5671,7 @@ void setupWebServer() {
       a["repeat"] = static_cast<uint8_t>(alarmRepeatMode[i]);
       a["weekDay"] = alarmWeeklyDay[i];
     }
-    JsonObject noaa = doc.createNestedObject("noaa");
+    JsonObject noaa = doc["noaa"].to<JsonObject>();
     noaa["enabled"] = noaaAlertsEnabled;
     noaa["source"] = static_cast<uint8_t>(noaaFetchSource);
     noaa["lat"] = noaaLatitude;
@@ -6136,7 +6136,7 @@ void setupWebServer() {
         req->send(200, "application/json", "{\"ok\":true}");
         logWebMemoryCheckpoint("/settings end");
         broadcastChangedAppSettingsSections(
-          snapshots, sizeof(snapshots) / sizeof(snapshots[0]));
+          snapshots, sizeof(snapshots) / sizeof(snapshots[0]), true);
 
         if (owmSettingsChanged) {
           requestScrollRebuild();
