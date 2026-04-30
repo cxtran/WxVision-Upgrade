@@ -1088,14 +1088,22 @@ function renderFullStatus(st){
   setText("fs-indoor-eqi", (typeof st.indoorEqi === 'number') ? st.indoorEqi : '--');
   setText("fs-indoor-band", titleCaseText(st.indoorBand));
   setText("fs-indoor-sensor", titleCaseText(st.indoorSensorStatus));
-  setText("fs-indoor-sensor-age", (typeof st.indoorSensorAgeSec === 'number') ? (st.indoorSensorAgeSec + ' sec old') : '--');
+  var sensorAgeText = (typeof st.indoorSensorAgeSec === 'number') ? (st.indoorSensorAgeSec + ' sec old') : '--';
+  if (st.indoorSensorDetail) {
+    sensorAgeText = sensorAgeText === '--' ? st.indoorSensorDetail : (sensorAgeText + ' | ' + st.indoorSensorDetail);
+  }
+  setText("fs-indoor-sensor-age", sensorAgeText);
   setText("fs-indoor-freshness", titleCaseText(st.indoorFreshness));
   setText("fs-indoor-trend", titleCaseText(st.indoorTrend));
   setText("fs-indoor-summary", st.indoorSummary || "--");
   setText("fs-indoor-action", st.indoorAction || "--");
 
-  setText("fs-indoor-temp-desc", describeTempC(st.indoorTempRaw));
-  setText("fs-indoor-hum-desc", describeHumidityPct(st.indoorHumidityRaw));
+  var indoorTempDesc = describeTempC(st.indoorTempRaw);
+  if (st.indoorTempSource) indoorTempDesc = indoorTempDesc + " | " + st.indoorTempSource;
+  setText("fs-indoor-temp-desc", indoorTempDesc);
+  var indoorHumDesc = describeHumidityPct(st.indoorHumidityRaw);
+  if (st.indoorHumiditySource) indoorHumDesc = indoorHumDesc + " | " + st.indoorHumiditySource;
+  setText("fs-indoor-hum-desc", indoorHumDesc);
   setText("fs-co2-desc", describeCo2(st.co2));
   setText("fs-aht-temp-desc", describeTempC(st.ahtTempRaw));
   setText("fs-aht-hum-desc", describeHumidityPct(st.ahtHumidityRaw));

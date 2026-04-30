@@ -3626,16 +3626,10 @@ static String formatOutdoorHumidity()
 
 static String formatIndoorHumidity()
 {
-    float humiditySource = SCD40_hum;
-
+    float humiditySource = currentIndoorHumidityPercent();
     if (!isnan(humiditySource))
     {
-        float calibrated = humiditySource + static_cast<float>(humOffset);
-        if (calibrated < 0.0f)
-            calibrated = 0.0f;
-        if (calibrated > 100.0f)
-            calibrated = 100.0f;
-        int rounded = static_cast<int>(calibrated + 0.5f);
+        int rounded = static_cast<int>(humiditySource + 0.5f);
         if (rounded < 0)
             rounded = 0;
         if (rounded > 100)

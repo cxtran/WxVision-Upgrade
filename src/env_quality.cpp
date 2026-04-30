@@ -1088,18 +1088,8 @@ void showEnvironmentalQualityScreen()
     EnvBand previousOverall = s_overallBand;
 
     float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
-    float tempC = NAN;
-    if (!isnan(SCD40_temp))
-        tempC = SCD40_temp + tempOffset;
-    float humidity = SCD40_hum;
-    if (!isnan(humidity))
-    {
-        humidity += static_cast<float>(humOffset);
-        if (humidity < 0.0f)
-            humidity = 0.0f;
-        if (humidity > 100.0f)
-            humidity = 100.0f;
-    }
+    float tempC = currentIndoorTemperatureC();
+    float humidity = currentIndoorHumidityPercent();
     float pressure = (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f) ? bmp280_pressure : NAN;
 
     EnvBand co2Band = bandFromCo2(co2Raw);
@@ -1251,19 +1241,8 @@ void serviceEnvironmentalAlerts()
     const unsigned long nowMs = millis();
 
     float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
-    float tempC = NAN;
-    if (!isnan(SCD40_temp))
-        tempC = SCD40_temp + tempOffset;
-
-    float humidity = SCD40_hum;
-    if (!isnan(humidity))
-    {
-        humidity += static_cast<float>(humOffset);
-        if (humidity < 0.0f)
-            humidity = 0.0f;
-        if (humidity > 100.0f)
-            humidity = 100.0f;
-    }
+    float tempC = currentIndoorTemperatureC();
+    float humidity = currentIndoorHumidityPercent();
 
     const EnvBand co2Band = bandFromCo2(co2Raw);
     const EnvBand tempBand = bandFromTemp(tempC);

@@ -577,6 +577,7 @@ struct AppRuntimeState
     char action[48] = "";
     char trend[16] = "";
     char sensorStatus[16] = "";
+    char sensorDetail[48] = "";
     uint32_t sensorAgeSec = 0;
   } indoor;
 
@@ -914,6 +915,7 @@ struct IndoorDerivedState
   float co2SlopePpmPerHour = NAN;
   const char *freshness = "unknown";
   const char *sensorStatus = "unknown";
+  String sensorDetail;
   uint32_t sensorAgeSec = 0;
   String summary;
   String action;
@@ -924,11 +926,8 @@ static IndoorDerivedState buildIndoorDerivedState()
 {
   IndoorDerivedState state;
 
-  if (!isnan(SCD40_temp))
-    state.tempC = SCD40_temp + tempOffset;
-
-  if (!isnan(SCD40_hum))
-    state.humidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
+  state.tempC = currentIndoorTemperatureC();
+  state.humidity = currentIndoorHumidityPercent();
 
   if (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f)
     state.pressureHpa = bmp280_pressure;
@@ -992,18 +991,33 @@ static IndoorDerivedState buildIndoorDerivedState()
   if (!scd40Ready)
   {
     state.sensorStatus = "fault";
+    if (scd40LastError != 0)
+      state.sensorDetail = String("scd40 init/read error ") + String(scd40LastError);
+    else
+      state.sensorDetail = "scd40 not ready";
   }
   else if (scd40IsWarmingUp())
   {
     state.sensorStatus = "warming";
+    state.sensorDetail = "scd40 warmup in progress";
   }
   else if (!scd40DataIsFresh())
   {
     state.sensorStatus = "stale";
+    state.sensorDetail = "scd40 data older than 90 seconds";
   }
   else
   {
     state.sensorStatus = "fresh";
+    state.sensorDetail = "scd40 data fresh";
+  }
+  if (!bmp280Ready)
+  {
+    if (strcmp(state.sensorStatus, "fresh") == 0)
+      state.sensorStatus = "fault";
+    if (state.sensorDetail.length() > 0)
+      state.sensorDetail += "; ";
+    state.sensorDetail += "bmp280 not ready";
   }
   if (scd40LastSuccessMs != 0)
     state.sensorAgeSec = static_cast<uint32_t>((millis() - scd40LastSuccessMs) / 1000UL);
@@ -1073,8 +1087,21 @@ static IndoorDerivedState buildIndoorDerivedState()
   }
   else if (strcmp(state.sensorStatus, "fault") == 0)
   {
-    state.summary = "CO2 sensor fault detected";
-    state.action = "Inspect the SCD40 wiring or power cycle the device";
+    if (!bmp280Ready && !scd40Ready)
+    {
+      state.summary = "Indoor sensors fault detected";
+      state.action = "Inspect SCD40 and BMP280 wiring or power cycle the device";
+    }
+    else if (!bmp280Ready)
+    {
+      state.summary = "Pressure sensor fault detected";
+      state.action = "Inspect the BMP280 wiring or replace the sensor";
+    }
+    else
+    {
+      state.summary = "CO2 sensor fault detected";
+      state.action = "Inspect the SCD40 wiring or power cycle the device";
+    }
   }
   else if (!isnan(state.co2ppm) && state.co2ppm > 1200.0f)
   {
@@ -1256,6 +1283,7 @@ static String buildAppStateJson(const AppRuntimeState &state)
   indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
   indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
   indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  indoor["sensorDetail"] = state.indoor.sensorDetail[0] ? state.indoor.sensorDetail : nullptr;
   indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
 
   JsonObject alerts = doc["alerts"].to<JsonObject>();
@@ -1340,6 +1368,7 @@ static void populateAppStateJson(JsonDocument &doc, const AppRuntimeState &state
   indoor["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
   indoor["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
   indoor["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  indoor["sensorDetail"] = state.indoor.sensorDetail[0] ? state.indoor.sensorDetail : nullptr;
   indoor["sensorAgeSec"] = state.indoor.sensorAgeSec;
 
   JsonObject alerts = doc["alerts"].to<JsonObject>();
@@ -1602,6 +1631,7 @@ static String buildIndoorWsJson(const AppRuntimeState &state)
   data["action"] = state.indoor.action[0] ? state.indoor.action : nullptr;
   data["trend"] = state.indoor.trend[0] ? state.indoor.trend : nullptr;
   data["sensorStatus"] = state.indoor.sensorStatus[0] ? state.indoor.sensorStatus : nullptr;
+  data["sensorDetail"] = state.indoor.sensorDetail[0] ? state.indoor.sensorDetail : nullptr;
   data["sensorAgeSec"] = state.indoor.sensorAgeSec;
   return serializeJsonToReservedString(doc);
 }
@@ -1670,6 +1700,7 @@ static void rebuildAppRuntimeJson(AppRuntimeState &state)
     sig = hashAppend(sig, state.indoor.pressureInHg, 2);
     sig = hashAppend(sig, state.indoor.eqi);
     sig = hashAppend(sig, state.indoor.sensorStatus);
+    sig = hashAppend(sig, state.indoor.sensorDetail);
     state.indoorWsSig = sig;
   }
 
@@ -1772,10 +1803,16 @@ static void refreshAppRuntimeState(bool force = false)
   copyToBuffer(next.weather.updatedIso, sizeof(next.weather.updatedIso),
                formatIsoLocalTime(static_cast<time_t>(next.weather.updatedEpoch)));
 
-  if (!isnan(SCD40_temp))
-    next.indoor.tempF = celsiusToFahrenheitValue(SCD40_temp + tempOffset);
-  if (!isnan(SCD40_hum))
-    next.indoor.humidity = static_cast<int>(roundf(constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
+  const float indoorTempC = currentIndoorTemperatureC();
+  const float indoorHumidity = currentIndoorHumidityPercent();
+  if (!isnan(indoorTempC))
+    next.indoor.tempF = celsiusToFahrenheitValue(indoorTempC);
+  if (!isnan(indoorHumidity))
+    next.indoor.humidity = static_cast<int>(roundf(indoorHumidity));
+  if (!isnan(aht20_temp))
+    next.indoor.ahtTempF = celsiusToFahrenheitValue(aht20_temp + tempOffset);
+  if (!isnan(aht20_hum))
+    next.indoor.ahtHumidity = static_cast<int>(roundf(constrain(aht20_hum + static_cast<float>(humOffset), 0.0f, 100.0f)));
   next.indoor.co2ppm = (SCD40_co2 > 0) ? static_cast<int>(SCD40_co2) : 0;
   if (!isnan(bmp280_pressure))
     next.indoor.pressureInHg = hpaToInHgValue(bmp280_pressure);
@@ -1797,6 +1834,7 @@ static void refreshAppRuntimeState(bool force = false)
   copyToBuffer(next.indoor.action, sizeof(next.indoor.action), indoorDerived.action);
   copyToBuffer(next.indoor.trend, sizeof(next.indoor.trend), indoorDerived.trend);
   copyToBuffer(next.indoor.sensorStatus, sizeof(next.indoor.sensorStatus), indoorDerived.sensorStatus);
+  copyToBuffer(next.indoor.sensorDetail, sizeof(next.indoor.sensorDetail), indoorDerived.sensorDetail);
   next.indoor.sensorAgeSec = indoorDerived.sensorAgeSec;
 
   next.alerts.activeCount = noaaAlertCount();
@@ -4124,20 +4162,34 @@ static String buildStatusJsonPayload()
   doc["weatherUpdatedEpoch"] = weatherUpdatedEpoch;
   doc["weatherUpdated"] = formatEpochLocalTime(weatherUpdatedEpoch);
 
-  if (!isnan(SCD40_temp)) {
-    float indoorCal = SCD40_temp + tempOffset;
+  const float indoorCal = currentIndoorTemperatureC();
+  if (!isnan(indoorCal)) {
     doc["indoorTemp"] = fmtTemp(indoorCal, 1);
     doc["indoorTempRaw"] = indoorCal;
-    doc["indoorTempSensor"] = SCD40_temp;
+    doc["indoorTempSensor"] = currentIndoorTemperatureSensorC();
   }
-  if (!isnan(SCD40_hum)) {
-    float indoorHumCal = SCD40_hum + static_cast<float>(humOffset);
-    if (indoorHumCal < 0.0f) indoorHumCal = 0.0f;
-    if (indoorHumCal > 100.0f) indoorHumCal = 100.0f;
+  const float indoorHumCal = currentIndoorHumidityPercent();
+  if (!isnan(indoorHumCal)) {
     doc["indoorHumidity"] = String(static_cast<int>(indoorHumCal + 0.5f)) + "%";
     doc["indoorHumidityRaw"] = indoorHumCal;
-    doc["indoorHumiditySensor"] = SCD40_hum;
+    doc["indoorHumiditySensor"] = currentIndoorHumiditySensorPercent();
   }
+  if (!isnan(aht20_temp)) {
+    const float ahtTempCal = aht20_temp + tempOffset;
+    doc["ahtTemp"] = fmtTemp(ahtTempCal, 1);
+    doc["ahtTempRaw"] = ahtTempCal;
+    doc["ahtTempSensor"] = aht20_temp;
+  }
+  if (!isnan(aht20_hum)) {
+    float ahtHumidityCal = aht20_hum + static_cast<float>(humOffset);
+    if (ahtHumidityCal < 0.0f) ahtHumidityCal = 0.0f;
+    if (ahtHumidityCal > 100.0f) ahtHumidityCal = 100.0f;
+    doc["ahtHumidity"] = String(static_cast<int>(ahtHumidityCal + 0.5f)) + "%";
+    doc["ahtHumidityRaw"] = ahtHumidityCal;
+    doc["ahtHumiditySensor"] = aht20_hum;
+  }
+  doc["indoorTempSource"] = indoorTempHumidityUsingFallback() ? "AHT20 fallback" : "SCD40";
+  doc["indoorHumiditySource"] = indoorTempHumidityUsingFallback() ? "AHT20 fallback" : "SCD40";
   if (SCD40_co2 > 0) {
     doc["co2"] = SCD40_co2;
   }
@@ -4156,6 +4208,10 @@ static String buildStatusJsonPayload()
   doc["indoorAction"] = indoorDerived.action;
   doc["indoorTrend"] = indoorDerived.trend;
   doc["indoorSensorStatus"] = indoorDerived.sensorStatus;
+  if (indoorDerived.sensorDetail.length())
+    doc["indoorSensorDetail"] = indoorDerived.sensorDetail;
+  else
+    doc["indoorSensorDetail"] = nullptr;
   doc["indoorSensorAgeSec"] = indoorDerived.sensorAgeSec;
   if (isfinite(indoorDerived.co2SlopePpmPerHour))
     doc["co2SlopePpmPerHour"] = serialized(String(indoorDerived.co2SlopePpmPerHour, 1));

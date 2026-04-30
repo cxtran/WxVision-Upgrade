@@ -16,16 +16,10 @@
 
 static String formatIndoorHumidity()
 {
-    float humiditySource = SCD40_hum;
-
+    float humiditySource = currentIndoorHumidityPercent();
     if (!isnan(humiditySource))
     {
-        float calibrated = humiditySource + static_cast<float>(humOffset);
-        if (calibrated < 0.0f)
-            calibrated = 0.0f;
-        if (calibrated > 100.0f)
-            calibrated = 100.0f;
-        int rounded = static_cast<int>(calibrated + 0.5f);
+        int rounded = static_cast<int>(humiditySource + 0.5f);
         if (rounded < 0)
             rounded = 0;
         if (rounded > 100)
@@ -382,9 +376,7 @@ void drawClockScreen()
     bool showOutdoor = !isDataSourceNone() && outdoorTempStr != "--";
     String indoorHumidityStr = formatIndoorHumidity();
     bool showIndoorHumidity = isDataSourceNone() && indoorHumidityStr != "--";
-    float indoorTempC = NAN;
-    if (!isnan(SCD40_temp))
-        indoorTempC = SCD40_temp + tempOffset;
+    float indoorTempC = currentIndoorTemperatureC();
     String localTempStr = fmtTemp(indoorTempC, 0);
 
     if (worldView)
@@ -457,15 +449,7 @@ void drawClockScreen()
     dma_display->fillRect(co2DotX - dotRadius - 1, clearTop, dotDiameter + 2, clearHeight, myBLACK);
 
     float co2Raw = (SCD40_co2 > 0) ? static_cast<float>(SCD40_co2) : NAN;
-    float humiditySource = SCD40_hum;
-    if (!isnan(humiditySource))
-    {
-        humiditySource += static_cast<float>(humOffset);
-        if (humiditySource < 0.0f)
-            humiditySource = 0.0f;
-        else if (humiditySource > 100.0f)
-            humiditySource = 100.0f;
-    }
+    float humiditySource = currentIndoorHumidityPercent();
     float pressure = (!isnan(bmp280_pressure) && bmp280_pressure > 200.0f) ? bmp280_pressure : NAN;
 
     EnvBand co2Band = envBandFromCo2(co2Raw);

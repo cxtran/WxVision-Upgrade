@@ -10,6 +10,7 @@
 #include "units.h"
 #include "system.h"
 #include "ir_learn.h"
+#include <Adafruit_AHTX0.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 
@@ -34,9 +35,12 @@
 // SCD40
 uint16_t SCD40_co2 = 0;
 float SCD40_temp = NAN, SCD40_hum = NAN;
+float aht20_temp = NAN, aht20_hum = NAN;
 bool scd40Ready = false;
+bool aht20Ready = false;
 unsigned long scd40InitMs = 0;
 unsigned long scd40LastSuccessMs = 0;
+unsigned long aht20LastSuccessMs = 0;
 int16_t scd40LastError = 0;
 uint32_t scd40ReadFailures = 0;
 
@@ -51,6 +55,7 @@ IRrecv irrecv(kRecvPin);
 decode_results results;
 
 SensirionI2cScd4x scd4x;
+Adafruit_AHTX0 aht20;
 Adafruit_BMP280 bmp280;
 static float s_lastCalibratedLux = NAN;
 static float s_lastRawLux = NAN;
@@ -499,6 +504,19 @@ void setupSensors()
   // --- SCD40 ---
   initializeScd40();
 
+  if (aht20.begin(&Wire))
+  {
+    aht20Ready = true;
+    WXV_SENSOR_LOG_PRINTLN(F("AHT20 initialized"));
+  }
+  else
+  {
+    aht20Ready = false;
+    aht20_temp = NAN;
+    aht20_hum = NAN;
+    WXV_SENSOR_LOG_PRINTLN(F("Could not find AHT20!"));
+  }
+
   // --- BMP280 (try both addresses) ---
   if (bmp280.begin(0x76))
   {
@@ -556,6 +574,23 @@ void readSCD40()
 
 void readBMP280()
 {
+  if (aht20Ready)
+  {
+    sensors_event_t humidityEvent;
+    sensors_event_t tempEvent;
+    if (aht20.getEvent(&humidityEvent, &tempEvent))
+    {
+      aht20_temp = tempEvent.temperature;
+      aht20_hum = humidityEvent.relative_humidity;
+      aht20LastSuccessMs = millis();
+    }
+    else
+    {
+      aht20_temp = NAN;
+      aht20_hum = NAN;
+    }
+  }
+
   bmp280_temp = bmp280.readTemperature();
   bmp280_pressure = bmp280.readPressure() / 100.0F;
 }
@@ -573,6 +608,52 @@ bool scd40IsWarmingUp(unsigned long warmupMs)
   if (scd40InitMs == 0)
     return true;
   return (millis() - scd40InitMs) < warmupMs;
+}
+
+bool aht20DataIsFresh(unsigned long staleAfterMs)
+{
+  return aht20LastSuccessMs != 0 && (millis() - aht20LastSuccessMs) <= staleAfterMs;
+}
+
+float currentIndoorTemperatureSensorC()
+{
+  if (isfinite(SCD40_temp) && scd40DataIsFresh())
+    return SCD40_temp;
+  if (isfinite(aht20_temp) && aht20DataIsFresh())
+    return aht20_temp;
+  return NAN;
+}
+
+float currentIndoorHumiditySensorPercent()
+{
+  if (isfinite(SCD40_hum) && scd40DataIsFresh())
+    return SCD40_hum;
+  if (isfinite(aht20_hum) && aht20DataIsFresh())
+    return aht20_hum;
+  return NAN;
+}
+
+float currentIndoorTemperatureC()
+{
+  const float sensorTemp = currentIndoorTemperatureSensorC();
+  if (!isfinite(sensorTemp))
+    return NAN;
+  return sensorTemp + tempOffset;
+}
+
+float currentIndoorHumidityPercent()
+{
+  const float sensorHumidity = currentIndoorHumiditySensorPercent();
+  if (!isfinite(sensorHumidity))
+    return NAN;
+  return constrain(sensorHumidity + humOffset, 0.0f, 100.0f);
+}
+
+bool indoorTempHumidityUsingFallback()
+{
+  return (!isfinite(SCD40_temp) || !scd40DataIsFresh()) &&
+         isfinite(aht20_temp) && aht20DataIsFresh() &&
+         isfinite(aht20_hum);
 }
 
 

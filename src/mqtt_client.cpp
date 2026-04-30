@@ -243,16 +243,12 @@ bool publishButtonDiscovery(const char *topic,
 
 float currentTemperatureC()
 {
-    if (!isnan(SCD40_temp))
-        return SCD40_temp + tempOffset;
-    return NAN;
+    return currentIndoorTemperatureC();
 }
 
 float currentHumidityPercent()
 {
-    if (!isnan(SCD40_hum))
-        return constrain(SCD40_hum + humOffset, 0.0f, 100.0f);
-    return NAN;
+    return currentIndoorHumidityPercent();
 }
 
 float currentPressureHpa()

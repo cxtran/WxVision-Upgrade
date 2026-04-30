@@ -962,8 +962,8 @@ void loop()
     {
         lastLogMs = now;
         float temp = NAN, hum = NAN, press = NAN, co2 = NAN;
-        if (!isnan(SCD40_temp)) temp = SCD40_temp;
-        if (!isnan(SCD40_hum)) hum = SCD40_hum;
+        temp = currentIndoorTemperatureSensorC();
+        hum = currentIndoorHumiditySensorPercent();
         if (!isnan(bmp280_pressure)) press = bmp280_pressure;
         if (SCD40_co2 > 0) co2 = static_cast<float>(SCD40_co2);
         float lux = readBrightnessSensor();

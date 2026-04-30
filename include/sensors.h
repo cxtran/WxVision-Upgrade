@@ -5,16 +5,21 @@
 #include <IRremoteESP8266.h>
 #include <SensirionI2CScd4x.h>
 #include <Adafruit_BMP280.h>
+#include <Adafruit_AHTX0.h>
 
 extern uint16_t SCD40_co2;
 extern float SCD40_temp;
 extern float SCD40_hum;
+extern float aht20_temp;
+extern float aht20_hum;
 extern float bmp280_temp;
 extern float bmp280_pressure;
 extern bool scd40Ready;
+extern bool aht20Ready;
 extern bool bmp280Ready;
 extern unsigned long scd40InitMs;
 extern unsigned long scd40LastSuccessMs;
+extern unsigned long aht20LastSuccessMs;
 extern int16_t scd40LastError;
 extern uint32_t scd40ReadFailures;
 
@@ -23,6 +28,7 @@ extern bool newAHT20_BMP280Data;
 extern IRrecv irrecv;
 extern decode_results results;
 extern SensirionI2cScd4x scd4x;
+extern Adafruit_AHTX0 aht20;
 extern Adafruit_BMP280 bmp280;
 
 void setupIRSensor();
@@ -60,5 +66,11 @@ void readBMP280();
 
 bool scd40DataIsFresh(unsigned long staleAfterMs = 90000UL);
 bool scd40IsWarmingUp(unsigned long warmupMs = 90000UL);
+bool aht20DataIsFresh(unsigned long staleAfterMs = 90000UL);
+float currentIndoorTemperatureC();
+float currentIndoorHumidityPercent();
+float currentIndoorTemperatureSensorC();
+float currentIndoorHumiditySensorPercent();
+bool indoorTempHumidityUsingFallback();
 
   

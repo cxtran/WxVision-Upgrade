@@ -964,21 +964,21 @@ namespace wxv::announce
 
         bool internalTempAlertActive()
         {
-            if (!envAlertTempEnabled || !isfinite(SCD40_temp))
+            const float indoorTempC = currentIndoorTemperatureC();
+            if (!envAlertTempEnabled || !isfinite(indoorTempC))
             {
                 return false;
             }
-            return (SCD40_temp + tempOffset) > envAlertTempThresholdC;
+            return indoorTempC > envAlertTempThresholdC;
         }
 
         int internalHumidityAlertDirection()
         {
-            if (!envAlertHumidityEnabled || !isfinite(SCD40_hum))
+            const float humidity = currentIndoorHumidityPercent();
+            if (!envAlertHumidityEnabled || !isfinite(humidity))
             {
                 return 0;
             }
-
-            const float humidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
             if (humidity < static_cast<float>(envAlertHumidityLowThreshold))
             {
                 return -1;
@@ -1054,22 +1054,23 @@ namespace wxv::announce
 
         bool queueIndoorTemperaturePhrase()
         {
-            if (!isfinite(SCD40_temp) || !scd40DataIsFresh())
+            const float indoorTempC = currentIndoorTemperatureC();
+            if (!isfinite(indoorTempC))
             {
                 g_lastStatus = "indoor temp unavailable";
                 return false;
             }
-            return queueTemperaturePhrase(SCD40_temp + tempOffset, "indoor");
+            return queueTemperaturePhrase(indoorTempC, "indoor");
         }
 
         bool queueIndoorHumidityPhrase()
         {
-            if (!isfinite(SCD40_hum) || !scd40DataIsFresh())
+            const float calibratedHumidity = currentIndoorHumidityPercent();
+            if (!isfinite(calibratedHumidity))
             {
                 g_lastStatus = "indoor humidity unavailable";
                 return false;
             }
-            const float calibratedHumidity = constrain(SCD40_hum + static_cast<float>(humOffset), 0.0f, 100.0f);
             return queueHumidityPhrase(calibratedHumidity);
         }
 
